@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/analysis-filter.schema.json",
+  "title": "Analysis Filter",
+  "description": "Reversible visibility rule for one query or plot context.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "field", "operator", "value", "enabled"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "field": {"type": "string", "minLength": 1},
+    "operator": {
+      "type": "string",
+      "enum": ["equals", "not_equals", "contains", "in", "not_in", "between", "is_empty", "is_not_empty", "is_true", "is_false"]
+    },
+    "value": {
+      "oneOf": [
+        {"type": ["string", "number", "boolean", "null"]},
+        {"type": "array", "items": {"type": ["string", "number", "boolean"]}}
+      ]
+    },
+    "enabled": {"type": "boolean"}
+  }
+}
+

@@ -1,0 +1,17 @@
+{
+  "$contract": "provenance.schema.json",
+  "kind": "import",
+  "recorded_at": "2026-08-28T09:00:00Z",
+  "source_id": "825f0fbc-dd86-46df-b71c-409e486af0f8",
+  "source_file_sha256": "1f2e3d4c5b6a79808f9e0d1c2b3a495867564534231201ffeeddccbbaa998877",
+  "sheet": "EPMA",
+  "source_row": 42,
+  "method": "EPMA-WDS",
+  "unit": "wt%",
+  "transformations": ["decimal_comma_to_point"],
+  "assumptions": [],
+  "algorithm_id": null,
+  "algorithm_version": null,
+  "input_measurement_ids": []
+}
+

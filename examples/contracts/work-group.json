@@ -1,0 +1,16 @@
+{
+  "$contract": "work-group.schema.json",
+  "id": "7dfd9157-f37e-4a10-a293-fc5e2a388930",
+  "project_id": "f269512a-d0db-476f-97bb-de6e827a58d3",
+  "name": "Апатиты статьи X",
+  "description": "Пять анализов, выбранных вручную для сравнения генераций",
+  "analysis_ids": [
+    "019c15f9-5d8a-7e31-89cf-86323913393f",
+    "019c15f9-7eb7-7e97-a362-8f10af2b80ab"
+  ],
+  "created_by": "researcher",
+  "created_at": "2026-08-28T10:25:00Z",
+  "revision": 1,
+  "previous_revision_id": null
+}
+

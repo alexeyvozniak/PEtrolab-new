@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/spatial-annotation.schema.json",
+  "title": "Spatial Annotation",
+  "description": "Point or rectangular region stored in source-image coordinates, independent of viewport zoom.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "thin_section_id", "image_asset_id", "geometry", "image_width_px", "image_height_px", "created_at"],
+  "$defs": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "x_px", "y_px"],
+      "properties": {
+        "kind": {"const": "point"},
+        "x_px": {"type": "number", "minimum": 0},
+        "y_px": {"type": "number", "minimum": 0}
+      }
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "x_px", "y_px", "width_px", "height_px"],
+      "properties": {
+        "kind": {"enum": ["rectangle", "square"]},
+        "x_px": {"type": "number", "minimum": 0},
+        "y_px": {"type": "number", "minimum": 0},
+        "width_px": {"type": "number", "exclusiveMinimum": 0},
+        "height_px": {"type": "number", "exclusiveMinimum": 0}
+      }
+    }
+  },
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "thin_section_id": {"type": "string", "format": "uuid"},
+    "image_asset_id": {"type": "string", "format": "uuid"},
+    "geometry": {"oneOf": [{"$ref": "#/$defs/point"}, {"$ref": "#/$defs/region"}]},
+    "image_width_px": {"type": "integer", "minimum": 1},
+    "image_height_px": {"type": "integer", "minimum": 1},
+    "section_coordinates": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["unit", "geometry"],
+          "properties": {
+            "unit": {"type": "string", "enum": ["um", "mm"]},
+            "geometry": {"type": "object"}
+          }
+        }
+      ]
+    },
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}
+

@@ -1,0 +1,11 @@
+{
+  "$contract": "selection.schema.json",
+  "session_id": "c9498f29-7782-4f9f-98f5-7e1237d12c13",
+  "analysis_ids": [
+    "019c15f9-5d8a-7e31-89cf-86323913393f",
+    "019c15f9-7eb7-7e97-a362-8f10af2b80ab"
+  ],
+  "revision": 4,
+  "updated_at": "2026-08-28T10:24:00Z"
+}
+

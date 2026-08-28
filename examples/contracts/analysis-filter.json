@@ -1,0 +1,9 @@
+{
+  "$contract": "analysis-filter.schema.json",
+  "id": "5a9e5310-1e7b-42b8-8c2e-592f80de8bf4",
+  "field": "source_id",
+  "operator": "not_in",
+  "value": ["825f0fbc-dd86-46df-b71c-409e486af0f8"],
+  "enabled": true
+}
+

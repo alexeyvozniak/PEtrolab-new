@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/protocol-envelope.schema.json",
+  "title": "Protocol Envelope",
+  "description": "NDJSON request envelope between Tauri and the Python application service.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version", "request_id", "command", "payload"],
+  "properties": {
+    "protocol_version": {"const": "1.0"},
+    "request_id": {"type": "string", "format": "uuid"},
+    "command": {
+      "type": "string",
+      "enum": [
+        "project.open", "analysis.query", "selection.replace", "selection.union", "selection.subtract",
+        "work_group.create", "plot_spec.save", "plot_data.query", "plot_visibility.hide",
+        "source_filter.set", "shutdown"
+      ]
+    },
+    "payload": {"type": "object"}
+  }
+}

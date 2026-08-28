@@ -1,0 +1,12 @@
+{
+  "$contract": "spatial-annotation.schema.json",
+  "id": "37f9eefe-f3b0-48b6-9a76-dd922797ec25",
+  "thin_section_id": "27cb3f8c-4127-4d72-b789-f38707f04c4f",
+  "image_asset_id": "39028738-5fb6-4f30-bf18-2b9c52b3ea93",
+  "geometry": {"kind": "point", "x_px": 12654.25, "y_px": 8031.75},
+  "image_width_px": 24000,
+  "image_height_px": 16000,
+  "section_coordinates": {"unit": "um", "geometry": {"kind": "point", "x": 6327.125, "y": 4015.875}},
+  "created_at": "2026-08-28T10:40:00Z"
+}
+

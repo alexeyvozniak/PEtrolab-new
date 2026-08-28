@@ -1,0 +1,53 @@
+{
+  "$contract": "plot-specification.schema.json",
+  "id": "b46b02ac-3f72-4389-bf14-fe543d4429f7",
+  "project_id": "f269512a-d0db-476f-97bb-de6e827a58d3",
+  "name": "Составы и генерации",
+  "input": {
+    "kind": "work_group",
+    "work_group_id": "7dfd9157-f37e-4a10-a293-fc5e2a388930"
+  },
+  "panels": [
+    {
+      "id": "a312ab21-bac3-4655-a827-38297f8d5ec2",
+      "kind": "binary",
+      "title": "SiO₂ — MgO",
+      "axes": [
+        {"field": "SiO2", "unit": "wt%", "scale": "linear", "manual_range": null},
+        {"field": "MgO", "unit": "wt%", "scale": "log", "manual_range": null}
+      ],
+      "normalization": null
+    },
+    {
+      "id": "3f2a796d-c57c-4242-914b-d40d869d63a5",
+      "kind": "ternary",
+      "title": "An–Ab–Or",
+      "axes": [
+        {"field": "An", "unit": "%", "scale": "linear", "manual_range": null},
+        {"field": "Ab", "unit": "%", "scale": "linear", "manual_range": null},
+        {"field": "Or", "unit": "%", "scale": "linear", "manual_range": null}
+      ],
+      "normalization": "sum_to_100"
+    }
+  ],
+  "legend": {
+    "group_by": "generation_id",
+    "entries": [
+      {"value": "G1", "label": "Generation 1", "color": "#3F7D63", "symbol": "circle"},
+      {"value": "G2", "label": "Generation 2", "color": "#C58C38", "symbol": "diamond"}
+    ]
+  },
+  "filters": [
+    {
+      "id": "5a9e5310-1e7b-42b8-8c2e-592f80de8bf4",
+      "field": "source_id",
+      "operator": "not_in",
+      "value": ["825f0fbc-dd86-46df-b71c-409e486af0f8"],
+      "enabled": true
+    }
+  ],
+  "hidden_analysis_ids": ["1962d725-629b-4d72-9c45-2ec569e1cdd1"],
+  "created_at": "2026-08-28T10:30:00Z",
+  "updated_at": "2026-08-28T10:35:00Z"
+}
+

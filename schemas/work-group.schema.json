@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/work-group.schema.json",
+  "title": "Work Group",
+  "description": "Named immutable snapshot of Analysis identifiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "project_id", "name", "analysis_ids", "created_by", "created_at", "revision"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "project_id": {"type": "string", "format": "uuid"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 120},
+    "description": {"type": "string", "maxLength": 2000, "default": ""},
+    "analysis_ids": {
+      "type": "array",
+      "items": {"type": "string", "format": "uuid"},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "created_by": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "revision": {"type": "integer", "minimum": 1},
+    "previous_revision_id": {"type": ["string", "null"], "format": "uuid"}
+  }
+}
+

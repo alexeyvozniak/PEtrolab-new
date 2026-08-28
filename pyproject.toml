@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "petrolab-architecture-contracts"
+version = "0.1.0"
+description = "Architecture and product contracts for PetroLab Desktop v2"
+requires-python = ">=3.11"
+dependencies = []
+

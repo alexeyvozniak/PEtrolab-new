@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/provenance.schema.json",
+  "title": "Provenance",
+  "description": "Trace from an imported or derived value to its source and transformations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "recorded_at"],
+  "properties": {
+    "kind": {"type": "string", "enum": ["import", "manual_entry", "calculation"]},
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "source_id": {"type": ["string", "null"], "format": "uuid"},
+    "source_file_sha256": {"type": ["string", "null"], "pattern": "^[0-9A-Fa-f]{64}$"},
+    "sheet": {"type": ["string", "null"]},
+    "source_row": {"type": ["integer", "null"], "minimum": 1},
+    "method": {"type": ["string", "null"]},
+    "unit": {"type": ["string", "null"]},
+    "transformations": {"type": "array", "items": {"type": "string"}},
+    "assumptions": {"type": "array", "items": {"type": "string"}},
+    "algorithm_id": {"type": ["string", "null"]},
+    "algorithm_version": {"type": ["string", "null"]},
+    "input_measurement_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true}
+  }
+}
+

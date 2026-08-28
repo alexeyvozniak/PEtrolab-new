@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/plot-specification.schema.json",
+  "title": "Plot Specification",
+  "description": "Saved plot layout, scientific mappings, stable legend and reversible visibility mask.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "project_id", "name", "input", "panels", "legend", "filters", "hidden_analysis_ids", "created_at", "updated_at"],
+  "$defs": {
+    "axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "scale"],
+      "properties": {
+        "field": {"type": "string", "minLength": 1},
+        "unit": {"type": ["string", "null"]},
+        "scale": {"type": "string", "enum": ["linear", "log"]},
+        "manual_range": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "items": false}
+          ]
+        }
+      }
+    },
+    "panel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title", "axes", "normalization"],
+      "properties": {
+        "id": {"type": "string", "format": "uuid"},
+        "kind": {"type": "string", "enum": ["binary", "ternary", "spider", "ree_pattern", "histogram"]},
+        "title": {"type": "string", "minLength": 1},
+        "axes": {"type": "array", "items": {"$ref": "#/$defs/axis"}, "minItems": 1, "maxItems": 3},
+        "normalization": {"type": ["string", "null"]}
+      }
+    }
+  },
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "project_id": {"type": "string", "format": "uuid"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 120},
+    "input": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "work_group_id"],
+          "properties": {
+            "kind": {"const": "work_group"},
+            "work_group_id": {"type": "string", "format": "uuid"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "analysis_ids"],
+          "properties": {
+            "kind": {"const": "analysis_snapshot"},
+            "analysis_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "minItems": 1, "uniqueItems": true}
+          }
+        }
+      ]
+    },
+    "panels": {"type": "array", "items": {"$ref": "#/$defs/panel"}, "minItems": 1, "maxItems": 32},
+    "legend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group_by", "entries"],
+      "properties": {
+        "group_by": {"type": "string", "minLength": 1},
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value", "label", "color", "symbol"],
+            "properties": {
+              "value": {"type": "string"},
+              "label": {"type": "string"},
+              "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+              "symbol": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
+    "filters": {"type": "array", "items": {"$ref": "analysis-filter.schema.json"}},
+    "hidden_analysis_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}
+

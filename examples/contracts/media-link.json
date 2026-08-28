@@ -1,0 +1,10 @@
+{
+  "$contract": "media-link.schema.json",
+  "id": "b2d5c0c4-8491-49e4-93f3-cebe1185578e",
+  "media_asset_id": "b49c3ef2-ccf7-4684-9518-90fa77860c95",
+  "spatial_annotation_id": "37f9eefe-f3b0-48b6-9a76-dd922797ec25",
+  "caption": "Детальная фотография зоны при большом увеличении",
+  "created_by": "researcher",
+  "created_at": "2026-08-28T10:41:00Z"
+}
+
