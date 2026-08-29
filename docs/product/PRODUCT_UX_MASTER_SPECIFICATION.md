@@ -215,3 +215,12 @@ EPMA, LA-ICP-MS, изотопный и другие анализы остают�
 - Точку другого Sample разрешено разместить после явного предупреждения и подтверждения. Это исключение сохраняется в provenance.
 - Rectangle/Square используются для областей и для Media Links детальных фотографий. К одной Point или области можно привязать несколько Media Assets.
 - Снятие пространственной связи не удаляет изображение, Analytical Point, Analysis или Measurement. Фокус и размещение точки не изменяют Selection автоматически.
+
+### 13.1. Состояния процесса
+
+- `design/reference/screens/image-import-sample-assignment-v1.png`: массовое назначение Sample/Thin Section и группировка BSE/PPL/XPL; точки ещё не размещаются.
+- `design/reference/screens/image-import-manual-point-linking-v1.png`: ручное размещение рекомендованных точек Sample при большом zoom.
+- `design/reference/screens/image-import-cross-sample-exception-v1.png`: осознанный выбор точки другого Sample с причиной и provenance.
+- `design/reference/screens/image-import-final-review-v1.png`: проверка Media Assets, Analytical Points, Media Links, исключений и неразмещённых точек до единой транзакции.
+
+Импорт не блокируется из-за неразмещённых Analytical Points. Пользователь может вернуться к размещению, завершить без них или сохранить черновик. Межобразцовое исключение не переназначает Sample ни одному объекту.
