@@ -33,5 +33,6 @@
 | Импорт: состояния | `import-*-v1.png` | колонки, Samples, минералы, Fe-режим и проверка дубликатов |
 | Импорт изображений: точки | `image-import-manual-point-linking-v1.png` | ручное размещение точек Sample на изображении и осознанный выбор другого Sample |
 | Импорт изображений: состояния | `image-import-sample-assignment-v1.png`, `image-import-cross-sample-exception-v1.png`, `image-import-final-review-v1.png` | назначение Sample, подтверждение исключения и итоговая проверка |
+| Образец | `sample-overview-approved-v1.png` | паспорт образца, полевой контекст, заметки, связанные данные и экспорт изображений |
 
 Черновые изображения запрещено помещать в эту папку.
