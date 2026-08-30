@@ -25,6 +25,81 @@ def _id() -> str:
     return str(uuid.uuid4())
 
 
+def _column_letters(index: int) -> str:
+    value = index + 1
+    result = ""
+    while value:
+        value, remainder = divmod(value - 1, 26)
+        result = chr(ord("A") + remainder) + result
+    return result
+
+
+def _cell_value(row: tuple[str | None, ...], index: int) -> str | None:
+    return row[index] if 0 <= index < len(row) else None
+
+
+def _section_for_record(recipe: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+    for section in recipe.get("sections", []):
+        if section.get("sheet_name") == record.get("sheet_name") and section.get("block_id") == record.get("block_id"):
+            return section
+    raise ImportCommandError(
+        "RECIPE_SCHEMA_INCOMPATIBLE",
+        "Planned record no longer resolves to its logical block.",
+        {"sheet_name": record.get("sheet_name"), "block_id": record.get("block_id")},
+    )
+
+
+def _source_metadata_for_record(inspection: Any, recipe: dict[str, Any], record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read source metadata losslessly without promoting it to controlled entities.
+
+    Mineral/Generation strings are source evidence at this stage. They retain the
+    exact physical source cell so a later explicit taxonomy assignment can cite
+    the original value rather than rewriting it.
+    """
+    section = _section_for_record(recipe, record)
+    sheet = next((item for item in inspection.sheets if item.name == record["sheet_name"]), None)
+    if sheet is None:
+        raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Planned record sheet is unavailable.")
+    mappings = [item for item in section.get("mappings", []) if item.get("target_role") == "metadata"]
+    orientation = record.get("orientation", "rows_are_analyses")
+    result: list[dict[str, Any]] = []
+    if orientation == "rows_are_analyses":
+        row_number = int(record["row_number"])
+        row = sheet.rows[row_number - 1]
+        for mapping in mappings:
+            column_index = mapping.get("source_column_index")
+            if not isinstance(column_index, int) or column_index < 0:
+                continue
+            result.append({
+                "canonical_field": mapping.get("canonical_field") or mapping.get("source_header") or "Metadata",
+                "raw_token": _cell_value(row, column_index),
+                "source_header": str(mapping.get("source_header") or ""),
+                "source_row_number": row_number,
+                "source_column_index": column_index,
+                "source_cell": f"{_column_letters(column_index)}{row_number}",
+            })
+        return result
+
+    source_column_number = record.get("source_column_number")
+    if not isinstance(source_column_number, int) or source_column_number < 1:
+        raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Transposed record has no physical source column.")
+    column_index = source_column_number - 1
+    for mapping in mappings:
+        row_index = mapping.get("source_row_index")
+        if not isinstance(row_index, int) or row_index < 0 or row_index >= len(sheet.rows):
+            continue
+        row_number = row_index + 1
+        result.append({
+            "canonical_field": mapping.get("canonical_field") or mapping.get("source_header") or "Metadata",
+            "raw_token": _cell_value(sheet.rows[row_index], column_index),
+            "source_header": str(mapping.get("source_header") or ""),
+            "source_row_number": row_number,
+            "source_column_index": column_index,
+            "source_cell": f"{_column_letters(column_index)}{row_number}",
+        })
+    return result
+
+
 def open_project(database_path: str | Path) -> sqlite3.Connection:
     connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
@@ -142,6 +217,7 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
     connection = open_project(database_path)
     try:
         timestamp = _now()
+        metadata_count = 0
         with connection:
             connection.execute(
                 """INSERT INTO source_file
@@ -177,6 +253,19 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
                         record.get("source_column_number"), orientation,
                     ),
                 )
+                for metadata in _source_metadata_for_record(inspection, recipe, record):
+                    connection.execute(
+                        """INSERT INTO analysis_source_metadata
+                        (analysis_source_metadata_id, analysis_id, import_batch_id, canonical_field, raw_token,
+                         source_header, source_row_number, source_column_index, source_cell, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            _id(), analysis_id, batch_id, metadata["canonical_field"], metadata["raw_token"],
+                            metadata["source_header"], metadata["source_row_number"], metadata["source_column_index"],
+                            metadata["source_cell"], timestamp,
+                        ),
+                    )
+                    metadata_count += 1
                 for measurement in record["measurements"]:
                     connection.execute(
                         """INSERT INTO measurement
@@ -225,6 +314,7 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
             "recipe_revision_id": recipe_revision_id,
             "analysis_count": plan["summary"]["planned_analysis_count"],
             "measurement_count": plan["summary"]["planned_measurement_count"],
+            "source_metadata_count": metadata_count,
             "warnings": plan["warnings"],
         }
     except Exception:
