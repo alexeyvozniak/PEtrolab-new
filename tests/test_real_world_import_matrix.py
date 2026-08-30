@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -11,6 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 from petrolab.desktop_workflow import suggest_import_recipe  # noqa: E402
+from petrolab.import_apply import apply_import_plan  # noqa: E402
 from petrolab.import_preview import create_import_plan, inspect_source, preview_source_window  # noqa: E402
 from petrolab.manual_mapping import revise_import_mappings, revise_import_sections  # noqa: E402
 from real_world_fixtures import (  # noqa: E402
@@ -33,7 +36,6 @@ class RealWorldImportMatrixTests(unittest.TestCase):
             section = suggestion["recipe"]["sections"][0]
             self.assertEqual(section["header_row"], 1)
             self.assertTrue(all(mapping["target_role"] == "ignore" for mapping in section["mappings"]))
-
             decisions = [
                 {
                     "block_id": section["block_id"],
@@ -73,7 +75,6 @@ class RealWorldImportMatrixTests(unittest.TestCase):
             plan = create_import_plan(inspect_source(source), suggestion["recipe"])
             self.assertEqual(plan["summary"]["planned_analysis_count"], 4)
             self.assertEqual([record["row_number"] for record in plan["planned_records"]], [2, 3, 6, 7])
-
             revised = revise_import_sections(source, suggestion["recipe"], [{"block_id": sections[1]["block_id"], "enabled": False}])["recipe"]
             reduced = create_import_plan(inspect_source(source), revised)
             self.assertEqual(reduced["summary"]["planned_analysis_count"], 2)
@@ -90,7 +91,8 @@ class RealWorldImportMatrixTests(unittest.TestCase):
 
     def test_transposed_block_is_normalized_in_memory_and_preserves_physical_cells(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            source = transposed_weight_percent(Path(directory) / "transposed.xlsx")
+            directory = Path(directory)
+            source = transposed_weight_percent(directory / "transposed.xlsx")
             suggestion = suggest_import_recipe(source)
             section = suggestion["recipe"]["sections"][0]
             revised = revise_import_sections(source, suggestion["recipe"], [{
@@ -113,6 +115,16 @@ class RealWorldImportMatrixTests(unittest.TestCase):
             self.assertEqual(first["measurements"][0]["unit"], "wt.%")
             self.assertEqual(first["measurements"][0]["source_cell"], "B3")
             self.assertEqual(first["measurements"][1]["source_cell"], "B4")
+
+            database = directory / "project.sqlite"
+            applied = apply_import_plan(database, source, revised)
+            self.assertEqual(applied["analysis_count"], 2)
+            self.assertEqual(applied["measurement_count"], 6)
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM source_cell_provenance").fetchone()[0], 6)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM source_row_provenance").fetchone()[0], 0)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analysis WHERE source_orientation = 'columns_are_analyses'").fetchone()[0], 2)
+                self.assertEqual(connection.execute("SELECT source_cell FROM measurement ORDER BY rowid LIMIT 2").fetchall(), [("B3",), ("B4",)])
 
     def test_atomic_percent_is_not_collapsed_into_mol_percent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
