@@ -23,7 +23,7 @@ from .import_preview import (
     run_import_preview_window,
     run_import_recipe_validate,
 )
-from .manual_mapping import revise_import_mapping, revise_import_mappings, revise_import_sections
+from .manual_mapping import review_duplicate_candidates, revise_import_mapping, revise_import_mappings, revise_import_sections
 from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
 
 
@@ -169,6 +169,14 @@ def _dispatch_recipe_revise_sections(params: Mapping[str, Any]) -> dict[str, Any
     )}
 
 
+def _dispatch_recipe_review_duplicates(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": review_duplicate_candidates(
+        _source_path(params),
+        _recipe(params),
+        _string(params, "decision"),
+    )}
+
+
 def _dispatch_recipe_validate(params: Mapping[str, Any]) -> dict[str, Any]:
     return run_import_recipe_validate(_source_path(params), _recipe(params))
 
@@ -238,6 +246,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.recipe.revise_mapping": _dispatch_recipe_revise_mapping,
     "import.recipe.revise_mappings": _dispatch_recipe_revise_mappings,
     "import.recipe.revise_sections": _dispatch_recipe_revise_sections,
+    "import.recipe.review_duplicates": _dispatch_recipe_review_duplicates,
     "import.recipe.validate": _dispatch_recipe_validate,
     "import.plan.create": _dispatch_plan_create,
     "import.plan.apply": _dispatch_plan_apply,
