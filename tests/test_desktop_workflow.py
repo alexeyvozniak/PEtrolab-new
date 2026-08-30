@@ -12,10 +12,19 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe  # noqa: E402
 from petrolab.import_apply import apply_import_plan, retract_latest_import  # noqa: E402
-from petrolab.import_preview import create_import_plan, inspect_source, validate_recipe  # noqa: E402
+from petrolab.import_preview import ImportCommandError, create_import_plan, inspect_source, validate_recipe  # noqa: E402
+from petrolab.manual_mapping import review_duplicate_candidates  # noqa: E402
 
 
 FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
+
+
+def reviewed_recipe() -> dict:
+    recipe = suggest_import_recipe(FIXTURE)["recipe"]
+    plan = create_import_plan(inspect_source(FIXTURE), recipe)
+    if plan["summary"]["duplicate_candidate_groups"]:
+        return review_duplicate_candidates(FIXTURE, recipe, "keep_all")["recipe"]
+    return recipe
 
 
 class DesktopWorkflowTests(unittest.TestCase):
@@ -28,6 +37,7 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertEqual(len(validation["sections"]), 2)
         self.assertEqual(recipe["ownership_mode"], "managed_copy")
         self.assertEqual(recipe["global_decisions"]["fe_semantics"], "preserve_reported_form_for_review")
+        self.assertEqual(recipe["global_decisions"]["duplicate_policy"], "review_each")
 
         trace = next(section for section in recipe["sections"] if section["sheet_name"] == "Trace_elements")
         unknown_f = next(mapping for mapping in trace["mappings"] if mapping["source_header"] == "F (unknown unit)")
@@ -38,10 +48,16 @@ class DesktopWorkflowTests(unittest.TestCase):
 
         plan = create_import_plan(inspection, recipe)
         self.assertEqual(plan["summary"]["planned_analysis_count"], 8)
+        self.assertGreater(plan["summary"]["duplicate_candidate_groups"], 0)
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "blocked.sqlite"
+            with self.assertRaises(ImportCommandError) as blocked:
+                apply_import_plan(database, FIXTURE, recipe)
+            self.assertEqual(blocked.exception.code, "DUPLICATE_REVIEW_REQUIRED")
+            self.assertFalse(database.exists())
 
     def test_applied_import_is_visible_in_desktop_analysis_projection(self) -> None:
-        suggestion = suggest_import_recipe(FIXTURE)
-        recipe = suggestion["recipe"]
+        recipe = reviewed_recipe()
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "petrolab.sqlite"
             applied = apply_import_plan(database, FIXTURE, recipe)
@@ -62,7 +78,7 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertEqual(len(managed_sources), 1)
 
     def test_source_metadata_is_persisted_separately_from_identity_and_measurements(self) -> None:
-        recipe = suggest_import_recipe(FIXTURE)["recipe"]
+        recipe = reviewed_recipe()
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "petrolab.sqlite"
             applied = apply_import_plan(database, FIXTURE, recipe)
@@ -79,7 +95,7 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertTrue(all("Mineral" not in row["measurements"] for row in projection["analyses"]))
 
     def test_retracted_latest_import_is_preserved_but_hidden_from_active_projection(self) -> None:
-        recipe = suggest_import_recipe(FIXTURE)["recipe"]
+        recipe = reviewed_recipe()
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "petrolab.sqlite"
             first = apply_import_plan(database, FIXTURE, recipe)
