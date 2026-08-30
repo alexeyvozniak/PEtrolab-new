@@ -85,7 +85,7 @@ def _active_import_filter() -> str:
 
 
 def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[str, Any]:
-    """Return active Analysis/Measurement rows plus latest-import metadata."""
+    """Return active Analysis/Measurement rows plus lossless source metadata."""
     limit = max(1, min(int(limit), 2000))
     connection = open_project(database_path)
     try:
@@ -130,6 +130,30 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                 str(name): identity_values[index] if index < len(identity_values) else ""
                 for index, name in enumerate(identity_names)
             }
+            source_metadata_rows = connection.execute(
+                """SELECT canonical_field, raw_token, source_header, source_row_number,
+                          source_column_index, source_cell
+                   FROM analysis_source_metadata
+                   WHERE analysis_id = ? ORDER BY source_column_index, rowid""",
+                (row["analysis_id"],),
+            ).fetchall()
+            source_metadata_list = [
+                {
+                    "field": metadata["canonical_field"],
+                    "raw_token": metadata["raw_token"],
+                    "source_header": metadata["source_header"],
+                    "source_row_number": metadata["source_row_number"],
+                    "source_column_index": metadata["source_column_index"],
+                    "source_cell": metadata["source_cell"],
+                }
+                for metadata in source_metadata_rows
+            ]
+            source_metadata: dict[str, Any] = {}
+            for metadata in source_metadata_list:
+                field = metadata["field"]
+                key = field if field not in source_metadata else f"{field} · {metadata['source_header']}"
+                source_metadata[key] = metadata["raw_token"]
+
             measurement_rows = connection.execute(
                 """SELECT canonical_field, unit, raw_token, qualifier, detection_limit,
                           source_column_name, source_column_index, measurement_set, method, source_cell
@@ -172,6 +196,8 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                 "sheet_name": row["sheet_name"],
                 "source_row_number": row["source_row_number"],
                 "identity": identity,
+                "source_metadata": source_metadata,
+                "source_metadata_list": source_metadata_list,
                 "measurements": measurement_map,
                 "measurement_list": measurement_list,
                 "created_at": row["created_at"],
