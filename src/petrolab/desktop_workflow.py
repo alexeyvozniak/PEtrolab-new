@@ -1,10 +1,9 @@
 """Desktop-facing application services for the first live PetroLab vertical slice.
 
 This module keeps import recognition and SQLite projections in Python so React
-remains a presentation layer. It builds a conservative first-pass recipe:
-recognized identity/metadata fields are mapped, recognized measurement columns
-are mapped only when their unit can be read explicitly from the source header,
-and everything else is preserved by omission rather than guessed.
+remains a presentation layer. Automatic recognition stays conservative about
+units, while also returning enough structured review information for the UI to
+make likely chemistry columns easy to confirm in bulk.
 """
 
 from __future__ import annotations
@@ -123,7 +122,12 @@ def _mapping_for_header(column: int, header: str) -> tuple[dict[str, Any], dict[
             "canonical_field": header,
             "unit": None,
             "measurement_semantics": "ignored",
-        }, {"code": "UNIT_REQUIRES_REVIEW", "source_header": header, "source_column_index": column})
+        }, {
+            "code": "UNIT_REQUIRES_REVIEW",
+            "source_header": header,
+            "source_column_index": column,
+            "canonical_field": measurement,
+        })
     return ({
         "source_column_index": column,
         "source_header": header,
@@ -189,21 +193,30 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
 
 
 def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[str, Any]:
-    """Return a read-only table projection of persisted Analyses and Measurements."""
+    """Return active Analysis/Measurement rows plus latest-import metadata."""
     limit = max(1, min(int(limit), 2000))
     connection = open_project(database_path)
     try:
-        total = connection.execute("SELECT COUNT(*) FROM analysis").fetchone()[0]
+        active_filter = "b.status = 'applied' AND x.import_batch_id IS NULL"
+        total = connection.execute(
+            f"""SELECT COUNT(*)
+                FROM analysis a
+                JOIN import_batch b ON b.import_batch_id = a.import_batch_id
+                LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                WHERE {active_filter}"""
+        ).fetchone()[0]
         rows = connection.execute(
-            """SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number, a.block_id,
-                      a.identity_json, a.created_at, s.display_name AS source_name,
-                      r.recipe_json
-               FROM analysis a
-               JOIN source_file s ON s.source_id = a.source_id
-               JOIN import_batch b ON b.import_batch_id = a.import_batch_id
-               JOIN import_recipe_revision r ON r.recipe_revision_id = b.recipe_revision_id
-               ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number
-               LIMIT ?""",
+            f"""SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number, a.block_id,
+                       a.identity_json, a.created_at, s.display_name AS source_name,
+                       r.recipe_json
+                FROM analysis a
+                JOIN source_file s ON s.source_id = a.source_id
+                JOIN import_batch b ON b.import_batch_id = a.import_batch_id
+                JOIN import_recipe_revision r ON r.recipe_revision_id = b.recipe_revision_id
+                LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                WHERE {active_filter}
+                ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number
+                LIMIT ?""",
             (limit,),
         ).fetchall()
         result: list[dict[str, Any]] = []
@@ -246,13 +259,44 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                 },
                 "created_at": row["created_at"],
             })
-        source_count = connection.execute("SELECT COUNT(*) FROM source_file").fetchone()[0]
-        batch_count = connection.execute("SELECT COUNT(*) FROM import_batch WHERE status = 'applied'").fetchone()[0]
+
+        source_count = connection.execute(
+            """SELECT COUNT(DISTINCT b.source_id)
+               FROM import_batch b
+               LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+               WHERE b.status = 'applied' AND x.import_batch_id IS NULL"""
+        ).fetchone()[0]
+        batch_count = connection.execute(
+            """SELECT COUNT(*)
+               FROM import_batch b
+               LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+               WHERE b.status = 'applied' AND x.import_batch_id IS NULL"""
+        ).fetchone()[0]
+        latest = connection.execute(
+            """SELECT b.import_batch_id, b.source_id, b.applied_at, s.display_name,
+                      COUNT(a.analysis_id) AS analysis_count
+               FROM import_batch b
+               JOIN source_file s ON s.source_id = b.source_id
+               LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
+               LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+               WHERE b.status = 'applied' AND x.import_batch_id IS NULL
+               GROUP BY b.import_batch_id, b.source_id, b.applied_at, s.display_name
+               ORDER BY b.applied_at DESC, b.rowid DESC
+               LIMIT 1"""
+        ).fetchone()
+        latest_import = None if latest is None else {
+            "import_batch_id": latest["import_batch_id"],
+            "source_id": latest["source_id"],
+            "source_name": latest["display_name"],
+            "analysis_count": latest["analysis_count"],
+            "applied_at": latest["applied_at"],
+        }
         return {
             "total": total,
             "returned": len(result),
             "source_count": source_count,
             "import_batch_count": batch_count,
+            "latest_import": latest_import,
             "analyses": result,
         }
     finally:

@@ -34,6 +34,13 @@ export const reviseImportMapping = (sourcePath, recipe, sheetName, sourceColumnI
     unit: unit ?? null,
   });
 
+export const reviseImportMappings = (sourcePath, recipe, decisions) =>
+  invokePetrolab("import.recipe.revise_mappings", {
+    source_path: sourcePath,
+    recipe,
+    decisions,
+  });
+
 export const createImportPlan = (sourcePath, recipe) =>
   invokePetrolab("import.plan.create", { source_path: sourcePath, recipe });
 
@@ -48,6 +55,12 @@ export const listProjectAnalyses = (projectDatabasePath, limit = 500) =>
   invokePetrolab("project.analyses.list", {
     project_database_path: projectDatabasePath,
     limit,
+  });
+
+export const retractLastImport = (projectDatabasePath, reason = "user_retracted") =>
+  invokePetrolab("project.last_import.retract", {
+    project_database_path: projectDatabasePath,
+    reason,
   });
 
 export const inspectMediaSources = (sourcePaths) =>

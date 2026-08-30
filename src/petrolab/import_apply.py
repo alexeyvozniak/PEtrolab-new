@@ -147,7 +147,6 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
     """Apply a fresh plan atomically; this function never writes the source file."""
     inspection = inspect_source(source_path)
     plan = create_import_plan(inspection, recipe)
-    # Recipe ownership is domain language; the SQLite adapter uses its own storage enum.
     source_kind = "managed_copy" if recipe["ownership_mode"] == "managed_copy" else "linked_reference"
     source_id, batch_id = _id(), _id()
     managed_copy: Path | None = None
@@ -242,6 +241,42 @@ def check_linked_source(database_path: str | Path, source_id: str) -> dict[str, 
         with connection:
             connection.execute("UPDATE source_file SET state = ?, last_verified_at = ? WHERE source_id = ?", (state, _now(), source_id))
         return {"source_id": source_id, "state": state, "checked": True, "observed_fingerprint": observed}
+    finally:
+        connection.close()
+
+
+def retract_latest_import(database_path: str | Path, reason: str = "user_retracted") -> dict[str, Any]:
+    """Hide the latest applied import from active projections while preserving its audit trail."""
+    connection = open_project(database_path)
+    try:
+        row = connection.execute(
+            """SELECT b.import_batch_id, b.source_id, b.applied_at, s.display_name,
+                      COUNT(a.analysis_id) AS analysis_count
+               FROM import_batch b
+               JOIN source_file s ON s.source_id = b.source_id
+               LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
+               LEFT JOIN import_batch_retraction r ON r.import_batch_id = b.import_batch_id
+               WHERE b.status = 'applied' AND r.import_batch_id IS NULL
+               GROUP BY b.import_batch_id, b.source_id, b.applied_at, s.display_name
+               ORDER BY b.applied_at DESC, b.rowid DESC
+               LIMIT 1"""
+        ).fetchone()
+        if row is None:
+            raise ImportCommandError("INVALID_ASSIGNMENT", "There is no active applied import to retract.")
+        timestamp = _now()
+        with connection:
+            connection.execute(
+                """INSERT INTO import_batch_retraction (retraction_id, import_batch_id, reason, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (_id(), row["import_batch_id"], reason or "user_retracted", timestamp),
+            )
+        return {
+            "import_batch_id": row["import_batch_id"],
+            "source_id": row["source_id"],
+            "source_name": row["display_name"],
+            "analysis_count": row["analysis_count"],
+            "retracted_at": timestamp,
+        }
     finally:
         connection.close()
 

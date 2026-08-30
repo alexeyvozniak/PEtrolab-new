@@ -20,7 +20,8 @@ import {
   inspectImportSource,
   listProjectAnalyses,
   pickImportFile,
-  reviseImportMapping,
+  retractLastImport,
+  reviseImportMappings,
   stageImportFile,
   suggestImportRecipe,
 } from "./desktopApi";
@@ -69,13 +70,20 @@ function warningText(warning) {
 export function App() {
   const [screen, setScreen] = useState("Импорт");
   const [databasePath, setDatabasePath] = useState("");
-  const [project, setProject] = useState({ total: 0, source_count: 0, import_batch_count: 0, analyses: [] });
+  const [project, setProject] = useState({
+    total: 0,
+    source_count: 0,
+    import_batch_count: 0,
+    latest_import: null,
+    analyses: [],
+  });
   const [sourcePath, setSourcePath] = useState("");
   const [sourceDisplayPath, setSourceDisplayPath] = useState("");
   const [inspection, setInspection] = useState(null);
   const [recipe, setRecipe] = useState(null);
   const [recipeWarnings, setRecipeWarnings] = useState([]);
   const [plan, setPlan] = useState(null);
+  const [mappingDraftDirty, setMappingDraftDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [activity, setActivity] = useState("");
   const [error, setError] = useState("");
@@ -138,7 +146,10 @@ export function App() {
   }, [recipe, recipeWarnings]);
 
   const canSaveImport = Boolean(
-    plan && plan.summary.planned_analysis_count > 0 && plannedMeasurementCount > 0,
+    plan
+    && plan.summary.planned_analysis_count > 0
+    && plannedMeasurementCount > 0
+    && !mappingDraftDirty,
   );
 
   const resetImportState = () => {
@@ -148,6 +159,7 @@ export function App() {
     setRecipe(null);
     setRecipeWarnings([]);
     setPlan(null);
+    setMappingDraftDirty(false);
   };
 
   const chooseFile = async () => {
@@ -176,6 +188,7 @@ export function App() {
       setRecipe(suggestion.recipe);
       setRecipeWarnings(suggestion.warnings || []);
       setPlan(planned);
+      setMappingDraftDirty(false);
       setScreen("Импорт");
 
       if (previousStaged && previousStaged !== newlyStaged) {
@@ -191,25 +204,24 @@ export function App() {
     }
   };
 
-  const applyMapping = async (sheetName, sourceColumnIndex, target, canonicalField, unit) => {
-    if (busy || !sourcePath || !recipe) return;
+  const applyMappings = async (decisions) => {
+    if (busy || !sourcePath || !recipe || !decisions?.length) return;
     setBusy(true);
-    setActivity(`Обновляю сопоставление: ${sheetName}…`);
+    setActivity(`Применяю сопоставление ${decisions.length} колонок…`);
     setError("");
     setSuccess("");
     try {
-      const revised = unwrap(await reviseImportMapping(
-        sourcePath,
-        recipe,
-        sheetName,
-        sourceColumnIndex,
-        target,
-        canonicalField,
-        unit,
-      ));
+      const revised = unwrap(await reviseImportMappings(sourcePath, recipe, decisions));
       const planned = unwrap(await createImportPlan(sourcePath, revised.recipe));
+      const resolved = new Set(decisions.map((decision) => `${decision.sheet_name}::${decision.source_column_index}`));
+      setRecipeWarnings((current) => current.filter((warning) => (
+        warning.code !== "UNIT_REQUIRES_REVIEW"
+        || !resolved.has(`${warning.sheet_name}::${warning.source_column_index}`)
+      )));
       setRecipe(revised.recipe);
       setPlan(planned);
+      setMappingDraftDirty(false);
+      setSuccess(`Сопоставление применено: ${decisions.length} колонок. Проверь предпросмотр и только потом сохраняй импорт.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -232,6 +244,30 @@ export function App() {
       clearImportStaging(stagedPath).catch(() => {});
       setSuccess(`Импорт сохранён: ${result.analysis_count} Analysis, ${result.measurement_count} Measurement.`);
       setScreen("Анализы");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const retractLatest = async () => {
+    if (busy || !databasePath || !project.latest_import) return;
+    const latest = project.latest_import;
+    const confirmed = window.confirm(
+      `Отменить последний импорт «${latest.source_name}» (${latest.analysis_count} Analysis)?\n\n`
+      + "Данные исчезнут из активного проекта, но история импорта сохранится для воспроизводимости.",
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setActivity("Отменяю последний импорт…");
+    setError("");
+    setSuccess("");
+    try {
+      const result = unwrap(await retractLastImport(databasePath, "user_retracted_from_analyses"));
+      await refreshAnalyses(databasePath);
+      setSuccess(`Импорт «${result.source_name}» отменён: ${result.analysis_count} Analysis убраны из активного проекта.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -348,14 +384,27 @@ export function App() {
                 </div>
 
                 <div className="live-card">
-                  <div className="section-title"><div><h3>2. Сопоставление колонок</h3><p>Автораспознавание не угадывает единицы. Здесь можно явно исправить решение PetroLab перед сохранением.</p></div></div>
-                  <ImportMappingEditor recipe={recipe} busy={busy} onApply={applyMapping} />
+                  <div className="section-title"><div><h3>2. Сопоставление колонок</h3><p>Знакомые химические колонки предлагаются как Measurement. Выбери общую единицу на листе и примени сопоставление один раз.</p></div></div>
+                  <ImportMappingEditor
+                    recipe={recipe}
+                    warnings={recipeWarnings}
+                    busy={busy}
+                    onApplyAll={applyMappings}
+                    onDirtyChange={setMappingDraftDirty}
+                  />
                 </div>
 
-                {plannedMeasurementCount === 0 && plan.summary.planned_analysis_count > 0 && (
+                {mappingDraftDirty && (
+                  <div className="import-blocker draft-blocker">
+                    <Info size={22} weight="fill" />
+                    <div><b>Есть неприменённые изменения</b><span>Сначала нажми «Применить сопоставление». Только после этого PetroLab пересчитает реальный план импорта.</span></div>
+                  </div>
+                )}
+
+                {!mappingDraftDirty && plannedMeasurementCount === 0 && plan.summary.planned_analysis_count > 0 && (
                   <div className="import-blocker">
                     <Warning size={22} weight="fill" />
-                    <div><b>Импорт пока нельзя сохранить</b><span>PetroLab нашёл {plan.summary.planned_analysis_count} Analysis, но ни одного Measurement. Назначь аналитические колонки как Measurement и явно выбери единицы.</span></div>
+                    <div><b>Импорт пока нельзя сохранить</b><span>PetroLab нашёл {plan.summary.planned_analysis_count} Analysis, но ни одного Measurement. Проверь аналитические колонки и явно выбери единицы.</span></div>
                   </div>
                 )}
 
@@ -387,9 +436,13 @@ export function App() {
                 <div className={`commit-bar${canSaveImport ? "" : " blocked"}`}>
                   <div>
                     <b>Готово к записи: {plan.summary.planned_analysis_count} Analysis · {plannedMeasurementCount} Measurement</b>
-                    <span>{canSaveImport ? "Исходник не меняется; PetroLab сохранит собственную управляемую копию импортируемого файла." : "Сначала назначь хотя бы одну аналитическую колонку как Measurement и укажи её единицу."}</span>
+                    <span>{canSaveImport
+                      ? "Исходник не меняется; PetroLab сохранит собственную управляемую копию импортируемого файла."
+                      : mappingDraftDirty
+                        ? "Сначала примени все изменения сопоставления одной кнопкой."
+                        : "Нужен хотя бы один Measurement с явной единицей."}</span>
                   </div>
-                  <button className="primary-button large" onClick={commitImport} disabled={busy || !canSaveImport} title={canSaveImport ? "" : "Нельзя сохранять Analysis без Measurement"}>
+                  <button className="primary-button large" onClick={commitImport} disabled={busy || !canSaveImport}>
                     {busy ? <SpinnerGap className="spin" size={20} /> : <CheckCircle size={20} />}
                     Сохранить импорт в проект
                   </button>
@@ -404,6 +457,11 @@ export function App() {
             <div className="analysis-toolbar">
               <div className="search-box"><MagnifyingGlass size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти по Sample, Analysis, Source, значению…" /></div>
               <span>Показано {filteredAnalyses.length} из {project.total}</span>
+              {project.latest_import && (
+                <button className="outline-button danger-outline" onClick={retractLatest} disabled={busy} title={`Последний импорт: ${project.latest_import.source_name}`}>
+                  Отменить последний импорт
+                </button>
+              )}
               <button className="outline-button" onClick={() => refreshAnalyses().catch((caught) => setError(caught.message))} disabled={busy}>Обновить</button>
             </div>
 

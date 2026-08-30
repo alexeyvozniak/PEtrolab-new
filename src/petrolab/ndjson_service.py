@@ -14,9 +14,15 @@ from collections.abc import Callable, Mapping
 from typing import Any, TextIO
 
 from .desktop_workflow import list_project_analyses, suggest_import_recipe
-from .import_apply import apply_import_plan, check_linked_source, rollback_incomplete_batch, save_import_recipe_revision
+from .import_apply import (
+    apply_import_plan,
+    check_linked_source,
+    retract_latest_import,
+    rollback_incomplete_batch,
+    save_import_recipe_revision,
+)
 from .import_preview import ImportCommandError, run_import_inspect_source, run_import_plan_create, run_import_recipe_validate
-from .manual_mapping import revise_import_mapping
+from .manual_mapping import revise_import_mapping, revise_import_mappings
 from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
 
 
@@ -135,6 +141,14 @@ def _dispatch_recipe_revise_mapping(params: Mapping[str, Any]) -> dict[str, Any]
     )}
 
 
+def _dispatch_recipe_revise_mappings(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": revise_import_mappings(
+        _source_path(params),
+        _recipe(params),
+        _object_list(params, "decisions"),
+    )}
+
+
 def _dispatch_recipe_validate(params: Mapping[str, Any]) -> dict[str, Any]:
     return run_import_recipe_validate(_source_path(params), _recipe(params))
 
@@ -152,6 +166,13 @@ def _dispatch_project_analyses_list(params: Mapping[str, Any]) -> dict[str, Any]
     if not isinstance(raw_limit, int):
         raise ValueError("limit")
     return {"result": list_project_analyses(_project_database_path(params), raw_limit)}
+
+
+def _dispatch_project_last_import_retract(params: Mapping[str, Any]) -> dict[str, Any]:
+    reason = params.get("reason", "user_retracted")
+    if not isinstance(reason, str) or not reason:
+        raise ValueError("reason")
+    return {"result": retract_latest_import(_project_database_path(params), reason)}
 
 
 def _dispatch_linked_source_check(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -194,10 +215,12 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.inspect_source": _dispatch_import_inspect,
     "import.recipe.suggest": _dispatch_recipe_suggest,
     "import.recipe.revise_mapping": _dispatch_recipe_revise_mapping,
+    "import.recipe.revise_mappings": _dispatch_recipe_revise_mappings,
     "import.recipe.validate": _dispatch_recipe_validate,
     "import.plan.create": _dispatch_plan_create,
     "import.plan.apply": _dispatch_plan_apply,
     "project.analyses.list": _dispatch_project_analyses_list,
+    "project.last_import.retract": _dispatch_project_last_import_retract,
     "source.check_linked": _dispatch_linked_source_check,
     "import.batch.rollback": _dispatch_batch_rollback,
     "import.recipe.save_revision": _dispatch_recipe_save_revision,
