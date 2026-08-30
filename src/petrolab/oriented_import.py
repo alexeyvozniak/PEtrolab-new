@@ -8,13 +8,13 @@ immutable source coordinates before persistence.
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from .import_preview import (
     ImportCommandError,
     SheetInspection,
     SourceInspection,
-    _header_candidates,
     create_import_plan,
     semantic_fingerprint,
     validate_recipe,
@@ -22,6 +22,31 @@ from .import_preview import (
 
 
 VALID_ORIENTATIONS = {"rows", "columns"}
+ORIENTATION_HEADER_TOKENS = {
+    "analysis", "анализ", "sample", "образец", "point", "spot", "точка", "mineral", "минерал",
+    "sio2", "tio2", "al2o3", "feo", "feot", "fe2o3", "mno", "mgo", "cao", "na2o", "k2o", "p2o5",
+    "c", "o", "f", "na", "mg", "al", "si", "p", "s", "cl", "k", "ca", "ti", "v", "cr", "mn", "fe",
+    "co", "ni", "cu", "zn", "ga", "as", "rb", "sr", "y", "zr", "nb", "ba", "la", "ce", "nd", "sm",
+}
+
+
+def _header_token(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"[^a-zа-яё0-9]", "", value.lower().replace("₂", "2").replace("₃", "3"))
+
+
+def _orientation_header_candidates(rows: tuple[tuple[str | None, ...], ...]) -> tuple[int, ...]:
+    candidates: list[int] = []
+    for number, row in enumerate(rows, start=1):
+        matches = sum(
+            any(_header_token(value).startswith(token) for token in ORIENTATION_HEADER_TOKENS)
+            for value in row
+            if value
+        )
+        if matches >= 2:
+            candidates.append(number)
+    return tuple(candidates)
 
 
 def excel_column_name(index: int) -> str:
@@ -53,8 +78,7 @@ def oriented_rows(sheet: SheetInspection, orientation: str) -> tuple[tuple[str |
 
 
 def oriented_header_candidates(sheet: SheetInspection, orientation: str) -> tuple[int, ...]:
-    rows = oriented_rows(sheet, orientation)
-    return _header_candidates([list(row) for row in rows])
+    return _orientation_header_candidates(oriented_rows(sheet, orientation))
 
 
 def source_cell_coordinates(orientation: str, virtual_row_number: int, virtual_column_index: int) -> tuple[int, int, str]:
@@ -99,7 +123,7 @@ def _materialize(inspection: SourceInspection, recipe: dict[str, Any]) -> tuple[
     for sheet in inspection.sheets:
         orientation = orientations.get(sheet.name, "rows")
         rows = oriented_rows(sheet, orientation)
-        headers = _header_candidates([list(row) for row in rows])
+        headers = _orientation_header_candidates(rows)
         virtual_sheets.append(SheetInspection(sheet.name, rows, headers, sheet.warnings))
 
     virtual_inspection = SourceInspection(
