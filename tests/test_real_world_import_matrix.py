@@ -18,6 +18,7 @@ from petrolab.import_preview import create_import_plan, inspect_source, preview_
 from petrolab.manual_mapping import revise_import_mappings, revise_import_sections  # noqa: E402
 from real_world_fixtures import (  # noqa: E402
     atomic_percent,
+    complementary_duplicate_blocks,
     duplicate_field_methods,
     generic_isotope,
     long_preamble_weight_percent,
@@ -89,6 +90,28 @@ class RealWorldImportMatrixTests(unittest.TestCase):
             self.assertEqual(len(sections), 2)
             self.assertEqual([section["header_row"] for section in sections], [1, 5])
             self.assertEqual([section["data_end_row"] for section in sections], [3, 7])
+
+    def test_complementary_blocks_with_same_identity_are_warned_not_silently_merged(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            source = complementary_duplicate_blocks(directory / "complementary.xlsx")
+            suggestion = suggest_import_recipe(source)
+            plan = create_import_plan(inspect_source(source), suggestion["recipe"])
+            self.assertEqual(plan["summary"]["planned_analysis_count"], 4)
+            self.assertEqual(plan["summary"]["duplicate_candidate_groups"], 2)
+            self.assertEqual(len(plan["warnings"]), 1)
+            self.assertEqual(plan["warnings"][0]["code"], "DUPLICATE_CANDIDATES")
+            self.assertEqual(sorted(len(group) for group in plan["warnings"][0]["preview_ids"]), [2, 2])
+            first_block_fields = {item["field"] for item in plan["planned_records"][0]["measurements"]}
+            second_block_fields = {item["field"] for item in plan["planned_records"][2]["measurements"]}
+            self.assertEqual(first_block_fields, {"SiO2", "MgO"})
+            self.assertEqual(second_block_fields, {"La", "Ce"})
+
+            applied = apply_import_plan(directory / "project.sqlite", source, suggestion["recipe"])
+            self.assertEqual(applied["analysis_count"], 4)
+            with closing(sqlite3.connect(directory / "project.sqlite")) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analysis").fetchone()[0], 4)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM measurement").fetchone()[0], 8)
 
     def test_transposed_block_is_normalized_in_memory_and_preserves_physical_cells(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
