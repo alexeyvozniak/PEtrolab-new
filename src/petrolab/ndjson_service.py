@@ -1,9 +1,4 @@
-"""Versioned NDJSON boundary between the desktop shell and application services.
-
-The dispatcher deliberately exposes projections, never Python exceptions or
-database objects. Tauri can supervise this module as one child process and
-send one JSON request per line over stdin.
-"""
+"""Versioned NDJSON boundary between the desktop shell and application services."""
 
 from __future__ import annotations
 
@@ -21,8 +16,14 @@ from .import_apply import (
     rollback_incomplete_batch,
     save_import_recipe_revision,
 )
-from .import_preview import ImportCommandError, run_import_inspect_source, run_import_plan_create, run_import_recipe_validate
-from .manual_mapping import revise_import_mapping, revise_import_mappings
+from .import_preview import (
+    ImportCommandError,
+    run_import_inspect_source,
+    run_import_plan_create,
+    run_import_preview_window,
+    run_import_recipe_validate,
+)
+from .manual_mapping import revise_import_mapping, revise_import_mappings, revise_import_sections
 from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
 
 
@@ -125,6 +126,17 @@ def _dispatch_import_inspect(params: Mapping[str, Any]) -> dict[str, Any]:
     return run_import_inspect_source(_source_path(params))
 
 
+def _dispatch_import_preview_window(params: Mapping[str, Any]) -> dict[str, Any]:
+    return run_import_preview_window(
+        _source_path(params),
+        _string(params, "sheet_name"),
+        _integer(params, "start_row"),
+        int(params.get("row_count", 12)),
+        int(params.get("start_column", 0)),
+        int(params.get("column_count", 24)),
+    )
+
+
 def _dispatch_recipe_suggest(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": suggest_import_recipe(_source_path(params))}
 
@@ -143,6 +155,14 @@ def _dispatch_recipe_revise_mapping(params: Mapping[str, Any]) -> dict[str, Any]
 
 def _dispatch_recipe_revise_mappings(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": revise_import_mappings(
+        _source_path(params),
+        _recipe(params),
+        _object_list(params, "decisions"),
+    )}
+
+
+def _dispatch_recipe_revise_sections(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": revise_import_sections(
         _source_path(params),
         _recipe(params),
         _object_list(params, "decisions"),
@@ -213,9 +233,11 @@ def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
 
 COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.inspect_source": _dispatch_import_inspect,
+    "import.preview.window": _dispatch_import_preview_window,
     "import.recipe.suggest": _dispatch_recipe_suggest,
     "import.recipe.revise_mapping": _dispatch_recipe_revise_mapping,
     "import.recipe.revise_mappings": _dispatch_recipe_revise_mappings,
+    "import.recipe.revise_sections": _dispatch_recipe_revise_sections,
     "import.recipe.validate": _dispatch_recipe_validate,
     "import.plan.create": _dispatch_plan_create,
     "import.plan.apply": _dispatch_plan_apply,
@@ -232,7 +254,6 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
 
 
 def handle_request(request: object) -> dict[str, Any]:
-    """Return one protocol-safe response for one decoded JSON request."""
     if not isinstance(request, dict):
         return _error("INVALID_REQUEST", "Request must be a JSON object.")
     unexpected = sorted(set(request) - {"protocol_version", "request_id", "command", "payload"})
@@ -269,7 +290,6 @@ def handle_request(request: object) -> dict[str, Any]:
 
 
 def serve(input_stream: TextIO = sys.stdin, output_stream: TextIO = sys.stdout) -> None:
-    """Process newline-delimited requests until EOF or a valid shutdown command."""
     for line in input_stream:
         try:
             request = json.loads(line)
