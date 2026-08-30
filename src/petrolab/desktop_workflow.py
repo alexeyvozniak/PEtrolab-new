@@ -7,6 +7,7 @@ logical blocks and explicit review warnings; it does not infer import semantics.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,11 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
             header_row = int(block["header_row"])
             header = sheet.rows[header_row - 1]
             context = block.get("unit_context")
+            # A block unit is evidence only when it is stated outside the column
+            # header itself. Mixed column headers such as Li (ppm) + F (unknown)
+            # must not leak ppm into F.
+            if isinstance(context, dict) and context.get("row_number") == header_row:
+                context = None
             context_unit = context.get("unit") if isinstance(context, dict) else None
             mappings, mapping_warnings = mappings_for_row_header(header, context_unit)
             if not mappings:
@@ -93,8 +99,7 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
         ).fetchone()[0]
         rows = connection.execute(
             f"""SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number, a.block_id,
-                       a.identity_json, a.created_at, s.display_name AS source_name,
-                       r.recipe_json
+                       a.identity_json, a.created_at, s.display_name AS source_name, r.recipe_json
                 FROM analysis a
                 JOIN source_file s ON s.source_id = a.source_id
                 JOIN import_batch b ON b.import_batch_id = a.import_batch_id
@@ -127,7 +132,7 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
             }
             measurement_rows = connection.execute(
                 """SELECT canonical_field, unit, raw_token, qualifier, detection_limit,
-                          source_column_name, source_column_index
+                          source_column_name, source_column_index, measurement_set, method, source_cell
                    FROM measurement WHERE analysis_id = ? ORDER BY source_column_index, rowid""",
                 (row["analysis_id"],),
             ).fetchall()
@@ -140,17 +145,25 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                     "detection_limit": measurement["detection_limit"],
                     "source_header": measurement["source_column_name"],
                     "source_index": measurement["source_column_index"],
+                    "source_cell": measurement["source_cell"],
+                    "measurement_set": measurement["measurement_set"],
+                    "method": measurement["method"],
                 }
                 for measurement in measurement_rows
             ]
+            totals = Counter(item["field"] for item in measurement_list)
+            seen: Counter[str] = Counter()
             measurement_map: dict[str, dict[str, Any]] = {}
-            counts: dict[str, int] = {}
             for measurement in measurement_list:
                 field = measurement["field"]
-                counts[field] = counts.get(field, 0) + 1
-                key = field if counts[field] == 1 and not any(item["field"] == field for item in measurement_list[measurement_list.index(measurement)+1:]) else f"{field} · {measurement['source_header']}"
-                if key in measurement_map:
-                    key = f"{key} [{counts[field]}]"
+                seen[field] += 1
+                if totals[field] == 1:
+                    key = field
+                else:
+                    context = measurement.get("measurement_set") or measurement.get("method") or measurement["source_header"]
+                    key = f"{field} · {context}"
+                    if key in measurement_map:
+                        key = f"{key} [{seen[field]}]"
                 measurement_map[key] = measurement
             result.append({
                 "analysis_id": row["analysis_id"],
