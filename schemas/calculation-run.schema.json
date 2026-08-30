@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/calculation-run.schema.json",
+  "title": "Calculation Run",
+  "description": "Immutable reproducible execution of one Scientific Method Definition.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "project_id", "method_id", "method_version", "method_definition_fingerprint", "input", "input_fingerprint", "parameters", "excluded", "result_manifest", "status", "stale_reasons", "software_versions", "created_at"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "project_id": {"type": "string", "format": "uuid"},
+    "method_id": {"type": "string", "minLength": 1},
+    "method_version": {"type": "string", "minLength": 1},
+    "method_definition_fingerprint": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "input": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "analysis_ids"],
+          "properties": {
+            "kind": {"const": "analysis_snapshot"},
+            "analysis_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "minItems": 1, "uniqueItems": true}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "work_group_id", "analysis_ids"],
+          "properties": {
+            "kind": {"const": "work_group_snapshot"},
+            "work_group_id": {"type": "string", "format": "uuid"},
+            "analysis_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "minItems": 1, "uniqueItems": true}
+          }
+        }
+      ]
+    },
+    "input_measurement_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "parameters": {"type": "object"},
+    "excluded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["analysis_id", "reason"],
+        "properties": {
+          "analysis_id": {"type": "string", "format": "uuid"},
+          "reason": {"type": "string", "enum": ["missing", "censored", "zero", "negative", "filter", "calculation_policy", "incompatible_unit", "incompatible_domain"]},
+          "field": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "result_manifest": {"type": "object"},
+    "status": {"type": "string", "enum": ["current", "stale", "failed"]},
+    "stale_reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "seed": {"type": ["integer", "null"], "minimum": 0},
+    "software_versions": {"type": "object"},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

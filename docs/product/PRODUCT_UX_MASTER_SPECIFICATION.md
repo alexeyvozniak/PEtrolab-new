@@ -390,6 +390,7 @@ EPMA, LA-ICP-MS, изотопный и другие анализы остают�
 - Analysis Template отвечает на вопрос «применить этот способ исследования к другому совместимому набору» и не содержит конкретных Analysis ID.
 - Переносимый архив имеет уровни `project`, `project + sources` и `full with media`. Restore проверяет manifest, пути и SQLite integrity; непустой workspace заменяется только после явного подтверждения и backup.
 - Быстрый экспорт Selection выгружает ровно отмеченные Analysis ID с provenance, не меняя Selection, Filter, Work Group или Plot Visibility.
+- Повторное открытие Import Recipe, Plot Specification, Workspace Snapshot или Analysis Template показывает статус совместимости. Если версия схемы изменилась, PetroLab перечисляет мигрированные, несовместимые и отброшенные поля до применения; «почти такое же» молчаливое восстановление запрещено.
 
 ### 20.4. Границы текущей версии
 

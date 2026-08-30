@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/import-recipe.schema.json",
+  "title": "Import Recipe",
+  "description": "Versioned semantic plan for parsing sheets or blocks without silently changing source meaning.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "project_id", "name", "schema_version", "semantic_fingerprint", "source_format", "ownership_mode", "sections", "global_decisions", "migration_report", "created_at", "updated_at"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "project_id": {"type": "string", "format": "uuid"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 160},
+    "schema_version": {"type": "integer", "minimum": 1},
+    "semantic_fingerprint": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "source_format": {"type": "string", "enum": ["xlsx", "xls", "csv", "tsv"]},
+    "source_file_sha256": {"type": ["string", "null"], "pattern": "^[0-9A-Fa-f]{64}$"},
+    "ownership_mode": {"type": "string", "enum": ["linked_external", "managed_copy"]},
+    "sections": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sheet_name", "block_id", "header_row", "data_start_row", "data_end_row", "mappings"],
+        "properties": {
+          "sheet_name": {"type": "string", "minLength": 1},
+          "block_id": {"type": "string", "minLength": 1},
+          "header_row": {"type": "integer", "minimum": 1},
+          "data_start_row": {"type": "integer", "minimum": 1},
+          "data_end_row": {"type": ["integer", "null"], "minimum": 1},
+          "mappings": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source_column_index", "source_header", "target_role", "canonical_field", "unit", "measurement_semantics"],
+              "properties": {
+                "source_column_index": {"type": "integer", "minimum": 0},
+                "source_header": {"type": "string"},
+                "target_role": {"type": "string", "enum": ["identity", "measurement", "metadata", "interpretation", "ignore"]},
+                "canonical_field": {"type": ["string", "null"]},
+                "unit": {"type": ["string", "null"]},
+                "measurement_semantics": {"type": "string", "enum": ["measured", "source_derived", "source_interpretation", "identity", "metadata", "ignored"]},
+                "original_token_policy": {"type": "string", "enum": ["preserve", "not_applicable"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    "global_decisions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fe_semantics", "censored_value_policy", "duplicate_policy", "unit_policy"],
+      "properties": {
+        "fe_semantics": {"type": "string", "enum": ["fe2_as_feo", "total_as_feot", "fe3_as_fe2o3", "separate_fe2_fe3", "not_present"]},
+        "censored_value_policy": {"const": "preserve_original_token_and_detection_limit"},
+        "duplicate_policy": {"type": "string", "enum": ["review_each", "keep_all", "skip_exact_after_review"]},
+        "unit_policy": {"const": "explicit_per_measurement_column"}
+      }
+    },
+    "migration_report": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "action", "reason"],
+        "properties": {
+          "field": {"type": "string", "minLength": 1},
+          "action": {"type": "string", "enum": ["unchanged", "renamed", "converted", "dropped", "blocked"]},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}

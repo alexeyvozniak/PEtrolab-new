@@ -91,6 +91,7 @@
 23. Import Recipe и Scientific Method Definition версионируются. Изменение определения не переписывает ранее импортированные Analyses или Calculation Runs.
 24. Edit Draft не является Measurement. Сохранение требует повторной проверки fingerprint источника и создаёт Operation Journal Entry.
 25. Workspace Snapshot может ссылаться на конкретные Analysis ID, а Analysis Template не содержит конкретных Analysis, Source или Dataset ID.
+26. Восстановление Import Recipe, Plot Specification, Workspace Snapshot или Analysis Template выполняется по версии схемы и semantic fingerprint. Любая миграция фиксирует изменённые/отброшенные поля; silent partial restore запрещён.
 
 ## Архитектурные границы
 

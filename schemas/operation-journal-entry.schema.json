@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/operation-journal-entry.schema.json",
+  "title": "Operation Journal Entry",
+  "description": "Auditable domain or view operation with exact stable-ID scope and optional inverse action.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "project_id", "action", "category", "scope", "parameters", "reversible", "inverse_action", "state", "actor", "created_at"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "project_id": {"type": "string", "format": "uuid"},
+    "action": {"type": "string", "enum": ["assign_generation", "link_analytical_point", "unlink_analytical_point", "hide_plot_points", "restore_plot_points", "commit_edit_draft", "accept_mineral_suggestion", "create_work_group"]},
+    "category": {"type": "string", "enum": ["domain", "view_only", "persistence"]},
+    "scope": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entity_type", "entity_id", "expected_revision", "result_revision"],
+        "properties": {
+          "entity_type": {"type": "string", "enum": ["analysis", "analytical_point", "spatial_annotation", "plot_specification", "work_group", "edit_draft"]},
+          "entity_id": {"type": "string", "format": "uuid"},
+          "expected_revision": {"type": ["integer", "null"], "minimum": 0},
+          "result_revision": {"type": ["integer", "null"], "minimum": 0}
+        }
+      }
+    },
+    "parameters": {"type": "object"},
+    "reversible": {"type": "boolean"},
+    "inverse_action": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "parameters"],
+          "properties": {
+            "action": {"type": "string", "minLength": 1},
+            "parameters": {"type": "object"}
+          }
+        }
+      ]
+    },
+    "state": {"type": "string", "enum": ["applied", "undone", "failed"]},
+    "actor": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

@@ -45,6 +45,7 @@
 | AT-35 | Получить high-confidence и ambiguous mineral suggestions, принять только первое и изменить ruleset version | candidates/confidence/reason, versioned provenance, unresolved ambiguous row и отсутствие silent assignment |
 | AT-36 | Сохранить Table View, отметить 17 строк на нескольких страницах и экспортировать Selection XLSX | совпадающие 17 Analysis ID и provenance; неизменные Filter, Selection, Work Group и Plot Visibility |
 | AT-37 | Назначить Generation и создать/снять связь Analytical Point через Operation Journal; отдельно скрыть точки как view-only action и отменить операции | точный journal scope, inverse actions, устойчивые ID и отсутствие изменения Measurement/Source |
+| AT-38 | Сохранить Import Recipe со структурой двух листов, FeO/FeOt decision, units и column mapping; открыть после изменения версии схемы и в несовместимом Dataset | semantic fingerprint, versioned migration report, точный round-trip совместимых полей, явный список отброшенных полей и отсутствие silent partial restore |
 
 ## Условия провала
 

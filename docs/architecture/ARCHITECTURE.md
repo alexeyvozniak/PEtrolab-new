@@ -55,6 +55,9 @@ Scientific domain core ← Persistence ports → SQLite adapters
 | `plot_data.query` | Plot Specification, viewport | данные панелей и маски видимости |
 | `plot_visibility.hide` | Analysis IDs, причина уровня представления | обновлённая обратимая маска |
 | `source_filter.set` | Source ID, visible | обновлённый Filter |
+| `import.recipe.validate` | source fingerprint, Import Recipe | отчёт совместимости колонок, единиц и семантики без записи |
+| `scientific_method.get` | method ID, version | версионированное определение метода и benchmark metadata |
+| `workspace_snapshot.restore` | Workspace Snapshot ID | план полного или частичного восстановления ссылок и ревизий |
 
 Команда возвращает либо `result`, либо структурированную ошибку. UI не разбирает traceback и не делает вывод по тексту ошибки.
 
@@ -97,8 +100,8 @@ Spatial Annotation хранит геометрию в исходных коор�
 - `project_schema_version` мигрируется отдельно от протокола.
 - `algorithm_version` записывается у каждого Calculation Run и Derived Value.
 - JSON Schemas в `/schemas` являются проверяемым контрактом обмена и сохранённых спецификаций.
+- После legacy-аудита к обязательным сохраняемым контрактам добавлены `Import Recipe`, `Scientific Method Definition` и `Workspace Snapshot`. Порядок их внедрения и release gates определены в `docs/architecture/POST_LEGACY_IMPLEMENTATION_ROADMAP_2026-08-30.md`.
 
 ## 11. Решения и открытые вопросы
 
 Принятые решения находятся в `docs/architecture/adr`. Пока намеренно не выбраны библиотека графиков, таблица React и UI state library: их сравнивают на vertical slice после утверждения макетов. Выбор компонента не должен менять доменную модель или протокол.
-

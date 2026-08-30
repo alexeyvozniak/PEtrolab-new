@@ -1,0 +1,40 @@
+{
+  "$contract": "scientific-method-definition.schema.json",
+  "method_id": "statistics.clr",
+  "version": "1.0.0",
+  "name": "Centered log-ratio transform",
+  "kind": "statistics",
+  "status": "validated",
+  "definition_fingerprint": "739ef182c4fa24bd30c5417cc2171c826adc56060bcc54492b1903d033cfa001",
+  "input_domain": {
+    "semantic_domain": "oxide_wt_percent",
+    "required_fields": ["SiO2", "TiO2", "Al2O3"],
+    "allowed_units": ["wt.%"],
+    "missing_policy": "reject_row",
+    "censored_policy": "reject_row",
+    "compositional_domain_policy": "single_domain_required",
+    "nonpositive_policy": "reject",
+    "mixed_unit_policy": "reject"
+  },
+  "parameters": [
+    {"name": "log_base", "value_type": "choice", "unit": null, "default": "e", "scientifically_significant": true}
+  ],
+  "output_fields": [
+    {"field": "CLR_SiO2", "semantic_role": "derived_value", "unit": null},
+    {"field": "CLR_TiO2", "semantic_role": "derived_value", "unit": null},
+    {"field": "CLR_Al2O3", "semantic_role": "derived_value", "unit": null}
+  ],
+  "citations": [
+    {"title": "The Statistical Analysis of Compositional Data", "doi": "10.1007/978-94-009-4109-0", "url": null}
+  ],
+  "assumptions": ["All selected components are strictly positive parts of one coherent composition."],
+  "applicability": ["Oxides must share wt.% units and belong to one compositional domain."],
+  "benchmark_ids": ["statistics.clr.three_parts.v1"],
+  "implementation": {
+    "algorithm_id": "petrolab.science.statistics.clr",
+    "algorithm_version": "1.0.0",
+    "implementation_sha256": "94ccb82b6bd0be6333f66a0643276121355254119686b3f3c011f1c0a0cb4b3c"
+  },
+  "implementation_library_versions": {"numpy": "pinned-at-build"},
+  "created_at": "2026-08-30T00:30:00Z"
+}

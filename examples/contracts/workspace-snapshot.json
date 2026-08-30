@@ -1,0 +1,25 @@
+{
+  "$contract": "workspace-snapshot.schema.json",
+  "id": "88888888-8888-4888-8888-888888888888",
+  "project_id": "f269512a-d0db-476f-97bb-de6e827a58d3",
+  "name": "Сравнение слюд перед статистикой",
+  "schema_version": 1,
+  "semantic_fingerprint": "55556666777788889999aaaabbbbccccddddeeeeffff00001111222233334444",
+  "data_universe": {
+    "dataset_ids": ["81111111-1111-4111-8111-111111111111"],
+    "work_group_ids": ["82222222-2222-4222-8222-222222222222"],
+    "analysis_ids": ["11111111-1111-4111-8111-111111111111"]
+  },
+  "table_view_id": "55555555-5555-4555-8555-555555555555",
+  "plot_specification_ids": ["83333333-3333-4333-8333-333333333333"],
+  "source_visibility": [
+    {"source_id": "67777777-7777-4777-8777-777777777777", "visible": true},
+    {"source_id": "84444444-4444-4444-8444-444444444444", "visible": false}
+  ],
+  "selection_restore_policy": "restore_exact_if_available",
+  "selection_analysis_ids": ["11111111-1111-4111-8111-111111111111"],
+  "active_calculation_run_id": "22222222-2222-4222-8222-222222222222",
+  "active_surface": "statistics",
+  "migration_report": [],
+  "created_at": "2026-08-30T00:37:00Z"
+}

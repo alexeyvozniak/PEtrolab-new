@@ -48,6 +48,7 @@
 3. Table View, Workspace Snapshot и Analysis Template не копируют Measurement и не подменяют Selection/Work Group.
 4. Portable archive проверяет manifest, защищается от path traversal, выполняет SQLite integrity check и создаёт backup до подтверждённой замены workspace.
 5. Optimized media в переносимом архиве является производной копией и никогда не заменяет scientific original.
+6. Import Recipe, Plot Specification и Analysis Template восстанавливаются по versioned schema и semantic fingerprint. Несовместимые или отброшенные поля перечисляются пользователю; частичное восстановление без отчёта запрещено.
 
 ## Научная честность интерфейса
 

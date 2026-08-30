@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/workspace-snapshot.schema.json",
+  "title": "Workspace Snapshot",
+  "description": "Concrete resumable research state containing exact entity identifiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "project_id", "name", "schema_version", "semantic_fingerprint", "data_universe", "table_view_id", "plot_specification_ids", "source_visibility", "selection_restore_policy", "selection_analysis_ids", "active_calculation_run_id", "active_surface", "migration_report", "created_at"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "project_id": {"type": "string", "format": "uuid"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 160},
+    "schema_version": {"type": "integer", "minimum": 1},
+    "semantic_fingerprint": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "data_universe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset_ids", "work_group_ids", "analysis_ids"],
+      "properties": {
+        "dataset_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
+        "work_group_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
+        "analysis_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true}
+      }
+    },
+    "table_view_id": {"type": ["string", "null"], "format": "uuid"},
+    "plot_specification_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
+    "source_visibility": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "visible"],
+        "properties": {
+          "source_id": {"type": "string", "format": "uuid"},
+          "visible": {"type": "boolean"}
+        }
+      }
+    },
+    "selection_restore_policy": {"type": "string", "enum": ["clear", "restore_exact_if_available"]},
+    "selection_analysis_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
+    "active_calculation_run_id": {"type": ["string", "null"], "format": "uuid"},
+    "active_surface": {"type": "string", "enum": ["overview", "import", "analyses", "samples", "thin_sections", "search", "plotting", "statistics", "publication"]},
+    "migration_report": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "action", "reason"],
+        "properties": {
+          "field": {"type": "string"},
+          "action": {"type": "string", "enum": ["unchanged", "renamed", "converted", "dropped", "blocked"]},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

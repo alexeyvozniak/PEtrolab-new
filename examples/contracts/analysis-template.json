@@ -1,0 +1,27 @@
+{
+  "$contract": "analysis-template.schema.json",
+  "id": "99999999-9999-4999-8999-999999999999",
+  "name": "Сравнение составов слюд",
+  "schema_version": 1,
+  "semantic_fingerprint": "6666777788889999aaaabbbbccccddddeeeeffff000011112222333344445555",
+  "requirements": [
+    {"field": "Sample", "semantic_domain": "identity", "allowed_units": [null], "required": true},
+    {"field": "SiO2", "semantic_domain": "oxide_wt_percent", "allowed_units": ["wt.%"], "required": true},
+    {"field": "TiO2", "semantic_domain": "oxide_wt_percent", "allowed_units": ["wt.%"], "required": true},
+    {"field": "F", "semantic_domain": "oxide_wt_percent", "allowed_units": ["wt.%"], "required": false}
+  ],
+  "table_columns": [
+    {"field": "Sample", "order": 0, "visible": true},
+    {"field": "Point", "order": 1, "visible": true},
+    {"field": "SiO2", "order": 2, "visible": true},
+    {"field": "TiO2", "order": 3, "visible": true}
+  ],
+  "panel_templates": [
+    {"kind": "binary", "title": "TiO2–SiO2", "axes": ["SiO2", "TiO2"]},
+    {"kind": "histogram", "title": "Распределение TiO2", "axes": ["TiO2"]}
+  ],
+  "method_templates": [
+    {"method_id": "statistics.mann_whitney", "method_version": "1.0.0", "parameters": {"multiple_comparison": "benjamini_hochberg", "alpha": 0.05}}
+  ],
+  "created_at": "2026-08-30T00:38:00Z"
+}
