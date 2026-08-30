@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from typing import Any, TextIO
 
+from .desktop_workflow import list_project_analyses, suggest_import_recipe
 from .import_apply import apply_import_plan, check_linked_source, rollback_incomplete_batch, save_import_recipe_revision
 from .import_preview import ImportCommandError, run_import_inspect_source, run_import_plan_create, run_import_recipe_validate
 from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
@@ -101,6 +102,10 @@ def _dispatch_import_inspect(params: Mapping[str, Any]) -> dict[str, Any]:
     return run_import_inspect_source(_source_path(params))
 
 
+def _dispatch_recipe_suggest(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": suggest_import_recipe(_source_path(params))}
+
+
 def _dispatch_recipe_validate(params: Mapping[str, Any]) -> dict[str, Any]:
     return run_import_recipe_validate(_source_path(params), _recipe(params))
 
@@ -111,6 +116,13 @@ def _dispatch_plan_create(params: Mapping[str, Any]) -> dict[str, Any]:
 
 def _dispatch_plan_apply(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": apply_import_plan(_project_database_path(params), _source_path(params), _recipe(params))}
+
+
+def _dispatch_project_analyses_list(params: Mapping[str, Any]) -> dict[str, Any]:
+    raw_limit = params.get("limit", 500)
+    if not isinstance(raw_limit, int):
+        raise ValueError("limit")
+    return {"result": list_project_analyses(_project_database_path(params), raw_limit)}
 
 
 def _dispatch_linked_source_check(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -151,9 +163,11 @@ def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
 
 COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.inspect_source": _dispatch_import_inspect,
+    "import.recipe.suggest": _dispatch_recipe_suggest,
     "import.recipe.validate": _dispatch_recipe_validate,
     "import.plan.create": _dispatch_plan_create,
     "import.plan.apply": _dispatch_plan_apply,
+    "project.analyses.list": _dispatch_project_analyses_list,
     "source.check_linked": _dispatch_linked_source_check,
     "import.batch.rollback": _dispatch_batch_rollback,
     "import.recipe.save_revision": _dispatch_recipe_save_revision,
@@ -198,7 +212,6 @@ def handle_request(request: object) -> dict[str, Any]:
     except ValueError as exc:
         return envelope | _error("INVALID_REQUEST", "Required command parameter is invalid.", {"parameter": str(exc)})
     except Exception:
-        # Tracebacks belong on diagnostic stderr in the Tauri supervisor, never in UI responses.
         return envelope | _error("INTERNAL_ERROR", "Command failed unexpectedly.")
 
 
