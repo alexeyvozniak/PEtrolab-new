@@ -141,3 +141,13 @@ def atomic_percent(path: Path) -> Path:
             ["Spectrum 2", 59.0, 21.0, 10.5],
         ]
     })
+
+
+def duplicate_field_methods(path: Path) -> Path:
+    return write_xlsx(path, {
+        "Mixed methods": [
+            ["Analysis", "Sample", "Mineral", "Generation", "SiO2 EPMA (wt.%)", "SiO2 SIMS (wt.%)"],
+            ["A-1", "SYN-1", "Phlogopite", "core", 39.2, 39.5],
+            ["A-2", "SYN-1", "Phlogopite", "rim", 38.7, 39.0],
+        ]
+    })
