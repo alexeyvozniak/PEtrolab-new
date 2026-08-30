@@ -8,7 +8,7 @@ use std::{
 };
 
 use serde_json::{json, Value};
-use tauri::{path::BaseDirectory, AppHandle, State};
+use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 use uuid::Uuid;
 
 struct PythonService {

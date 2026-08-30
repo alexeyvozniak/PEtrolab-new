@@ -11,6 +11,7 @@ test("Tauri shell owns one local Python service rather than a localhost API", as
   assert.match(shell, /struct PythonService/);
   assert.match(shell, /fn petrolab_command/);
   assert.match(shell, /petrolab-service\.exe/);
+  assert.match(shell, /AppHandle, Manager, State/);
   assert.doesNotMatch(shell, /TcpListener|reqwest|localhost API/);
 });
 
