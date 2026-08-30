@@ -14,8 +14,8 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe  # noqa: E402
 from petrolab.import_apply import apply_import_plan  # noqa: E402
-from petrolab.import_preview import create_import_plan, inspect_source, preview_source_window  # noqa: E402
-from petrolab.manual_mapping import revise_import_mappings, revise_import_sections  # noqa: E402
+from petrolab.import_preview import ImportCommandError, create_import_plan, inspect_source, preview_source_window  # noqa: E402
+from petrolab.manual_mapping import review_duplicate_candidates, revise_import_mappings, revise_import_sections  # noqa: E402
 from real_world_fixtures import (  # noqa: E402
     atomic_percent,
     complementary_duplicate_blocks,
@@ -91,7 +91,7 @@ class RealWorldImportMatrixTests(unittest.TestCase):
             self.assertEqual([section["header_row"] for section in sections], [1, 5])
             self.assertEqual([section["data_end_row"] for section in sections], [3, 7])
 
-    def test_complementary_blocks_with_same_identity_are_warned_not_silently_merged(self) -> None:
+    def test_complementary_blocks_with_same_identity_require_review_and_are_never_silently_merged(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             directory = Path(directory_name)
             source = complementary_duplicate_blocks(directory / "complementary.xlsx")
@@ -107,7 +107,15 @@ class RealWorldImportMatrixTests(unittest.TestCase):
             self.assertEqual(first_block_fields, {"SiO2", "MgO"})
             self.assertEqual(second_block_fields, {"La", "Ce"})
 
-            applied = apply_import_plan(directory / "project.sqlite", source, suggestion["recipe"])
+            with self.assertRaises(ImportCommandError) as blocked:
+                apply_import_plan(directory / "blocked.sqlite", source, suggestion["recipe"])
+            self.assertEqual(blocked.exception.code, "DUPLICATE_REVIEW_REQUIRED")
+            self.assertFalse((directory / "blocked.sqlite").exists())
+
+            reviewed = review_duplicate_candidates(source, suggestion["recipe"], "keep_all")
+            self.assertEqual(reviewed["duplicate_review"]["candidate_group_count"], 2)
+            self.assertEqual(reviewed["recipe"]["global_decisions"]["duplicate_policy"], "keep_all")
+            applied = apply_import_plan(directory / "project.sqlite", source, reviewed["recipe"])
             self.assertEqual(applied["analysis_count"], 4)
             with closing(sqlite3.connect(directory / "project.sqlite")) as connection:
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM analysis").fetchone()[0], 4)
@@ -207,7 +215,6 @@ class RealWorldImportMatrixTests(unittest.TestCase):
             self.assertEqual(preview["rows"][2]["values"], [None, None, None, None])
 
     def test_legacy_xls_is_identified_honestly_instead_of_called_encrypted_xlsx(self) -> None:
-        from petrolab.import_preview import ImportCommandError
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "legacy.xls"
             source.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"synthetic-biff")
