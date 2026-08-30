@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import "./importMapping.css";
 
 const TARGETS = ["Ignore", "Analysis", "Sample", "Point", "Mineral", "Generation", "Measurement"];
 const UNITS = ["wt.%", "ppm", "ppb", "apfu", "mol%", "ratio"];
