@@ -1,0 +1,21 @@
+{
+  "fixture_version": 1,
+  "source_file": "m1_1_ambiguous_multisheet.xlsx",
+  "sheets": ["EPMA_analyses", "Trace_elements", "Read_me"],
+  "expected_source_rows": 8,
+  "expected_candidate_blocks": 2,
+  "required_detection": {
+    "decimal_comma": ["EPMA_analyses!G3"],
+    "below_detection_limit": ["EPMA_analyses!H4"],
+    "missing_value": ["EPMA_analyses!H5"],
+    "iron_semantics": ["EPMA_analyses!I2", "EPMA_analyses!J2"],
+    "unknown_unit": ["Trace_elements!E2"],
+    "duplicate_candidates": ["EPMA_analyses!A3", "EPMA_analyses!A7"]
+  },
+  "required_outcome": {
+    "inspect_source": "success_with_warnings",
+    "recipe_validate_before_unit_decision": "error:UNKNOWN_UNIT",
+    "recipe_validate_before_iron_decision": "error:IRON_SEMANTICS_REQUIRED",
+    "plan_create": "blocked_until_both_decisions"
+  }
+}

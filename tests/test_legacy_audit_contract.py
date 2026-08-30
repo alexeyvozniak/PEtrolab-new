@@ -1,5 +1,8 @@
 from pathlib import Path
+from html import unescape
+import json
 import unittest
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,9 +54,27 @@ class LegacyAuditContractTests(unittest.TestCase):
         for name in (
             "statistics-task-approved-v1.png",
             "statistics-data-review-approved-v1.png",
+            "statistics-data-review-domain-guard-approved-v1.png",
             "statistics-comparison-result-approved-v1.png",
         ):
             self.assertGreater((screens / name).stat().st_size, 100_000)
+
+    def test_m1_1_fixture_and_implementation_gate_are_concrete(self) -> None:
+        fixture = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
+        expected = json.loads(
+            (ROOT / "fixtures/import/m1_1_ambiguous_multisheet.expected.json").read_text(encoding="utf-8")
+        )
+        self.assertGreater(fixture.stat().st_size, 5_000)
+        with zipfile.ZipFile(fixture) as workbook:
+            xml = unescape(
+                b"\n".join(workbook.read(name) for name in workbook.namelist() if name.endswith(".xml"))
+                .decode("utf-8")
+            )
+        for token in ("EPMA_analyses", "Trace_elements", "<0.01", "FeOt", "unknown unit"):
+            self.assertIn(token, xml)
+        self.assertEqual(expected["expected_source_rows"], 8)
+        self.assertIn("IRON_SEMANTICS_REQUIRED", (ROOT / "docs/architecture/M1_1_COMMAND_PROJECTIONS.md").read_text(encoding="utf-8"))
+        self.assertIn("CREATE TABLE import_batch", (ROOT / "migrations/0001_import_foundation.sql").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

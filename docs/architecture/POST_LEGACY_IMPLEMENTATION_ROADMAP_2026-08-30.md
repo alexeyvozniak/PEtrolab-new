@@ -281,9 +281,9 @@ Template содержит структуру Table View, панели и ссы�
 
 - схемы и примеры M0 проходят валидацию;
 - fixture-файл импорта содержит multi-sheet, Fe ambiguity, `<DL>`, missing values и duplicate candidates;
-- для каждой команды M1 описаны result/error projections;
+- для каждой команды M1 описаны result/error projections в `M1_1_COMMAND_PROJECTIONS.md`;
 - согласован способ хранения linked source path без попадания пользовательских путей в диагностические логи;
-- создана минимальная SQLite migration только для M1, без таблиц будущих экранов;
+- создана минимальная SQLite migration `migrations/0001_import_foundation.sql` только для M1, без таблиц будущих экранов;
 - QA заранее знает, какие SHA-256 и counts должны совпасть.
 
 Следующая инженерная задача после этого документа — один vertical slice M1.1 `inspect → recipe validation → import plan`, без записи в проект и без production UI за пределами уже утверждённого экрана импорта.

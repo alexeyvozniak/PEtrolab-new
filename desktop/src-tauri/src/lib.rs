@@ -1,0 +1,102 @@
+use std::{
+    env,
+    io::{BufRead, BufReader, Write},
+    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    sync::Mutex,
+    thread,
+    time::{Duration, Instant},
+};
+
+use serde_json::{json, Value};
+use tauri::State;
+use uuid::Uuid;
+
+struct PythonService {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+}
+
+impl PythonService {
+    fn start() -> Result<Self, String> {
+        let executable = env::var("PETROLAB_PYTHON").unwrap_or_else(|_| "python".to_owned());
+        let mut command = Command::new(executable);
+        command
+            .args(["-m", "petrolab.ndjson_service"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+
+        if let Ok(python_path) = env::var("PETROLAB_PYTHONPATH") {
+            command.env("PYTHONPATH", python_path);
+        }
+
+        let mut child = command.spawn().map_err(|error| format!("Cannot start PetroLab scientific service: {error}"))?;
+        let stdin = child.stdin.take().ok_or("Scientific service stdin is unavailable.")?;
+        let stdout = child.stdout.take().ok_or("Scientific service stdout is unavailable.")?;
+        Ok(Self { child, stdin, stdout: BufReader::new(stdout) })
+    }
+
+    fn request(&mut self, envelope: Value) -> Result<Value, String> {
+        let request_id = envelope
+            .get("request_id")
+            .and_then(Value::as_str)
+            .ok_or("Desktop request has no request_id.")?
+            .to_owned();
+        serde_json::to_writer(&mut self.stdin, &envelope).map_err(|error| format!("Cannot encode request: {error}"))?;
+        self.stdin.write_all(b"\n").map_err(|error| format!("Cannot send request: {error}"))?;
+        self.stdin.flush().map_err(|error| format!("Cannot flush request: {error}"))?;
+
+        let mut line = String::new();
+        let read = self.stdout.read_line(&mut line).map_err(|error| format!("Cannot read scientific service response: {error}"))?;
+        if read == 0 {
+            return Err("Scientific service stopped before responding.".to_owned());
+        }
+        let response: Value = serde_json::from_str(&line).map_err(|error| format!("Scientific service returned invalid JSON: {error}"))?;
+        if response.get("request_id").and_then(Value::as_str) != Some(request_id.as_str()) {
+            return Err("Scientific service response does not match the request.".to_owned());
+        }
+        Ok(response)
+    }
+
+    fn shutdown(&mut self) {
+        let shutdown = json!({
+            "protocol_version": "1.0",
+            "request_id": Uuid::new_v4().to_string(),
+            "command": "shutdown",
+            "payload": {},
+        });
+        let _ = serde_json::to_writer(&mut self.stdin, &shutdown);
+        let _ = self.stdin.write_all(b"\n");
+        let _ = self.stdin.flush();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if self.child.try_wait().ok().flatten().is_some() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+}
+
+impl Drop for PythonService {
+    fn drop(&mut self) {
+        self.shutdown();
+        let _ = self.child.kill();
+    }
+}
+
+#[tauri::command]
+fn petrolab_command(envelope: Value, service: State<'_, Mutex<PythonService>>) -> Result<Value, String> {
+    let mut service = service.lock().map_err(|_| "Scientific service lock is unavailable.".to_owned())?;
+    service.request(envelope)
+}
+
+pub fn run() {
+    let service = PythonService::start().expect("PetroLab scientific service cannot be started");
+    tauri::Builder::default()
+        .manage(Mutex::new(service))
+        .invoke_handler(tauri::generate_handler![petrolab_command])
+        .run(tauri::generate_context!())
+        .expect("Tauri application failed");
+}
