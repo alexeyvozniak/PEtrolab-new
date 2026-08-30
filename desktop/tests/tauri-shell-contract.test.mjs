@@ -65,6 +65,8 @@ test("raw block review precedes field mapping and supports transposed orientatio
   assert.match(review, /Применить структуру/);
   assert.match(review, /Единица из источника/);
   assert.match(review, /raw-preview-table/);
+  assert.match(review, /placeholder="до конца"/);
+  assert.match(review, /invalidState/);
 });
 
 test("mapping edits are applied once in bulk per logical block", async () => {
@@ -129,8 +131,11 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
   assert.match(api, /analytical_point\.create/);
 });
 
-test("Tauri config keeps the approved desktop minimum window size", async () => {
+test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {
   const config = JSON.parse(await read("src-tauri/tauri.conf.json"));
+  const cargo = await read("src-tauri/Cargo.toml");
+  assert.equal(config.version, "0.1.3");
+  assert.match(cargo, /version = "0\.1\.3"/);
   assert.equal(config.app.windows[0].width, 1440);
   assert.equal(config.app.windows[0].height, 1024);
   assert.equal(config.app.windows[0].minWidth, 1180);
