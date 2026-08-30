@@ -2,6 +2,7 @@ use std::{
     env,
     fs,
     io::{BufRead, BufReader, Write},
+    path::PathBuf,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::Mutex,
     thread,
@@ -99,12 +100,61 @@ fn petrolab_command(envelope: Value, service: State<'_, Mutex<PythonService>>) -
     service.request(envelope)
 }
 
+fn staging_root(app: &AppHandle) -> Result<PathBuf, String> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot resolve PetroLab application data directory: {error}"))?
+        .join("import-staging");
+    fs::create_dir_all(&root).map_err(|error| format!("Cannot create PetroLab import staging directory: {error}"))?;
+    Ok(root)
+}
+
 #[tauri::command]
-fn pick_import_file() -> Option<String> {
-    rfd::FileDialog::new()
+fn pick_import_file(app: AppHandle) -> Result<Option<Value>, String> {
+    let Some(source) = rfd::FileDialog::new()
         .add_filter("PetroLab data", &["xlsx", "csv", "tsv"])
         .pick_file()
-        .map(|path| path.to_string_lossy().into_owned())
+    else {
+        return Ok(None);
+    };
+
+    let file_name = source
+        .file_name()
+        .ok_or("Selected import file has no file name.")?
+        .to_owned();
+    let staging_directory = staging_root(&app)?.join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&staging_directory)
+        .map_err(|error| format!("Cannot create temporary import directory: {error}"))?;
+    let staged = staging_directory.join(file_name);
+
+    if let Err(error) = fs::copy(&source, &staged) {
+        let _ = fs::remove_dir_all(&staging_directory);
+        return Err(format!(
+            "PetroLab can see the selected path but Windows did not allow the file to be read: {} ({error}). If this is a mapped network drive such as O:, reopen PetroLab normally rather than from an elevated installer, or use the network/UNC location.",
+            source.to_string_lossy()
+        ));
+    }
+
+    Ok(Some(json!({
+        "original_path": source.to_string_lossy(),
+        "local_path": staged.to_string_lossy(),
+    })))
+}
+
+#[tauri::command]
+fn clear_import_staging(app: AppHandle, staged_path: String) -> Result<(), String> {
+    let root = staging_root(&app)?;
+    let candidate = PathBuf::from(staged_path);
+    if !candidate.starts_with(&root) {
+        return Err("Refusing to remove a file outside PetroLab import staging.".to_owned());
+    }
+    if let Some(directory) = candidate.parent() {
+        if directory.exists() {
+            fs::remove_dir_all(directory).map_err(|error| format!("Cannot clear temporary import file: {error}"))?;
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -124,7 +174,12 @@ pub fn run() {
             app.manage(Mutex::new(service));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![petrolab_command, pick_import_file, project_database_path])
+        .invoke_handler(tauri::generate_handler![
+            petrolab_command,
+            pick_import_file,
+            clear_import_staging,
+            project_database_path
+        ])
         .run(tauri::generate_context!())
         .expect("Tauri application failed");
 }
