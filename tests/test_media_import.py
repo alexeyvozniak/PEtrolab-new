@@ -123,7 +123,7 @@ class MediaImportTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM spatial_annotation").fetchone()[0], 1)
                 row = connection.execute("SELECT geometry_kind, x_px, y_px, image_width_px, image_height_px FROM spatial_annotation").fetchone()
                 self.assertEqual(row, ("point", 5.25, 3.5, 12, 8))
-                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 5)
+                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 6)
             self.assertEqual(result["spatial_annotation_count"], 1)
 
     def test_cross_sample_placement_requires_and_preserves_reason(self) -> None:
