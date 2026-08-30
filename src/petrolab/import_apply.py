@@ -69,13 +69,7 @@ def _prepare_managed_copy(database_path: str | Path, source_id: str, source_path
     return destination
 
 
-def _insert_recipe_revision(
-    connection: sqlite3.Connection,
-    source_id: str,
-    recipe: dict[str, Any],
-    timestamp: str,
-    supersedes_recipe_revision_id: str | None = None,
-) -> str:
+def _insert_recipe_revision(connection: sqlite3.Connection, source_id: str, recipe: dict[str, Any], timestamp: str, supersedes_recipe_revision_id: str | None = None) -> str:
     revision_id = _id()
     if supersedes_recipe_revision_id is not None:
         predecessor = connection.execute(
@@ -107,12 +101,7 @@ def _source_path_for_revision(database_path: str | Path, row: sqlite3.Row) -> Pa
     return source
 
 
-def save_import_recipe_revision(
-    database_path: str | Path,
-    source_id: str,
-    recipe: dict[str, Any],
-    supersedes_recipe_revision_id: str | None = None,
-) -> dict[str, Any]:
+def save_import_recipe_revision(database_path: str | Path, source_id: str, recipe: dict[str, Any], supersedes_recipe_revision_id: str | None = None) -> dict[str, Any]:
     connection = open_project(database_path)
     try:
         source = connection.execute(
@@ -176,6 +165,7 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
             )
             for record in plan["planned_records"]:
                 analysis_id = _id()
+                orientation = record.get("orientation", "rows_are_analyses")
                 connection.execute(
                     """INSERT INTO analysis
                     (analysis_id, import_batch_id, source_id, preview_id, sheet_name, source_row_number, block_id,
@@ -184,7 +174,7 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
                     (
                         analysis_id, batch_id, source_id, record["preview_id"], record["sheet_name"], record["row_number"],
                         record["block_id"], json.dumps(record["identity"], ensure_ascii=False), timestamp,
-                        record.get("source_column_number"), record.get("orientation", "rows_are_analyses"),
+                        record.get("source_column_number"), orientation,
                     ),
                 )
                 for measurement in record["measurements"]:
@@ -202,16 +192,21 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
                             measurement.get("measurement_set"), measurement.get("method"),
                         ),
                     )
-                    connection.execute(
-                        """INSERT INTO source_row_provenance
-                        (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token,
-                         normalized_token, qualifier, analysis_id)
-                        VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)""",
-                        (
-                            _id(), batch_id, record["sheet_name"], measurement["physical_source_row_number"],
-                            measurement["source_header"], measurement["raw_token"], measurement["qualifier"], analysis_id,
-                        ),
-                    )
+                    # Legacy row provenance cannot uniquely represent a transposed
+                    # source: two Analyses can use the same physical field row.
+                    # Keep it for ordinary imports, while exact cell provenance is
+                    # authoritative for every orientation.
+                    if orientation == "rows_are_analyses":
+                        connection.execute(
+                            """INSERT INTO source_row_provenance
+                            (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token,
+                             normalized_token, qualifier, analysis_id)
+                            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)""",
+                            (
+                                _id(), batch_id, record["sheet_name"], measurement["physical_source_row_number"],
+                                measurement["source_header"], measurement["raw_token"], measurement["qualifier"], analysis_id,
+                            ),
+                        )
                     connection.execute(
                         """INSERT INTO source_cell_provenance
                         (provenance_id, import_batch_id, analysis_id, sheet_name, source_row_number,
@@ -252,11 +247,9 @@ def check_linked_source(database_path: str | Path, source_id: str) -> dict[str, 
             return {"source_id": source_id, "state": "current", "checked": False}
         path = Path(row["linked_path"])
         if not path.is_file():
-            state = "unavailable"
-            observed = None
+            state, observed = "unavailable", None
         else:
             from .import_preview import _fingerprint
-
             observed = _fingerprint(path)
             state = "current" if observed == row["source_fingerprint_sha256"] else "source_changed"
         with connection:
