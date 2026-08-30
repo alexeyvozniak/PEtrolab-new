@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import "./importMapping.css";
 
-const TARGETS = ["Ignore", "Analysis", "Sample", "Point", "Mineral", "Generation", "Measurement"];
+const TARGETS = ["Ignore", "Analysis", "Sample", "Point", "Measurement"];
 const UNITS = ["wt.%", "ppm", "ppb", "apfu", "mol%", "ratio"];
 
 function targetFromMapping(mapping) {
   if (mapping.target_role === "measurement") return "Measurement";
   if (mapping.target_role === "identity" && ["Analysis", "Sample", "Point"].includes(mapping.canonical_field)) return mapping.canonical_field;
-  if (mapping.target_role === "metadata" && ["Mineral", "Generation"].includes(mapping.canonical_field)) return mapping.canonical_field;
   return "Ignore";
 }
 
