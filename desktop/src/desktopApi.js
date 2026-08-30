@@ -13,6 +13,7 @@ export async function invokePetrolab(command, payload) {
 }
 
 export const pickImportFile = () => invoke("pick_import_file");
+export const clearImportStaging = (stagedPath) => invoke("clear_import_staging", { stagedPath });
 export const getProjectDatabasePath = () => invoke("project_database_path");
 
 export const inspectImportSource = (sourcePath) =>
