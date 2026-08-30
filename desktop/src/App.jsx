@@ -22,12 +22,14 @@ import {
   pickImportFile,
   previewImportWindow,
   retractLastImport,
+  reviewImportDuplicates,
   reviseImportMappings,
   reviseImportSections,
   stageImportFile,
   suggestImportRecipe,
 } from "./desktopApi";
 import { ImportBlockReview } from "./ImportBlockReview";
+import { ImportDuplicateReview } from "./ImportDuplicateReview";
 import { ImportMappingEditor } from "./ImportMappingEditor";
 import "./styles.css";
 
@@ -65,7 +67,7 @@ function warningText(warning) {
     MERGED_HEADERS: "В заголовке есть объединённые ячейки",
     HIDDEN_ROWS: "В файле есть скрытые строки",
     FORMULA_WITHOUT_CACHED_VALUE: "Есть формулы без сохранённого значения",
-    DUPLICATE_CANDIDATES: "Найдены возможные дубликаты",
+    DUPLICATE_CANDIDATES: "Найдены возможные совпадения идентичности",
     LEGACY_XLS_REQUIRES_CONVERSION: "Старый XLS пока требует сохранения копии как XLSX",
   };
   return names[warning.code] || warning.code || "Предупреждение импорта";
@@ -166,6 +168,14 @@ export function App() {
     ?? recipe?.sections?.filter((section) => section.enabled !== false).length
     ?? 0;
 
+  const duplicateCandidateGroups = plan?.summary?.duplicate_candidate_groups ?? 0;
+  const duplicateReview = recipe?.global_decisions?.duplicate_review;
+  const duplicateReviewRequired = duplicateCandidateGroups > 0 && !(
+    recipe?.global_decisions?.duplicate_policy === "keep_all"
+    && duplicateReview?.decision === "keep_all"
+    && duplicateReview?.candidate_group_count === duplicateCandidateGroups
+  );
+
   const visibleRecipeWarnings = useMemo(() => {
     if (!recipe) return recipeWarnings;
     return recipeWarnings.filter((warning) => {
@@ -190,7 +200,8 @@ export function App() {
     && plannedMeasurementCount > 0
     && enabledBlockCount > 0
     && !blockDraftDirty
-    && !mappingDraftDirty,
+    && !mappingDraftDirty
+    && !duplicateReviewRequired,
   );
 
   const loadBlockPreviews = useCallback(async (path, nextRecipe) => {
@@ -309,6 +320,25 @@ export function App() {
     }
   };
 
+  const keepAllDuplicateCandidates = async () => {
+    if (busy || !sourcePath || !recipe || !duplicateCandidateGroups) return;
+    setBusy(true);
+    setActivity(`Фиксирую решение по ${duplicateCandidateGroups} группам совпадений…`);
+    setError("");
+    setSuccess("");
+    try {
+      const reviewed = unwrap(await reviewImportDuplicates(sourcePath, recipe, "keep_all"));
+      setRecipe(reviewed.recipe);
+      setPlan(reviewed.plan);
+      setSuccess(`Совпадения проверены: ${reviewed.duplicate_review.candidate_group_count} групп. Все записи останутся отдельными.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
   const commitImport = async () => {
     if (busy || !canSaveImport || !databasePath || !sourcePath || !recipe || !plan) return;
     const stagedPath = sourcePath;
@@ -321,7 +351,7 @@ export function App() {
       await refreshAnalyses(databasePath);
       resetImportState();
       clearImportStaging(stagedPath).catch(() => {});
-      const metadataNote = result.source_metadata_count ? `, ${result.source_metadata_count} source metadata` : "";
+      const metadataNote = result.source_metadata_count ? `, ${result.source_metadata_count} исходных метаданных` : "";
       setSuccess(`Импорт сохранён: ${result.analysis_count} Analysis, ${result.measurement_count} Measurement${metadataNote}.`);
       setScreen("Анализы");
     } catch (caught) {
@@ -441,29 +471,17 @@ export function App() {
                   <div className="metric"><span>Логических блоков</span><b>{enabledBlockCount}/{recipe.sections.length}</b></div>
                   <div className="metric"><span>Будет Analysis</span><b>{plan.summary.planned_analysis_count}</b></div>
                   <div className="metric"><span>Будет Measurement</span><b>{plannedMeasurementCount}</b></div>
-                  <div className="metric"><span>Групп дубликатов</span><b>{plan.summary.duplicate_candidate_groups}</b></div>
+                  <div className="metric"><span>Групп совпадений</span><b>{duplicateCandidateGroups}</b></div>
                 </div>
 
                 <div className="live-card">
                   <div className="section-title"><div><h3>1. Где находятся данные</h3><p>Проверь реальные строки Excel, границы блоков и ориентацию. Ненужный блок можно выключить целиком.</p></div></div>
-                  <ImportBlockReview
-                    recipe={recipe}
-                    previews={blockPreviews}
-                    busy={busy}
-                    onApply={applySections}
-                    onDirtyChange={setBlockDraftDirty}
-                  />
+                  <ImportBlockReview recipe={recipe} previews={blockPreviews} busy={busy} onApply={applySections} onDirtyChange={setBlockDraftDirty} />
                 </div>
 
                 <div className="live-card">
                   <div className="section-title"><div><h3>2. Что означают поля</h3><p>PetroLab предлагает очевидные роли. Исправляй только ошибки и применяй все изменения одной кнопкой.</p></div></div>
-                  <ImportMappingEditor
-                    recipe={recipe}
-                    warnings={recipeWarnings}
-                    busy={busy || blockDraftDirty}
-                    onApplyAll={applyMappings}
-                    onDirtyChange={setMappingDraftDirty}
-                  />
+                  <ImportMappingEditor recipe={recipe} warnings={recipeWarnings} busy={busy || blockDraftDirty} onApplyAll={applyMappings} onDirtyChange={setMappingDraftDirty} />
                 </div>
 
                 {(blockDraftDirty || mappingDraftDirty) && (
@@ -491,8 +509,20 @@ export function App() {
                   </div>
                 )}
 
+                {duplicateCandidateGroups > 0 && (
+                  <div className="live-card">
+                    <div className="section-title"><div><h3>3. Проверка возможных совпадений</h3><p>Совпадение идентичности не означает, что записи нужно объединить или удалить.</p></div></div>
+                    <ImportDuplicateReview
+                      plan={plan}
+                      recipe={recipe}
+                      busy={busy || blockDraftDirty || mappingDraftDirty}
+                      onKeepAll={keepAllDuplicateCandidates}
+                    />
+                  </div>
+                )}
+
                 <div className="live-card">
-                  <div className="section-title"><div><h3>3. Что будет записано</h3><p>Это уже нормализованный план. Координаты исходных ячеек сохраняются отдельно для воспроизводимости.</p></div></div>
+                  <div className="section-title"><div><h3>{duplicateCandidateGroups > 0 ? "4" : "3"}. Что будет записано</h3><p>Это уже нормализованный план. Координаты исходных ячеек сохраняются отдельно для воспроизводимости.</p></div></div>
                   <div className="analysis-preview-list">
                     {plan.planned_records.slice(0, 12).map((record) => (
                       <div className="analysis-preview-row" key={record.preview_id}>
@@ -514,7 +544,9 @@ export function App() {
                         ? "Сначала примени структуру блоков."
                         : mappingDraftDirty
                           ? "Сначала примени сопоставление полей."
-                          : "Нужен хотя бы один Analysis и Measurement с явной единицей."}</span>
+                          : duplicateReviewRequired
+                            ? "Сначала проверь группы возможных совпадений и явно зафиксируй решение."
+                            : "Нужен хотя бы один Analysis и Measurement с явной единицей."}</span>
                   </div>
                   <button className="primary-button large" onClick={commitImport} disabled={busy || !canSaveImport}>
                     {busy ? <SpinnerGap className="spin" size={20} /> : <CheckCircle size={20} />} Сохранить импорт в проект
@@ -539,7 +571,7 @@ export function App() {
             ) : (
               <div className="analysis-table-wrap">
                 <table className="analysis-table">
-                  <thead><tr><th>Source</th><th>Лист</th><th>Строка</th>{identityColumns.map((field) => <th key={`identity-${field}`}>{field}</th>)}{metadataColumns.map((field) => <th key={`metadata-${field}`} title="Исходное значение из файла">{field} · source</th>)}{measurementColumns.map((field) => <th key={`measurement-${field}`}>{field}</th>)}</tr></thead>
+                  <thead><tr><th>Source</th><th>Лист</th><th>Строка</th>{identityColumns.map((field) => <th key={`identity-${field}`}>{field}</th>)}{metadataColumns.map((field) => <th key={`metadata-${field}`} title="Исходное значение из файла">{field} · исходное</th>)}{measurementColumns.map((field) => <th key={`measurement-${field}`}>{field}</th>)}</tr></thead>
                   <tbody>
                     {filteredAnalyses.map((analysis) => (
                       <tr key={analysis.analysis_id} title={analysis.analysis_id}>
