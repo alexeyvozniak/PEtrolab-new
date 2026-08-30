@@ -49,7 +49,7 @@ A row/column whose normalized header signature equals the active block header is
 
 ### 6. Units from source context are explicit evidence
 
-A block-level unit can be auto-applied only if an inspected source cell states a recognized unit. The plan stores the evidence coordinate/text. A likely unit based only on instrument/file naming remains a suggestion requiring user confirmation.
+A block-level unit can be auto-applied only if an inspected source cell states a recognized unit outside a mixed per-column header row. The plan stores the evidence coordinate/text. A likely unit based only on instrument/file naming remains a suggestion requiring user confirmation.
 
 `at.%` is distinct from `mol%`.
 
@@ -57,13 +57,28 @@ A block-level unit can be auto-applied only if an inspected source cell states a
 
 New planning structures carry optional `measurement_set` and `method` labels in addition to `canonical_field`. This prevents same-named fields from different analytical groups from being collapsed in projections. Existing records without these labels remain valid.
 
+### 8. Free-text Mineral and Generation remain source metadata until explicit assignment
+
+A source column mapped as `Mineral` or `Generation` is persisted losslessly as Analysis source metadata with physical source-cell provenance. It is not automatically promoted into the controlled `Mineral` or `Generation` domain entities.
+
+This keeps the original scientific label visible and searchable while preserving the later ability to make an explicit, versioned taxonomy/classification assignment.
+
+### 9. Duplicate candidates require an explicit recipe decision
+
+Duplicate detection never merges Analyses.
+
+The default recipe policy is `review_each`. If candidate groups exist, a reviewed import is not save-ready until the policy is changed by an explicit duplicate-review command. The current supported terminal decision is `keep_all`: all records remain separate and the decision is stored in the immutable recipe snapshot.
+
+Complementary records with the same identity but different measurement subsets are therefore warned about and retained separately. `skip_exact_after_review` remains reserved until row-level exclusion and its provenance are implemented; UI must not pretend that it is available.
+
 ## Consequences
 
 - `import.inspect_source` remains lightweight; raw windows are fetched with a dedicated preview command.
 - import recipe schema advances for block/orientation decisions while old recipe revisions remain immutable.
 - tests generate anonymized synthetic workbooks that reproduce real layouts instead of committing user scientific data.
 - native BIFF `.xls` parsing is not introduced by this ADR. `.xls` must be identified distinctly and reported honestly until a reviewed reader/conversion strategy is implemented.
-- UI must not show Mineral/Generation as fully supported until persistence is lossless.
+- source `Mineral` / `Generation` can be displayed after import because persistence is now lossless, but the UI must label them as source values rather than controlled assignments.
+- save readiness depends on duplicate review when duplicate candidates are present.
 
 ## Rejected alternatives
 
@@ -78,3 +93,6 @@ Rejected because import semantics belong to Python core and would become untesta
 
 ### Guess units by chemistry field
 Rejected because the same field may be reported in different units and scientific rules require explicit units.
+
+### Silently merge or drop duplicate identities
+Rejected because identical Analysis/Sample labels can represent complementary methods or blocks. Any merge, exclusion or link must be a separate explicit scientific/data-management decision with provenance.
