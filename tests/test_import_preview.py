@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import closing
 from pathlib import Path
 import sys
 import sqlite3
@@ -194,7 +195,7 @@ class ImportPreviewTests(unittest.TestCase):
             database = Path(directory) / "project.sqlite"
             recipe = fixture_recipe()
             result = apply_import_plan(database, FIXTURE, recipe)
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 self.assertEqual(connection.execute("SELECT status FROM import_batch").fetchone()[0], "applied")
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM analysis").fetchone()[0], 8)
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM measurement").fetchone()[0], 42)
@@ -223,7 +224,7 @@ class ImportPreviewTests(unittest.TestCase):
             connection.close()
             with self.assertRaises(sqlite3.IntegrityError):
                 apply_import_plan(database, FIXTURE, fixture_recipe())
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM source_file").fetchone()[0], 0)
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM import_batch").fetchone()[0], 0)
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM analysis").fetchone()[0], 0)
@@ -238,7 +239,7 @@ class ImportPreviewTests(unittest.TestCase):
             copied = Path(directory) / "sources" / f"{result['source_id']}.xlsx"
             self.assertTrue(copied.is_file())
             self.assertEqual(hashlib.sha256(copied.read_bytes()).hexdigest(), hashlib.sha256(FIXTURE.read_bytes()).hexdigest())
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 linked_path, managed_path = connection.execute(
                     "SELECT linked_path, managed_relative_path FROM source_file WHERE source_id = ?", (result["source_id"],)
                 ).fetchone()
@@ -257,7 +258,7 @@ class ImportPreviewTests(unittest.TestCase):
                 changed.write(b"changed outside PetroLab")
             status = check_linked_source(directory / "project.sqlite", result["source_id"])
             self.assertEqual(status["state"], "source_changed")
-            with sqlite3.connect(directory / "project.sqlite") as connection:
+            with closing(sqlite3.connect(directory / "project.sqlite")) as connection:
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM import_batch").fetchone()[0], 1)
 
     def test_saving_recipe_revision_keeps_previous_snapshot_immutable(self) -> None:
@@ -271,7 +272,7 @@ class ImportPreviewTests(unittest.TestCase):
             revision = save_import_recipe_revision(
                 database, imported["source_id"], revised_recipe, imported["recipe_revision_id"]
             )
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 rows = connection.execute(
                     "SELECT recipe_revision_id, supersedes_recipe_revision_id, recipe_json FROM import_recipe_revision ORDER BY created_at, rowid"
                 ).fetchall()

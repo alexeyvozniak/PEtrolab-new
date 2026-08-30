@@ -164,7 +164,7 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
             if managed_copy is not None:
                 connection.execute(
                     "UPDATE source_file SET managed_relative_path = ? WHERE source_id = ?",
-                    (str(managed_copy.relative_to(Path(database_path).parent)), source_id),
+                    (managed_copy.relative_to(Path(database_path).parent).as_posix(), source_id),
                 )
             recipe_revision_id = _insert_recipe_revision(connection, source_id, recipe, timestamp)
             connection.execute(
