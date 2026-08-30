@@ -42,6 +42,32 @@ jobs:
           if ($null -ne $dbResponse.error) { throw "Packaged service could not open project database: $($dbResponse.error.message)" }
           if ($dbResponse.result.total -ne 0) { throw "Fresh packaged project database must be empty." }
           if (-not (Test-Path $database)) { throw "Packaged service did not create the SQLite project database." }
+          @'
+          import json
+          import subprocess
+          import uuid
+          from pathlib import Path
+
+          executable = Path("desktop/src-tauri/binaries/petrolab-service.exe")
+          request = {
+              "protocol_version": "1.0",
+              "request_id": str(uuid.uuid4()),
+              "command": "import.inspect_source",
+              "payload": {"source_path": r"C:\тест PetroLab\нет файла.xlsx"},
+          }
+          completed = subprocess.run(
+              [str(executable)],
+              input=(json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"),
+              stdout=subprocess.PIPE,
+              stderr=subprocess.PIPE,
+              check=True,
+          )
+          decoded = completed.stdout.decode("utf-8", errors="strict")
+          response = json.loads(decoded.splitlines()[0])
+          observed = response["error"]["details"]["path"]
+          if "тест PetroLab" not in observed:
+              raise SystemExit(f"Packaged service UTF-8 round-trip failed: {observed!r}")
+          '@ | python -
       - name: Build and test frontend
         working-directory: desktop
         run: |
