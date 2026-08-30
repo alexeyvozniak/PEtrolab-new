@@ -1,6 +1,21 @@
 .metric-row { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .global-message.activity { color: #315743; background: #eef5ef; border: 1px solid #d1e0d4; }
 
+.orientation-sheet { grid-template-columns: auto minmax(180px, 1fr) minmax(250px, auto); align-items: center; }
+.orientation-sheet > div:nth-child(2) em { margin-top: 5px; }
+.orientation-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border: 1px solid #d5ddd6; border-radius: 8px; background: #f5f7f5; }
+.orientation-switch button { min-height: 30px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: #66716a; font-size: 10px; white-space: nowrap; }
+.orientation-switch button.active { background: #fff; color: #2f5c43; font-weight: 700; box-shadow: 0 1px 3px rgba(38,55,45,.12); }
+
+.bulk-mapping-bar { display: flex; align-items: center; gap: 9px; padding: 11px 13px; border-bottom: 1px solid #e7ebe7; background: #f8faf8; }
+.bulk-mapping-bar > div { margin-right: auto; }
+.bulk-mapping-bar b, .bulk-mapping-bar span { display: block; }
+.bulk-mapping-bar span { margin-top: 2px; color: #77807a; font-size: 10px; }
+.bulk-mapping-bar select { min-height: 36px; border: 1px solid #cfd6d0; border-radius: 8px; background: #fff; padding: 0 9px; }
+.mapping-check-cell { width: 38px; text-align: center !important; }
+.mapping-check-cell input { min-width: 0 !important; min-height: 0 !important; width: 15px; height: 15px; }
+.orientation-mini, .source-axis-note { display: block; margin-top: 3px; color: #87908a; font-size: 9px; font-weight: 400; }
+
 .editable-mapping-table td { vertical-align: middle; }
 .editable-mapping-table select,
 .editable-mapping-table input {
@@ -44,8 +59,12 @@
 
 @media (max-width: 1450px) {
   .metric-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .orientation-sheet { grid-template-columns: auto minmax(160px, 1fr); }
+  .orientation-switch { grid-column: 1 / -1; }
 }
 
 @media (max-width: 1280px) {
   .metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bulk-mapping-bar { flex-wrap: wrap; }
+  .bulk-mapping-bar > div { width: 100%; }
 }
