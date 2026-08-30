@@ -39,12 +39,29 @@ def _header_token(value: str | None) -> str:
     return re.sub(r"[^a-zа-яё0-9]", "", text.lower().replace("₂", "2").replace("₃", "3"))
 
 
+def _numericish(value: str | None) -> bool:
+    if value is None:
+        return False
+    text = str(value).strip().replace(",", ".")
+    return re.fullmatch(r"(?:[<>]=?\s*)?[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", text) is not None
+
+
 def _orientation_header_candidates(rows: tuple[tuple[str | None, ...], ...]) -> tuple[int, ...]:
+    """Find high-confidence label columns after a virtual transpose.
+
+    Exact field tokens avoid confusing values such as S-01 with the element S.
+    A candidate must also be followed by an analysis-like column containing at
+    least two numeric values, so Read_me/instruction sheets are not imported.
+    """
     candidates: list[int] = []
     for number, row in enumerate(rows, start=1):
         matches = sum(_header_token(value) in ORIENTATION_HEADER_TOKENS for value in row if value)
-        if matches >= 2:
-            candidates.append(number)
+        if matches < 3 or number >= len(rows):
+            continue
+        following = rows[number:min(len(rows), number + 3)]
+        if not any(sum(_numericish(value) for value in data_row) >= 2 for data_row in following):
+            continue
+        candidates.append(number)
     return tuple(candidates)
 
 
