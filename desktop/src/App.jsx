@@ -20,9 +20,11 @@ import {
   inspectImportSource,
   listProjectAnalyses,
   pickImportFile,
+  reviseImportMapping,
   stageImportFile,
   suggestImportRecipe,
 } from "./desktopApi";
+import { ImportMappingEditor } from "./ImportMappingEditor";
 import "./styles.css";
 
 const navigation = [
@@ -55,7 +57,7 @@ function fileName(path) {
 function warningText(warning) {
   const names = {
     HEADER_NOT_DETECTED: "Табличный заголовок не распознан",
-    UNIT_REQUIRES_REVIEW: "Колонка похожа на измерение, но единица не указана явно — она пока пропущена",
+    UNIT_REQUIRES_REVIEW: "Колонка похожа на измерение, но единица не указана явно — проверь её ниже",
     MERGED_HEADERS: "В заголовке есть объединённые ячейки",
     HIDDEN_ROWS: "В файле есть скрытые строки",
     FORMULA_WITHOUT_CACHED_VALUE: "Есть формулы без сохранённого значения",
@@ -120,6 +122,25 @@ export function App() {
     return project.analyses.filter((analysis) => JSON.stringify(analysis).toLowerCase().includes(needle));
   }, [project.analyses, query]);
 
+  const plannedMeasurementCount = useMemo(
+    () => plan ? plan.planned_records.reduce((total, record) => total + record.measurements.length, 0) : 0,
+    [plan],
+  );
+
+  const visibleRecipeWarnings = useMemo(() => {
+    if (!recipe) return recipeWarnings;
+    return recipeWarnings.filter((warning) => {
+      if (warning.code !== "UNIT_REQUIRES_REVIEW") return true;
+      const section = recipe.sections.find((item) => item.sheet_name === warning.sheet_name);
+      const mapping = section?.mappings.find((item) => item.source_column_index === warning.source_column_index);
+      return !mapping || mapping.target_role === "ignore";
+    });
+  }, [recipe, recipeWarnings]);
+
+  const canSaveImport = Boolean(
+    plan && plan.summary.planned_analysis_count > 0 && plannedMeasurementCount > 0,
+  );
+
   const resetImportState = () => {
     setSourcePath("");
     setSourceDisplayPath("");
@@ -162,8 +183,6 @@ export function App() {
       }
     } catch (caught) {
       if (newlyStaged) clearImportStaging(newlyStaged).catch(() => {});
-      // Do not destroy a previously valid preview when a replacement file
-      // fails. With no previous file the screen naturally remains empty.
       setScreen("Импорт");
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -172,8 +191,35 @@ export function App() {
     }
   };
 
+  const applyMapping = async (sheetName, sourceColumnIndex, target, canonicalField, unit) => {
+    if (busy || !sourcePath || !recipe) return;
+    setBusy(true);
+    setActivity(`Обновляю сопоставление: ${sheetName}…`);
+    setError("");
+    setSuccess("");
+    try {
+      const revised = unwrap(await reviseImportMapping(
+        sourcePath,
+        recipe,
+        sheetName,
+        sourceColumnIndex,
+        target,
+        canonicalField,
+        unit,
+      ));
+      const planned = unwrap(await createImportPlan(sourcePath, revised.recipe));
+      setRecipe(revised.recipe);
+      setPlan(planned);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
   const commitImport = async () => {
-    if (busy || !databasePath || !sourcePath || !recipe || !plan) return;
+    if (busy || !canSaveImport || !databasePath || !sourcePath || !recipe || !plan) return;
     const stagedPath = sourcePath;
     setBusy(true);
     setActivity("Сохраняю импорт в проект…");
@@ -281,6 +327,7 @@ export function App() {
                   <div className="metric"><span>Листов в файле</span><b>{inspection.sheets.length}</b></div>
                   <div className="metric"><span>Распознано таблиц</span><b>{recipe.sections.length}</b></div>
                   <div className="metric"><span>Будет Analysis</span><b>{plan.summary.planned_analysis_count}</b></div>
+                  <div className="metric"><span>Будет Measurement</span><b>{plannedMeasurementCount}</b></div>
                   <div className="metric"><span>Групп дубликатов</span><b>{plan.summary.duplicate_candidate_groups}</b></div>
                 </div>
 
@@ -301,30 +348,22 @@ export function App() {
                 </div>
 
                 <div className="live-card">
-                  <div className="section-title"><div><h3>2. Что PetroLab понял</h3><p>Нераспознанные колонки пока не угадываются и не записываются как измерения.</p></div></div>
-                  <div className="mapping-table-wrap">
-                    <table className="mapping-table">
-                      <thead><tr><th>Лист</th><th>Колонка файла</th><th>Поле PetroLab</th><th>Роль</th><th>Единица</th></tr></thead>
-                      <tbody>
-                        {recipe.sections.flatMap((section) => section.mappings.map((mapping) => (
-                          <tr key={`${section.sheet_name}-${mapping.source_column_index}`} className={mapping.target_role === "ignore" ? "muted-row" : ""}>
-                            <td>{section.sheet_name}</td>
-                            <td>{mapping.source_header}</td>
-                            <td>{mapping.target_role === "ignore" ? "Не импортировать" : mapping.canonical_field}</td>
-                            <td>{mapping.target_role}</td>
-                            <td>{mapping.unit || "—"}</td>
-                          </tr>
-                        )))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <div className="section-title"><div><h3>2. Сопоставление колонок</h3><p>Автораспознавание не угадывает единицы. Здесь можно явно исправить решение PetroLab перед сохранением.</p></div></div>
+                  <ImportMappingEditor recipe={recipe} busy={busy} onApply={applyMapping} />
                 </div>
 
-                {(recipeWarnings.length > 0 || plan.warnings.length > 0) && (
+                {plannedMeasurementCount === 0 && plan.summary.planned_analysis_count > 0 && (
+                  <div className="import-blocker">
+                    <Warning size={22} weight="fill" />
+                    <div><b>Импорт пока нельзя сохранить</b><span>PetroLab нашёл {plan.summary.planned_analysis_count} Analysis, но ни одного Measurement. Назначь аналитические колонки как Measurement и явно выбери единицы.</span></div>
+                  </div>
+                )}
+
+                {(visibleRecipeWarnings.length > 0 || plan.warnings.length > 0) && (
                   <div className="live-card warning-card">
                     <div className="section-title"><div><h3>Предупреждения</h3><p>Они не скрываются перед сохранением.</p></div></div>
                     <div className="warning-list">
-                      {[...recipeWarnings, ...plan.warnings].map((warning, index) => (
+                      {[...visibleRecipeWarnings, ...plan.warnings].map((warning, index) => (
                         <div key={`${warning.code}-${index}`}><Warning size={18} weight="fill" /><span><b>{warningText(warning)}</b>{warning.sheet_name ? ` · ${warning.sheet_name}` : ""}{warning.source_header ? ` · ${warning.source_header}` : ""}</span></div>
                       ))}
                     </div>
@@ -338,16 +377,19 @@ export function App() {
                       <div className="analysis-preview-row" key={record.preview_id}>
                         <span className="row-origin">{record.sheet_name} · строка {record.row_number}</span>
                         <b>{record.identity.filter(Boolean).join(" · ") || "Analysis без распознанного идентификатора"}</b>
-                        <span>{record.measurements.slice(0, 6).map((measurement) => `${measurement.field}=${measurement.raw_token ?? "∅"} ${measurement.unit}`).join(" · ")}</span>
+                        <span>{record.measurements.slice(0, 6).map((measurement) => `${measurement.field}=${measurement.raw_token ?? "∅"} ${measurement.unit}`).join(" · ") || "Нет Measurement"}</span>
                       </div>
                     ))}
                   </div>
                   {plan.planned_records.length > 12 && <p className="more-note">Показано 12 из {plan.planned_records.length} записей.</p>}
                 </div>
 
-                <div className="commit-bar">
-                  <div><b>Готово к записи: {plan.summary.planned_analysis_count} Analysis</b><span>Исходник не меняется; PetroLab сохранит собственную управляемую копию импортируемого файла.</span></div>
-                  <button className="primary-button large" onClick={commitImport} disabled={busy}>
+                <div className={`commit-bar${canSaveImport ? "" : " blocked"}`}>
+                  <div>
+                    <b>Готово к записи: {plan.summary.planned_analysis_count} Analysis · {plannedMeasurementCount} Measurement</b>
+                    <span>{canSaveImport ? "Исходник не меняется; PetroLab сохранит собственную управляемую копию импортируемого файла." : "Сначала назначь хотя бы одну аналитическую колонку как Measurement и укажи её единицу."}</span>
+                  </div>
+                  <button className="primary-button large" onClick={commitImport} disabled={busy || !canSaveImport} title={canSaveImport ? "" : "Нельзя сохранять Analysis без Measurement"}>
                     {busy ? <SpinnerGap className="spin" size={20} /> : <CheckCircle size={20} />}
                     Сохранить импорт в проект
                   </button>

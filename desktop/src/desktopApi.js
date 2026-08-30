@@ -23,6 +23,17 @@ export const inspectImportSource = (sourcePath) =>
 export const suggestImportRecipe = (sourcePath) =>
   invokePetrolab("import.recipe.suggest", { source_path: sourcePath });
 
+export const reviseImportMapping = (sourcePath, recipe, sheetName, sourceColumnIndex, target, canonicalField, unit) =>
+  invokePetrolab("import.recipe.revise_mapping", {
+    source_path: sourcePath,
+    recipe,
+    sheet_name: sheetName,
+    source_column_index: sourceColumnIndex,
+    target,
+    canonical_field: canonicalField ?? null,
+    unit: unit ?? null,
+  });
+
 export const createImportPlan = (sourcePath, recipe) =>
   invokePetrolab("import.plan.create", { source_path: sourcePath, recipe });
 

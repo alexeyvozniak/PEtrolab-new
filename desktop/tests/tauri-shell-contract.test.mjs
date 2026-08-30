@@ -43,10 +43,25 @@ test("desktop stages selected files locally before the scientific service reads 
 test("replacement import is transactional and keeps previous preview on failure", async () => {
   const app = await read("src/App.jsx");
   assert.match(app, /const previousStaged = sourcePath/);
-  assert.match(app, /Do not destroy a previously valid preview/);
-  assert.doesNotMatch(app.match(/const chooseFile = async \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "", /catch[\s\S]*resetImportState\(\)/);
+  const chooseFile = app.match(/const chooseFile = async \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
+  assert.doesNotMatch(chooseFile, /catch[\s\S]*resetImportState\(\)/);
   assert.match(app, /Копирую файл в рабочую область PetroLab/);
   assert.match(app, /Читаю листы и проверяю структуру файла/);
+});
+
+test("manual mapping is explicit, validated by Python, and empty measurement imports are blocked", async () => {
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  const editor = await read("src/ImportMappingEditor.jsx");
+  assert.match(api, /import\.recipe\.revise_mapping/);
+  assert.match(app, /reviseImportMapping/);
+  assert.match(app, /plannedMeasurementCount/);
+  assert.match(app, /!canSaveImport/);
+  assert.match(app, /ни одного Measurement/);
+  assert.match(editor, /Measurement/);
+  assert.match(editor, /Выбрать…/);
+  assert.match(editor, /wt\.%/);
+  assert.doesNotMatch(editor, /Mineral|Generation/);
 });
 
 test("frontend sends the versioned envelope through the one Tauri command", async () => {

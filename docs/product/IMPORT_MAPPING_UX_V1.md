@@ -10,7 +10,7 @@ PetroLab can locate sheets and table headers, but conservative auto-recognition 
 
 1. Keep automatic recognition conservative. Never infer a unit silently.
 2. Make every detected source column editable on the import review screen.
-3. User can choose role: Ignore, Analysis, Sample, Point, Mineral, Generation, or Measurement.
+3. In this slice, user can choose only roles that the current persistence layer stores losslessly: Ignore, Analysis, Sample, Point, or Measurement.
 4. Measurement requires an explicit canonical field and unit (`wt.%`, `ppm`, `ppb`, `apfu`, `mol%`, `ratio`).
 5. Rebuilding and validating the recipe remains Python-core responsibility. React only sends user decisions and renders the returned recipe/plan.
 6. Recompute the import plan after every accepted mapping edit.
@@ -20,4 +20,4 @@ PetroLab can locate sheets and table headers, but conservative auto-recognition 
 
 ## Follow-up slice
 
-Header-row/data-range editing, per-sheet enable/disable, raw row preview, and `normal|transposed` orientation are separate but adjacent controls and should reuse the same recipe-revision path.
+Mineral and Generation become selectable only when their domain persistence is connected; do not fake them as identity text. Header-row/data-range editing, per-sheet enable/disable, raw row preview, and `normal|transposed` orientation are separate but adjacent controls and should reuse the same recipe-revision path.

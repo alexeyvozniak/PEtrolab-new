@@ -1,7 +1,7 @@
 """Versioned NDJSON boundary between the desktop shell and application services.
 
 The dispatcher deliberately exposes projections, never Python exceptions or
-database objects.  Tauri can supervise this module as one child process and
+database objects. Tauri can supervise this module as one child process and
 send one JSON request per line over stdin.
 """
 
@@ -16,6 +16,7 @@ from typing import Any, TextIO
 from .desktop_workflow import list_project_analyses, suggest_import_recipe
 from .import_apply import apply_import_plan, check_linked_source, rollback_incomplete_batch, save_import_recipe_revision
 from .import_preview import ImportCommandError, run_import_inspect_source, run_import_plan_create, run_import_recipe_validate
+from .manual_mapping import revise_import_mapping
 from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
 
 
@@ -77,6 +78,22 @@ def _string(params: Mapping[str, Any], name: str) -> str:
     return value
 
 
+def _integer(params: Mapping[str, Any], name: str) -> int:
+    value = params.get(name)
+    if not isinstance(value, int):
+        raise ValueError(name)
+    return value
+
+
+def _optional_string(params: Mapping[str, Any], name: str) -> str | None:
+    value = params.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(name)
+    return value
+
+
 def _string_list(params: Mapping[str, Any], name: str) -> list[str]:
     value = params.get(name)
     if not isinstance(value, list) or not value or not all(isinstance(item, str) and item for item in value):
@@ -104,6 +121,18 @@ def _dispatch_import_inspect(params: Mapping[str, Any]) -> dict[str, Any]:
 
 def _dispatch_recipe_suggest(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": suggest_import_recipe(_source_path(params))}
+
+
+def _dispatch_recipe_revise_mapping(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": revise_import_mapping(
+        _source_path(params),
+        _recipe(params),
+        _string(params, "sheet_name"),
+        _integer(params, "source_column_index"),
+        _string(params, "target"),
+        _optional_string(params, "canonical_field"),
+        _optional_string(params, "unit"),
+    )}
 
 
 def _dispatch_recipe_validate(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -164,6 +193,7 @@ def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
 COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.inspect_source": _dispatch_import_inspect,
     "import.recipe.suggest": _dispatch_recipe_suggest,
+    "import.recipe.revise_mapping": _dispatch_recipe_revise_mapping,
     "import.recipe.validate": _dispatch_recipe_validate,
     "import.plan.create": _dispatch_plan_create,
     "import.plan.apply": _dispatch_plan_apply,
