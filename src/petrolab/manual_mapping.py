@@ -22,7 +22,13 @@ TARGETS = {
     "Measurement": ("measurement", "measured"),
 }
 VALID_UNITS = {"wt.%", "ppm", "ppb", "apfu", "mol%", "ratio"}
-IRON_FIELDS = {"FeO", "FeOt", "Fe2O3", "Fe2O3t", "Fe_total"}
+IRON_FIELDS = {"feo", "feot", "fe2o3", "fe2o3t", "fetotal"}
+
+
+def _normalized_field(value: str | None) -> str:
+    if not value:
+        return ""
+    return "".join(character for character in value.lower() if character.isalnum())
 
 
 def revise_import_mapping(
@@ -83,7 +89,7 @@ def revise_import_mapping(
     })
 
     mapped_iron = any(
-        item.get("target_role") == "measurement" and item.get("canonical_field") in IRON_FIELDS
+        item.get("target_role") == "measurement" and _normalized_field(item.get("canonical_field")) in IRON_FIELDS
         for section in revised.get("sections", [])
         for item in section.get("mappings", [])
     )
