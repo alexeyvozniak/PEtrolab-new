@@ -1,5 +1,6 @@
 use std::{
     env,
+    fs,
     io::{BufRead, BufReader, Write},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::Mutex,
@@ -98,6 +99,24 @@ fn petrolab_command(envelope: Value, service: State<'_, Mutex<PythonService>>) -
     service.request(envelope)
 }
 
+#[tauri::command]
+fn pick_import_file() -> Option<String> {
+    rfd::FileDialog::new()
+        .add_filter("PetroLab data", &["xlsx", "csv", "tsv"])
+        .pick_file()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn project_database_path(app: AppHandle) -> Result<String, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot resolve PetroLab application data directory: {error}"))?;
+    fs::create_dir_all(&directory).map_err(|error| format!("Cannot create PetroLab application data directory: {error}"))?;
+    Ok(directory.join("petrolab-v2.sqlite").to_string_lossy().into_owned())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
@@ -105,7 +124,7 @@ pub fn run() {
             app.manage(Mutex::new(service));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![petrolab_command])
+        .invoke_handler(tauri::generate_handler![petrolab_command, pick_import_file, project_database_path])
         .run(tauri::generate_context!())
         .expect("Tauri application failed");
 }
