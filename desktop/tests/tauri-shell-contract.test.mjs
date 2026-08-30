@@ -82,8 +82,13 @@ test("mapping edits are applied once in bulk per logical block", async () => {
   assert.match(editor, /source_index/);
   assert.match(editor, /at\.%/);
   assert.match(editor, /UNIT_REQUIRES_REVIEW/);
+  assert.match(editor, /Mineral/);
+  assert.match(editor, /Generation/);
+  assert.match(editor, /measurement_set/);
+  assert.match(editor, /method/);
+  assert.match(editor, /Метод/);
+  assert.match(editor, /Набор/);
   assert.doesNotMatch(editor, />Применить<\/button>/);
-  assert.doesNotMatch(editor, /Mineral|Generation/);
 });
 
 test("save stays blocked while block or mapping drafts are unapplied", async () => {
