@@ -88,6 +88,12 @@ function recordOrigin(record) {
   return `${record.sheet_name} · строка ${record.row_number}`;
 }
 
+function measurementPreview(measurement) {
+  const context = measurement.method || measurement.measurement_set;
+  const label = context ? `${measurement.field} (${context})` : measurement.field;
+  return `${label}=${measurement.raw_token ?? "∅"} ${measurement.unit} [${measurement.source_cell || ""}]`;
+}
+
 export function App() {
   const [screen, setScreen] = useState("Импорт");
   const [databasePath, setDatabasePath] = useState("");
@@ -131,6 +137,12 @@ export function App() {
   const identityColumns = useMemo(() => {
     const fields = new Set();
     project.analyses.forEach((analysis) => Object.keys(analysis.identity || {}).forEach((field) => fields.add(field)));
+    return [...fields];
+  }, [project.analyses]);
+
+  const metadataColumns = useMemo(() => {
+    const fields = new Set();
+    project.analyses.forEach((analysis) => Object.keys(analysis.source_metadata || {}).forEach((field) => fields.add(field)));
     return [...fields];
   }, [project.analyses]);
 
@@ -309,7 +321,8 @@ export function App() {
       await refreshAnalyses(databasePath);
       resetImportState();
       clearImportStaging(stagedPath).catch(() => {});
-      setSuccess(`Импорт сохранён: ${result.analysis_count} Analysis, ${result.measurement_count} Measurement.`);
+      const metadataNote = result.source_metadata_count ? `, ${result.source_metadata_count} source metadata` : "";
+      setSuccess(`Импорт сохранён: ${result.analysis_count} Analysis, ${result.measurement_count} Measurement${metadataNote}.`);
       setScreen("Анализы");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -485,7 +498,7 @@ export function App() {
                       <div className="analysis-preview-row" key={record.preview_id}>
                         <span className="row-origin">{recordOrigin(record)}</span>
                         <b>{record.identity.filter(Boolean).join(" · ") || "Analysis без распознанного идентификатора"}</b>
-                        <span>{record.measurements.slice(0, 6).map((measurement) => `${measurement.field}=${measurement.raw_token ?? "∅"} ${measurement.unit} [${measurement.source_cell || ""}]`).join(" · ") || "Нет Measurement"}</span>
+                        <span>{record.measurements.slice(0, 6).map(measurementPreview).join(" · ") || "Нет Measurement"}</span>
                       </div>
                     ))}
                   </div>
@@ -515,7 +528,7 @@ export function App() {
         {screen === "Анализы" && (
           <section className="live-page analyses-page">
             <div className="analysis-toolbar">
-              <div className="search-box"><MagnifyingGlass size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти по Sample, Analysis, Source, значению…" /></div>
+              <div className="search-box"><MagnifyingGlass size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти по Sample, Mineral, Generation, Source, значению…" /></div>
               <span>Показано {filteredAnalyses.length} из {project.total}</span>
               {project.latest_import && <button className="outline-button danger-outline" onClick={retractLatest} disabled={busy} title={`Последний импорт: ${project.latest_import.source_name}`}>Отменить последний импорт</button>}
               <button className="outline-button" onClick={() => refreshAnalyses().catch((caught) => setError(caught.message))} disabled={busy}>Обновить</button>
@@ -526,15 +539,17 @@ export function App() {
             ) : (
               <div className="analysis-table-wrap">
                 <table className="analysis-table">
-                  <thead><tr><th>Source</th><th>Лист</th><th>Строка</th>{identityColumns.map((field) => <th key={field}>{field}</th>)}{measurementColumns.map((field) => <th key={field}>{field}</th>)}</tr></thead>
+                  <thead><tr><th>Source</th><th>Лист</th><th>Строка</th>{identityColumns.map((field) => <th key={`identity-${field}`}>{field}</th>)}{metadataColumns.map((field) => <th key={`metadata-${field}`} title="Исходное значение из файла">{field} · source</th>)}{measurementColumns.map((field) => <th key={`measurement-${field}`}>{field}</th>)}</tr></thead>
                   <tbody>
                     {filteredAnalyses.map((analysis) => (
                       <tr key={analysis.analysis_id} title={analysis.analysis_id}>
                         <td><b>{analysis.source_name}</b></td><td>{analysis.sheet_name}</td><td>{analysis.source_row_number}</td>
-                        {identityColumns.map((field) => <td key={field}>{analysis.identity?.[field] || ""}</td>)}
+                        {identityColumns.map((field) => <td key={`identity-${field}`}>{analysis.identity?.[field] || ""}</td>)}
+                        {metadataColumns.map((field) => <td key={`metadata-${field}`} title="Сохранено без интерпретации как исходный текст">{analysis.source_metadata?.[field] || ""}</td>)}
                         {measurementColumns.map((field) => {
                           const measurement = analysis.measurements?.[field];
-                          return <td key={field}>{measurement ? <><span>{measurement.raw_token ?? "∅"}</span><small>{measurement.unit}</small></> : ""}</td>;
+                          const context = measurement?.method || measurement?.measurement_set;
+                          return <td key={`measurement-${field}`}>{measurement ? <><span>{measurement.raw_token ?? "∅"}</span><small>{measurement.unit}{context ? ` · ${context}` : ""}</small></> : ""}</td>;
                         })}
                       </tr>
                     ))}
