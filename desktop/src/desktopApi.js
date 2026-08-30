@@ -58,6 +58,13 @@ export const reviseImportSections = (sourcePath, recipe, decisions) =>
     decisions,
   });
 
+export const reviewImportDuplicates = (sourcePath, recipe, decision = "keep_all") =>
+  invokePetrolab("import.recipe.review_duplicates", {
+    source_path: sourcePath,
+    recipe,
+    decision,
+  });
+
 export const createImportPlan = (sourcePath, recipe) =>
   invokePetrolab("import.plan.create", { source_path: sourcePath, recipe });
 
