@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import sys
@@ -70,7 +71,7 @@ class OrientedImportTests(unittest.TestCase):
             self.assertEqual(result["analysis_count"], 2)
             self.assertEqual(result["measurement_count"], 4)
 
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 analyses = connection.execute(
                     "SELECT source_orientation, source_record_index FROM analysis ORDER BY source_record_index"
                 ).fetchall()
