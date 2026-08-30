@@ -10,8 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe  # noqa: E402
-from petrolab.import_apply import apply_import_plan  # noqa: E402
-from petrolab.import_preview import create_import_plan, inspect_source, validate_recipe  # noqa: E402
+from petrolab.import_preview import inspect_source  # noqa: E402
+from petrolab.oriented_apply import apply_oriented_import_plan  # noqa: E402
+from petrolab.oriented_import import create_oriented_import_plan, validate_oriented_recipe  # noqa: E402
 
 
 FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
@@ -23,8 +24,9 @@ class DesktopWorkflowTests(unittest.TestCase):
         recipe = suggestion["recipe"]
         inspection = inspect_source(FIXTURE)
 
-        validation = validate_recipe(inspection, recipe)
+        validation = validate_oriented_recipe(inspection, recipe)
         self.assertEqual(len(validation["sections"]), 2)
+        self.assertTrue(all(section["orientation"] == "rows" for section in validation["sections"]))
         self.assertEqual(recipe["ownership_mode"], "managed_copy")
         self.assertEqual(recipe["global_decisions"]["fe_semantics"], "preserve_reported_form_for_review")
 
@@ -33,7 +35,7 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertEqual(unknown_f["target_role"], "ignore")
         self.assertTrue(any(warning["code"] == "UNIT_REQUIRES_REVIEW" for warning in suggestion["warnings"]))
 
-        plan = create_import_plan(inspection, recipe)
+        plan = create_oriented_import_plan(inspection, recipe)
         self.assertEqual(plan["summary"]["planned_analysis_count"], 8)
 
     def test_applied_import_is_visible_in_desktop_analysis_projection(self) -> None:
@@ -41,7 +43,7 @@ class DesktopWorkflowTests(unittest.TestCase):
         recipe = suggestion["recipe"]
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "petrolab.sqlite"
-            applied = apply_import_plan(database, FIXTURE, recipe)
+            applied = apply_oriented_import_plan(database, FIXTURE, recipe)
             projection = list_project_analyses(database)
             managed_sources = list((Path(directory) / "sources").glob("*.xlsx"))
 
@@ -49,6 +51,7 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertEqual(projection["source_count"], 1)
         self.assertEqual(projection["import_batch_count"], 1)
         self.assertEqual(projection["analyses"][0]["source_name"], FIXTURE.name)
+        self.assertTrue(all(row["source_orientation"] == "rows" for row in projection["analyses"]))
         self.assertTrue(any("Analysis" in row["identity"] for row in projection["analyses"]))
         self.assertTrue(any("SiO2" in row["measurements"] for row in projection["analyses"]))
         self.assertEqual(len(managed_sources), 1)
