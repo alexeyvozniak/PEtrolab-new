@@ -1,4 +1,4 @@
-"""M1.2 atomic application of a validated import plan to local SQLite."""
+"""Atomic application of a validated import plan to local SQLite."""
 
 from __future__ import annotations
 
@@ -76,7 +76,6 @@ def _insert_recipe_revision(
     timestamp: str,
     supersedes_recipe_revision_id: str | None = None,
 ) -> str:
-    """Persist an immutable recipe snapshot after it has been validated."""
     revision_id = _id()
     if supersedes_recipe_revision_id is not None:
         predecessor = connection.execute(
@@ -114,7 +113,6 @@ def save_import_recipe_revision(
     recipe: dict[str, Any],
     supersedes_recipe_revision_id: str | None = None,
 ) -> dict[str, Any]:
-    """Save a new, validated recipe revision without rewriting an earlier one."""
     connection = open_project(database_path)
     try:
         source = connection.execute(
@@ -180,26 +178,50 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
                 analysis_id = _id()
                 connection.execute(
                     """INSERT INTO analysis
-                    (analysis_id, import_batch_id, source_id, preview_id, sheet_name, source_row_number, block_id, identity_json, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (analysis_id, batch_id, source_id, record["preview_id"], record["sheet_name"], record["row_number"],
-                     record["block_id"], json.dumps(record["identity"], ensure_ascii=False), timestamp),
+                    (analysis_id, import_batch_id, source_id, preview_id, sheet_name, source_row_number, block_id,
+                     identity_json, created_at, source_column_number, source_orientation)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        analysis_id, batch_id, source_id, record["preview_id"], record["sheet_name"], record["row_number"],
+                        record["block_id"], json.dumps(record["identity"], ensure_ascii=False), timestamp,
+                        record.get("source_column_number"), record.get("orientation", "rows_are_analyses"),
+                    ),
                 )
                 for measurement in record["measurements"]:
                     connection.execute(
                         """INSERT INTO measurement
-                        (measurement_id, analysis_id, canonical_field, unit, raw_token, qualifier, detection_limit, source_column_name, source_column_index, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (_id(), analysis_id, measurement["field"], measurement["unit"], measurement["raw_token"],
-                         measurement["qualifier"], measurement["detection_limit"], measurement["source_header"],
-                         measurement["source_column_index"], timestamp),
+                        (measurement_id, analysis_id, canonical_field, unit, raw_token, qualifier, detection_limit,
+                         source_column_name, source_column_index, created_at, source_row_number,
+                         physical_source_column_index, source_cell, measurement_set, method)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            _id(), analysis_id, measurement["field"], measurement["unit"], measurement["raw_token"],
+                            measurement["qualifier"], measurement["detection_limit"], measurement["source_header"],
+                            measurement["source_column_index"], timestamp, measurement["physical_source_row_number"],
+                            measurement["physical_source_column_index"], measurement["source_cell"],
+                            measurement.get("measurement_set"), measurement.get("method"),
+                        ),
                     )
                     connection.execute(
                         """INSERT INTO source_row_provenance
-                        (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token, normalized_token, qualifier, analysis_id)
+                        (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token,
+                         normalized_token, qualifier, analysis_id)
                         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)""",
-                        (_id(), batch_id, record["sheet_name"], record["row_number"], measurement["source_header"],
-                         measurement["raw_token"], measurement["qualifier"], analysis_id),
+                        (
+                            _id(), batch_id, record["sheet_name"], measurement["physical_source_row_number"],
+                            measurement["source_header"], measurement["raw_token"], measurement["qualifier"], analysis_id,
+                        ),
+                    )
+                    connection.execute(
+                        """INSERT INTO source_cell_provenance
+                        (provenance_id, import_batch_id, analysis_id, sheet_name, source_row_number,
+                         source_column_index, source_cell, source_header, raw_token, qualifier)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            _id(), batch_id, analysis_id, record["sheet_name"], measurement["physical_source_row_number"],
+                            measurement["physical_source_column_index"], measurement["source_cell"],
+                            measurement["source_header"], measurement["raw_token"], measurement["qualifier"],
+                        ),
                     )
             connection.execute("UPDATE import_batch SET status = 'applied', applied_at = ? WHERE import_batch_id = ?", (timestamp, batch_id))
         return {
@@ -207,7 +229,7 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
             "source_id": source_id,
             "recipe_revision_id": recipe_revision_id,
             "analysis_count": plan["summary"]["planned_analysis_count"],
-            "measurement_count": sum(len(record["measurements"]) for record in plan["planned_records"]),
+            "measurement_count": plan["summary"]["planned_measurement_count"],
             "warnings": plan["warnings"],
         }
     except Exception:
@@ -219,7 +241,6 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
 
 
 def check_linked_source(database_path: str | Path, source_id: str) -> dict[str, Any]:
-    """Re-fingerprint a linked file and report change; never import or refresh it."""
     connection = open_project(database_path)
     try:
         row = connection.execute(
@@ -246,7 +267,6 @@ def check_linked_source(database_path: str | Path, source_id: str) -> dict[str, 
 
 
 def retract_latest_import(database_path: str | Path, reason: str = "user_retracted") -> dict[str, Any]:
-    """Hide the latest applied import from active projections while preserving its audit trail."""
     connection = open_project(database_path)
     try:
         row = connection.execute(
@@ -282,7 +302,6 @@ def retract_latest_import(database_path: str | Path, reason: str = "user_retract
 
 
 def rollback_incomplete_batch(database_path: str | Path, import_batch_id: str) -> dict[str, Any]:
-    """Only a non-applied batch may be marked rolled back; applied data is immutable."""
     connection = open_project(database_path)
     try:
         with connection:
