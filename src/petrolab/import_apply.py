@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import shutil
@@ -38,6 +39,51 @@ def _cell_value(row: tuple[str | None, ...], index: int) -> str | None:
     return row[index] if 0 <= index < len(row) else None
 
 
+def _duplicate_groups(plan: dict[str, Any]) -> list[list[str]]:
+    for warning in plan.get("warnings", []):
+        if warning.get("code") == "DUPLICATE_CANDIDATES" and isinstance(warning.get("preview_ids"), list):
+            return [list(group) for group in warning["preview_ids"] if isinstance(group, list)]
+    return []
+
+
+def _duplicate_groups_fingerprint(groups: list[list[str]]) -> str:
+    canonical_groups = sorted(sorted(str(item) for item in group) for group in groups)
+    payload = json.dumps(canonical_groups, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _require_duplicate_review(plan: dict[str, Any], recipe: dict[str, Any]) -> None:
+    groups = _duplicate_groups(plan)
+    if not groups:
+        return
+    decisions = recipe.get("global_decisions") or {}
+    policy = decisions.get("duplicate_policy")
+    if policy == "skip_exact_after_review":
+        raise ImportCommandError(
+            "DUPLICATE_POLICY_NOT_IMPLEMENTED",
+            "Skipping duplicate rows is not implemented in this import version; no records were written.",
+        )
+    if policy != "keep_all":
+        raise ImportCommandError(
+            "DUPLICATE_REVIEW_REQUIRED",
+            "Duplicate candidates must be reviewed before this import can be saved.",
+            {"candidate_group_count": len(groups)},
+        )
+    # Recipe schema v1 predates persisted duplicate-review evidence. Preserve
+    # compatibility for immutable old recipes, but v2 must carry proof that the
+    # keep-all decision was made against these exact candidate groups.
+    if int(recipe.get("schema_version", 1)) < 2:
+        return
+    review = decisions.get("duplicate_review")
+    expected = _duplicate_groups_fingerprint(groups)
+    if not isinstance(review, dict) or review.get("decision") != "keep_all" or review.get("groups_fingerprint_sha256") != expected:
+        raise ImportCommandError(
+            "DUPLICATE_REVIEW_REQUIRED",
+            "The saved duplicate review does not match the current import plan.",
+            {"candidate_group_count": len(groups)},
+        )
+
+
 def _section_for_record(recipe: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
     for section in recipe.get("sections", []):
         if section.get("sheet_name") == record.get("sheet_name") and section.get("block_id") == record.get("block_id"):
@@ -50,12 +96,7 @@ def _section_for_record(recipe: dict[str, Any], record: dict[str, Any]) -> dict[
 
 
 def _source_metadata_for_record(inspection: Any, recipe: dict[str, Any], record: dict[str, Any]) -> list[dict[str, Any]]:
-    """Read source metadata losslessly without promoting it to controlled entities.
-
-    Mineral/Generation strings are source evidence at this stage. They retain the
-    exact physical source cell so a later explicit taxonomy assignment can cite
-    the original value rather than rewriting it.
-    """
+    """Read source metadata losslessly without promoting it to controlled entities."""
     section = _section_for_record(recipe, record)
     sheet = next((item for item in inspection.sheets if item.name == record["sheet_name"]), None)
     if sheet is None:
@@ -209,6 +250,7 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
     """Apply a fresh plan atomically; this function never writes the source file."""
     inspection = inspect_source(source_path)
     plan = create_import_plan(inspection, recipe)
+    _require_duplicate_review(plan, recipe)
     source_kind = "managed_copy" if recipe["ownership_mode"] == "managed_copy" else "linked_reference"
     source_id, batch_id = _id(), _id()
     managed_copy: Path | None = None
@@ -281,10 +323,6 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
                             measurement.get("measurement_set"), measurement.get("method"),
                         ),
                     )
-                    # Legacy row provenance cannot uniquely represent a transposed
-                    # source: two Analyses can use the same physical field row.
-                    # Keep it for ordinary imports, while exact cell provenance is
-                    # authoritative for every orientation.
                     if orientation == "rows_are_analyses":
                         connection.execute(
                             """INSERT INTO source_row_provenance
