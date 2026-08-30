@@ -15,6 +15,20 @@ function stateFor(section) {
   };
 }
 
+function invalidState(value) {
+  if (!value.enabled) return false;
+  const transposed = value.orientation === "columns_are_analyses";
+  return !Number.isInteger(Number(value.header_row))
+    || Number(value.header_row) < 1
+    || Number(value.data_start_row) < 1
+    || Number(value.data_end_row) < Number(value.data_start_row)
+    || (transposed && (
+      Number(value.header_column) < 1
+      || Number(value.data_start_column) < 1
+      || (value.data_end_column != null && Number(value.data_end_column) < Number(value.data_start_column))
+    ));
+}
+
 function sameState(left, right) {
   return left.enabled === right.enabled
     && left.orientation === right.orientation
@@ -54,17 +68,7 @@ function RawPreview({ preview, state }) {
 function BlockCard({ section, index, preview, value, busy, onChange }) {
   const transposed = value.orientation === "columns_are_analyses";
   const context = section.unit_context;
-  const invalid = value.enabled && (
-    !Number.isInteger(Number(value.header_row))
-    || Number(value.header_row) < 1
-    || Number(value.data_start_row) < 1
-    || Number(value.data_end_row) < Number(value.data_start_row)
-    || (transposed && (
-      Number(value.header_column) < 1
-      || Number(value.data_start_column) < 1
-      || (value.data_end_column && Number(value.data_end_column) < Number(value.data_start_column))
-    ))
-  );
+  const invalid = invalidState(value);
 
   const set = (field, next) => onChange({ ...value, [field]: next });
   return (
@@ -100,7 +104,7 @@ function BlockCard({ section, index, preview, value, busy, onChange }) {
           <>
             <label><span>Колонка названий полей</span><input type="number" min="1" value={value.header_column} onChange={(event) => set("header_column", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
             <label><span>Первая колонка Analysis</span><input type="number" min="1" value={value.data_start_column} onChange={(event) => set("data_start_column", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
-            <label><span>Последняя колонка Analysis</span><input type="number" min="1" value={value.data_end_column || ""} onChange={(event) => set("data_end_column", event.target.value ? Number(event.target.value) : null)} disabled={busy || !value.enabled} /></label>
+            <label><span>Последняя колонка Analysis</span><input type="number" min="1" value={value.data_end_column || ""} onChange={(event) => set("data_end_column", event.target.value ? Number(event.target.value) : null)} disabled={busy || !value.enabled} placeholder="до конца" /></label>
           </>
         )}
       </div>
@@ -127,11 +131,7 @@ export function ImportBlockReview({ recipe, previews = {}, busy, onApply, onDirt
     [recipe, draft, applied],
   );
   const enabledCount = useMemo(() => Object.values(draft).filter((value) => value.enabled).length, [draft]);
-  const invalidCount = useMemo(() => Object.values(draft).filter((value) => value.enabled && (
-    Number(value.header_row) < 1
-    || Number(value.data_start_row) < 1
-    || Number(value.data_end_row) < Number(value.data_start_row)
-  )).length, [draft]);
+  const invalidCount = useMemo(() => Object.values(draft).filter(invalidState).length, [draft]);
 
   useEffect(() => { onDirtyChange?.(dirtyBlocks.length > 0); }, [dirtyBlocks.length, onDirtyChange]);
 
@@ -141,6 +141,13 @@ export function ImportBlockReview({ recipe, previews = {}, busy, onApply, onDirt
       const previous = applied[section.block_id];
       const orientationChanged = next.orientation !== previous.orientation;
       const headerChanged = Number(next.header_row) !== Number(previous.header_row);
+      const transposedBounds = next.orientation === "columns_are_analyses" ? {
+        header_column: Number(next.header_column),
+        data_start_column: Number(next.data_start_column),
+        ...(next.data_end_column != null ? { data_end_column: Number(next.data_end_column) } : {}),
+        analysis_axis_role: "Analysis",
+        analysis_axis_field: "Analysis",
+      } : {};
       return {
         block_id: section.block_id,
         enabled: next.enabled,
@@ -148,13 +155,7 @@ export function ImportBlockReview({ recipe, previews = {}, busy, onApply, onDirt
         header_row: Number(next.header_row),
         data_start_row: Number(next.data_start_row),
         data_end_row: Number(next.data_end_row),
-        ...(next.orientation === "columns_are_analyses" ? {
-          header_column: Number(next.header_column),
-          data_start_column: Number(next.data_start_column),
-          data_end_column: Number(next.data_end_column),
-          analysis_axis_role: "Analysis",
-          analysis_axis_field: "Analysis",
-        } : {}),
+        ...transposedBounds,
         rebuild_mappings: orientationChanged || headerChanged,
       };
     });
