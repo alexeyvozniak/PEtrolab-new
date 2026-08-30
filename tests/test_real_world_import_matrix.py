@@ -12,12 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from petrolab.desktop_workflow import suggest_import_recipe  # noqa: E402
+from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe  # noqa: E402
 from petrolab.import_apply import apply_import_plan  # noqa: E402
 from petrolab.import_preview import create_import_plan, inspect_source, preview_source_window  # noqa: E402
 from petrolab.manual_mapping import revise_import_mappings, revise_import_sections  # noqa: E402
 from real_world_fixtures import (  # noqa: E402
     atomic_percent,
+    duplicate_field_methods,
     generic_isotope,
     long_preamble_weight_percent,
     multiple_blocks,
@@ -138,6 +139,41 @@ class RealWorldImportMatrixTests(unittest.TestCase):
                 if mapping["target_role"] == "measurement"
             }
             self.assertEqual(units, {"at.%"})
+
+    def test_same_canonical_field_from_two_methods_stays_distinguishable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            source = duplicate_field_methods(directory / "mixed-methods.xlsx")
+            suggestion = suggest_import_recipe(source)
+            section = suggestion["recipe"]["sections"][0]
+            mappings = {item["source_header"]: item for item in section["mappings"]}
+            decisions = []
+            for header, method in (("SiO2 EPMA (wt.%)", "EPMA"), ("SiO2 SIMS (wt.%)", "SIMS")):
+                mapping = mappings[header]
+                decisions.append({
+                    "block_id": section["block_id"],
+                    "source_axis": "column",
+                    "source_index": mapping["source_column_index"],
+                    "target": "Measurement",
+                    "canonical_field": "SiO2",
+                    "unit": "wt.%",
+                    "method": method,
+                    "measurement_set": method,
+                })
+            revised = revise_import_mappings(source, suggestion["recipe"], decisions)["recipe"]
+            plan = create_import_plan(inspect_source(source), revised)
+            self.assertEqual([item["method"] for item in plan["planned_records"][0]["measurements"]], ["EPMA", "SIMS"])
+
+            database = directory / "project.sqlite"
+            applied = apply_import_plan(database, source, revised)
+            projection = list_project_analyses(database)
+            first = projection["analyses"][0]
+            self.assertEqual(applied["source_metadata_count"], 4)
+            self.assertEqual(first["source_metadata"]["Mineral"], "Phlogopite")
+            self.assertIn(first["source_metadata"]["Generation"], {"core", "rim"})
+            self.assertEqual(set(first["measurements"]), {"SiO2 · EPMA", "SiO2 · SIMS"})
+            self.assertEqual({item["method"] for item in first["measurement_list"]}, {"EPMA", "SIMS"})
+            self.assertTrue(all(item["source_cell"] for item in first["source_metadata_list"]))
 
     def test_raw_preview_returns_physical_rows_without_normalizing_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
