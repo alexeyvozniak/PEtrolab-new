@@ -17,14 +17,14 @@ CREATE TABLE source_row_provenance_v2 (
     import_batch_id TEXT NOT NULL REFERENCES import_batch(import_batch_id),
     sheet_name TEXT NOT NULL,
     row_number INTEGER NOT NULL CHECK (row_number > 0),
-    source_column_index INTEGER NOT NULL CHECK (source_column_index >= 0),
+    source_column_index INTEGER NOT NULL DEFAULT 0 CHECK (source_column_index >= 0),
     source_column_name TEXT NOT NULL,
     source_cell_reference TEXT,
     raw_token TEXT,
     normalized_token TEXT,
     qualifier TEXT CHECK (qualifier IN ('below_detection_limit', 'missing', 'not_applicable')),
     analysis_id TEXT REFERENCES analysis(analysis_id),
-    UNIQUE(import_batch_id, sheet_name, row_number, source_column_index)
+    UNIQUE(import_batch_id, sheet_name, row_number, source_column_name, source_column_index)
 );
 
 INSERT INTO source_row_provenance_v2 (
