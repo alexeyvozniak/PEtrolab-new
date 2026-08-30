@@ -33,17 +33,16 @@ ORIENTATION_HEADER_TOKENS = {
 def _header_token(value: str | None) -> str:
     if not value:
         return ""
-    return re.sub(r"[^a-zа-яё0-9]", "", value.lower().replace("₂", "2").replace("₃", "3"))
+    text = str(value).strip()
+    text = re.sub(r"\([^)]*\)", "", text)
+    text = re.split(r"\s+", text, maxsplit=1)[0]
+    return re.sub(r"[^a-zа-яё0-9]", "", text.lower().replace("₂", "2").replace("₃", "3"))
 
 
 def _orientation_header_candidates(rows: tuple[tuple[str | None, ...], ...]) -> tuple[int, ...]:
     candidates: list[int] = []
     for number, row in enumerate(rows, start=1):
-        matches = sum(
-            any(_header_token(value).startswith(token) for token in ORIENTATION_HEADER_TOKENS)
-            for value in row
-            if value
-        )
+        matches = sum(_header_token(value) in ORIENTATION_HEADER_TOKENS for value in row if value)
         if matches >= 2:
             candidates.append(number)
     return tuple(candidates)
@@ -78,6 +77,8 @@ def oriented_rows(sheet: SheetInspection, orientation: str) -> tuple[tuple[str |
 
 
 def oriented_header_candidates(sheet: SheetInspection, orientation: str) -> tuple[int, ...]:
+    if orientation == "rows":
+        return sheet.header_rows
     return _orientation_header_candidates(oriented_rows(sheet, orientation))
 
 
@@ -123,7 +124,7 @@ def _materialize(inspection: SourceInspection, recipe: dict[str, Any]) -> tuple[
     for sheet in inspection.sheets:
         orientation = orientations.get(sheet.name, "rows")
         rows = oriented_rows(sheet, orientation)
-        headers = _orientation_header_candidates(rows)
+        headers = sheet.header_rows if orientation == "rows" else _orientation_header_candidates(rows)
         virtual_sheets.append(SheetInspection(sheet.name, rows, headers, sheet.warnings))
 
     virtual_inspection = SourceInspection(
@@ -166,9 +167,7 @@ def create_oriented_import_plan(inspection: SourceInspection, recipe: dict[str, 
         record["source_orientation"] = orientation
         record["source_record_axis"] = "row" if orientation == "rows" else "column"
         record["source_record_index"] = virtual_row
-        record["source_record_label"] = (
-            str(virtual_row) if orientation == "rows" else excel_column_name(virtual_row - 1)
-        )
+        record["source_record_label"] = str(virtual_row) if orientation == "rows" else excel_column_name(virtual_row - 1)
         for measurement in record.get("measurements", []):
             virtual_column = int(measurement["source_column_index"])
             source_row, source_column, cell = source_cell_coordinates(orientation, virtual_row, virtual_column)
