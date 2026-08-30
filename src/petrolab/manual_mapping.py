@@ -1,6 +1,6 @@
 """User-driven import mapping revisions for the Desktop review screen.
 
-React sends only explicit user decisions.  This service owns recipe semantics,
+React sends only explicit user decisions. This service owns recipe semantics,
 recalculates the semantic fingerprint and validates the revised recipe against
 the immutable source before it can be planned or applied.
 """
@@ -19,8 +19,6 @@ TARGETS = {
     "Analysis": ("identity", "identity"),
     "Sample": ("identity", "identity"),
     "Point": ("identity", "identity"),
-    "Mineral": ("metadata", "metadata"),
-    "Generation": ("metadata", "metadata"),
     "Measurement": ("measurement", "measured"),
 }
 VALID_UNITS = {"wt.%", "ppm", "ppb", "apfu", "mol%", "ratio"}
