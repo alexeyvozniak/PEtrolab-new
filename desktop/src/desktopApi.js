@@ -34,6 +34,14 @@ export const reviseImportMapping = (sourcePath, recipe, sheetName, sourceColumnI
     unit: unit ?? null,
   });
 
+export const reviseImportOrientation = (sourcePath, recipe, sheetName, orientation) =>
+  invokePetrolab("import.recipe.revise_orientation", {
+    source_path: sourcePath,
+    recipe,
+    sheet_name: sheetName,
+    orientation,
+  });
+
 export const createImportPlan = (sourcePath, recipe) =>
   invokePetrolab("import.plan.create", { source_path: sourcePath, recipe });
 
