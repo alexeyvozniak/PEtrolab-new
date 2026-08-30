@@ -1,6 +1,47 @@
 .metric-row { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .global-message.activity { color: #315743; background: #eef5ef; border: 1px solid #d1e0d4; }
 
+.mapping-editor { display: grid; gap: 12px; padding: 14px; }
+.mapping-explainer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 13px;
+  border: 1px solid #dbe3dc;
+  border-radius: 9px;
+  background: #f8faf8;
+}
+.mapping-explainer b,
+.mapping-explainer span { display: block; }
+.mapping-explainer > div:first-child > span { margin-top: 4px; color: #6f7872; font-size: 11px; }
+.mapping-summary { display: flex; gap: 12px; align-items: center; white-space: nowrap; font-size: 11px; color: #606963; }
+.mapping-needs-review { color: #925224; font-size: 10px; font-weight: 700; }
+
+.mapping-sheet { overflow: hidden; border: 1px solid #e0e5e0; border-radius: 10px; background: #fff; }
+.mapping-sheet-head {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 12px;
+  background: #f8f9f7;
+  border-bottom: 1px solid #e4e8e4;
+}
+.mapping-sheet-head b,
+.mapping-sheet-head span { display: block; }
+.mapping-sheet-head span { margin-top: 3px; color: #7a827d; font-size: 10px; }
+.sheet-unit-control { display: flex; align-items: center; gap: 7px; }
+.sheet-unit-control label { color: #717a74; font-size: 10px; }
+.sheet-unit-control select {
+  min-height: 32px;
+  border: 1px solid #cfd6d0;
+  border-radius: 7px;
+  background: #fff;
+  padding: 0 8px;
+}
+
 .editable-mapping-table td { vertical-align: middle; }
 .editable-mapping-table select,
 .editable-mapping-table input {
@@ -16,6 +57,8 @@
 .editable-mapping-table input:focus { outline: 2px solid #c8d9cc; outline-offset: 1px; }
 .mapping-review-row.muted-row select,
 .mapping-review-row.muted-row input { color: #3f4c45; }
+.mapping-invalid { background: #fff9f0 !important; }
+.mapping-status-cell { width: 105px; }
 .compact-button {
   min-height: 32px;
   padding: 0 10px;
@@ -26,6 +69,7 @@
   font-weight: 650;
 }
 .compact-button:hover:not(:disabled) { background: #eef4ef; }
+.mapping-actions { display: flex; justify-content: flex-end; gap: 9px; padding-top: 2px; }
 
 .import-blocker {
   display: flex;
@@ -37,15 +81,20 @@
   background: #fff2ef;
   color: #7a332e;
 }
+.import-blocker.draft-blocker { border-color: #cbd9d0; background: #f1f6f2; color: #315743; }
 .import-blocker b,
 .import-blocker span { display: block; }
 .import-blocker span { margin-top: 4px; font-size: 11px; line-height: 1.45; }
 .commit-bar.blocked { border-color: #e5c7bf; background: rgba(255,248,246,.97); }
+.danger-outline { color: #8a3f39; border-color: #e1bdb8; }
+.danger-outline:hover:not(:disabled) { background: #fff1ef; }
 
 @media (max-width: 1450px) {
   .metric-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .mapping-sheet-head { align-items: flex-start; flex-direction: column; }
 }
 
 @media (max-width: 1280px) {
   .metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mapping-explainer { align-items: flex-start; flex-direction: column; }
 }
