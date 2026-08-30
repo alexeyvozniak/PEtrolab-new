@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./importMapping.css";
 
-const TARGETS = ["Ignore", "Analysis", "Sample", "Point", "Measurement"];
+const TARGETS = ["Ignore", "Analysis", "Sample", "Point", "Mineral", "Generation", "Measurement"];
 const UNITS = ["wt.%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio"];
 
 function mappingAxis(mapping) {
@@ -18,6 +18,7 @@ const keyForMapping = (blockId, mapping) => keyFor(blockId, mappingAxis(mapping)
 function targetFromMapping(mapping) {
   if (mapping.target_role === "measurement") return "Measurement";
   if (mapping.target_role === "identity" && ["Analysis", "Sample", "Point"].includes(mapping.canonical_field)) return mapping.canonical_field;
+  if (mapping.target_role === "metadata" && ["Mineral", "Generation"].includes(mapping.canonical_field)) return mapping.canonical_field;
   return "Ignore";
 }
 
@@ -27,6 +28,8 @@ function appliedState(mapping) {
     target,
     field: target === "Measurement" ? (mapping.canonical_field || mapping.source_header || "") : target,
     unit: target === "Measurement" ? (mapping.unit || "") : "",
+    method: target === "Measurement" ? (mapping.method || "") : "",
+    measurementSet: target === "Measurement" ? (mapping.measurement_set || "") : "",
   };
 }
 
@@ -49,7 +52,7 @@ function buildDraft(recipe, warnings) {
       const current = appliedState(mapping);
       const suggestedField = suggestions.get(key);
       draft[key] = current.target === "Ignore" && suggestedField
-        ? { target: "Measurement", field: suggestedField, unit: "" }
+        ? { target: "Measurement", field: suggestedField, unit: "", method: "", measurementSet: "" }
         : current;
     }
   }
@@ -60,7 +63,9 @@ function statesEqual(left, right) {
   return Boolean(left && right)
     && left.target === right.target
     && left.field === right.field
-    && left.unit === right.unit;
+    && left.unit === right.unit
+    && left.method === right.method
+    && left.measurementSet === right.measurementSet;
 }
 
 function MappingRow({ mapping, value, busy, onChange }) {
@@ -76,12 +81,17 @@ function MappingRow({ mapping, value, busy, onChange }) {
       <td>
         <select
           value={value.target}
-          onChange={(event) => onChange({
-            ...value,
-            target: event.target.value,
-            field: event.target.value === "Measurement" ? (value.field || mapping.source_header || "") : event.target.value,
-            unit: event.target.value === "Measurement" ? value.unit : "",
-          })}
+          onChange={(event) => {
+            const target = event.target.value;
+            onChange({
+              ...value,
+              target,
+              field: target === "Measurement" ? (value.field || mapping.source_header || "") : target,
+              unit: target === "Measurement" ? value.unit : "",
+              method: target === "Measurement" ? value.method : "",
+              measurementSet: target === "Measurement" ? value.measurementSet : "",
+            });
+          }}
           disabled={busy}
         >
           {TARGETS.map((item) => <option key={item} value={item}>{item === "Ignore" ? "Не импортировать" : item}</option>)}
@@ -98,6 +108,28 @@ function MappingRow({ mapping, value, busy, onChange }) {
             <option value="">Выбрать…</option>
             {UNITS.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
+        ) : "—"}
+      </td>
+      <td>
+        {measurement ? (
+          <input
+            value={value.method}
+            onChange={(event) => onChange({ ...value, method: event.target.value })}
+            disabled={busy}
+            placeholder="EPMA / WDS / SIMS…"
+            aria-label={`Метод ${mapping.source_header}`}
+          />
+        ) : "—"}
+      </td>
+      <td>
+        {measurement ? (
+          <input
+            value={value.measurementSet}
+            onChange={(event) => onChange({ ...value, measurementSet: event.target.value })}
+            disabled={busy}
+            placeholder="major / trace…"
+            aria-label={`Набор ${mapping.source_header}`}
+          />
         ) : "—"}
       </td>
       <td className="mapping-status-cell">{invalid ? <span className="mapping-needs-review">нужна единица</span> : null}</td>
@@ -168,6 +200,8 @@ export function ImportMappingEditor({ recipe, warnings = [], busy, onApplyAll, o
         target: value.target,
         canonical_field: value.target === "Measurement" ? value.field.trim() : null,
         unit: value.target === "Measurement" ? value.unit : null,
+        method: value.target === "Measurement" ? (value.method.trim() || null) : null,
+        measurement_set: value.target === "Measurement" ? (value.measurementSet.trim() || null) : null,
       };
     });
     onApplyAll(decisions);
@@ -180,7 +214,7 @@ export function ImportMappingEditor({ recipe, warnings = [], busy, onApplyAll, o
       <div className="mapping-explainer">
         <div>
           <b>Исправляй только то, что PetroLab понял неверно.</b>
-          <span>Все изменения применяются одной кнопкой. Общую единицу можно назначить сразу всему логическому блоку.</span>
+          <span>Mineral и Generation сохраняются как исходные метаданные. Для одинаковых полей разных методов можно явно указать метод и набор измерений.</span>
         </div>
         <div className="mapping-summary">
           <span>Изменений: <b>{dirtyKeys.length}</b></span>
@@ -208,7 +242,7 @@ export function ImportMappingEditor({ recipe, warnings = [], busy, onApplyAll, o
           </div>
           <div className="mapping-table-wrap">
             <table className="mapping-table editable-mapping-table">
-              <thead><tr><th>Поле источника</th><th>Что это</th><th>Поле PetroLab</th><th>Единица</th><th /></tr></thead>
+              <thead><tr><th>Поле источника</th><th>Что это</th><th>Поле PetroLab</th><th>Единица</th><th>Метод</th><th>Набор</th><th /></tr></thead>
               <tbody>
                 {section.mappings.map((mapping) => (
                   <MappingRow
