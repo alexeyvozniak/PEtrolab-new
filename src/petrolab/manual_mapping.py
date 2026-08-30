@@ -80,6 +80,16 @@ def _normalize_mapping_decision(recipe: dict[str, Any], decision: dict[str, Any]
     return normalized_decision
 
 
+def _optional_context(decision: dict[str, Any], name: str) -> str | None:
+    value = decision.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", f"{name} must be text when provided.")
+    value = value.strip()
+    return value or None
+
+
 def _apply_mapping_decision(revised: dict[str, Any], decision: dict[str, Any]) -> None:
     block_id = decision.get("block_id")
     source_axis = decision.get("source_axis", "column")
@@ -115,6 +125,14 @@ def _apply_mapping_decision(revised: dict[str, Any], decision: dict[str, Any]) -
         "unit": selected_unit,
         "measurement_semantics": semantics,
     })
+    if target == "Measurement":
+        if "measurement_set" in decision:
+            mapping["measurement_set"] = _optional_context(decision, "measurement_set")
+        if "method" in decision:
+            mapping["method"] = _optional_context(decision, "method")
+    else:
+        mapping.pop("measurement_set", None)
+        mapping.pop("method", None)
 
 
 def _rebuild_section_mappings(inspection: Any, section: dict[str, Any]) -> list[dict[str, Any]]:
