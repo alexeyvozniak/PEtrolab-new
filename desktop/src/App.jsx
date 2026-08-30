@@ -20,6 +20,7 @@ import {
   inspectImportSource,
   listProjectAnalyses,
   pickImportFile,
+  stageImportFile,
   suggestImportRecipe,
 } from "./desktopApi";
 import "./styles.css";
@@ -74,6 +75,7 @@ export function App() {
   const [recipeWarnings, setRecipeWarnings] = useState([]);
   const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [activity, setActivity] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [query, setQuery] = useState("");
@@ -128,42 +130,53 @@ export function App() {
   };
 
   const chooseFile = async () => {
+    if (busy) return;
+    setBusy(true);
+    setActivity("Выберите файл…");
     setError("");
     setSuccess("");
+    const previousStaged = sourcePath;
     let newlyStaged = "";
     try {
-      const selected = await pickImportFile();
-      if (!selected) return;
-      setBusy(true);
+      const selectedPath = await pickImportFile();
+      if (!selectedPath) return;
+      setActivity("Копирую файл в рабочую область PetroLab…");
+      const selected = await stageImportFile(selectedPath);
       newlyStaged = selected.local_path;
+      setActivity("Читаю листы и проверяю структуру файла…");
       const inspected = unwrap(await inspectImportSource(newlyStaged));
+      setActivity("Распознаю колонки и создаю план импорта…");
       const suggestion = unwrap(await suggestImportRecipe(newlyStaged));
       const planned = unwrap(await createImportPlan(newlyStaged, suggestion.recipe));
-      const previousStaged = sourcePath;
+
       setSourcePath(newlyStaged);
-      setSourceDisplayPath(selected.original_path || newlyStaged);
+      setSourceDisplayPath(selected.original_path || selectedPath);
       setInspection(inspected);
       setRecipe(suggestion.recipe);
       setRecipeWarnings(suggestion.warnings || []);
       setPlan(planned);
       setScreen("Импорт");
+
       if (previousStaged && previousStaged !== newlyStaged) {
         clearImportStaging(previousStaged).catch(() => {});
       }
     } catch (caught) {
       if (newlyStaged) clearImportStaging(newlyStaged).catch(() => {});
-      resetImportState();
+      // Do not destroy a previously valid preview when a replacement file
+      // fails. With no previous file the screen naturally remains empty.
       setScreen("Импорт");
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
+      setActivity("");
       setBusy(false);
     }
   };
 
   const commitImport = async () => {
-    if (!databasePath || !sourcePath || !recipe || !plan) return;
+    if (busy || !databasePath || !sourcePath || !recipe || !plan) return;
     const stagedPath = sourcePath;
     setBusy(true);
+    setActivity("Сохраняю импорт в проект…");
     setError("");
     setSuccess("");
     try {
@@ -176,11 +189,13 @@ export function App() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
+      setActivity("");
       setBusy(false);
     }
   };
 
   const startNewImport = () => {
+    if (busy) return;
     const stagedPath = sourcePath;
     resetImportState();
     if (stagedPath) clearImportStaging(stagedPath).catch(() => {});
@@ -190,7 +205,7 @@ export function App() {
   };
 
   const goTo = (label, enabled) => {
-    if (!enabled) return;
+    if (!enabled || busy) return;
     setError("");
     setScreen(label);
     if (label === "Анализы") refreshAnalyses().catch((caught) => setError(caught.message));
@@ -208,7 +223,7 @@ export function App() {
             <button
               className={`${screen === label ? "nav-item active" : "nav-item"}${enabled ? "" : " disabled"}`}
               key={label}
-              disabled={!enabled}
+              disabled={!enabled || busy}
               onClick={() => goTo(label, enabled)}
               title={enabled ? label : "Экран ещё не подключён в этой alpha-сборке"}
             >
@@ -228,11 +243,12 @@ export function App() {
             <p>Источников: <b>{project.source_count}</b> · импортов: <b>{project.import_batch_count}</b> · анализов: <b>{project.total}</b></p>
           </div>
           <div className="top-actions">
-            <button className="outline-button" onClick={startNewImport}><Plus size={18} /> Добавить данные</button>
+            <button className="outline-button" onClick={startNewImport} disabled={busy}><Plus size={18} /> Добавить данные</button>
             <button className="icon-button" disabled title="Настройки будут подключены позже"><GearSix size={21} /></button>
           </div>
         </header>
 
+        {activity && <div className="global-message activity"><SpinnerGap className="spin" size={20} /><span>{activity}</span></div>}
         {error && <div className="global-message error"><Warning size={20} weight="fill" /><span>{error}</span></div>}
         {success && <div className="global-message success"><CheckCircle size={20} weight="fill" /><span>{success}</span></div>}
 
@@ -245,7 +261,7 @@ export function App() {
                 <p>PetroLab прочитает XLSX, CSV или TSV, покажет распознанные листы и создаст план до записи в проект.</p>
                 <button className="primary-button large" onClick={chooseFile} disabled={busy}>
                   {busy ? <SpinnerGap className="spin" size={20} /> : <FileArrowUp size={20} />}
-                  Выбрать файл
+                  {busy ? "Открываю файл…" : "Выбрать файл"}
                 </button>
                 <small>Исходный файл не изменяется. Перед чтением PetroLab создаёт локальную временную копию, поэтому поддерживаются и подключённые сетевые диски.</small>
               </div>
@@ -346,11 +362,11 @@ export function App() {
             <div className="analysis-toolbar">
               <div className="search-box"><MagnifyingGlass size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти по Sample, Analysis, Source, значению…" /></div>
               <span>Показано {filteredAnalyses.length} из {project.total}</span>
-              <button className="outline-button" onClick={() => refreshAnalyses().catch((caught) => setError(caught.message))}>Обновить</button>
+              <button className="outline-button" onClick={() => refreshAnalyses().catch((caught) => setError(caught.message))} disabled={busy}>Обновить</button>
             </div>
 
             {project.total === 0 ? (
-              <div className="empty-analyses"><Database size={48} weight="duotone" /><h2>В проекте пока нет анализов</h2><p>Импортируй первый Excel — после сохранения строки появятся здесь и останутся после перезапуска PetroLab.</p><button className="primary-button" onClick={startNewImport}>Добавить данные</button></div>
+              <div className="empty-analyses"><Database size={48} weight="duotone" /><h2>В проекте пока нет анализов</h2><p>Импортируй первый Excel — после сохранения строки появятся здесь и останутся после перезапуска PetroLab.</p><button className="primary-button" onClick={startNewImport} disabled={busy}>Добавить данные</button></div>
             ) : (
               <div className="analysis-table-wrap">
                 <table className="analysis-table">
