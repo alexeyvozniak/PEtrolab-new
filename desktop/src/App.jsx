@@ -14,6 +14,7 @@ import {
 } from "@phosphor-icons/react";
 import {
   applyImportPlan,
+  clearImportStaging,
   createImportPlan,
   getProjectDatabasePath,
   inspectImportSource,
@@ -67,6 +68,7 @@ export function App() {
   const [databasePath, setDatabasePath] = useState("");
   const [project, setProject] = useState({ total: 0, source_count: 0, import_batch_count: 0, analyses: [] });
   const [sourcePath, setSourcePath] = useState("");
+  const [sourceDisplayPath, setSourceDisplayPath] = useState("");
   const [inspection, setInspection] = useState(null);
   const [recipe, setRecipe] = useState(null);
   const [recipeWarnings, setRecipeWarnings] = useState([]);
@@ -116,26 +118,42 @@ export function App() {
     return project.analyses.filter((analysis) => JSON.stringify(analysis).toLowerCase().includes(needle));
   }, [project.analyses, query]);
 
+  const resetImportState = () => {
+    setSourcePath("");
+    setSourceDisplayPath("");
+    setInspection(null);
+    setRecipe(null);
+    setRecipeWarnings([]);
+    setPlan(null);
+  };
+
   const chooseFile = async () => {
     setError("");
     setSuccess("");
+    let newlyStaged = "";
     try {
       const selected = await pickImportFile();
       if (!selected) return;
       setBusy(true);
-      setSourcePath(selected);
-      const inspected = unwrap(await inspectImportSource(selected));
-      const suggestion = unwrap(await suggestImportRecipe(selected));
-      const planned = unwrap(await createImportPlan(selected, suggestion.recipe));
+      newlyStaged = selected.local_path;
+      const inspected = unwrap(await inspectImportSource(newlyStaged));
+      const suggestion = unwrap(await suggestImportRecipe(newlyStaged));
+      const planned = unwrap(await createImportPlan(newlyStaged, suggestion.recipe));
+      const previousStaged = sourcePath;
+      setSourcePath(newlyStaged);
+      setSourceDisplayPath(selected.original_path || newlyStaged);
       setInspection(inspected);
       setRecipe(suggestion.recipe);
       setRecipeWarnings(suggestion.warnings || []);
       setPlan(planned);
       setScreen("Импорт");
+      if (previousStaged && previousStaged !== newlyStaged) {
+        clearImportStaging(previousStaged).catch(() => {});
+      }
     } catch (caught) {
-      setInspection(null);
-      setRecipe(null);
-      setPlan(null);
+      if (newlyStaged) clearImportStaging(newlyStaged).catch(() => {});
+      resetImportState();
+      setScreen("Импорт");
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setBusy(false);
@@ -144,12 +162,15 @@ export function App() {
 
   const commitImport = async () => {
     if (!databasePath || !sourcePath || !recipe || !plan) return;
+    const stagedPath = sourcePath;
     setBusy(true);
     setError("");
     setSuccess("");
     try {
-      const result = unwrap(await applyImportPlan(databasePath, sourcePath, recipe));
+      const result = unwrap(await applyImportPlan(databasePath, stagedPath, recipe));
       await refreshAnalyses(databasePath);
+      resetImportState();
+      clearImportStaging(stagedPath).catch(() => {});
       setSuccess(`Импорт сохранён: ${result.analysis_count} Analysis, ${result.measurement_count} Measurement.`);
       setScreen("Анализы");
     } catch (caught) {
@@ -160,11 +181,9 @@ export function App() {
   };
 
   const startNewImport = () => {
-    setSourcePath("");
-    setInspection(null);
-    setRecipe(null);
-    setRecipeWarnings([]);
-    setPlan(null);
+    const stagedPath = sourcePath;
+    resetImportState();
+    if (stagedPath) clearImportStaging(stagedPath).catch(() => {});
     setError("");
     setSuccess("");
     setScreen("Импорт");
@@ -228,15 +247,18 @@ export function App() {
                   {busy ? <SpinnerGap className="spin" size={20} /> : <FileArrowUp size={20} />}
                   Выбрать файл
                 </button>
-                <small>Исходный файл не изменяется. Первая alpha-версия импортирует только явно распознанные поля и единицы.</small>
+                <small>Исходный файл не изменяется. Перед чтением PetroLab создаёт локальную временную копию, поэтому поддерживаются и подключённые сетевые диски.</small>
               </div>
             )}
 
             {sourcePath && inspection && recipe && plan && (
               <>
                 <div className="source-heading">
-                  <div className="source-file"><File size={32} weight="duotone" /><div><b>{fileName(sourcePath)}</b><span>{inspection.source_format.toUpperCase()} · SHA-256 {inspection.source_fingerprint.slice(0, 12)}…</span></div></div>
-                  <button className="outline-button" onClick={chooseFile} disabled={busy}>Выбрать другой файл</button>
+                  <div className="source-file"><File size={32} weight="duotone" /><div><b>{fileName(sourceDisplayPath || sourcePath)}</b><span title={sourceDisplayPath}>{inspection.source_format.toUpperCase()} · SHA-256 {inspection.source_fingerprint.slice(0, 12)}…</span></div></div>
+                  <div className="top-actions">
+                    <button className="outline-button" onClick={startNewImport} disabled={busy}>Отменить импорт</button>
+                    <button className="outline-button" onClick={chooseFile} disabled={busy}>Выбрать другой файл</button>
+                  </div>
                 </div>
 
                 <div className="metric-row">
@@ -308,7 +330,7 @@ export function App() {
                 </div>
 
                 <div className="commit-bar">
-                  <div><b>Готово к записи: {plan.summary.planned_analysis_count} Analysis</b><span>Источник останется неизменным; импорт создаётся отдельной транзакцией.</span></div>
+                  <div><b>Готово к записи: {plan.summary.planned_analysis_count} Analysis</b><span>Исходник не меняется; PetroLab сохранит собственную управляемую копию импортируемого файла.</span></div>
                   <button className="primary-button large" onClick={commitImport} disabled={busy}>
                     {busy ? <SpinnerGap className="spin" size={20} /> : <CheckCircle size={20} />}
                     Сохранить импорт в проект

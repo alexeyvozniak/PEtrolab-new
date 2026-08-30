@@ -175,7 +175,7 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
         "schema_version": 1,
         "source_file_sha256": inspection.fingerprint,
         "source_format": inspection.source_format,
-        "ownership_mode": "linked_external",
+        "ownership_mode": "managed_copy",
         "sections": sections,
         "global_decisions": {
             "fe_semantics": "preserve_reported_form_for_review" if mapped_iron else "not_present",
