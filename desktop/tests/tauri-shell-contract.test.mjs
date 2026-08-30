@@ -91,6 +91,16 @@ test("mapping edits are applied once in bulk per logical block", async () => {
   assert.doesNotMatch(editor, />Применить<\/button>/);
 });
 
+test("analyses view exposes source metadata and measurement method context", async () => {
+  const app = await read("src/App.jsx");
+  assert.match(app, /metadataColumns/);
+  assert.match(app, /source_metadata/);
+  assert.match(app, /source metadata/);
+  assert.match(app, /Mineral, Generation/);
+  assert.match(app, /measurement\.method/);
+  assert.match(app, /Исходное значение из файла/);
+});
+
 test("save stays blocked while block or mapping drafts are unapplied", async () => {
   const app = await read("src/App.jsx");
   assert.match(app, /!blockDraftDirty/);
