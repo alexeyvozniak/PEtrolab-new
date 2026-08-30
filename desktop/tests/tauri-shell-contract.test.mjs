@@ -9,10 +9,20 @@ test("Tauri shell owns one local Python service rather than a localhost API", as
   const shell = await read("src-tauri/src/lib.rs");
   assert.match(shell, /python.*-m.*petrolab\.ndjson_service/s);
   assert.match(shell, /struct PythonService/);
-  assert.match(shell, /fn petrolab_command/);
+  assert.match(shell, /async fn petrolab_command/);
   assert.match(shell, /petrolab-service\.exe/);
-  assert.match(shell, /AppHandle, Manager, State/);
+  assert.match(shell, /Arc<Mutex<PythonService>>/);
   assert.doesNotMatch(shell, /TcpListener|reqwest|localhost API/);
+});
+
+test("blocking scientific and file I/O stays off the Tauri UI thread", async () => {
+  const shell = await read("src-tauri/src/lib.rs");
+  assert.match(shell, /spawn_blocking/);
+  assert.match(shell, /async fn stage_import_file/);
+  assert.match(shell, /async fn clear_import_staging/);
+  assert.match(shell, /read_until\(b'\\n'/);
+  assert.match(shell, /PYTHONUTF8/);
+  assert.match(shell, /PYTHONIOENCODING/);
 });
 
 test("desktop stages selected files locally before the scientific service reads them", async () => {
@@ -21,11 +31,22 @@ test("desktop stages selected files locally before the scientific service reads 
   const app = await read("src/App.jsx");
   assert.match(shell, /import-staging/);
   assert.match(shell, /fs::copy\(&source, &staged\)/);
-  assert.match(shell, /fn clear_import_staging/);
+  assert.match(shell, /fn pick_import_file/);
+  assert.match(shell, /async fn stage_import_file/);
+  assert.match(api, /stage_import_file/);
   assert.match(api, /clear_import_staging/);
+  assert.match(app, /stageImportFile\(selectedPath\)/);
   assert.match(app, /selected\.local_path/);
-  assert.match(app, /resetImportState\(\)/);
   assert.match(app, /Отменить импорт/);
+});
+
+test("replacement import is transactional and keeps previous preview on failure", async () => {
+  const app = await read("src/App.jsx");
+  assert.match(app, /const previousStaged = sourcePath/);
+  assert.match(app, /Do not destroy a previously valid preview/);
+  assert.doesNotMatch(app.match(/const chooseFile = async \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "", /catch[\s\S]*resetImportState\(\)/);
+  assert.match(app, /Копирую файл в рабочую область PetroLab/);
+  assert.match(app, /Читаю листы и проверяю структуру файла/);
 });
 
 test("frontend sends the versioned envelope through the one Tauri command", async () => {

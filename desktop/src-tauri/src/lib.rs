@@ -4,7 +4,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::PathBuf,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -37,7 +37,12 @@ impl PythonService {
                 .map_err(|error| format!("Cannot resolve bundled scientific service: {error}"))?;
             Command::new(service)
         };
-        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());
+        command
+            .env("PYTHONUTF8", "1")
+            .env("PYTHONIOENCODING", "utf-8")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
 
         let mut child = command.spawn().map_err(|error| format!("Cannot start PetroLab scientific service: {error}"))?;
         let stdin = child.stdin.take().ok_or("Scientific service stdin is unavailable.")?;
@@ -55,12 +60,20 @@ impl PythonService {
         self.stdin.write_all(b"\n").map_err(|error| format!("Cannot send request: {error}"))?;
         self.stdin.flush().map_err(|error| format!("Cannot flush request: {error}"))?;
 
-        let mut line = String::new();
-        let read = self.stdout.read_line(&mut line).map_err(|error| format!("Cannot read scientific service response: {error}"))?;
+        // Read the whole NDJSON record as bytes first. If one response is ever
+        // malformed, the complete line is still consumed and the next request
+        // can use the same long-lived service instead of inheriting a poisoned
+        // partial UTF-8 buffer.
+        let mut line = Vec::new();
+        let read = self
+            .stdout
+            .read_until(b'\n', &mut line)
+            .map_err(|error| format!("Cannot read scientific service response: {error}"))?;
         if read == 0 {
             return Err("Scientific service stopped before responding.".to_owned());
         }
-        let response: Value = serde_json::from_str(&line).map_err(|error| format!("Scientific service returned invalid JSON: {error}"))?;
+        let response: Value = serde_json::from_slice(&line)
+            .map_err(|error| format!("Scientific service returned invalid UTF-8/JSON: {error}"))?;
         if response.get("request_id").and_then(Value::as_str) != Some(request_id.as_str()) {
             return Err("Scientific service response does not match the request.".to_owned());
         }
@@ -95,9 +108,19 @@ impl Drop for PythonService {
 }
 
 #[tauri::command]
-fn petrolab_command(envelope: Value, service: State<'_, Mutex<PythonService>>) -> Result<Value, String> {
-    let mut service = service.lock().map_err(|_| "Scientific service lock is unavailable.".to_owned())?;
-    service.request(envelope)
+async fn petrolab_command(
+    envelope: Value,
+    service: State<'_, Arc<Mutex<PythonService>>>,
+) -> Result<Value, String> {
+    let service = Arc::clone(service.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut service = service
+            .lock()
+            .map_err(|_| "Scientific service lock is unavailable.".to_owned())?;
+        service.request(envelope)
+    })
+    .await
+    .map_err(|error| format!("Scientific service task failed: {error}"))?
 }
 
 fn staging_root(app: &AppHandle) -> Result<PathBuf, String> {
@@ -111,19 +134,22 @@ fn staging_root(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn pick_import_file(app: AppHandle) -> Result<Option<Value>, String> {
-    let Some(source) = rfd::FileDialog::new()
+fn pick_import_file() -> Option<String> {
+    rfd::FileDialog::new()
         .add_filter("PetroLab data", &["xlsx", "csv", "tsv"])
         .pick_file()
-    else {
-        return Ok(None);
-    };
+        .map(|source| source.to_string_lossy().into_owned())
+}
 
+fn stage_import_copy(root: PathBuf, source: PathBuf) -> Result<Value, String> {
+    if !source.is_file() {
+        return Err(format!("Selected source is no longer available: {}", source.to_string_lossy()));
+    }
     let file_name = source
         .file_name()
         .ok_or("Selected import file has no file name.")?
         .to_owned();
-    let staging_directory = staging_root(&app)?.join(Uuid::new_v4().to_string());
+    let staging_directory = root.join(Uuid::new_v4().to_string());
     fs::create_dir_all(&staging_directory)
         .map_err(|error| format!("Cannot create temporary import directory: {error}"))?;
     let staged = staging_directory.join(file_name);
@@ -136,25 +162,37 @@ fn pick_import_file(app: AppHandle) -> Result<Option<Value>, String> {
         ));
     }
 
-    Ok(Some(json!({
+    Ok(json!({
         "original_path": source.to_string_lossy(),
         "local_path": staged.to_string_lossy(),
-    })))
+    }))
 }
 
 #[tauri::command]
-fn clear_import_staging(app: AppHandle, staged_path: String) -> Result<(), String> {
+async fn stage_import_file(app: AppHandle, source_path: String) -> Result<Value, String> {
     let root = staging_root(&app)?;
-    let candidate = PathBuf::from(staged_path);
-    if !candidate.starts_with(&root) {
-        return Err("Refusing to remove a file outside PetroLab import staging.".to_owned());
-    }
-    if let Some(directory) = candidate.parent() {
-        if directory.exists() {
-            fs::remove_dir_all(directory).map_err(|error| format!("Cannot clear temporary import file: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || stage_import_copy(root, PathBuf::from(source_path)))
+        .await
+        .map_err(|error| format!("Import staging task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn clear_import_staging(app: AppHandle, staged_path: String) -> Result<(), String> {
+    let root = staging_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let candidate = PathBuf::from(staged_path);
+        if !candidate.starts_with(&root) {
+            return Err("Refusing to remove a file outside PetroLab import staging.".to_owned());
         }
-    }
-    Ok(())
+        if let Some(directory) = candidate.parent() {
+            if directory.exists() {
+                fs::remove_dir_all(directory).map_err(|error| format!("Cannot clear temporary import file: {error}"))?;
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("Import cleanup task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -171,12 +209,13 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let service = PythonService::start(&app.handle()).map_err(std::io::Error::other)?;
-            app.manage(Mutex::new(service));
+            app.manage(Arc::new(Mutex::new(service)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             petrolab_command,
             pick_import_file,
+            stage_import_file,
             clear_import_staging,
             project_database_path
         ])
