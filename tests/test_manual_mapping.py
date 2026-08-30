@@ -9,8 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from petrolab.desktop_workflow import suggest_import_recipe  # noqa: E402
-from petrolab.import_preview import ImportCommandError, create_import_plan, inspect_source  # noqa: E402
+from petrolab.import_preview import ImportCommandError, inspect_source  # noqa: E402
 from petrolab.manual_mapping import revise_import_mapping  # noqa: E402
+from petrolab.oriented_import import create_oriented_import_plan  # noqa: E402
 
 
 FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
@@ -41,7 +42,7 @@ class ManualMappingTests(unittest.TestCase):
         self.assertNotEqual(revised["semantic_fingerprint"], original["semantic_fingerprint"])
         self.assertEqual(mapping["target_role"], "ignore", "revision must not mutate the original recipe")
 
-        plan = create_import_plan(inspect_source(FIXTURE), revised)
+        plan = create_oriented_import_plan(inspect_source(FIXTURE), revised)
         self.assertTrue(any(
             measurement["field"] == "F" and measurement["unit"] == "ppm"
             for record in plan["planned_records"]
