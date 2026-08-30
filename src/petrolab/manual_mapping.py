@@ -1,4 +1,4 @@
-"""User-driven import mapping and block revisions.
+"""User-driven import mapping, block and ambiguity revisions.
 
 React sends explicit decisions. Python owns recognition, recipe semantics,
 fingerprints and validation. Multiple edits are applied atomically.
@@ -7,10 +7,12 @@ fingerprints and validation. Multiple edits are applied atomically.
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
-from .import_preview import ImportCommandError, inspect_source, semantic_fingerprint, validate_recipe
+from .import_preview import ImportCommandError, create_import_plan, inspect_source, semantic_fingerprint, validate_recipe
 from .import_recognition import IRON_FIELDS, VALID_UNITS, mappings_for_column_header, mappings_for_row_header, normalized
 
 
@@ -54,12 +56,6 @@ def _find_mapping(section: dict[str, Any], source_axis: str, source_index: int) 
 
 
 def _normalize_mapping_decision(recipe: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
-    """Accept v2 block coordinates and the short-lived v1 sheet/column shape.
-
-    Old coordinates are allowed only when the source sheet resolves to one
-    section. This keeps stored callers/test contracts usable without reintroducing
-    ambiguity for real multi-block sheets.
-    """
     if isinstance(decision.get("block_id"), str) and decision.get("block_id"):
         return dict(decision)
     sheet_name = decision.get("sheet_name")
@@ -192,6 +188,65 @@ def _refresh_fe_semantics(revised: dict[str, Any]) -> None:
     revised.setdefault("global_decisions", {})["fe_semantics"] = "preserve_reported_form_for_review" if mapped_iron else "not_present"
 
 
+def _invalidate_duplicate_review(revised: dict[str, Any]) -> None:
+    decisions = revised.setdefault("global_decisions", {})
+    decisions["duplicate_policy"] = "review_each"
+    decisions.pop("duplicate_review", None)
+
+
+def _duplicate_groups(plan: dict[str, Any]) -> list[list[str]]:
+    for warning in plan.get("warnings", []):
+        if warning.get("code") == "DUPLICATE_CANDIDATES":
+            groups = warning.get("preview_ids")
+            if isinstance(groups, list):
+                return [list(group) for group in groups if isinstance(group, list)]
+    return []
+
+
+def _duplicate_groups_fingerprint(groups: list[list[str]]) -> str:
+    canonical_groups = sorted(sorted(str(item) for item in group) for group in groups)
+    payload = json.dumps(canonical_groups, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def review_duplicate_candidates(source_path: str | Path, recipe: dict[str, Any], decision: str) -> dict[str, Any]:
+    """Persist an explicit keep-all decision for the current duplicate groups.
+
+    No rows are merged or discarded. Any later block/mapping edit invalidates this
+    review because it can change identities or the candidate groups.
+    """
+    if decision != "keep_all":
+        raise ImportCommandError(
+            "RECIPE_SCHEMA_INCOMPATIBLE",
+            "This import version supports only explicit keep-all duplicate review.",
+            {"decision": decision},
+        )
+    inspection = inspect_source(source_path)
+    validate_recipe(inspection, recipe)
+    plan = create_import_plan(inspection, recipe)
+    groups = _duplicate_groups(plan)
+    if not groups:
+        raise ImportCommandError("DUPLICATE_REVIEW_NOT_REQUIRED", "No duplicate candidate groups require review.")
+
+    revised = deepcopy(recipe)
+    decisions = revised.setdefault("global_decisions", {})
+    decisions["duplicate_policy"] = "keep_all"
+    decisions["duplicate_review"] = {
+        "decision": "keep_all",
+        "candidate_group_count": len(groups),
+        "groups_fingerprint_sha256": _duplicate_groups_fingerprint(groups),
+    }
+    revised["semantic_fingerprint"] = semantic_fingerprint(revised)
+    validation = validate_recipe(inspection, revised)
+    reviewed_plan = create_import_plan(inspection, revised)
+    return {
+        "recipe": revised,
+        "validation": validation,
+        "plan": reviewed_plan,
+        "duplicate_review": decisions["duplicate_review"],
+    }
+
+
 def revise_import_mappings(source_path: str | Path, recipe: dict[str, Any], decisions: list[dict[str, Any]]) -> dict[str, Any]:
     if not isinstance(decisions, list) or not decisions:
         raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "At least one mapping decision is required.")
@@ -208,6 +263,7 @@ def revise_import_mappings(source_path: str | Path, recipe: dict[str, Any], deci
         seen.add(key)
         _apply_mapping_decision(revised, decision)
     _refresh_fe_semantics(revised)
+    _invalidate_duplicate_review(revised)
     revised["semantic_fingerprint"] = semantic_fingerprint(revised)
     validation = validate_recipe(inspection, revised)
     return {"recipe": revised, "validation": validation, "applied_decision_count": len(decisions)}
@@ -228,6 +284,7 @@ def revise_import_sections(source_path: str | Path, recipe: dict[str, Any], deci
         seen.add(block_id)
         _apply_section_decision(inspection, revised, decision)
     _refresh_fe_semantics(revised)
+    _invalidate_duplicate_review(revised)
     revised["semantic_fingerprint"] = semantic_fingerprint(revised)
     validation = validate_recipe(inspection, revised)
     return {"recipe": revised, "validation": validation, "applied_decision_count": len(decisions)}
