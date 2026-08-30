@@ -177,7 +177,10 @@ class ImportPreviewTests(unittest.TestCase):
         response = run_import_plan_create(FIXTURE, recipe)
         self.assertIn("result", response)
         plan = response["result"]
-        self.assertEqual(plan["summary"], {"planned_analysis_count": 8, "duplicate_candidate_groups": 1})
+        self.assertEqual(plan["summary"]["planned_analysis_count"], 8)
+        self.assertEqual(plan["summary"]["planned_measurement_count"], 42)
+        self.assertEqual(plan["summary"]["duplicate_candidate_groups"], 1)
+        self.assertEqual(plan["summary"]["enabled_block_count"], 2)
         epma_first = plan["planned_records"][0]
         self.assertEqual(epma_first["measurements"][2]["raw_token"], "0,95")
         censored = plan["planned_records"][1]["measurements"][3]
@@ -204,6 +207,7 @@ class ImportPreviewTests(unittest.TestCase):
                 ).fetchone()
                 self.assertEqual(censored, ("<0.01", "below_detection_limit", 0.01))
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM source_row_provenance").fetchone()[0], 42)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM source_cell_provenance").fetchone()[0], 42)
                 self.assertEqual(
                     connection.execute("SELECT semantic_fingerprint_sha256 FROM import_recipe_revision").fetchone()[0],
                     recipe["semantic_fingerprint"],
