@@ -10,6 +10,7 @@ test("Tauri shell owns one local Python service rather than a localhost API", as
   assert.match(shell, /python.*-m.*petrolab\.ndjson_service/s);
   assert.match(shell, /struct PythonService/);
   assert.match(shell, /fn petrolab_command/);
+  assert.match(shell, /petrolab-service\.exe/);
   assert.doesNotMatch(shell, /TcpListener|reqwest|localhost API/);
 });
 
@@ -26,4 +27,5 @@ test("Tauri config keeps the approved desktop minimum window size", async () => 
   assert.equal(config.app.windows[0].height, 1024);
   assert.equal(config.app.windows[0].minWidth, 1180);
   assert.equal(config.app.windows[0].minHeight, 800);
+  assert.deepEqual(config.bundle.resources, ["binaries/petrolab-service.exe"]);
 });

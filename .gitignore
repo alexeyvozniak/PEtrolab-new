@@ -14,3 +14,4 @@ target/
 *.sqlite3
 *.log
 .DS_Store
+desktop/src-tauri/binaries/*.exe

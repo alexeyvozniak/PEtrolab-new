@@ -8,7 +8,7 @@ use std::{
 };
 
 use serde_json::{json, Value};
-use tauri::State;
+use tauri::{path::BaseDirectory, AppHandle, State};
 use uuid::Uuid;
 
 struct PythonService {
@@ -18,18 +18,24 @@ struct PythonService {
 }
 
 impl PythonService {
-    fn start() -> Result<Self, String> {
-        let executable = env::var("PETROLAB_PYTHON").unwrap_or_else(|_| "python".to_owned());
-        let mut command = Command::new(executable);
-        command
-            .args(["-m", "petrolab.ndjson_service"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
-
-        if let Ok(python_path) = env::var("PETROLAB_PYTHONPATH") {
-            command.env("PYTHONPATH", python_path);
-        }
+    fn start(app: &AppHandle) -> Result<Self, String> {
+        let use_development_python = cfg!(debug_assertions) || env::var("PETROLAB_PYTHON").is_ok();
+        let mut command = if use_development_python {
+            let executable = env::var("PETROLAB_PYTHON").unwrap_or_else(|_| "python".to_owned());
+            let mut command = Command::new(executable);
+            command.args(["-m", "petrolab.ndjson_service"]);
+            if let Ok(python_path) = env::var("PETROLAB_PYTHONPATH") {
+                command.env("PYTHONPATH", python_path);
+            }
+            command
+        } else {
+            let service = app
+                .path()
+                .resolve("binaries/petrolab-service.exe", BaseDirectory::Resource)
+                .map_err(|error| format!("Cannot resolve bundled scientific service: {error}"))?;
+            Command::new(service)
+        };
+        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());
 
         let mut child = command.spawn().map_err(|error| format!("Cannot start PetroLab scientific service: {error}"))?;
         let stdin = child.stdin.take().ok_or("Scientific service stdin is unavailable.")?;
@@ -93,9 +99,12 @@ fn petrolab_command(envelope: Value, service: State<'_, Mutex<PythonService>>) -
 }
 
 pub fn run() {
-    let service = PythonService::start().expect("PetroLab scientific service cannot be started");
     tauri::Builder::default()
-        .manage(Mutex::new(service))
+        .setup(|app| {
+            let service = PythonService::start(&app.handle()).map_err(std::io::Error::other)?;
+            app.manage(Mutex::new(service));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![petrolab_command])
         .run(tauri::generate_context!())
         .expect("Tauri application failed");
