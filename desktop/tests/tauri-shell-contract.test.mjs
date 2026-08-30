@@ -49,19 +49,29 @@ test("replacement import is transactional and keeps previous preview on failure"
   assert.match(app, /Читаю листы и проверяю структуру файла/);
 });
 
-test("manual mapping is explicit, validated by Python, and empty measurement imports are blocked", async () => {
+test("mapping edits are applied once in bulk and unresolved draft blocks save", async () => {
   const api = await read("src/desktopApi.js");
   const app = await read("src/App.jsx");
   const editor = await read("src/ImportMappingEditor.jsx");
-  assert.match(api, /import\.recipe\.revise_mapping/);
-  assert.match(app, /reviseImportMapping/);
-  assert.match(app, /plannedMeasurementCount/);
-  assert.match(app, /!canSaveImport/);
-  assert.match(app, /ни одного Measurement/);
-  assert.match(editor, /Measurement/);
-  assert.match(editor, /Выбрать…/);
-  assert.match(editor, /wt\.%/);
+  assert.match(api, /import\.recipe\.revise_mappings/);
+  assert.match(app, /reviseImportMappings/);
+  assert.match(app, /mappingDraftDirty/);
+  assert.match(app, /Применяю сопоставление/);
+  assert.match(editor, /Применить сопоставление/);
+  assert.match(editor, /Назначить всем Measurement/);
+  assert.match(editor, /UNIT_REQUIRES_REVIEW/);
+  assert.match(editor, /canonical_field/);
+  assert.doesNotMatch(editor, />Применить<\/button>/);
   assert.doesNotMatch(editor, /Mineral|Generation/);
+});
+
+test("mistaken saved import can be retracted without deleting audit history", async () => {
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  assert.match(api, /project\.last_import\.retract/);
+  assert.match(app, /Отменить последний импорт/);
+  assert.match(app, /история импорта сохранится/);
+  assert.match(app, /retractLastImport/);
 });
 
 test("frontend sends the versioned envelope through the one Tauri command", async () => {
