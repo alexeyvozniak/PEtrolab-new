@@ -1,10 +1,8 @@
-"""Desktop-facing application services for the first live PetroLab vertical slice.
+"""Desktop-facing application services for the live PetroLab import slice.
 
-This module keeps import recognition and SQLite projections in Python so React
-remains a presentation layer. It builds a conservative first-pass recipe:
-recognized identity/metadata fields are mapped, recognized measurement columns
-are mapped only when their unit can be read explicitly from the source header,
-and everything else is preserved by omission rather than guessed.
+Import recognition remains conservative: identities are mapped when recognized;
+measurements are mapped only when their unit is explicit. Table orientation is
+part of the recipe and can be revised without modifying the source workbook.
 """
 
 from __future__ import annotations
@@ -15,7 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from .import_apply import open_project
-from .import_preview import ImportCommandError, inspect_source, semantic_fingerprint
+from .import_preview import ImportCommandError, SheetInspection, SourceInspection, inspect_source, semantic_fingerprint
+from .oriented_import import excel_column_name, oriented_header_candidates, oriented_rows
 
 
 IDENTITY_FIELDS = {
@@ -39,15 +38,17 @@ MEASUREMENT_FIELDS = {
     "sio2": "SiO2", "tio2": "TiO2", "al2o3": "Al2O3", "feo": "FeO", "feot": "FeOt",
     "fe2o3": "Fe2O3", "fe2o3t": "Fe2O3t", "mno": "MnO", "mgo": "MgO", "cao": "CaO",
     "na2o": "Na2O", "k2o": "K2O", "p2o5": "P2O5", "cr2o3": "Cr2O3", "nio": "NiO",
-    "f": "F", "cl": "Cl", "li": "Li", "rb": "Rb", "ba": "Ba", "sr": "Sr", "ni": "Ni",
-    "cr": "Cr", "co": "Co", "sc": "Sc", "v": "V", "cu": "Cu", "zn": "Zn", "ga": "Ga",
+    "c": "C", "o": "O", "f": "F", "na": "Na", "mg": "Mg", "al": "Al", "si": "Si", "p": "P",
+    "s": "S", "cl": "Cl", "k": "K", "ca": "Ca", "ti": "Ti", "mn": "Mn", "fe": "Fe",
+    "li": "Li", "rb": "Rb", "ba": "Ba", "sr": "Sr", "ni": "Ni", "cr": "Cr", "co": "Co",
+    "sc": "Sc", "v": "V", "cu": "Cu", "zn": "Zn", "ga": "Ga", "as": "As", "se": "Se",
     "y": "Y", "zr": "Zr", "nb": "Nb", "mo": "Mo", "cs": "Cs", "la": "La", "ce": "Ce",
     "pr": "Pr", "nd": "Nd", "sm": "Sm", "eu": "Eu", "gd": "Gd", "tb": "Tb", "dy": "Dy",
     "ho": "Ho", "er": "Er", "tm": "Tm", "yb": "Yb", "lu": "Lu", "hf": "Hf", "ta": "Ta",
     "w": "W", "pb": "Pb", "th": "Th", "u": "U",
 }
 
-IRON_FIELDS = {"FeO", "FeOt", "Fe2O3", "Fe2O3t"}
+IRON_FIELDS = {"Fe", "FeO", "FeOt", "Fe2O3", "Fe2O3t"}
 
 
 def _normalized(value: str | None) -> str:
@@ -120,7 +121,7 @@ def _mapping_for_header(column: int, header: str) -> tuple[dict[str, Any], dict[
             "source_column_index": column,
             "source_header": header,
             "target_role": "ignore",
-            "canonical_field": header,
+            "canonical_field": measurement,
             "unit": None,
             "measurement_semantics": "ignored",
         }, {"code": "UNIT_REQUIRES_REVIEW", "source_header": header, "source_column_index": column})
@@ -134,6 +135,53 @@ def _mapping_for_header(column: int, header: str) -> tuple[dict[str, Any], dict[
     }, None)
 
 
+def build_import_section(sheet: SheetInspection, orientation: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]], bool]:
+    """Build one conservative recipe section in the requested orientation."""
+    candidates = oriented_header_candidates(sheet, orientation)
+    if not candidates:
+        return None, [], False
+    rows = oriented_rows(sheet, orientation)
+    header_row = candidates[0]
+    header = rows[header_row - 1]
+    mappings: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    mapped_iron = False
+    for column, raw_header in enumerate(header):
+        if raw_header in (None, ""):
+            continue
+        mapping, warning = _mapping_for_header(column, str(raw_header))
+        mappings.append(mapping)
+        if warning:
+            warnings.append({"sheet_name": sheet.name, **warning})
+        mapped_iron = mapped_iron or (
+            mapping["target_role"] == "measurement" and mapping["canonical_field"] in IRON_FIELDS
+        )
+    if not mappings:
+        return None, [{"code": "NO_COLUMNS_DETECTED", "sheet_name": sheet.name}], False
+    return ({
+        "sheet_name": sheet.name,
+        "block_id": f"{sheet.name}:{orientation}:{header_row}",
+        "orientation": orientation,
+        "header_row": header_row,
+        "data_start_row": header_row + 1,
+        "data_end_row": len(rows),
+        "mappings": mappings,
+    }, warnings, mapped_iron)
+
+
+def collect_recipe_warnings(inspection: SourceInspection, recipe: dict[str, Any]) -> list[dict[str, Any]]:
+    """Rebuild current review warnings so resolved mappings stop warning."""
+    warnings: list[dict[str, Any]] = list(inspection.projection()["warnings"])
+    for section in recipe.get("sections", []):
+        for mapping in section.get("mappings", []):
+            if mapping.get("target_role") != "ignore":
+                continue
+            _, warning = _mapping_for_header(int(mapping["source_column_index"]), str(mapping.get("source_header") or ""))
+            if warning:
+                warnings.append({"sheet_name": section.get("sheet_name"), **warning})
+    return warnings
+
+
 def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
     """Create a conservative, immediately inspectable recipe for a real source."""
     inspection = inspect_source(source_path)
@@ -142,31 +190,24 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
     mapped_iron = False
 
     for sheet in inspection.sheets:
-        if not sheet.header_rows:
+        section, section_warnings, iron = build_import_section(sheet, "rows")
+        if section is None:
+            transposed, transposed_warnings, transposed_iron = build_import_section(sheet, "columns")
+            if transposed is not None:
+                section = transposed
+                section_warnings = transposed_warnings
+                iron = transposed_iron
+                warnings.append({
+                    "code": "TRANSPOSED_TABLE_SUGGESTED",
+                    "sheet_name": sheet.name,
+                    "orientation": "columns",
+                })
+        if section is None:
             warnings.append({"code": "HEADER_NOT_DETECTED", "sheet_name": sheet.name})
             continue
-        header_row = sheet.header_rows[0]
-        header = sheet.rows[header_row - 1]
-        mappings: list[dict[str, Any]] = []
-        for column, raw_header in enumerate(header):
-            if raw_header in (None, ""):
-                continue
-            mapping, warning = _mapping_for_header(column, str(raw_header))
-            mappings.append(mapping)
-            if warning:
-                warnings.append({"sheet_name": sheet.name, **warning})
-            mapped_iron = mapped_iron or (mapping["target_role"] == "measurement" and mapping["canonical_field"] in IRON_FIELDS)
-        if not mappings:
-            warnings.append({"code": "NO_COLUMNS_DETECTED", "sheet_name": sheet.name})
-            continue
-        sections.append({
-            "sheet_name": sheet.name,
-            "block_id": f"{sheet.name}:{header_row}",
-            "header_row": header_row,
-            "data_start_row": header_row + 1,
-            "data_end_row": len(sheet.rows),
-            "mappings": mappings,
-        })
+        sections.append(section)
+        warnings.extend(section_warnings)
+        mapped_iron = mapped_iron or iron
 
     if not sections:
         raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "No importable table headers were detected in the selected file.")
@@ -195,14 +236,14 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
     try:
         total = connection.execute("SELECT COUNT(*) FROM analysis").fetchone()[0]
         rows = connection.execute(
-            """SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number, a.block_id,
-                      a.identity_json, a.created_at, s.display_name AS source_name,
-                      r.recipe_json
+            """SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number, a.source_orientation,
+                      a.source_record_index, a.block_id, a.identity_json, a.created_at,
+                      s.display_name AS source_name, r.recipe_json
                FROM analysis a
                JOIN source_file s ON s.source_id = a.source_id
                JOIN import_batch b ON b.import_batch_id = a.import_batch_id
                JOIN import_recipe_revision r ON r.recipe_revision_id = b.recipe_revision_id
-               ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number
+               ORDER BY a.created_at DESC, a.sheet_name, a.source_record_index, a.source_row_number
                LIMIT ?""",
             (limit,),
         ).fetchall()
@@ -224,16 +265,21 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                 for index, name in enumerate(identity_names)
             }
             measurements = connection.execute(
-                """SELECT canonical_field, unit, raw_token, qualifier, detection_limit
-                   FROM measurement WHERE analysis_id = ? ORDER BY source_column_index""",
+                """SELECT canonical_field, unit, raw_token, qualifier, detection_limit, source_cell_reference
+                   FROM measurement WHERE analysis_id = ? ORDER BY source_column_index, source_row_number""",
                 (row["analysis_id"],),
             ).fetchall()
+            orientation = row["source_orientation"] or "rows"
+            record_index = row["source_record_index"] or row["source_row_number"]
             result.append({
                 "analysis_id": row["analysis_id"],
                 "source_id": row["source_id"],
                 "source_name": row["source_name"],
                 "sheet_name": row["sheet_name"],
                 "source_row_number": row["source_row_number"],
+                "source_orientation": orientation,
+                "source_record_index": record_index,
+                "source_record_label": str(record_index) if orientation == "rows" else excel_column_name(int(record_index) - 1),
                 "identity": identity,
                 "measurements": {
                     measurement["canonical_field"]: {
@@ -241,6 +287,7 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                         "unit": measurement["unit"],
                         "qualifier": measurement["qualifier"],
                         "detection_limit": measurement["detection_limit"],
+                        "source_cell_reference": measurement["source_cell_reference"],
                     }
                     for measurement in measurements
                 },
