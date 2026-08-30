@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -25,6 +26,8 @@ def main() -> None:
             "petrolab-service",
             "--paths",
             str(ROOT / "src"),
+            "--add-data",
+            f"{ROOT / 'migrations'}{os.pathsep}migrations",
             "--distpath",
             str(OUTPUT),
             "--workpath",

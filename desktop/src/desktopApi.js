@@ -12,6 +12,31 @@ export async function invokePetrolab(command, payload) {
   return invoke("petrolab_command", { envelope });
 }
 
+export const pickImportFile = () => invoke("pick_import_file");
+export const getProjectDatabasePath = () => invoke("project_database_path");
+
+export const inspectImportSource = (sourcePath) =>
+  invokePetrolab("import.inspect_source", { source_path: sourcePath });
+
+export const suggestImportRecipe = (sourcePath) =>
+  invokePetrolab("import.recipe.suggest", { source_path: sourcePath });
+
+export const createImportPlan = (sourcePath, recipe) =>
+  invokePetrolab("import.plan.create", { source_path: sourcePath, recipe });
+
+export const applyImportPlan = (projectDatabasePath, sourcePath, recipe) =>
+  invokePetrolab("import.plan.apply", {
+    project_database_path: projectDatabasePath,
+    source_path: sourcePath,
+    recipe,
+  });
+
+export const listProjectAnalyses = (projectDatabasePath, limit = 500) =>
+  invokePetrolab("project.analyses.list", {
+    project_database_path: projectDatabasePath,
+    limit,
+  });
+
 export const inspectMediaSources = (sourcePaths) =>
   invokePetrolab("media.inspect_sources", { source_paths: sourcePaths });
 
