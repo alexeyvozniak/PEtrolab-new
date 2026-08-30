@@ -59,9 +59,24 @@ test("manual mapping is explicit, validated by Python, and empty measurement imp
   assert.match(app, /!canSaveImport/);
   assert.match(app, /ни одного Measurement/);
   assert.match(editor, /Measurement/);
-  assert.match(editor, /Выбрать…/);
+  assert.match(editor, /Общая единица/);
+  assert.match(editor, /Назначить Measurement/);
   assert.match(editor, /wt\.%/);
   assert.doesNotMatch(editor, /Mineral|Generation/);
+});
+
+test("orientation is explicit per sheet and bulk mapping is transactional in the UI", async () => {
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  const editor = await read("src/ImportMappingEditor.jsx");
+  assert.match(api, /import\.recipe\.revise_orientation/);
+  assert.match(app, /reviseImportOrientation/);
+  assert.match(app, /Строки = анализы/);
+  assert.match(app, /Столбцы = анализы/);
+  assert.match(app, /const applyBulkMapping = async/);
+  assert.match(app, /let workingRecipe = recipe/);
+  assert.match(editor, /type="checkbox"/);
+  assert.match(editor, /selectedEntries/);
 });
 
 test("frontend sends the versioned envelope through the one Tauri command", async () => {
