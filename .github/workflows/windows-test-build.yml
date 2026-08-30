@@ -36,6 +36,12 @@ jobs:
           $request = @{ protocol_version = "1.0"; request_id = [guid]::NewGuid().ToString(); command = "import.inspect_source"; payload = @{ source_path = (Resolve-Path "fixtures/import/m1_1_ambiguous_multisheet.xlsx").Path } } | ConvertTo-Json -Compress
           $response = $request | & .\desktop\src-tauri\binaries\petrolab-service.exe | ConvertFrom-Json
           if ($null -eq $response.result.source_fingerprint) { throw "Packaged service did not return import inspection." }
+          $database = Join-Path $env:RUNNER_TEMP "petrolab-packaged-smoke.sqlite"
+          $dbRequest = @{ protocol_version = "1.0"; request_id = [guid]::NewGuid().ToString(); command = "project.analyses.list"; payload = @{ project_database_path = $database; limit = 10 } } | ConvertTo-Json -Compress
+          $dbResponse = $dbRequest | & .\desktop\src-tauri\binaries\petrolab-service.exe | ConvertFrom-Json
+          if ($null -ne $dbResponse.error) { throw "Packaged service could not open project database: $($dbResponse.error.message)" }
+          if ($dbResponse.result.total -ne 0) { throw "Fresh packaged project database must be empty." }
+          if (-not (Test-Path $database)) { throw "Packaged service did not create the SQLite project database." }
       - name: Build and test frontend
         working-directory: desktop
         run: |
