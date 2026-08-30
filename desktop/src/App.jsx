@@ -21,6 +21,7 @@ import {
   listProjectAnalyses,
   pickImportFile,
   reviseImportMapping,
+  reviseImportOrientation,
   stageImportFile,
   suggestImportRecipe,
 } from "./desktopApi";
@@ -54,10 +55,22 @@ function fileName(path) {
   return path.split(/[\\/]/).pop();
 }
 
+function excelColumnName(index) {
+  let value = index + 1;
+  let label = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    value = Math.floor((value - 1) / 26);
+  }
+  return label;
+}
+
 function warningText(warning) {
   const names = {
     HEADER_NOT_DETECTED: "Табличный заголовок не распознан",
-    UNIT_REQUIRES_REVIEW: "Колонка похожа на измерение, но единица не указана явно — проверь её ниже",
+    UNIT_REQUIRES_REVIEW: "Поле похоже на измерение, но единица не указана явно — проверь её ниже",
+    TRANSPOSED_TABLE_SUGGESTED: "PetroLab распознал таблицу как транспонированную: анализы идут по столбцам",
     MERGED_HEADERS: "В заголовке есть объединённые ячейки",
     HIDDEN_ROWS: "В файле есть скрытые строки",
     FORMULA_WITHOUT_CACHED_VALUE: "Есть формулы без сохранённого значения",
@@ -84,8 +97,7 @@ export function App() {
 
   const refreshAnalyses = async (path = databasePath) => {
     if (!path) return;
-    const result = unwrap(await listProjectAnalyses(path));
-    setProject(result);
+    setProject(unwrap(await listProjectAnalyses(path)));
   };
 
   useEffect(() => {
@@ -137,9 +149,7 @@ export function App() {
     });
   }, [recipe, recipeWarnings]);
 
-  const canSaveImport = Boolean(
-    plan && plan.summary.planned_analysis_count > 0 && plannedMeasurementCount > 0,
-  );
+  const canSaveImport = Boolean(plan && plan.summary.planned_analysis_count > 0 && plannedMeasurementCount > 0);
 
   const resetImportState = () => {
     setSourcePath("");
@@ -166,10 +176,9 @@ export function App() {
       newlyStaged = selected.local_path;
       setActivity("Читаю листы и проверяю структуру файла…");
       const inspected = unwrap(await inspectImportSource(newlyStaged));
-      setActivity("Распознаю колонки и создаю план импорта…");
+      setActivity("Распознаю структуру и создаю план импорта…");
       const suggestion = unwrap(await suggestImportRecipe(newlyStaged));
       const planned = unwrap(await createImportPlan(newlyStaged, suggestion.recipe));
-
       setSourcePath(newlyStaged);
       setSourceDisplayPath(selected.original_path || selectedPath);
       setInspection(inspected);
@@ -177,10 +186,7 @@ export function App() {
       setRecipeWarnings(suggestion.warnings || []);
       setPlan(planned);
       setScreen("Импорт");
-
-      if (previousStaged && previousStaged !== newlyStaged) {
-        clearImportStaging(previousStaged).catch(() => {});
-      }
+      if (previousStaged && previousStaged !== newlyStaged) clearImportStaging(previousStaged).catch(() => {});
     } catch (caught) {
       if (newlyStaged) clearImportStaging(newlyStaged).catch(() => {});
       setScreen("Импорт");
@@ -198,17 +204,66 @@ export function App() {
     setError("");
     setSuccess("");
     try {
-      const revised = unwrap(await reviseImportMapping(
-        sourcePath,
-        recipe,
-        sheetName,
-        sourceColumnIndex,
-        target,
-        canonicalField,
-        unit,
-      ));
+      const revised = unwrap(await reviseImportMapping(sourcePath, recipe, sheetName, sourceColumnIndex, target, canonicalField, unit));
       const planned = unwrap(await createImportPlan(sourcePath, revised.recipe));
       setRecipe(revised.recipe);
+      setRecipeWarnings(revised.warnings || recipeWarnings);
+      setPlan(planned);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const applyBulkMapping = async (entries, target, unit) => {
+    if (busy || !sourcePath || !recipe || !entries.length) return;
+    setBusy(true);
+    setActivity(`Применяю групповое сопоставление к ${entries.length} полям…`);
+    setError("");
+    setSuccess("");
+    try {
+      let workingRecipe = recipe;
+      let workingWarnings = recipeWarnings;
+      for (const entry of entries) {
+        const revised = unwrap(await reviseImportMapping(
+          sourcePath,
+          workingRecipe,
+          entry.sheetName,
+          entry.sourceColumnIndex,
+          target,
+          target === "Measurement" ? entry.canonicalField : null,
+          target === "Measurement" ? unit : null,
+        ));
+        workingRecipe = revised.recipe;
+        workingWarnings = revised.warnings || workingWarnings;
+      }
+      const planned = unwrap(await createImportPlan(sourcePath, workingRecipe));
+      setRecipe(workingRecipe);
+      setRecipeWarnings(workingWarnings);
+      setPlan(planned);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const applyOrientation = async (sheetName, orientation) => {
+    if (busy || !sourcePath || !recipe) return;
+    const current = recipe.sections.find((section) => section.sheet_name === sheetName)?.orientation || "rows";
+    if (current === orientation) return;
+    setBusy(true);
+    setActivity(`Перестраиваю лист «${sheetName}»…`);
+    setError("");
+    setSuccess("");
+    try {
+      const revised = unwrap(await reviseImportOrientation(sourcePath, recipe, sheetName, orientation));
+      const planned = unwrap(await createImportPlan(sourcePath, revised.recipe));
+      setRecipe(revised.recipe);
+      setRecipeWarnings(revised.warnings || []);
       setPlan(planned);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -266,16 +321,8 @@ export function App() {
         </div>
         <nav>
           {navigation.map(([Icon, label, enabled]) => (
-            <button
-              className={`${screen === label ? "nav-item active" : "nav-item"}${enabled ? "" : " disabled"}`}
-              key={label}
-              disabled={!enabled || busy}
-              onClick={() => goTo(label, enabled)}
-              title={enabled ? label : "Экран ещё не подключён в этой alpha-сборке"}
-            >
-              <Icon size={19} />
-              <span>{label}</span>
-              {!enabled && <small>скоро</small>}
+            <button className={`${screen === label ? "nav-item active" : "nav-item"}${enabled ? "" : " disabled"}`} key={label} disabled={!enabled || busy} onClick={() => goTo(label, enabled)} title={enabled ? label : "Экран ещё не подключён в этой alpha-сборке"}>
+              <Icon size={19} /><span>{label}</span>{!enabled && <small>скоро</small>}
             </button>
           ))}
         </nav>
@@ -284,10 +331,7 @@ export function App() {
 
       <section className="workspace">
         <header className="topbar">
-          <div>
-            <h2>{screen}</h2>
-            <p>Источников: <b>{project.source_count}</b> · импортов: <b>{project.import_batch_count}</b> · анализов: <b>{project.total}</b></p>
-          </div>
+          <div><h2>{screen}</h2><p>Источников: <b>{project.source_count}</b> · импортов: <b>{project.import_batch_count}</b> · анализов: <b>{project.total}</b></p></div>
           <div className="top-actions">
             <button className="outline-button" onClick={startNewImport} disabled={busy}><Plus size={18} /> Добавить данные</button>
             <button className="icon-button" disabled title="Настройки будут подключены позже"><GearSix size={21} /></button>
@@ -305,10 +349,7 @@ export function App() {
                 <div className="file-start-icon"><FileArrowUp size={46} weight="duotone" /></div>
                 <h1>Добавить настоящий файл</h1>
                 <p>PetroLab прочитает XLSX, CSV или TSV, покажет распознанные листы и создаст план до записи в проект.</p>
-                <button className="primary-button large" onClick={chooseFile} disabled={busy}>
-                  {busy ? <SpinnerGap className="spin" size={20} /> : <FileArrowUp size={20} />}
-                  {busy ? "Открываю файл…" : "Выбрать файл"}
-                </button>
+                <button className="primary-button large" onClick={chooseFile} disabled={busy}>{busy ? <SpinnerGap className="spin" size={20} /> : <FileArrowUp size={20} />}{busy ? "Открываю файл…" : "Выбрать файл"}</button>
                 <small>Исходный файл не изменяется. Перед чтением PetroLab создаёт локальную временную копию, поэтому поддерживаются и подключённые сетевые диски.</small>
               </div>
             )}
@@ -317,10 +358,7 @@ export function App() {
               <>
                 <div className="source-heading">
                   <div className="source-file"><File size={32} weight="duotone" /><div><b>{fileName(sourceDisplayPath || sourcePath)}</b><span title={sourceDisplayPath}>{inspection.source_format.toUpperCase()} · SHA-256 {inspection.source_fingerprint.slice(0, 12)}…</span></div></div>
-                  <div className="top-actions">
-                    <button className="outline-button" onClick={startNewImport} disabled={busy}>Отменить импорт</button>
-                    <button className="outline-button" onClick={chooseFile} disabled={busy}>Выбрать другой файл</button>
-                  </div>
+                  <div className="top-actions"><button className="outline-button" onClick={startNewImport} disabled={busy}>Отменить импорт</button><button className="outline-button" onClick={chooseFile} disabled={busy}>Выбрать другой файл</button></div>
                 </div>
 
                 <div className="metric-row">
@@ -332,15 +370,20 @@ export function App() {
                 </div>
 
                 <div className="live-card">
-                  <div className="section-title"><div><h3>1. Листы и распознавание</h3><p>Это данные из выбранного файла, а не демонстрационный пример.</p></div></div>
+                  <div className="section-title"><div><h3>1. Листы и ориентация</h3><p>Для каждого листа можно явно указать, идут анализы по строкам или по столбцам.</p></div></div>
                   <div className="sheet-grid">
                     {inspection.sheets.map((sheet) => {
                       const section = recipe.sections.find((item) => item.sheet_name === sheet.name);
+                      const orientation = section?.orientation || "rows";
+                      const headerText = !section ? "заголовок пока не распознан" : orientation === "columns" ? `подписи: столбец ${excelColumnName(section.header_row - 1)}` : `заголовок: строка ${section.header_row}`;
                       return (
-                        <div className={section ? "real-sheet ready" : "real-sheet skipped"} key={sheet.name}>
+                        <div className={section ? "real-sheet ready orientation-sheet" : "real-sheet skipped orientation-sheet"} key={sheet.name}>
                           <File size={22} />
-                          <div><b>{sheet.name}</b><span>{sheet.used_range.rows} строк × {sheet.used_range.columns} колонок</span></div>
-                          {section ? <em><CheckCircle size={16} weight="fill" /> заголовок: строка {section.header_row}</em> : <em><Warning size={16} /> пока пропущен</em>}
+                          <div><b>{sheet.name}</b><span>{sheet.used_range.rows} строк × {sheet.used_range.columns} колонок</span><em>{section ? <CheckCircle size={15} weight="fill" /> : <Warning size={15} />}{headerText}</em></div>
+                          <div className="orientation-switch" role="group" aria-label={`Ориентация ${sheet.name}`}>
+                            <button className={orientation === "rows" ? "active" : ""} disabled={busy} onClick={() => applyOrientation(sheet.name, "rows")}>Строки = анализы</button>
+                            <button className={orientation === "columns" ? "active" : ""} disabled={busy} onClick={() => applyOrientation(sheet.name, "columns")}>Столбцы = анализы</button>
+                          </div>
                         </div>
                       );
                     })}
@@ -348,25 +391,18 @@ export function App() {
                 </div>
 
                 <div className="live-card">
-                  <div className="section-title"><div><h3>2. Сопоставление колонок</h3><p>Автораспознавание не угадывает единицы. Здесь можно явно исправить решение PetroLab перед сохранением.</p></div></div>
-                  <ImportMappingEditor recipe={recipe} busy={busy} onApply={applyMapping} />
+                  <div className="section-title"><div><h3>2. Сопоставление полей</h3><p>Можно назначать поля по одному или выделить сразу несколько и задать им общую единицу.</p></div></div>
+                  <ImportMappingEditor recipe={recipe} busy={busy} onApply={applyMapping} onBulkApply={applyBulkMapping} />
                 </div>
 
                 {plannedMeasurementCount === 0 && plan.summary.planned_analysis_count > 0 && (
-                  <div className="import-blocker">
-                    <Warning size={22} weight="fill" />
-                    <div><b>Импорт пока нельзя сохранить</b><span>PetroLab нашёл {plan.summary.planned_analysis_count} Analysis, но ни одного Measurement. Назначь аналитические колонки как Measurement и явно выбери единицы.</span></div>
-                  </div>
+                  <div className="import-blocker"><Warning size={22} weight="fill" /><div><b>Импорт пока нельзя сохранить</b><span>PetroLab нашёл {plan.summary.planned_analysis_count} Analysis, но ни одного Measurement. Назначь аналитические поля как Measurement и явно выбери единицы.</span></div></div>
                 )}
 
                 {(visibleRecipeWarnings.length > 0 || plan.warnings.length > 0) && (
                   <div className="live-card warning-card">
                     <div className="section-title"><div><h3>Предупреждения</h3><p>Они не скрываются перед сохранением.</p></div></div>
-                    <div className="warning-list">
-                      {[...visibleRecipeWarnings, ...plan.warnings].map((warning, index) => (
-                        <div key={`${warning.code}-${index}`}><Warning size={18} weight="fill" /><span><b>{warningText(warning)}</b>{warning.sheet_name ? ` · ${warning.sheet_name}` : ""}{warning.source_header ? ` · ${warning.source_header}` : ""}</span></div>
-                      ))}
-                    </div>
+                    <div className="warning-list">{[...visibleRecipeWarnings, ...plan.warnings].map((warning, index) => <div key={`${warning.code}-${index}`}><Warning size={18} weight="fill" /><span><b>{warningText(warning)}</b>{warning.sheet_name ? ` · ${warning.sheet_name}` : ""}{warning.source_header ? ` · ${warning.source_header}` : ""}</span></div>)}</div>
                   </div>
                 )}
 
@@ -375,7 +411,7 @@ export function App() {
                   <div className="analysis-preview-list">
                     {plan.planned_records.slice(0, 12).map((record) => (
                       <div className="analysis-preview-row" key={record.preview_id}>
-                        <span className="row-origin">{record.sheet_name} · строка {record.row_number}</span>
+                        <span className="row-origin">{record.sheet_name} · {record.source_orientation === "columns" ? `столбец ${record.source_record_label}` : `строка ${record.source_record_label || record.row_number}`}</span>
                         <b>{record.identity.filter(Boolean).join(" · ") || "Analysis без распознанного идентификатора"}</b>
                         <span>{record.measurements.slice(0, 6).map((measurement) => `${measurement.field}=${measurement.raw_token ?? "∅"} ${measurement.unit}`).join(" · ") || "Нет Measurement"}</span>
                       </div>
@@ -385,14 +421,8 @@ export function App() {
                 </div>
 
                 <div className={`commit-bar${canSaveImport ? "" : " blocked"}`}>
-                  <div>
-                    <b>Готово к записи: {plan.summary.planned_analysis_count} Analysis · {plannedMeasurementCount} Measurement</b>
-                    <span>{canSaveImport ? "Исходник не меняется; PetroLab сохранит собственную управляемую копию импортируемого файла." : "Сначала назначь хотя бы одну аналитическую колонку как Measurement и укажи её единицу."}</span>
-                  </div>
-                  <button className="primary-button large" onClick={commitImport} disabled={busy || !canSaveImport} title={canSaveImport ? "" : "Нельзя сохранять Analysis без Measurement"}>
-                    {busy ? <SpinnerGap className="spin" size={20} /> : <CheckCircle size={20} />}
-                    Сохранить импорт в проект
-                  </button>
+                  <div><b>Готово к записи: {plan.summary.planned_analysis_count} Analysis · {plannedMeasurementCount} Measurement</b><span>{canSaveImport ? "Исходник не меняется; PetroLab сохранит собственную управляемую копию импортируемого файла." : "Сначала назначь хотя бы одно аналитическое поле как Measurement и укажи его единицу."}</span></div>
+                  <button className="primary-button large" onClick={commitImport} disabled={busy || !canSaveImport} title={canSaveImport ? "" : "Нельзя сохранять Analysis без Measurement"}>{busy ? <SpinnerGap className="spin" size={20} /> : <CheckCircle size={20} />}Сохранить импорт в проект</button>
                 </div>
               </>
             )}
@@ -412,21 +442,15 @@ export function App() {
             ) : (
               <div className="analysis-table-wrap">
                 <table className="analysis-table">
-                  <thead><tr><th>Source</th><th>Лист</th><th>Строка</th>{identityColumns.map((field) => <th key={field}>{field}</th>)}{measurementColumns.map((field) => <th key={field}>{field}</th>)}</tr></thead>
-                  <tbody>
-                    {filteredAnalyses.map((analysis) => (
-                      <tr key={analysis.analysis_id} title={analysis.analysis_id}>
-                        <td><b>{analysis.source_name}</b></td>
-                        <td>{analysis.sheet_name}</td>
-                        <td>{analysis.source_row_number}</td>
-                        {identityColumns.map((field) => <td key={field}>{analysis.identity?.[field] || ""}</td>)}
-                        {measurementColumns.map((field) => {
-                          const measurement = analysis.measurements?.[field];
-                          return <td key={field}>{measurement ? <><span>{measurement.raw_token ?? "∅"}</span><small>{measurement.unit}</small></> : ""}</td>;
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
+                  <thead><tr><th>Source</th><th>Лист</th><th>Источник</th>{identityColumns.map((field) => <th key={field}>{field}</th>)}{measurementColumns.map((field) => <th key={field}>{field}</th>)}</tr></thead>
+                  <tbody>{filteredAnalyses.map((analysis) => (
+                    <tr key={analysis.analysis_id} title={analysis.analysis_id}>
+                      <td><b>{analysis.source_name}</b></td><td>{analysis.sheet_name}</td>
+                      <td>{analysis.source_orientation === "columns" ? `столбец ${analysis.source_record_label}` : `строка ${analysis.source_record_label || analysis.source_row_number}`}</td>
+                      {identityColumns.map((field) => <td key={field}>{analysis.identity?.[field] || ""}</td>)}
+                      {measurementColumns.map((field) => { const measurement = analysis.measurements?.[field]; return <td key={field}>{measurement ? <><span>{measurement.raw_token ?? "∅"}</span><small>{measurement.unit}</small></> : ""}</td>; })}
+                    </tr>
+                  ))}</tbody>
                 </table>
               </div>
             )}
