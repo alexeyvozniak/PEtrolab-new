@@ -120,6 +120,20 @@ def multiple_blocks(path: Path) -> Path:
     })
 
 
+def complementary_duplicate_blocks(path: Path) -> Path:
+    return write_xlsx(path, {
+        "Major and trace": [
+            ["Analysis", "Sample", "SiO2 (wt.%)", "MgO (wt.%)"],
+            ["A-1", "SYN-1", 50.2, 9.8],
+            ["A-2", "SYN-2", 51.0, 9.2],
+            [None, None, None, None],
+            ["Analysis", "Sample", "La (ppm)", "Ce (ppm)"],
+            ["A-1", "SYN-1", 85, 170],
+            ["A-2", "SYN-2", 90, 180],
+        ]
+    })
+
+
 def transposed_weight_percent(path: Path) -> Path:
     return write_xlsx(path, {
         "Transposed": [
