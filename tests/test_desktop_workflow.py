@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
 import sys
 import tempfile
@@ -67,7 +68,7 @@ class DesktopWorkflowTests(unittest.TestCase):
             after = list_project_analyses(database)
 
             import sqlite3
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 audit_rows = connection.execute(
                     "SELECT COUNT(*) FROM analysis WHERE import_batch_id = ?", (second["import_batch_id"],)
                 ).fetchone()[0]
