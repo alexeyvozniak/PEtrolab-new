@@ -15,6 +15,19 @@ test("Tauri shell owns one local Python service rather than a localhost API", as
   assert.doesNotMatch(shell, /TcpListener|reqwest|localhost API/);
 });
 
+test("desktop stages selected files locally before the scientific service reads them", async () => {
+  const shell = await read("src-tauri/src/lib.rs");
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  assert.match(shell, /import-staging/);
+  assert.match(shell, /fs::copy\(&source, &staged\)/);
+  assert.match(shell, /fn clear_import_staging/);
+  assert.match(api, /clear_import_staging/);
+  assert.match(app, /selected\.local_path/);
+  assert.match(app, /resetImportState\(\)/);
+  assert.match(app, /Отменить импорт/);
+});
+
 test("frontend sends the versioned envelope through the one Tauri command", async () => {
   const api = await read("src/desktopApi.js");
   assert.match(api, /protocol_version: PROTOCOL_VERSION/);
