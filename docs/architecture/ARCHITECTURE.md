@@ -58,6 +58,10 @@ Scientific domain core ← Persistence ports → SQLite adapters
 | `import.recipe.validate` | source fingerprint, Import Recipe | отчёт совместимости колонок, единиц и семантики без записи |
 | `scientific_method.get` | method ID, version | версионированное определение метода и benchmark metadata |
 | `workspace_snapshot.restore` | Workspace Snapshot ID | план полного или частичного восстановления ссылок и ревизий |
+| `analytical_point.create` | Sample, имя Point, Analysis IDs и тип связи | Analytical Point без изменения Analysis/Measurement |
+| `media.inspect_sources` | явный список путей | форматы, размеры, SHA-256 и дубликаты без записи |
+| `media.import.plan` | назначения Sample/Thin Section, типы и ручные геометрии | проверяемый план с fingerprint |
+| `media.import.apply` | подтверждённый media plan | атомарный пакет Media Assets, Spatial Annotations и связей |
 
 Команда возвращает либо `result`, либо структурированную ошибку. UI не разбирает traceback и не делает вывод по тексту ошибки.
 

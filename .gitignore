@@ -15,3 +15,5 @@ target/
 *.log
 .DS_Store
 desktop/src-tauri/binaries/*.exe
+desktop/src-tauri/icons/icon.ico
+desktop/src-tauri/icons/icon.png

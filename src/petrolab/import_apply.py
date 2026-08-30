@@ -31,18 +31,21 @@ def open_project(database_path: str | Path) -> sqlite3.Connection:
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute("CREATE TABLE IF NOT EXISTS schema_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migration")}
-    for migration in sorted(MIGRATIONS.glob("*.sql")):
+    migrations = sorted(MIGRATIONS.glob("*.sql"))
+    for migration in migrations:
         version = int(migration.name.split("_", 1)[0])
         if version in applied:
             continue
         with connection:
             connection.executescript(migration.read_text(encoding="utf-8"))
             connection.execute("INSERT INTO schema_migration (version, applied_at) VALUES (?, ?)", (version, _now()))
+    latest_version = max(int(migration.name.split("_", 1)[0]) for migration in migrations)
     with connection:
         connection.execute(
-            "INSERT OR IGNORE INTO project_meta (singleton, project_schema_version, created_at) VALUES (1, 3, ?)",
-            (_now(),),
+            "INSERT OR IGNORE INTO project_meta (singleton, project_schema_version, created_at) VALUES (1, ?, ?)",
+            (latest_version, _now()),
         )
+        connection.execute("UPDATE project_meta SET project_schema_version = ? WHERE singleton = 1", (latest_version,))
     return connection
 
 

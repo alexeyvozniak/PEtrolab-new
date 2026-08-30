@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/media-import-plan.schema.json",
+  "title": "Media Import Plan",
+  "description": "Validated batch of immutable image assets and manual point placements.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "semantic_fingerprint", "items", "warnings"],
+  "$defs": {
+    "geometry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "x_px", "y_px"],
+          "properties": {
+            "kind": {"const": "point"},
+            "x_px": {"type": "number", "minimum": 0},
+            "y_px": {"type": "number", "minimum": 0}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "x_px", "y_px", "width_px", "height_px"],
+          "properties": {
+            "kind": {"enum": ["rectangle", "square"]},
+            "x_px": {"type": "number", "minimum": 0},
+            "y_px": {"type": "number", "minimum": 0},
+            "width_px": {"type": "number", "exclusiveMinimum": 0},
+            "height_px": {"type": "number", "exclusiveMinimum": 0}
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {"const": 1},
+    "semantic_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["media_asset_id", "source_path", "source_fingerprint", "display_name", "ownership_mode", "media_type", "mime_type", "width_px", "height_px", "sample_name", "thin_section_name", "placements"],
+        "properties": {
+          "media_asset_id": {"type": "string", "format": "uuid"},
+          "source_path": {"type": "string", "minLength": 1},
+          "source_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "display_name": {"type": "string", "minLength": 1},
+          "ownership_mode": {"type": "string", "enum": ["managed_copy", "linked_external"]},
+          "media_type": {"type": "string", "minLength": 1, "maxLength": 80},
+          "mime_type": {"type": "string", "pattern": "^image/"},
+          "width_px": {"type": "integer", "minimum": 1},
+          "height_px": {"type": "integer", "minimum": 1},
+          "sample_name": {"type": "string", "minLength": 1, "maxLength": 200},
+          "thin_section_name": {"type": "string", "minLength": 1, "maxLength": 200},
+          "existing_media_asset_id": {
+            "oneOf": [{"type": "null"}, {"type": "string", "format": "uuid"}]
+          },
+          "placements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["spatial_annotation_id", "analytical_point_id", "geometry", "cross_sample_exception_reason"],
+              "properties": {
+                "spatial_annotation_id": {"type": "string", "format": "uuid"},
+                "analytical_point_id": {"type": "string", "format": "uuid"},
+                "geometry": {"$ref": "#/$defs/geometry"},
+                "cross_sample_exception_reason": {
+                  "oneOf": [{"type": "null"}, {"type": "string", "minLength": 1, "maxLength": 1000}]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

@@ -15,6 +15,7 @@ from typing import Any, TextIO
 
 from .import_apply import apply_import_plan, check_linked_source, rollback_incomplete_batch, save_import_recipe_revision
 from .import_preview import ImportCommandError, run_import_inspect_source, run_import_plan_create, run_import_recipe_validate
+from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
 
 
 PROTOCOL_VERSION = "1.0"
@@ -68,6 +69,34 @@ def _optional_supersedes_revision_id(params: Mapping[str, Any]) -> str | None:
     return value
 
 
+def _string(params: Mapping[str, Any], name: str) -> str:
+    value = params.get(name)
+    if not isinstance(value, str) or not value:
+        raise ValueError(name)
+    return value
+
+
+def _string_list(params: Mapping[str, Any], name: str) -> list[str]:
+    value = params.get(name)
+    if not isinstance(value, list) or not value or not all(isinstance(item, str) and item for item in value):
+        raise ValueError(name)
+    return value
+
+
+def _object_list(params: Mapping[str, Any], name: str) -> list[dict[str, Any]]:
+    value = params.get(name)
+    if not isinstance(value, list) or not value or not all(isinstance(item, dict) for item in value):
+        raise ValueError(name)
+    return value
+
+
+def _object(params: Mapping[str, Any], name: str) -> dict[str, Any]:
+    value = params.get(name)
+    if not isinstance(value, dict):
+        raise ValueError(name)
+    return value
+
+
 def _dispatch_import_inspect(params: Mapping[str, Any]) -> dict[str, Any]:
     return run_import_inspect_source(_source_path(params))
 
@@ -98,6 +127,28 @@ def _dispatch_recipe_save_revision(params: Mapping[str, Any]) -> dict[str, Any]:
     )}
 
 
+def _dispatch_analytical_point_create(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": create_analytical_point(
+        _project_database_path(params),
+        _string(params, "sample_name"),
+        _string(params, "point_name"),
+        _string_list(params, "analysis_ids"),
+        _string(params, "link_type"),
+    )}
+
+
+def _dispatch_media_inspect(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": inspect_media_sources(_string_list(params, "source_paths"))}
+
+
+def _dispatch_media_plan(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": create_media_import_plan(_project_database_path(params), _object_list(params, "assignments"))}
+
+
+def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": apply_media_import_plan(_project_database_path(params), _object(params, "plan"))}
+
+
 COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.inspect_source": _dispatch_import_inspect,
     "import.recipe.validate": _dispatch_recipe_validate,
@@ -106,6 +157,10 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "source.check_linked": _dispatch_linked_source_check,
     "import.batch.rollback": _dispatch_batch_rollback,
     "import.recipe.save_revision": _dispatch_recipe_save_revision,
+    "analytical_point.create": _dispatch_analytical_point_create,
+    "media.inspect_sources": _dispatch_media_inspect,
+    "media.import.plan": _dispatch_media_plan,
+    "media.import.apply": _dispatch_media_apply,
 }
 
 

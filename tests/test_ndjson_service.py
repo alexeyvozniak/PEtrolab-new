@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from contextlib import closing
 from pathlib import Path
 import sys
 import tempfile
@@ -15,6 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from petrolab.import_preview import inspect_source  # noqa: E402
 from petrolab.ndjson_service import PROTOCOL_VERSION, handle_request, serve  # noqa: E402
 from test_import_preview import FIXTURE, fixture_recipe  # noqa: E402
+from test_media_import import write_png  # noqa: E402
 
 
 class NdjsonServiceTests(unittest.TestCase):
@@ -103,6 +105,47 @@ class NdjsonServiceTests(unittest.TestCase):
                 },
             })
             self.assertEqual(response["result"]["supersedes_recipe_revision_id"], imported["recipe_revision_id"])
+
+    def test_media_inspection_and_point_placement_are_available_through_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            database = str(directory / "project.sqlite")
+            imported = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "import.plan.apply",
+                "payload": {"project_database_path": database, "source_path": str(FIXTURE), "recipe": fixture_recipe()},
+            })["result"]
+            import sqlite3
+            with closing(sqlite3.connect(database)) as connection:
+                analysis_ids = [row[0] for row in connection.execute("SELECT analysis_id FROM analysis ORDER BY rowid LIMIT 2")]
+            point = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.create",
+                "payload": {"project_database_path": database, "sample_name": "KIV-2", "point_name": "P-07", "analysis_ids": analysis_ids, "link_type": "same_point"},
+            })["result"]
+            image = directory / "KIV-2_BSE.png"
+            write_png(image)
+            inspection = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "media.inspect_sources",
+                "payload": {"source_paths": [str(image)]},
+            })["result"]
+            self.assertEqual(inspection["items"][0]["width_px"], 12)
+            assignments = [{
+                "source_path": str(image), "ownership_mode": "managed_copy", "media_type": "BSE",
+                "sample_name": "KIV-2", "thin_section_name": "KIV-2-TS1",
+                "placements": [{
+                    "analytical_point_id": point["analytical_point_id"],
+                    "geometry": {"kind": "point", "x_px": 3, "y_px": 4},
+                    "cross_sample_exception_reason": None,
+                }],
+            }]
+            plan = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "media.import.plan",
+                "payload": {"project_database_path": database, "assignments": assignments},
+            })["result"]
+            applied = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "media.import.apply",
+                "payload": {"project_database_path": database, "plan": plan},
+            })["result"]
+            self.assertEqual(applied["spatial_annotation_count"], 1)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,8 @@
         "project.open", "analysis.query", "selection.replace", "selection.union", "selection.subtract",
         "work_group.create", "plot_spec.save", "plot_data.query", "plot_visibility.hide",
         "source_filter.set", "import.inspect_source", "import.recipe.validate", "import.plan.create",
-        "import.plan.apply", "import.batch.rollback", "import.recipe.save_revision", "source.check_linked", "shutdown"
+        "import.plan.apply", "import.batch.rollback", "import.recipe.save_revision", "source.check_linked",
+        "analytical_point.create", "media.inspect_sources", "media.import.plan", "media.import.apply", "shutdown"
       ]
     },
     "payload": {"type": "object"}

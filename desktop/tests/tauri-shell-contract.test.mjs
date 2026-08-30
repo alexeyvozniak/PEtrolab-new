@@ -19,6 +19,10 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
   assert.match(api, /protocol_version: PROTOCOL_VERSION/);
   assert.match(api, /request_id: crypto\.randomUUID\(\)/);
   assert.match(api, /invoke\("petrolab_command", \{ envelope \}\)/);
+  assert.match(api, /media\.inspect_sources/);
+  assert.match(api, /media\.import\.plan/);
+  assert.match(api, /media\.import\.apply/);
+  assert.match(api, /analytical_point\.create/);
 });
 
 test("Tauri config keeps the approved desktop minimum window size", async () => {
@@ -28,4 +32,6 @@ test("Tauri config keeps the approved desktop minimum window size", async () => 
   assert.equal(config.app.windows[0].minWidth, 1180);
   assert.equal(config.app.windows[0].minHeight, 800);
   assert.deepEqual(config.bundle.resources, ["binaries/petrolab-service.exe"]);
+  assert.deepEqual(config.bundle.icon, ["icons/icon.ico"]);
+  assert.match(config.build.beforeBuildCommand, /generate_tauri_icon\.py/);
 });
