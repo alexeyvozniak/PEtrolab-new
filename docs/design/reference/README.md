@@ -40,5 +40,8 @@
 | Построение: слои и поля | `plotting-layers-fields-approved-v1.png` | компактная побочная панель видимости, opacity, порядка и Field для сравниваемых массивов |
 | Статистика: выбор метода | `statistics-guided-method-approved-v1.png` | пошаговая задача, явный состав входа, проверка условий и подтверждение статистического метода |
 | Статистика: кластеризация | `statistics-clustering-result-approved-v1.png` | проверка кластеров на графике и в таблице, сохранение выбранных кластеров как Work Groups |
+| Статистика: выбор задачи | `statistics-task-approved-v1.png` | простой выбор исследовательской задачи и входного контекста |
+| Статистика: проверка данных | `statistics-data-review-approved-v1.png` | точный состав групп, Analyses, признаков, методов, пропусков и исключений до метода |
+| Статистика: сравнение групп | `statistics-comparison-result-approved-v1.png` | проверяемый результат, effect size, multiple-comparison correction и действия с Calculation Run |
 
 Черновые изображения запрещено помещать в эту папку.
