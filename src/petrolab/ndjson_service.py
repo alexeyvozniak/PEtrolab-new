@@ -14,10 +14,12 @@ from collections.abc import Callable, Mapping
 from typing import Any, TextIO
 
 from .desktop_workflow import list_project_analyses, suggest_import_recipe
-from .import_apply import apply_import_plan, check_linked_source, rollback_incomplete_batch, save_import_recipe_revision
-from .import_preview import ImportCommandError, run_import_inspect_source, run_import_plan_create, run_import_recipe_validate
-from .manual_mapping import revise_import_mapping
+from .import_apply import check_linked_source, rollback_incomplete_batch, save_import_recipe_revision
+from .import_preview import ImportCommandError, run_import_inspect_source
+from .manual_mapping import revise_import_mapping, revise_import_orientation
 from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
+from .oriented_apply import apply_oriented_import_plan
+from .oriented_import import run_oriented_plan_create, run_oriented_recipe_validate
 
 
 PROTOCOL_VERSION = "1.0"
@@ -135,16 +137,25 @@ def _dispatch_recipe_revise_mapping(params: Mapping[str, Any]) -> dict[str, Any]
     )}
 
 
+def _dispatch_recipe_revise_orientation(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": revise_import_orientation(
+        _source_path(params),
+        _recipe(params),
+        _string(params, "sheet_name"),
+        _string(params, "orientation"),
+    )}
+
+
 def _dispatch_recipe_validate(params: Mapping[str, Any]) -> dict[str, Any]:
-    return run_import_recipe_validate(_source_path(params), _recipe(params))
+    return run_oriented_recipe_validate(_source_path(params), _recipe(params))
 
 
 def _dispatch_plan_create(params: Mapping[str, Any]) -> dict[str, Any]:
-    return run_import_plan_create(_source_path(params), _recipe(params))
+    return run_oriented_plan_create(_source_path(params), _recipe(params))
 
 
 def _dispatch_plan_apply(params: Mapping[str, Any]) -> dict[str, Any]:
-    return {"result": apply_import_plan(_project_database_path(params), _source_path(params), _recipe(params))}
+    return {"result": apply_oriented_import_plan(_project_database_path(params), _source_path(params), _recipe(params))}
 
 
 def _dispatch_project_analyses_list(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -194,6 +205,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.inspect_source": _dispatch_import_inspect,
     "import.recipe.suggest": _dispatch_recipe_suggest,
     "import.recipe.revise_mapping": _dispatch_recipe_revise_mapping,
+    "import.recipe.revise_orientation": _dispatch_recipe_revise_orientation,
     "import.recipe.validate": _dispatch_recipe_validate,
     "import.plan.create": _dispatch_plan_create,
     "import.plan.apply": _dispatch_plan_apply,
