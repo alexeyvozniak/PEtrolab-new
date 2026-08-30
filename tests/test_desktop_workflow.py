@@ -25,7 +25,7 @@ class DesktopWorkflowTests(unittest.TestCase):
 
         validation = validate_recipe(inspection, recipe)
         self.assertEqual(len(validation["sections"]), 2)
-        self.assertEqual(recipe["ownership_mode"], "linked_external")
+        self.assertEqual(recipe["ownership_mode"], "managed_copy")
         self.assertEqual(recipe["global_decisions"]["fe_semantics"], "preserve_reported_form_for_review")
 
         trace = next(section for section in recipe["sections"] if section["sheet_name"] == "Trace_elements")
@@ -43,6 +43,7 @@ class DesktopWorkflowTests(unittest.TestCase):
             database = Path(directory) / "petrolab.sqlite"
             applied = apply_import_plan(database, FIXTURE, recipe)
             projection = list_project_analyses(database)
+            managed_sources = list((Path(directory) / "sources").glob("*.xlsx"))
 
         self.assertEqual(projection["total"], applied["analysis_count"])
         self.assertEqual(projection["source_count"], 1)
@@ -50,6 +51,7 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertEqual(projection["analyses"][0]["source_name"], FIXTURE.name)
         self.assertTrue(any("Analysis" in row["identity"] for row in projection["analyses"]))
         self.assertTrue(any("SiO2" in row["measurements"] for row in projection["analyses"]))
+        self.assertEqual(len(managed_sources), 1)
 
 
 if __name__ == "__main__":
