@@ -1,4 +1,4 @@
-"""Atomic persistence for orientation-aware import plans."""
+"""Atomic persistence for orientation-aware import plans and recipe revisions."""
 
 from __future__ import annotations
 
@@ -6,9 +6,60 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .import_apply import _id, _insert_recipe_revision, _now, _prepare_managed_copy, open_project
-from .import_preview import ImportCommandError, inspect_source
+from .import_apply import (
+    _id,
+    _insert_recipe_revision,
+    _now,
+    _prepare_managed_copy,
+    _source_path_for_revision,
+    open_project,
+)
+from .import_preview import ImportCommandError, inspect_source, semantic_fingerprint
 from .oriented_import import create_oriented_import_plan, validate_oriented_recipe
+
+
+def save_oriented_recipe_revision(
+    database_path: str | Path,
+    source_id: str,
+    recipe: dict[str, Any],
+    supersedes_recipe_revision_id: str | None = None,
+) -> dict[str, Any]:
+    """Save a validated orientation-aware recipe revision without rewriting history."""
+    connection = open_project(database_path)
+    try:
+        source = connection.execute(
+            "SELECT source_kind, linked_path, managed_relative_path, source_fingerprint_sha256 FROM source_file WHERE source_id = ?",
+            (source_id,),
+        ).fetchone()
+        if source is None:
+            raise ImportCommandError("INVALID_ASSIGNMENT", "Source does not exist.")
+        inspection = inspect_source(_source_path_for_revision(database_path, source))
+        if inspection.fingerprint != source["source_fingerprint_sha256"]:
+            if source["source_kind"] == "linked_reference":
+                with connection:
+                    connection.execute(
+                        "UPDATE source_file SET state = 'source_changed', last_verified_at = ? WHERE source_id = ?",
+                        (_now(), source_id),
+                    )
+            raise ImportCommandError("SOURCE_FINGERPRINT_MISMATCH", "Source changed; recipe revision was not saved.")
+        validate_oriented_recipe(inspection, recipe)
+        timestamp = _now()
+        with connection:
+            revision_id = _insert_recipe_revision(
+                connection,
+                source_id,
+                recipe,
+                timestamp,
+                supersedes_recipe_revision_id,
+            )
+        return {
+            "recipe_revision_id": revision_id,
+            "source_id": source_id,
+            "supersedes_recipe_revision_id": supersedes_recipe_revision_id,
+            "semantic_fingerprint": semantic_fingerprint(recipe),
+        }
+    finally:
+        connection.close()
 
 
 def apply_oriented_import_plan(database_path: str | Path, source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
