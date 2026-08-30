@@ -55,7 +55,28 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertEqual(projection["analyses"][0]["source_name"], FIXTURE.name)
         self.assertTrue(any("Analysis" in row["identity"] for row in projection["analyses"]))
         self.assertTrue(any("SiO2" in row["measurements"] for row in projection["analyses"]))
+        self.assertGreater(applied["source_metadata_count"], 0)
+        mineral_rows = [row for row in projection["analyses"] if row["source_metadata"].get("Mineral")]
+        self.assertTrue(mineral_rows)
+        self.assertTrue(all(item["source_cell"] for row in mineral_rows for item in row["source_metadata_list"] if item["field"] == "Mineral"))
         self.assertEqual(len(managed_sources), 1)
+
+    def test_source_metadata_is_persisted_separately_from_identity_and_measurements(self) -> None:
+        recipe = suggest_import_recipe(FIXTURE)["recipe"]
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "petrolab.sqlite"
+            applied = apply_import_plan(database, FIXTURE, recipe)
+            projection = list_project_analyses(database)
+            import sqlite3
+            with closing(sqlite3.connect(database)) as connection:
+                stored = connection.execute(
+                    "SELECT canonical_field, raw_token, source_cell FROM analysis_source_metadata ORDER BY rowid"
+                ).fetchall()
+        self.assertEqual(len(stored), applied["source_metadata_count"])
+        self.assertTrue(any(field == "Mineral" and raw_token not in (None, "") and source_cell for field, raw_token, source_cell in stored))
+        self.assertTrue(any(row["source_metadata"].get("Mineral") for row in projection["analyses"]))
+        self.assertTrue(all("Mineral" not in row["identity"] for row in projection["analyses"]))
+        self.assertTrue(all("Mineral" not in row["measurements"] for row in projection["analyses"]))
 
     def test_retracted_latest_import_is_preserved_but_hidden_from_active_projection(self) -> None:
         recipe = suggest_import_recipe(FIXTURE)["recipe"]
