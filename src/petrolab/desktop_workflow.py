@@ -124,12 +124,6 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
             header_row = int(block["header_row"])
             header = sheet.rows[header_row - 1]
             if _looks_like_service_preamble(header):
-                warnings.append({
-                    "code": "SERVICE_PREAMBLE_SKIPPED",
-                    "sheet_name": sheet.name,
-                    "block_id": block["block_id"],
-                    "row_number": header_row,
-                })
                 continue
             context = block.get("unit_context")
             # A block unit is evidence only when it is stated outside the column
