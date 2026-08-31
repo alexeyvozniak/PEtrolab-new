@@ -97,10 +97,23 @@ test("analyses view exposes source metadata and measurement method context", asy
   const app = await read("src/App.jsx");
   assert.match(app, /metadataColumns/);
   assert.match(app, /source_metadata/);
-  assert.match(app, /source metadata/);
-  assert.match(app, /Mineral, Generation/);
-  assert.match(app, /measurement\.method/);
   assert.match(app, /Исходное значение из файла/);
+  assert.match(app, /Сохранено без интерпретации как исходный текст/);
+  assert.match(app, /measurement\?\.method/);
+  assert.match(app, /measurement\?\.measurement_set/);
+});
+
+test("duplicate candidates require explicit keep-all review before save", async () => {
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  const review = await read("src/ImportDuplicateReview.jsx");
+  assert.match(api, /import\.recipe\.review_duplicates/);
+  assert.match(app, /reviewImportDuplicates/);
+  assert.match(app, /duplicateReviewRequired/);
+  assert.match(app, /!duplicateReviewRequired/);
+  assert.match(app, /Проверка возможных совпадений/);
+  assert.match(review, /ничего не объединяет автоматически/);
+  assert.match(review, /Проверено: оставить все записи/);
 });
 
 test("save stays blocked while block or mapping drafts are unapplied", async () => {
