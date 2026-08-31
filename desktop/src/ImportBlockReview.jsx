@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle, Eye, Warning } from "@phosphor-icons/react";
+import { previewImportWindow } from "./desktopApi";
 import "./importBlockReview.css";
+
+const PREVIEW_ROW_COUNT = 30;
+const PREVIEW_COLUMN_COUNT = 24;
 
 function stateFor(section) {
   return {
@@ -40,27 +44,80 @@ function sameState(left, right) {
     && Number(left.data_end_column || 0) === Number(right.data_end_column || 0);
 }
 
-function RawPreview({ preview, state }) {
+function previewResult(response) {
+  if (!response) throw new Error("PetroLab не получил окно предпросмотра.");
+  if (response.error) throw new Error(response.error.message || "Не удалось прочитать строки Excel.");
+  return response.result;
+}
+
+function RawPreview({ preview, state, loading, error, onNavigate }) {
+  const [jumpRow, setJumpRow] = useState(preview?.start_row || 1);
+
+  useEffect(() => {
+    if (preview?.start_row) setJumpRow(preview.start_row);
+  }, [preview?.start_row]);
+
   if (!preview) return <div className="raw-preview-loading">Предпросмотр загружается…</div>;
+
+  const totalRows = Number(preview.used_range?.rows || 0);
+  const currentCount = Math.max(1, Number(preview.end_row || 1) - Number(preview.start_row || 1) + 1);
+  const previousStart = Math.max(1, Number(preview.start_row || 1) - currentCount);
+  const nextStart = Math.min(Math.max(1, totalRows), Number(preview.end_row || 0) + 1);
+  const canGoBack = Number(preview.start_row || 1) > 1;
+  const canGoForward = Number(preview.end_row || 0) < totalRows;
+
+  const jump = () => {
+    const row = Number(jumpRow);
+    if (Number.isInteger(row) && row >= 1 && (!totalRows || row <= totalRows)) onNavigate(row, true);
+  };
+
   return (
-    <div className="raw-preview-wrap">
-      <table className="raw-preview-table">
-        <thead>
-          <tr><th className="raw-row-number">#</th>{preview.column_labels.map((label) => <th key={label}>{label}</th>)}</tr>
-        </thead>
-        <tbody>
-          {preview.rows.map((row) => {
-            const isHeader = row.row_number === Number(state.header_row);
-            const isData = row.row_number >= Number(state.data_start_row) && row.row_number <= Number(state.data_end_row);
-            return (
-              <tr key={row.row_number} className={isHeader ? "raw-header-row" : isData ? "raw-data-row" : ""}>
-                <th className="raw-row-number">{row.row_number}</th>
-                {row.values.map((value, index) => <td key={`${row.row_number}-${index}`}>{value ?? ""}</td>)}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="raw-preview-shell">
+      <div className="raw-preview-nav">
+        <div>
+          <b>Строки {preview.start_row}–{preview.end_row}</b>
+          <span>из {totalRows || "?"} · лист целиком доступен через навигацию</span>
+        </div>
+        <div className="raw-preview-nav-actions">
+          <button type="button" onClick={() => onNavigate(previousStart, false)} disabled={!canGoBack || loading}>← Выше</button>
+          <button type="button" onClick={() => onNavigate(Number(state.header_row), true)} disabled={loading || Number(state.header_row) < 1}>К заголовку</button>
+          <label>
+            <span>К строке</span>
+            <input
+              type="number"
+              min="1"
+              max={totalRows || undefined}
+              value={jumpRow}
+              onChange={(event) => setJumpRow(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") jump(); }}
+              disabled={loading}
+            />
+          </label>
+          <button type="button" onClick={jump} disabled={loading}>Перейти</button>
+          <button type="button" onClick={() => onNavigate(nextStart, false)} disabled={!canGoForward || loading}>Ниже →</button>
+        </div>
+      </div>
+      {error && <div className="raw-preview-error"><Warning size={16} weight="fill" /> {error}</div>}
+      {loading && <div className="raw-preview-loading-line">Читаю другой участок листа…</div>}
+      <div className="raw-preview-wrap">
+        <table className="raw-preview-table">
+          <thead>
+            <tr><th className="raw-row-number">#</th>{preview.column_labels.map((label) => <th key={label}>{label}</th>)}</tr>
+          </thead>
+          <tbody>
+            {preview.rows.map((row) => {
+              const isHeader = row.row_number === Number(state.header_row);
+              const isData = row.row_number >= Number(state.data_start_row) && row.row_number <= Number(state.data_end_row);
+              return (
+                <tr key={row.row_number} className={isHeader ? "raw-header-row" : isData ? "raw-data-row" : ""}>
+                  <th className="raw-row-number">{row.row_number}</th>
+                  {row.values.map((value, index) => <td key={`${row.row_number}-${index}`}>{value ?? ""}</td>)}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -69,8 +126,59 @@ function BlockCard({ section, index, preview, value, busy, onChange }) {
   const transposed = value.orientation === "columns_are_analyses";
   const context = section.unit_context;
   const invalid = invalidState(value);
+  const [livePreview, setLivePreview] = useState(preview);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [previewTarget, setPreviewTarget] = useState(null);
 
-  const set = (field, next) => onChange({ ...value, [field]: next });
+  useEffect(() => {
+    setLivePreview(preview);
+    setPreviewError("");
+  }, [preview]);
+
+  const fetchPreview = useCallback(async (row, center = true) => {
+    const sourcePath = livePreview?.source_path || preview?.source_path;
+    if (!sourcePath || !section.sheet_name) return;
+    const totalRows = Number(livePreview?.used_range?.rows || preview?.used_range?.rows || 0);
+    const requested = Math.max(1, Math.min(Number(row) || 1, totalRows || Number(row) || 1));
+    const startRow = center ? Math.max(1, requested - 4) : requested;
+    const startColumn = Number(livePreview?.start_column ?? preview?.start_column ?? 0);
+    setPreviewLoading(true);
+    setPreviewError("");
+    try {
+      const response = await previewImportWindow(
+        sourcePath,
+        section.sheet_name,
+        startRow,
+        PREVIEW_ROW_COUNT,
+        startColumn,
+        PREVIEW_COLUMN_COUNT,
+      );
+      setLivePreview(previewResult(response));
+    } catch (caught) {
+      setPreviewError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [livePreview, preview, section.sheet_name]);
+
+  useEffect(() => {
+    if (!previewTarget) return undefined;
+    const target = previewTarget;
+    const timer = window.setTimeout(() => {
+      setPreviewTarget(null);
+      fetchPreview(target, true);
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [previewTarget, fetchPreview]);
+
+  const set = (field, next) => {
+    onChange({ ...value, [field]: next });
+    if (["header_row", "data_start_row", "data_end_row"].includes(field) && Number(next) >= 1) {
+      setPreviewTarget(Number(next));
+    }
+  };
+
   return (
     <article className={`import-block-card${value.enabled ? "" : " block-disabled"}${invalid ? " block-invalid" : ""}`}>
       <div className="block-card-head">
@@ -113,7 +221,13 @@ function BlockCard({ section, index, preview, value, busy, onChange }) {
         <div className="unit-evidence"><Eye size={17} /><span>Единица из источника: <b>{context.unit}</b> · строка {context.row_number}: «{context.text}»</span></div>
       )}
       {invalid && <div className="block-error"><Warning size={17} weight="fill" /> Проверь границы блока.</div>}
-      <RawPreview preview={preview} state={value} />
+      <RawPreview
+        preview={livePreview}
+        state={value}
+        loading={previewLoading}
+        error={previewError}
+        onNavigate={fetchPreview}
+      />
     </article>
   );
 }
