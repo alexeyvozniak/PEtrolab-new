@@ -13,7 +13,65 @@ from typing import Any
 
 from .import_apply import open_project
 from .import_preview import ImportCommandError, candidate_blocks, inspect_source, semantic_fingerprint
-from .import_recognition import IRON_FIELDS, mappings_for_row_header
+from .import_recognition import IRON_FIELDS, mappings_for_column_header, mappings_for_row_header
+
+
+def _transposed_candidate(sheet: Any, block: dict[str, Any], context_unit: str | None) -> dict[str, Any] | None:
+    """Return conservative structural evidence for a column-oriented block.
+
+    Detection deliberately requires several recognizable field labels down one
+    physical column plus multiple populated Analysis labels across the header
+    row. Names of files/sheets/instruments are never used as evidence.
+    """
+    header_row = int(block["header_row"])
+    field_start = int(block["data_start_row"])
+    field_end = int(block["data_end_row"])
+    header = sheet.rows[header_row - 1]
+    max_columns = max((len(row) for row in sheet.rows), default=0)
+    if max_columns < 3:
+        return None
+
+    best: dict[str, Any] | None = None
+    # Most real transposed analytical tables keep field labels in one of the
+    # first few columns. Limiting the scan also avoids treating helper regions
+    # far to the right as a second orientation for the same block.
+    for header_column_index in range(min(max_columns, 4)):
+        mappings, mapping_warnings = mappings_for_column_header(
+            sheet.rows,
+            header_column_index + 1,
+            field_start,
+            field_end,
+            context_unit,
+        )
+        if not mappings:
+            continue
+        recognized = sum(1 for mapping in mappings if mapping.get("target_role") != "ignore")
+        unit_pending = sum(1 for warning in mapping_warnings if warning.get("code") == "UNIT_REQUIRES_REVIEW")
+        evidence_count = recognized + unit_pending
+        if evidence_count < 3 or evidence_count / len(mappings) < 0.6:
+            continue
+
+        analysis_columns = [
+            column_index
+            for column_index in range(header_column_index + 1, len(header))
+            if header[column_index] not in (None, "")
+        ]
+        if len(analysis_columns) < 2:
+            continue
+
+        candidate = {
+            "header_column": header_column_index + 1,
+            "data_start_column": min(analysis_columns) + 1,
+            "data_end_column": max(analysis_columns) + 1,
+            "analysis_column_count": len(analysis_columns),
+            "field_evidence_count": evidence_count,
+            "mappings": mappings,
+            "mapping_warnings": mapping_warnings,
+        }
+        score = (evidence_count, len(analysis_columns), -header_column_index)
+        if best is None or score > best["score"]:
+            best = {**candidate, "score": score}
+    return best
 
 
 def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
@@ -38,7 +96,51 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
             if isinstance(context, dict) and context.get("row_number") == header_row:
                 context = None
             context_unit = context.get("unit") if isinstance(context, dict) else None
-            mappings, mapping_warnings = mappings_for_row_header(header, context_unit)
+
+            transposed = _transposed_candidate(sheet, block, context_unit)
+            if transposed is not None:
+                mappings = transposed["mappings"]
+                mapping_warnings = transposed["mapping_warnings"]
+                orientation = "columns_are_analyses"
+                section: dict[str, Any] = {
+                    "sheet_name": sheet.name,
+                    "block_id": block["block_id"],
+                    "enabled": True,
+                    "orientation": orientation,
+                    "header_row": header_row,
+                    "header_column": transposed["header_column"],
+                    "data_start_row": int(block["data_start_row"]),
+                    "data_end_row": int(block["data_end_row"]),
+                    "data_start_column": transposed["data_start_column"],
+                    "data_end_column": transposed["data_end_column"],
+                    "analysis_axis_role": "Analysis",
+                    "analysis_axis_field": "Analysis",
+                    "unit_context": context,
+                    "mappings": mappings,
+                }
+                warnings.append({
+                    "code": "TRANSPOSED_TABLE_LIKELY",
+                    "sheet_name": sheet.name,
+                    "block_id": block["block_id"],
+                    "header_column": transposed["header_column"],
+                    "analysis_column_count": transposed["analysis_column_count"],
+                    "field_evidence_count": transposed["field_evidence_count"],
+                })
+            else:
+                mappings, mapping_warnings = mappings_for_row_header(header, context_unit)
+                orientation = "rows_are_analyses"
+                section = {
+                    "sheet_name": sheet.name,
+                    "block_id": block["block_id"],
+                    "enabled": True,
+                    "orientation": orientation,
+                    "header_row": header_row,
+                    "data_start_row": int(block["data_start_row"]),
+                    "data_end_row": int(block["data_end_row"]),
+                    "unit_context": context,
+                    "mappings": mappings,
+                }
+
             if not mappings:
                 warnings.append({"code": "NO_COLUMNS_DETECTED", "sheet_name": sheet.name, "block_id": block["block_id"]})
                 continue
@@ -48,17 +150,7 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
                 mapping["target_role"] == "measurement" and mapping["canonical_field"] in IRON_FIELDS
                 for mapping in mappings
             )
-            sections.append({
-                "sheet_name": sheet.name,
-                "block_id": block["block_id"],
-                "enabled": True,
-                "orientation": "rows_are_analyses",
-                "header_row": header_row,
-                "data_start_row": int(block["data_start_row"]),
-                "data_end_row": int(block["data_end_row"]),
-                "unit_context": context,
-                "mappings": mappings,
-            })
+            sections.append(section)
 
     if not sections:
         raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "No importable table blocks were detected in the selected file.")
