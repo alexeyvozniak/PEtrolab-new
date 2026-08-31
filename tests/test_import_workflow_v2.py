@@ -46,6 +46,15 @@ class ImportWorkflowV2TransportTests(unittest.TestCase):
 
     def test_latest_import_retraction_is_available_through_transport(self) -> None:
         recipe = suggest_import_recipe(FIXTURE)["recipe"]
+        reviewed = request("import.recipe.review_duplicates", {
+            "source_path": str(FIXTURE),
+            "recipe": recipe,
+            "decision": "keep_all",
+        })
+        self.assertNotIn("error", reviewed)
+        recipe = reviewed["result"]["recipe"]
+        self.assertEqual(recipe["global_decisions"]["duplicate_policy"], "keep_all")
+
         with tempfile.TemporaryDirectory() as directory:
             database = str(Path(directory) / "petrolab.sqlite")
             for _ in range(2):
