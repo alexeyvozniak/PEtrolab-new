@@ -66,7 +66,54 @@
 }
 .unit-evidence { background: #eef6f0; color: #315b45; }
 .block-error { background: #fff0ec; color: #803a31; }
-.raw-preview-wrap { overflow: auto; max-height: 300px; border-top: 1px solid #e5e9e6; }
+.raw-preview-shell { border-top: 1px solid #e5e9e6; background: #fff; }
+.raw-preview-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  background: #f8faf8;
+  border-bottom: 1px solid #e5e9e6;
+}
+.raw-preview-nav > div:first-child { display: grid; gap: 1px; min-width: 150px; }
+.raw-preview-nav > div:first-child b { font-size: 11px; color: #36463e; }
+.raw-preview-nav > div:first-child span { font-size: 10px; color: #77837d; }
+.raw-preview-nav-actions { display: flex; align-items: end; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+.raw-preview-nav-actions button {
+  min-height: 30px;
+  border: 1px solid #cfd6d0;
+  border-radius: 7px;
+  padding: 0 9px;
+  background: #fff;
+  color: #36463e;
+  font-size: 10px;
+  cursor: pointer;
+}
+.raw-preview-nav-actions button:disabled { opacity: .45; cursor: default; }
+.raw-preview-nav-actions label { display: grid; gap: 2px; }
+.raw-preview-nav-actions label span { font-size: 9px; color: #758079; }
+.raw-preview-nav-actions input {
+  width: 76px;
+  min-height: 30px;
+  border: 1px solid #cfd6d0;
+  border-radius: 7px;
+  padding: 0 7px;
+  background: #fff;
+  color: #29332e;
+}
+.raw-preview-error,
+.raw-preview-loading-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 10px;
+  border-bottom: 1px solid #e7ebe8;
+}
+.raw-preview-error { color: #803a31; background: #fff0ec; }
+.raw-preview-loading-line { color: #466153; background: #f0f7f2; }
+.raw-preview-wrap { overflow: auto; max-height: 360px; }
 .raw-preview-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 10px; }
 .raw-preview-table th,
 .raw-preview-table td { border-right: 1px solid #edf0ee; border-bottom: 1px solid #edf0ee; padding: 5px 7px; min-width: 74px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -80,4 +127,6 @@
 
 @media (max-width: 1450px) {
   .block-controls { grid-template-columns: repeat(2, minmax(160px, 1fr)); }
+  .raw-preview-nav { align-items: flex-start; flex-direction: column; }
+  .raw-preview-nav-actions { justify-content: flex-start; }
 }
