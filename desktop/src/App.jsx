@@ -187,9 +187,12 @@ export function App() {
   const visibleRecipeWarnings = useMemo(() => {
     if (!recipe) return recipeWarnings;
     return recipeWarnings.filter((warning) => {
-      if (warning.code !== "UNIT_REQUIRES_REVIEW") return true;
       const section = recipe.sections.find((item) => item.block_id === warning.block_id)
         || recipe.sections.find((item) => item.sheet_name === warning.sheet_name);
+      if (warning.code === "TRANSPOSED_TABLE_LIKELY") {
+        return Boolean(section && section.enabled !== false && section.orientation === "columns_are_analyses");
+      }
+      if (warning.code !== "UNIT_REQUIRES_REVIEW") return true;
       if (!section || section.enabled === false) return false;
       const axis = warning.source_axis || "column";
       const index = axis === "column" ? warning.source_column_index : warning.source_row_index;
