@@ -61,6 +61,8 @@ test("raw block review precedes field mapping and supports transposed orientatio
   assert.match(app, /blockDraftDirty/);
   assert.match(app, /1\. Где находятся данные/);
   assert.match(app, /2\. Что означают поля/);
+  assert.match(app, /TRANSPOSED_TABLE_LIKELY/);
+  assert.match(app, /Похоже, анализы расположены по столбцам/);
   assert.match(review, /По столбцам \(инвертировано\)/);
   assert.match(review, /Применить структуру/);
   assert.match(review, /Единица из источника/);
@@ -93,7 +95,7 @@ test("mapping edits are applied once in bulk per logical block", async () => {
   assert.doesNotMatch(editor, />Применить<\/button>/);
 });
 
-test("analyses view exposes source metadata and measurement method context", async () => {
+test("analyses view exposes source metadata, method context and truthful physical origin", async () => {
   const app = await read("src/App.jsx");
   assert.match(app, /metadataColumns/);
   assert.match(app, /source_metadata/);
@@ -101,6 +103,10 @@ test("analyses view exposes source metadata and measurement method context", asy
   assert.match(app, /Сохранено без интерпретации как исходный текст/);
   assert.match(app, /measurement\?\.method/);
   assert.match(app, /measurement\?\.measurement_set/);
+  assert.match(app, /savedAnalysisOrigin/);
+  assert.match(app, /source_orientation === "columns_are_analyses"/);
+  assert.match(app, /source_column_number/);
+  assert.match(app, /Источник в файле/);
 });
 
 test("duplicate candidates require explicit keep-all review before save", async () => {
