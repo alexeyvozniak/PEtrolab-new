@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from petrolab.desktop_workflow import suggest_import_recipe  # noqa: E402
+from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe  # noqa: E402
+from petrolab.import_apply import apply_import_plan  # noqa: E402
 from petrolab.import_preview import create_import_plan, inspect_source  # noqa: E402
 from real_world_fixtures import long_preamble_weight_percent, repeated_headers, transposed_weight_percent  # noqa: E402
 
@@ -36,6 +37,25 @@ class TransposedOrientationSuggestionTests(unittest.TestCase):
             self.assertEqual(plan["summary"]["planned_measurement_count"], 6)
             self.assertEqual(plan["planned_records"][0]["identity"], ("A-1",))
             self.assertEqual(plan["planned_records"][0]["measurements"][0]["source_cell"], "B3")
+
+    def test_saved_projection_keeps_column_origin_for_transposed_analyses(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            source = transposed_weight_percent(directory / "transposed.xlsx")
+            recipe = suggest_import_recipe(source)["recipe"]
+            database = directory / "project.sqlite"
+
+            applied = apply_import_plan(database, source, recipe)
+            projection = list_project_analyses(database)
+
+            self.assertEqual(applied["analysis_count"], 2)
+            self.assertEqual(projection["total"], 2)
+            origins = {
+                (analysis["source_orientation"], analysis["source_column_number"], analysis["source_row_number"])
+                for analysis in projection["analyses"]
+            }
+            self.assertEqual(origins, {("columns_are_analyses", 2, 2), ("columns_are_analyses", 3, 2)})
+            self.assertEqual({analysis["identity"]["Analysis"] for analysis in projection["analyses"]}, {"A-1", "A-2"})
 
     def test_ordinary_row_table_is_not_falsely_transposed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
