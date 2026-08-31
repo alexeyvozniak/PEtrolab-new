@@ -27,9 +27,13 @@ Each section owns:
 - mappings;
 - explicit unit/method context when present.
 
-### 2. Python core owns block detection and normalization
+### 2. Python core owns block detection and bounded raw-source windows
 
 Python inspection detects candidate blocks and serves bounded raw previews. React only edits explicit block/mapping decisions and renders projections.
+
+A raw preview window is a view onto the full physical worksheet used range. It is not part of the recipe and has no semantic effect. Desktop may request another window at any row at any time, including while block-boundary edits are still only a local draft. This lets the UI page/jump/recentre without applying a recipe revision.
+
+The service returns physical row numbers, column labels and used-range bounds. React never loads the entire large workbook merely to make a scrollable preview; it requests bounded windows lazily. Navigation state therefore belongs to presentation state, while workbook parsing remains Python-owned.
 
 Tauri remains a file/process boundary and does not parse workbook semantics.
 
@@ -53,9 +57,11 @@ For transposed blocks, Python creates a logical transposed view in memory for va
 
 Row number + source column name is insufficient for orientation-normalized planning. New import plans expose physical `source_row_number`, `source_column_index` and source header for every value. Persistence may keep legacy row fields for compatibility, but no new feature may rely on logical position as physical provenance.
 
-### 6. Repeated headers are structure, not data
+### 6. Repeated headers and instrument preambles are structure, not data
 
 A row/column whose normalized header signature equals the active block header is skipped as structural content. Detection should normally split such content into multiple blocks, but planning has the same guard for manually widened ranges.
+
+Instrument/service preambles (for example `Sample: ...`, `Type: ...`, `Processing option: ...`, standalone unit-context rows) do not become logical analytical blocks merely because they contain a known keyword. A candidate header must have multi-field header evidence and data-like rows beneath it. Preamble rows may still provide explicit context (such as units) to the actual analytical block that follows.
 
 ### 7. Units from source context are explicit evidence
 
@@ -84,9 +90,11 @@ Complementary records with the same identity but different measurement subsets a
 ## Consequences
 
 - `import.inspect_source` remains lightweight; raw windows are fetched with a dedicated preview command.
+- raw preview navigation can move to any row without creating recipe revisions or reparsing workbook semantics in React.
 - import recipe schema advances for block/orientation decisions while old recipe revisions remain immutable.
 - tests generate anonymized synthetic workbooks that reproduce real layouts instead of committing user scientific data.
 - automatic orientation suggestion is regression-tested against both a clearly transposed workbook and an ordinary workbook that must remain row-oriented.
+- instrument preamble rows must be regression-tested against false block detection.
 - native BIFF `.xls` parsing is not introduced by this ADR. `.xls` must be identified distinctly and reported honestly until a reviewed reader/conversion strategy is implemented.
 - source `Mineral` / `Generation` can be displayed after import because persistence is now lossless, but the UI must label them as source values rather than controlled assignments.
 - save readiness depends on duplicate review when duplicate candidates are present.
@@ -95,6 +103,9 @@ Complementary records with the same identity but different measurement subsets a
 
 ### One worksheet = one table
 Rejected because it already fails on repeated headers, instrument preambles and multiple composition blocks.
+
+### Load the complete workbook into React for scrolling
+Rejected because workbook parsing belongs to Python, large workbooks would create unnecessary UI memory/serialization cost, and view navigation does not need to become application semantics.
 
 ### Transpose source files before import
 Rejected because it mutates/creates a derived source representation that can obscure physical provenance and complicate reproducibility.
