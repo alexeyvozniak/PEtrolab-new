@@ -190,7 +190,8 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                 WHERE {active_filter}"""
         ).fetchone()[0]
         rows = connection.execute(
-            f"""SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number, a.block_id,
+            f"""SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number,
+                       a.source_column_number, a.source_orientation, a.block_id,
                        a.identity_json, a.created_at, s.display_name AS source_name, r.recipe_json
                 FROM analysis a
                 JOIN source_file s ON s.source_id = a.source_id
@@ -198,7 +199,7 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                 JOIN import_recipe_revision r ON r.recipe_revision_id = b.recipe_revision_id
                 LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
                 WHERE {active_filter}
-                ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number
+                ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number, a.source_column_number
                 LIMIT ?""",
             (limit,),
         ).fetchall()
@@ -287,6 +288,8 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                 "source_name": row["source_name"],
                 "sheet_name": row["sheet_name"],
                 "source_row_number": row["source_row_number"],
+                "source_column_number": row["source_column_number"],
+                "source_orientation": row["source_orientation"] or "rows_are_analyses",
                 "identity": identity,
                 "source_metadata": source_metadata,
                 "source_metadata_list": source_metadata_list,
