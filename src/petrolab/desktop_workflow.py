@@ -16,6 +16,40 @@ from .import_preview import ImportCommandError, candidate_blocks, inspect_source
 from .import_recognition import IRON_FIELDS, mappings_for_column_header, mappings_for_row_header
 
 
+SERVICE_PREAMBLE_PREFIXES = (
+    "project:",
+    "owner:",
+    "site:",
+    "sample:",
+    "type:",
+    "id:",
+    "processing option:",
+    "processing option :",
+)
+
+
+def _meaningful_row_values(row: Any) -> list[str]:
+    return [str(value).strip() for value in row if value is not None and str(value).strip()]
+
+
+def _looks_like_service_preamble(row: Any) -> bool:
+    """Keep instrument metadata/context rows out of logical table sections.
+
+    This is intentionally narrow. Ordinary headers such as `Sample | SiO2`
+    remain eligible; only label/value preamble syntax and standalone unit
+    context phrases are rejected here.
+    """
+    values = _meaningful_row_values(row)
+    if not values:
+        return False
+    first = values[0].lower()
+    if first.startswith("all results in"):
+        return len(values) <= 2
+    if len(values) <= 2 and any(first.startswith(prefix) for prefix in SERVICE_PREAMBLE_PREFIXES):
+        return True
+    return False
+
+
 def _transposed_candidate(sheet: Any, block: dict[str, Any], context_unit: str | None) -> dict[str, Any] | None:
     """Return conservative structural evidence for a column-oriented block.
 
@@ -89,6 +123,8 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
         for block in blocks:
             header_row = int(block["header_row"])
             header = sheet.rows[header_row - 1]
+            if _looks_like_service_preamble(header):
+                continue
             context = block.get("unit_context")
             # A block unit is evidence only when it is stated outside the column
             # header itself. Mixed column headers such as Li (ppm) + F (unknown)

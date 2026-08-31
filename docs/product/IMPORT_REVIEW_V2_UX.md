@@ -29,6 +29,23 @@ The UI is a review surface. Scientific/import semantics remain in Python.
 - If confidence is insufficient, the default remains row-oriented; orientation is never guessed merely from a file name or instrument name.
 - Raw preview must precede semantic mapping.
 - Repeated headers must never silently become Analysis rows.
+- Instrument/service preambles such as `Sample: ...`, `Type: ...`, `Processing option: ...` and standalone unit-context rows are context, not standalone analytical blocks unless they satisfy the same multi-field/data evidence as a real table header.
+
+## Raw source navigation
+
+The raw Excel preview is a window onto the **whole used range of the worksheet**, not a decorative fixed 12-row snippet.
+
+For every logical block:
+
+- the user can move the preview backward/forward through the sheet without applying the block first;
+- the user can jump directly to an arbitrary source row;
+- editing `Строка заголовка`, `Первая строка данных` or the corresponding transposed bounds recentres the preview around that row automatically;
+- the preview clearly shows which physical rows are currently loaded and the total used row count;
+- horizontal scrolling remains available for wide analytical tables;
+- navigation changes only what is displayed; it must never alter the recipe or source data;
+- bounded windows are fetched lazily from Python so large workbooks are not copied into React memory wholesale.
+
+A user must never need to know a hidden implementation window size in order to reach the actual analytical header.
 
 ## Source metadata
 
@@ -73,6 +90,9 @@ Choosing a bad replacement file must not destroy the current valid review state.
 The regression matrix must cover at least:
 
 - long preambles and unit context rows;
+- service metadata rows before an instrument header must not become separate logical blocks;
+- raw preview navigation beyond the initial window and direct jump to a later row;
+- changing a draft header/data-row field recentres preview without applying the recipe;
 - repeated headers;
 - several logical tables on one sheet;
 - transposed tables, including conservative automatic orientation suggestion and manual override;
