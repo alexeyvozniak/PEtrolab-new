@@ -1,182 +1,162 @@
-"""Desktop-facing application services for the first live PetroLab vertical slice.
+"""Desktop-facing application services for the live PetroLab import slice.
 
-This module keeps import recognition and SQLite projections in Python so React
-remains a presentation layer. Automatic recognition stays conservative about
-units, while also returning enough structured review information for the UI to
-make likely chemistry columns easy to confirm in bulk.
+Python owns structural recognition and project projections. The UI receives
+logical blocks and explicit review warnings; it does not infer import semantics.
 """
 
 from __future__ import annotations
 
 import json
-import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from .import_apply import open_project
-from .import_preview import ImportCommandError, inspect_source, semantic_fingerprint
+from .import_preview import ImportCommandError, candidate_blocks, inspect_source, semantic_fingerprint
+from .import_recognition import IRON_FIELDS, mappings_for_column_header, mappings_for_row_header
 
 
-IDENTITY_FIELDS = {
-    "analysis": "Analysis",
-    "анализ": "Analysis",
-    "sample": "Sample",
-    "sampleid": "Sample",
-    "образец": "Sample",
-    "образецid": "Sample",
-    "point": "Point",
-    "spot": "Point",
-    "точка": "Point",
-}
+def _transposed_candidate(sheet: Any, block: dict[str, Any], context_unit: str | None) -> dict[str, Any] | None:
+    """Return conservative structural evidence for a column-oriented block.
 
-METADATA_FIELDS = {
-    "mineral": "Mineral",
-    "минерал": "Mineral",
-}
+    Detection deliberately requires several recognizable field labels down one
+    physical column plus multiple populated Analysis labels across the header
+    row. Names of files/sheets/instruments are never used as evidence.
+    """
+    header_row = int(block["header_row"])
+    field_start = int(block["data_start_row"])
+    field_end = int(block["data_end_row"])
+    header = sheet.rows[header_row - 1]
+    max_columns = max((len(row) for row in sheet.rows), default=0)
+    if max_columns < 3:
+        return None
 
-MEASUREMENT_FIELDS = {
-    "sio2": "SiO2", "tio2": "TiO2", "al2o3": "Al2O3", "feo": "FeO", "feot": "FeOt",
-    "fe2o3": "Fe2O3", "fe2o3t": "Fe2O3t", "mno": "MnO", "mgo": "MgO", "cao": "CaO",
-    "na2o": "Na2O", "k2o": "K2O", "p2o5": "P2O5", "cr2o3": "Cr2O3", "nio": "NiO",
-    "f": "F", "cl": "Cl", "li": "Li", "rb": "Rb", "ba": "Ba", "sr": "Sr", "ni": "Ni",
-    "cr": "Cr", "co": "Co", "sc": "Sc", "v": "V", "cu": "Cu", "zn": "Zn", "ga": "Ga",
-    "y": "Y", "zr": "Zr", "nb": "Nb", "mo": "Mo", "cs": "Cs", "la": "La", "ce": "Ce",
-    "pr": "Pr", "nd": "Nd", "sm": "Sm", "eu": "Eu", "gd": "Gd", "tb": "Tb", "dy": "Dy",
-    "ho": "Ho", "er": "Er", "tm": "Tm", "yb": "Yb", "lu": "Lu", "hf": "Hf", "ta": "Ta",
-    "w": "W", "pb": "Pb", "th": "Th", "u": "U",
-}
+    best: dict[str, Any] | None = None
+    # Most real transposed analytical tables keep field labels in one of the
+    # first few columns. Limiting the scan also avoids treating helper regions
+    # far to the right as a second orientation for the same block.
+    for header_column_index in range(min(max_columns, 4)):
+        mappings, mapping_warnings = mappings_for_column_header(
+            sheet.rows,
+            header_column_index + 1,
+            field_start,
+            field_end,
+            context_unit,
+        )
+        if not mappings:
+            continue
+        recognized = sum(1 for mapping in mappings if mapping.get("target_role") != "ignore")
+        unit_pending = sum(1 for warning in mapping_warnings if warning.get("code") == "UNIT_REQUIRES_REVIEW")
+        evidence_count = recognized + unit_pending
+        if evidence_count < 3 or evidence_count / len(mappings) < 0.6:
+            continue
 
-IRON_FIELDS = {"FeO", "FeOt", "Fe2O3", "Fe2O3t"}
+        analysis_columns = [
+            column_index
+            for column_index in range(header_column_index + 1, len(header))
+            if header[column_index] not in (None, "")
+        ]
+        if len(analysis_columns) < 2:
+            continue
 
-
-def _normalized(value: str | None) -> str:
-    if not value:
-        return ""
-    value = value.lower().replace("₂", "2").replace("₃", "3")
-    return "".join(character for character in value if character.isalnum())
-
-
-def _field_token(header: str) -> str:
-    text = header.strip()
-    text = re.sub(r"\([^)]*\)", "", text)
-    text = re.split(r"\s+", text, maxsplit=1)[0]
-    return _normalized(text)
-
-
-def _unit_from_header(header: str) -> str | None:
-    lowered = header.lower().replace(" ", "")
-    if "ppm" in lowered or "мкг/г" in lowered:
-        return "ppm"
-    if "ppb" in lowered:
-        return "ppb"
-    if "apfu" in lowered or "а.е.ф." in lowered:
-        return "apfu"
-    if "mol%" in lowered or "мол.%" in lowered or "мол%" in lowered:
-        return "mol%"
-    if "wt.%" in lowered or "wt%" in lowered or "mass%" in lowered or "мас.%" in lowered or "мас%" in lowered:
-        return "wt.%"
-    if "%" in lowered:
-        return "wt.%"
-    return None
-
-
-def _mapping_for_header(column: int, header: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    normalized = _normalized(header)
-    field_token = _field_token(header)
-    identity = IDENTITY_FIELDS.get(normalized) or IDENTITY_FIELDS.get(field_token)
-    if identity:
-        return ({
-            "source_column_index": column,
-            "source_header": header,
-            "target_role": "identity",
-            "canonical_field": identity,
-            "unit": None,
-            "measurement_semantics": "identity",
-        }, None)
-    metadata = METADATA_FIELDS.get(normalized) or METADATA_FIELDS.get(field_token)
-    if metadata:
-        return ({
-            "source_column_index": column,
-            "source_header": header,
-            "target_role": "metadata",
-            "canonical_field": metadata,
-            "unit": None,
-            "measurement_semantics": "metadata",
-        }, None)
-    measurement = MEASUREMENT_FIELDS.get(field_token)
-    if measurement:
-        unit = _unit_from_header(header)
-        if unit:
-            return ({
-                "source_column_index": column,
-                "source_header": header,
-                "target_role": "measurement",
-                "canonical_field": measurement,
-                "unit": unit,
-                "measurement_semantics": "measured",
-            }, None)
-        return ({
-            "source_column_index": column,
-            "source_header": header,
-            "target_role": "ignore",
-            "canonical_field": header,
-            "unit": None,
-            "measurement_semantics": "ignored",
-        }, {
-            "code": "UNIT_REQUIRES_REVIEW",
-            "source_header": header,
-            "source_column_index": column,
-            "canonical_field": measurement,
-        })
-    return ({
-        "source_column_index": column,
-        "source_header": header,
-        "target_role": "ignore",
-        "canonical_field": header,
-        "unit": None,
-        "measurement_semantics": "ignored",
-    }, None)
+        candidate = {
+            "header_column": header_column_index + 1,
+            "data_start_column": min(analysis_columns) + 1,
+            "data_end_column": max(analysis_columns) + 1,
+            "analysis_column_count": len(analysis_columns),
+            "field_evidence_count": evidence_count,
+            "mappings": mappings,
+            "mapping_warnings": mapping_warnings,
+        }
+        score = (evidence_count, len(analysis_columns), -header_column_index)
+        if best is None or score > best["score"]:
+            best = {**candidate, "score": score}
+    return best
 
 
 def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
-    """Create a conservative, immediately inspectable recipe for a real source."""
+    """Create a conservative block-based recipe from a real source."""
     inspection = inspect_source(source_path)
     sections: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = list(inspection.projection()["warnings"])
     mapped_iron = False
 
     for sheet in inspection.sheets:
-        if not sheet.header_rows:
+        blocks = candidate_blocks(sheet)
+        if not blocks:
             warnings.append({"code": "HEADER_NOT_DETECTED", "sheet_name": sheet.name})
             continue
-        header_row = sheet.header_rows[0]
-        header = sheet.rows[header_row - 1]
-        mappings: list[dict[str, Any]] = []
-        for column, raw_header in enumerate(header):
-            if raw_header in (None, ""):
+        for block in blocks:
+            header_row = int(block["header_row"])
+            header = sheet.rows[header_row - 1]
+            context = block.get("unit_context")
+            # A block unit is evidence only when it is stated outside the column
+            # header itself. Mixed column headers such as Li (ppm) + F (unknown)
+            # must not leak ppm into F.
+            if isinstance(context, dict) and context.get("row_number") == header_row:
+                context = None
+            context_unit = context.get("unit") if isinstance(context, dict) else None
+
+            transposed = _transposed_candidate(sheet, block, context_unit)
+            if transposed is not None:
+                mappings = transposed["mappings"]
+                mapping_warnings = transposed["mapping_warnings"]
+                orientation = "columns_are_analyses"
+                section: dict[str, Any] = {
+                    "sheet_name": sheet.name,
+                    "block_id": block["block_id"],
+                    "enabled": True,
+                    "orientation": orientation,
+                    "header_row": header_row,
+                    "header_column": transposed["header_column"],
+                    "data_start_row": int(block["data_start_row"]),
+                    "data_end_row": int(block["data_end_row"]),
+                    "data_start_column": transposed["data_start_column"],
+                    "data_end_column": transposed["data_end_column"],
+                    "analysis_axis_role": "Analysis",
+                    "analysis_axis_field": "Analysis",
+                    "unit_context": context,
+                    "mappings": mappings,
+                }
+                warnings.append({
+                    "code": "TRANSPOSED_TABLE_LIKELY",
+                    "sheet_name": sheet.name,
+                    "block_id": block["block_id"],
+                    "header_column": transposed["header_column"],
+                    "analysis_column_count": transposed["analysis_column_count"],
+                    "field_evidence_count": transposed["field_evidence_count"],
+                })
+            else:
+                mappings, mapping_warnings = mappings_for_row_header(header, context_unit)
+                orientation = "rows_are_analyses"
+                section = {
+                    "sheet_name": sheet.name,
+                    "block_id": block["block_id"],
+                    "enabled": True,
+                    "orientation": orientation,
+                    "header_row": header_row,
+                    "data_start_row": int(block["data_start_row"]),
+                    "data_end_row": int(block["data_end_row"]),
+                    "unit_context": context,
+                    "mappings": mappings,
+                }
+
+            if not mappings:
+                warnings.append({"code": "NO_COLUMNS_DETECTED", "sheet_name": sheet.name, "block_id": block["block_id"]})
                 continue
-            mapping, warning = _mapping_for_header(column, str(raw_header))
-            mappings.append(mapping)
-            if warning:
-                warnings.append({"sheet_name": sheet.name, **warning})
-            mapped_iron = mapped_iron or (mapping["target_role"] == "measurement" and mapping["canonical_field"] in IRON_FIELDS)
-        if not mappings:
-            warnings.append({"code": "NO_COLUMNS_DETECTED", "sheet_name": sheet.name})
-            continue
-        sections.append({
-            "sheet_name": sheet.name,
-            "block_id": f"{sheet.name}:{header_row}",
-            "header_row": header_row,
-            "data_start_row": header_row + 1,
-            "data_end_row": len(sheet.rows),
-            "mappings": mappings,
-        })
+            for warning in mapping_warnings:
+                warnings.append({"sheet_name": sheet.name, "block_id": block["block_id"], **warning})
+            mapped_iron = mapped_iron or any(
+                mapping["target_role"] == "measurement" and mapping["canonical_field"] in IRON_FIELDS
+                for mapping in mappings
+            )
+            sections.append(section)
 
     if not sections:
-        raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "No importable table headers were detected in the selected file.")
+        raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "No importable table blocks were detected in the selected file.")
 
     recipe: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "source_file_sha256": inspection.fingerprint,
         "source_format": inspection.source_format,
         "ownership_mode": "managed_copy",
@@ -192,12 +172,16 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
     return {"recipe": recipe, "warnings": warnings}
 
 
+def _active_import_filter() -> str:
+    return "b.status = 'applied' AND x.import_batch_id IS NULL"
+
+
 def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[str, Any]:
-    """Return active Analysis/Measurement rows plus latest-import metadata."""
+    """Return active Analysis/Measurement rows plus lossless source metadata."""
     limit = max(1, min(int(limit), 2000))
     connection = open_project(database_path)
     try:
-        active_filter = "b.status = 'applied' AND x.import_batch_id IS NULL"
+        active_filter = _active_import_filter()
         total = connection.execute(
             f"""SELECT COUNT(*)
                 FROM analysis a
@@ -206,16 +190,16 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                 WHERE {active_filter}"""
         ).fetchone()[0]
         rows = connection.execute(
-            f"""SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number, a.block_id,
-                       a.identity_json, a.created_at, s.display_name AS source_name,
-                       r.recipe_json
+            f"""SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number,
+                       a.source_column_number, a.source_orientation, a.block_id,
+                       a.identity_json, a.created_at, s.display_name AS source_name, r.recipe_json
                 FROM analysis a
                 JOIN source_file s ON s.source_id = a.source_id
                 JOIN import_batch b ON b.import_batch_id = a.import_batch_id
                 JOIN import_recipe_revision r ON r.recipe_revision_id = b.recipe_revision_id
                 LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
                 WHERE {active_filter}
-                ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number
+                ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number, a.source_column_number
                 LIMIT ?""",
             (limit,),
         ).fetchall()
@@ -225,38 +209,92 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
             recipe = json.loads(row["recipe_json"])
             identity_names: list[str] = []
             for section in recipe.get("sections", []):
-                if section.get("sheet_name") == row["sheet_name"] and section.get("block_id") == row["block_id"]:
-                    identity_names = [
-                        mapping.get("canonical_field") or mapping.get("source_header")
-                        for mapping in section.get("mappings", [])
-                        if mapping.get("target_role") == "identity"
-                    ]
-                    break
+                if section.get("sheet_name") != row["sheet_name"] or section.get("block_id") != row["block_id"]:
+                    continue
+                if section.get("orientation", "rows_are_analyses") == "columns_are_analyses" and section.get("analysis_axis_role", "Analysis") != "Ignore":
+                    identity_names.append(section.get("analysis_axis_field") or "Analysis")
+                identity_names.extend(
+                    mapping.get("canonical_field") or mapping.get("source_header")
+                    for mapping in section.get("mappings", [])
+                    if mapping.get("target_role") == "identity"
+                )
+                break
             identity = {
                 str(name): identity_values[index] if index < len(identity_values) else ""
                 for index, name in enumerate(identity_names)
             }
-            measurements = connection.execute(
-                """SELECT canonical_field, unit, raw_token, qualifier, detection_limit
-                   FROM measurement WHERE analysis_id = ? ORDER BY source_column_index""",
+            source_metadata_rows = connection.execute(
+                """SELECT canonical_field, raw_token, source_header, source_row_number,
+                          source_column_index, source_cell
+                   FROM analysis_source_metadata
+                   WHERE analysis_id = ? ORDER BY source_column_index, rowid""",
                 (row["analysis_id"],),
             ).fetchall()
+            source_metadata_list = [
+                {
+                    "field": metadata["canonical_field"],
+                    "raw_token": metadata["raw_token"],
+                    "source_header": metadata["source_header"],
+                    "source_row_number": metadata["source_row_number"],
+                    "source_column_index": metadata["source_column_index"],
+                    "source_cell": metadata["source_cell"],
+                }
+                for metadata in source_metadata_rows
+            ]
+            source_metadata: dict[str, Any] = {}
+            for metadata in source_metadata_list:
+                field = metadata["field"]
+                key = field if field not in source_metadata else f"{field} · {metadata['source_header']}"
+                source_metadata[key] = metadata["raw_token"]
+
+            measurement_rows = connection.execute(
+                """SELECT canonical_field, unit, raw_token, qualifier, detection_limit,
+                          source_column_name, source_column_index, measurement_set, method, source_cell
+                   FROM measurement WHERE analysis_id = ? ORDER BY source_column_index, rowid""",
+                (row["analysis_id"],),
+            ).fetchall()
+            measurement_list = [
+                {
+                    "field": measurement["canonical_field"],
+                    "raw_token": measurement["raw_token"],
+                    "unit": measurement["unit"],
+                    "qualifier": measurement["qualifier"],
+                    "detection_limit": measurement["detection_limit"],
+                    "source_header": measurement["source_column_name"],
+                    "source_index": measurement["source_column_index"],
+                    "source_cell": measurement["source_cell"],
+                    "measurement_set": measurement["measurement_set"],
+                    "method": measurement["method"],
+                }
+                for measurement in measurement_rows
+            ]
+            totals = Counter(item["field"] for item in measurement_list)
+            seen: Counter[str] = Counter()
+            measurement_map: dict[str, dict[str, Any]] = {}
+            for measurement in measurement_list:
+                field = measurement["field"]
+                seen[field] += 1
+                if totals[field] == 1:
+                    key = field
+                else:
+                    context = measurement.get("measurement_set") or measurement.get("method") or measurement["source_header"]
+                    key = f"{field} · {context}"
+                    if key in measurement_map:
+                        key = f"{key} [{seen[field]}]"
+                measurement_map[key] = measurement
             result.append({
                 "analysis_id": row["analysis_id"],
                 "source_id": row["source_id"],
                 "source_name": row["source_name"],
                 "sheet_name": row["sheet_name"],
                 "source_row_number": row["source_row_number"],
+                "source_column_number": row["source_column_number"],
+                "source_orientation": row["source_orientation"] or "rows_are_analyses",
                 "identity": identity,
-                "measurements": {
-                    measurement["canonical_field"]: {
-                        "raw_token": measurement["raw_token"],
-                        "unit": measurement["unit"],
-                        "qualifier": measurement["qualifier"],
-                        "detection_limit": measurement["detection_limit"],
-                    }
-                    for measurement in measurements
-                },
+                "source_metadata": source_metadata,
+                "source_metadata_list": source_metadata_list,
+                "measurements": measurement_map,
+                "measurement_list": measurement_list,
                 "created_at": row["created_at"],
             })
 

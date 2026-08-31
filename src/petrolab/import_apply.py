@@ -1,7 +1,8 @@
-"""M1.2 atomic application of a validated import plan to local SQLite."""
+"""Atomic application of a validated import plan to local SQLite."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import shutil
@@ -23,6 +24,121 @@ def _now() -> str:
 
 def _id() -> str:
     return str(uuid.uuid4())
+
+
+def _column_letters(index: int) -> str:
+    value = index + 1
+    result = ""
+    while value:
+        value, remainder = divmod(value - 1, 26)
+        result = chr(ord("A") + remainder) + result
+    return result
+
+
+def _cell_value(row: tuple[str | None, ...], index: int) -> str | None:
+    return row[index] if 0 <= index < len(row) else None
+
+
+def _duplicate_groups(plan: dict[str, Any]) -> list[list[str]]:
+    for warning in plan.get("warnings", []):
+        if warning.get("code") == "DUPLICATE_CANDIDATES" and isinstance(warning.get("preview_ids"), list):
+            return [list(group) for group in warning["preview_ids"] if isinstance(group, list)]
+    return []
+
+
+def _duplicate_groups_fingerprint(groups: list[list[str]]) -> str:
+    canonical_groups = sorted(sorted(str(item) for item in group) for group in groups)
+    payload = json.dumps(canonical_groups, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _require_duplicate_review(plan: dict[str, Any], recipe: dict[str, Any]) -> None:
+    groups = _duplicate_groups(plan)
+    if not groups:
+        return
+    decisions = recipe.get("global_decisions") or {}
+    policy = decisions.get("duplicate_policy")
+    if policy == "skip_exact_after_review":
+        raise ImportCommandError(
+            "DUPLICATE_POLICY_NOT_IMPLEMENTED",
+            "Skipping duplicate rows is not implemented in this import version; no records were written.",
+        )
+    if policy != "keep_all":
+        raise ImportCommandError(
+            "DUPLICATE_REVIEW_REQUIRED",
+            "Duplicate candidates must be reviewed before this import can be saved.",
+            {"candidate_group_count": len(groups)},
+        )
+    # Recipe schema v1 predates persisted duplicate-review evidence. Preserve
+    # compatibility for immutable old recipes, but v2 must carry proof that the
+    # keep-all decision was made against these exact candidate groups.
+    if int(recipe.get("schema_version", 1)) < 2:
+        return
+    review = decisions.get("duplicate_review")
+    expected = _duplicate_groups_fingerprint(groups)
+    if not isinstance(review, dict) or review.get("decision") != "keep_all" or review.get("groups_fingerprint_sha256") != expected:
+        raise ImportCommandError(
+            "DUPLICATE_REVIEW_REQUIRED",
+            "The saved duplicate review does not match the current import plan.",
+            {"candidate_group_count": len(groups)},
+        )
+
+
+def _section_for_record(recipe: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+    for section in recipe.get("sections", []):
+        if section.get("sheet_name") == record.get("sheet_name") and section.get("block_id") == record.get("block_id"):
+            return section
+    raise ImportCommandError(
+        "RECIPE_SCHEMA_INCOMPATIBLE",
+        "Planned record no longer resolves to its logical block.",
+        {"sheet_name": record.get("sheet_name"), "block_id": record.get("block_id")},
+    )
+
+
+def _source_metadata_for_record(inspection: Any, recipe: dict[str, Any], record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read source metadata losslessly without promoting it to controlled entities."""
+    section = _section_for_record(recipe, record)
+    sheet = next((item for item in inspection.sheets if item.name == record["sheet_name"]), None)
+    if sheet is None:
+        raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Planned record sheet is unavailable.")
+    mappings = [item for item in section.get("mappings", []) if item.get("target_role") == "metadata"]
+    orientation = record.get("orientation", "rows_are_analyses")
+    result: list[dict[str, Any]] = []
+    if orientation == "rows_are_analyses":
+        row_number = int(record["row_number"])
+        row = sheet.rows[row_number - 1]
+        for mapping in mappings:
+            column_index = mapping.get("source_column_index")
+            if not isinstance(column_index, int) or column_index < 0:
+                continue
+            result.append({
+                "canonical_field": mapping.get("canonical_field") or mapping.get("source_header") or "Metadata",
+                "raw_token": _cell_value(row, column_index),
+                "source_header": str(mapping.get("source_header") or ""),
+                "source_row_number": row_number,
+                "source_column_index": column_index,
+                "source_cell": f"{_column_letters(column_index)}{row_number}",
+            })
+        return result
+
+    source_column_number = record.get("source_column_number")
+    if not isinstance(source_column_number, int) or source_column_number < 1:
+        raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Transposed record has no physical source column.")
+    column_index = source_column_number - 1
+    for mapping in mappings:
+        row_index = mapping.get("source_row_index")
+        if not isinstance(row_index, int) or row_index < 0 or row_index >= len(sheet.rows):
+            continue
+        row_number = row_index + 1
+        result.append({
+            "canonical_field": mapping.get("canonical_field") or mapping.get("source_header") or "Metadata",
+            "raw_token": _cell_value(sheet.rows[row_index], column_index),
+            "source_header": str(mapping.get("source_header") or ""),
+            "source_row_number": row_number,
+            "source_column_index": column_index,
+            "source_cell": f"{_column_letters(column_index)}{row_number}",
+        })
+    return result
 
 
 def open_project(database_path: str | Path) -> sqlite3.Connection:
@@ -69,14 +185,7 @@ def _prepare_managed_copy(database_path: str | Path, source_id: str, source_path
     return destination
 
 
-def _insert_recipe_revision(
-    connection: sqlite3.Connection,
-    source_id: str,
-    recipe: dict[str, Any],
-    timestamp: str,
-    supersedes_recipe_revision_id: str | None = None,
-) -> str:
-    """Persist an immutable recipe snapshot after it has been validated."""
+def _insert_recipe_revision(connection: sqlite3.Connection, source_id: str, recipe: dict[str, Any], timestamp: str, supersedes_recipe_revision_id: str | None = None) -> str:
     revision_id = _id()
     if supersedes_recipe_revision_id is not None:
         predecessor = connection.execute(
@@ -108,13 +217,7 @@ def _source_path_for_revision(database_path: str | Path, row: sqlite3.Row) -> Pa
     return source
 
 
-def save_import_recipe_revision(
-    database_path: str | Path,
-    source_id: str,
-    recipe: dict[str, Any],
-    supersedes_recipe_revision_id: str | None = None,
-) -> dict[str, Any]:
-    """Save a new, validated recipe revision without rewriting an earlier one."""
+def save_import_recipe_revision(database_path: str | Path, source_id: str, recipe: dict[str, Any], supersedes_recipe_revision_id: str | None = None) -> dict[str, Any]:
     connection = open_project(database_path)
     try:
         source = connection.execute(
@@ -147,6 +250,7 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
     """Apply a fresh plan atomically; this function never writes the source file."""
     inspection = inspect_source(source_path)
     plan = create_import_plan(inspection, recipe)
+    _require_duplicate_review(plan, recipe)
     source_kind = "managed_copy" if recipe["ownership_mode"] == "managed_copy" else "linked_reference"
     source_id, batch_id = _id(), _id()
     managed_copy: Path | None = None
@@ -155,6 +259,7 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
     connection = open_project(database_path)
     try:
         timestamp = _now()
+        metadata_count = 0
         with connection:
             connection.execute(
                 """INSERT INTO source_file
@@ -178,28 +283,67 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
             )
             for record in plan["planned_records"]:
                 analysis_id = _id()
+                orientation = record.get("orientation", "rows_are_analyses")
                 connection.execute(
                     """INSERT INTO analysis
-                    (analysis_id, import_batch_id, source_id, preview_id, sheet_name, source_row_number, block_id, identity_json, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (analysis_id, batch_id, source_id, record["preview_id"], record["sheet_name"], record["row_number"],
-                     record["block_id"], json.dumps(record["identity"], ensure_ascii=False), timestamp),
+                    (analysis_id, import_batch_id, source_id, preview_id, sheet_name, source_row_number, block_id,
+                     identity_json, created_at, source_column_number, source_orientation)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        analysis_id, batch_id, source_id, record["preview_id"], record["sheet_name"], record["row_number"],
+                        record["block_id"], json.dumps(record["identity"], ensure_ascii=False), timestamp,
+                        record.get("source_column_number"), orientation,
+                    ),
                 )
+                for metadata in _source_metadata_for_record(inspection, recipe, record):
+                    connection.execute(
+                        """INSERT INTO analysis_source_metadata
+                        (analysis_source_metadata_id, analysis_id, import_batch_id, canonical_field, raw_token,
+                         source_header, source_row_number, source_column_index, source_cell, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            _id(), analysis_id, batch_id, metadata["canonical_field"], metadata["raw_token"],
+                            metadata["source_header"], metadata["source_row_number"], metadata["source_column_index"],
+                            metadata["source_cell"], timestamp,
+                        ),
+                    )
+                    metadata_count += 1
                 for measurement in record["measurements"]:
                     connection.execute(
                         """INSERT INTO measurement
-                        (measurement_id, analysis_id, canonical_field, unit, raw_token, qualifier, detection_limit, source_column_name, source_column_index, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (_id(), analysis_id, measurement["field"], measurement["unit"], measurement["raw_token"],
-                         measurement["qualifier"], measurement["detection_limit"], measurement["source_header"],
-                         measurement["source_column_index"], timestamp),
+                        (measurement_id, analysis_id, canonical_field, unit, raw_token, qualifier, detection_limit,
+                         source_column_name, source_column_index, created_at, source_row_number,
+                         physical_source_column_index, source_cell, measurement_set, method)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            _id(), analysis_id, measurement["field"], measurement["unit"], measurement["raw_token"],
+                            measurement["qualifier"], measurement["detection_limit"], measurement["source_header"],
+                            measurement["source_column_index"], timestamp, measurement["physical_source_row_number"],
+                            measurement["physical_source_column_index"], measurement["source_cell"],
+                            measurement.get("measurement_set"), measurement.get("method"),
+                        ),
                     )
+                    if orientation == "rows_are_analyses":
+                        connection.execute(
+                            """INSERT INTO source_row_provenance
+                            (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token,
+                             normalized_token, qualifier, analysis_id)
+                            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)""",
+                            (
+                                _id(), batch_id, record["sheet_name"], measurement["physical_source_row_number"],
+                                measurement["source_header"], measurement["raw_token"], measurement["qualifier"], analysis_id,
+                            ),
+                        )
                     connection.execute(
-                        """INSERT INTO source_row_provenance
-                        (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token, normalized_token, qualifier, analysis_id)
-                        VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)""",
-                        (_id(), batch_id, record["sheet_name"], record["row_number"], measurement["source_header"],
-                         measurement["raw_token"], measurement["qualifier"], analysis_id),
+                        """INSERT INTO source_cell_provenance
+                        (provenance_id, import_batch_id, analysis_id, sheet_name, source_row_number,
+                         source_column_index, source_cell, source_header, raw_token, qualifier)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            _id(), batch_id, analysis_id, record["sheet_name"], measurement["physical_source_row_number"],
+                            measurement["physical_source_column_index"], measurement["source_cell"],
+                            measurement["source_header"], measurement["raw_token"], measurement["qualifier"],
+                        ),
                     )
             connection.execute("UPDATE import_batch SET status = 'applied', applied_at = ? WHERE import_batch_id = ?", (timestamp, batch_id))
         return {
@@ -207,7 +351,8 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
             "source_id": source_id,
             "recipe_revision_id": recipe_revision_id,
             "analysis_count": plan["summary"]["planned_analysis_count"],
-            "measurement_count": sum(len(record["measurements"]) for record in plan["planned_records"]),
+            "measurement_count": plan["summary"]["planned_measurement_count"],
+            "source_metadata_count": metadata_count,
             "warnings": plan["warnings"],
         }
     except Exception:
@@ -219,7 +364,6 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
 
 
 def check_linked_source(database_path: str | Path, source_id: str) -> dict[str, Any]:
-    """Re-fingerprint a linked file and report change; never import or refresh it."""
     connection = open_project(database_path)
     try:
         row = connection.execute(
@@ -231,11 +375,9 @@ def check_linked_source(database_path: str | Path, source_id: str) -> dict[str, 
             return {"source_id": source_id, "state": "current", "checked": False}
         path = Path(row["linked_path"])
         if not path.is_file():
-            state = "unavailable"
-            observed = None
+            state, observed = "unavailable", None
         else:
             from .import_preview import _fingerprint
-
             observed = _fingerprint(path)
             state = "current" if observed == row["source_fingerprint_sha256"] else "source_changed"
         with connection:
@@ -246,7 +388,6 @@ def check_linked_source(database_path: str | Path, source_id: str) -> dict[str, 
 
 
 def retract_latest_import(database_path: str | Path, reason: str = "user_retracted") -> dict[str, Any]:
-    """Hide the latest applied import from active projections while preserving its audit trail."""
     connection = open_project(database_path)
     try:
         row = connection.execute(
@@ -282,7 +423,6 @@ def retract_latest_import(database_path: str | Path, reason: str = "user_retract
 
 
 def rollback_incomplete_batch(database_path: str | Path, import_batch_id: str) -> dict[str, Any]:
-    """Only a non-applied batch may be marked rolled back; applied data is immutable."""
     connection = open_project(database_path)
     try:
         with connection:

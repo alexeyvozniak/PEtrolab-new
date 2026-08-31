@@ -29,6 +29,12 @@ FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
 
 
 def fixture_recipe() -> dict:
+    """Legacy schema-v1 recipe with an already explicit keep-all decision.
+
+    New Desktop recipes are schema v2 and require persisted duplicate-review
+    evidence. This fixture models an older stored recipe so migration/apply
+    compatibility can be tested independently from the new review UX.
+    """
     fingerprint = inspect_source(FIXTURE).fingerprint
     recipe = {
         "source_file_sha256": fingerprint,
@@ -72,7 +78,7 @@ def fixture_recipe() -> dict:
         "global_decisions": {
             "fe_semantics": "separate_fe2_fe3",
             "censored_value_policy": "preserve_original_token_and_detection_limit",
-            "duplicate_policy": "review_each",
+            "duplicate_policy": "keep_all",
             "unit_policy": "explicit_per_measurement_column",
         },
     }
@@ -154,7 +160,7 @@ class ImportPreviewTests(unittest.TestCase):
 
     def test_recipe_rejects_stale_semantic_fingerprint(self) -> None:
         recipe = fixture_recipe()
-        recipe["global_decisions"]["duplicate_policy"] = "keep_all"
+        recipe["global_decisions"]["duplicate_policy"] = "review_each"
         response = run_import_recipe_validate(FIXTURE, recipe)
         self.assertEqual(response["error"]["code"], "RECIPE_SCHEMA_INCOMPATIBLE")
         refresh_recipe_fingerprint(recipe)
@@ -177,7 +183,10 @@ class ImportPreviewTests(unittest.TestCase):
         response = run_import_plan_create(FIXTURE, recipe)
         self.assertIn("result", response)
         plan = response["result"]
-        self.assertEqual(plan["summary"], {"planned_analysis_count": 8, "duplicate_candidate_groups": 1})
+        self.assertEqual(plan["summary"]["planned_analysis_count"], 8)
+        self.assertEqual(plan["summary"]["planned_measurement_count"], 42)
+        self.assertEqual(plan["summary"]["duplicate_candidate_groups"], 1)
+        self.assertEqual(plan["summary"]["enabled_block_count"], 2)
         epma_first = plan["planned_records"][0]
         self.assertEqual(epma_first["measurements"][2]["raw_token"], "0,95")
         censored = plan["planned_records"][1]["measurements"][3]
@@ -204,6 +213,7 @@ class ImportPreviewTests(unittest.TestCase):
                 ).fetchone()
                 self.assertEqual(censored, ("<0.01", "below_detection_limit", 0.01))
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM source_row_provenance").fetchone()[0], 42)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM source_cell_provenance").fetchone()[0], 42)
                 self.assertEqual(
                     connection.execute("SELECT semantic_fingerprint_sha256 FROM import_recipe_revision").fetchone()[0],
                     recipe["semantic_fingerprint"],
@@ -267,7 +277,7 @@ class ImportPreviewTests(unittest.TestCase):
             first_recipe = fixture_recipe()
             imported = apply_import_plan(database, FIXTURE, first_recipe)
             revised_recipe = fixture_recipe()
-            revised_recipe["global_decisions"]["duplicate_policy"] = "keep_all"
+            revised_recipe["global_decisions"]["duplicate_policy"] = "review_each"
             refresh_recipe_fingerprint(revised_recipe)
             revision = save_import_recipe_revision(
                 database, imported["source_id"], revised_recipe, imported["recipe_revision_id"]
@@ -279,8 +289,8 @@ class ImportPreviewTests(unittest.TestCase):
             self.assertEqual(len(rows), 2)
             self.assertEqual(rows[1][0], revision["recipe_revision_id"])
             self.assertEqual(rows[1][1], imported["recipe_revision_id"])
-            self.assertEqual(json.loads(rows[0][2])["global_decisions"]["duplicate_policy"], "review_each")
-            self.assertEqual(json.loads(rows[1][2])["global_decisions"]["duplicate_policy"], "keep_all")
+            self.assertEqual(json.loads(rows[0][2])["global_decisions"]["duplicate_policy"], "keep_all")
+            self.assertEqual(json.loads(rows[1][2])["global_decisions"]["duplicate_policy"], "review_each")
 
 
 if __name__ == "__main__":

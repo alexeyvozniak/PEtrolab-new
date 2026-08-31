@@ -20,6 +20,16 @@ export const getProjectDatabasePath = () => invoke("project_database_path");
 export const inspectImportSource = (sourcePath) =>
   invokePetrolab("import.inspect_source", { source_path: sourcePath });
 
+export const previewImportWindow = (sourcePath, sheetName, startRow, rowCount = 12, startColumn = 0, columnCount = 24) =>
+  invokePetrolab("import.preview.window", {
+    source_path: sourcePath,
+    sheet_name: sheetName,
+    start_row: startRow,
+    row_count: rowCount,
+    start_column: startColumn,
+    column_count: columnCount,
+  });
+
 export const suggestImportRecipe = (sourcePath) =>
   invokePetrolab("import.recipe.suggest", { source_path: sourcePath });
 
@@ -39,6 +49,20 @@ export const reviseImportMappings = (sourcePath, recipe, decisions) =>
     source_path: sourcePath,
     recipe,
     decisions,
+  });
+
+export const reviseImportSections = (sourcePath, recipe, decisions) =>
+  invokePetrolab("import.recipe.revise_sections", {
+    source_path: sourcePath,
+    recipe,
+    decisions,
+  });
+
+export const reviewImportDuplicates = (sourcePath, recipe, decision = "keep_all") =>
+  invokePetrolab("import.recipe.review_duplicates", {
+    source_path: sourcePath,
+    recipe,
+    decision,
   });
 
 export const createImportPlan = (sourcePath, recipe) =>
