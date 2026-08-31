@@ -153,8 +153,8 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
 test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {
   const config = JSON.parse(await read("src-tauri/tauri.conf.json"));
   const cargo = await read("src-tauri/Cargo.toml");
-  assert.equal(config.version, "0.1.3");
-  assert.match(cargo, /version = "0\.1\.3"/);
+  assert.equal(config.version, "0.1.4");
+  assert.match(cargo, /version = "0\.1\.4"/);
   assert.equal(config.app.windows[0].width, 1440);
   assert.equal(config.app.windows[0].height, 1024);
   assert.equal(config.app.windows[0].minWidth, 1180);
