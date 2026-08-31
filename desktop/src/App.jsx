@@ -68,6 +68,7 @@ function warningText(warning) {
     HIDDEN_ROWS: "В файле есть скрытые строки",
     FORMULA_WITHOUT_CACHED_VALUE: "Есть формулы без сохранённого значения",
     DUPLICATE_CANDIDATES: "Найдены возможные совпадения идентичности",
+    TRANSPOSED_TABLE_LIKELY: "Похоже, анализы расположены по столбцам — проверь ориентацию блока",
     LEGACY_XLS_REQUIRES_CONVERSION: "Старый XLS пока требует сохранения копии как XLSX",
   };
   return names[warning.code] || warning.code || "Предупреждение импорта";
@@ -88,6 +89,13 @@ function recordOrigin(record) {
     return `${record.sheet_name} · колонка ${record.source_column_number}`;
   }
   return `${record.sheet_name} · строка ${record.row_number}`;
+}
+
+function savedAnalysisOrigin(analysis) {
+  if (analysis.source_orientation === "columns_are_analyses") {
+    return `колонка ${analysis.source_column_number ?? "?"}`;
+  }
+  return `строка ${analysis.source_row_number ?? "?"}`;
 }
 
 function measurementPreview(measurement) {
@@ -571,11 +579,11 @@ export function App() {
             ) : (
               <div className="analysis-table-wrap">
                 <table className="analysis-table">
-                  <thead><tr><th>Source</th><th>Лист</th><th>Строка</th>{identityColumns.map((field) => <th key={`identity-${field}`}>{field}</th>)}{metadataColumns.map((field) => <th key={`metadata-${field}`} title="Исходное значение из файла">{field} · исходное</th>)}{measurementColumns.map((field) => <th key={`measurement-${field}`}>{field}</th>)}</tr></thead>
+                  <thead><tr><th>Source</th><th>Лист</th><th>Источник в файле</th>{identityColumns.map((field) => <th key={`identity-${field}`}>{field}</th>)}{metadataColumns.map((field) => <th key={`metadata-${field}`} title="Исходное значение из файла">{field} · исходное</th>)}{measurementColumns.map((field) => <th key={`measurement-${field}`}>{field}</th>)}</tr></thead>
                   <tbody>
                     {filteredAnalyses.map((analysis) => (
                       <tr key={analysis.analysis_id} title={analysis.analysis_id}>
-                        <td><b>{analysis.source_name}</b></td><td>{analysis.sheet_name}</td><td>{analysis.source_row_number}</td>
+                        <td><b>{analysis.source_name}</b></td><td>{analysis.sheet_name}</td><td>{savedAnalysisOrigin(analysis)}</td>
                         {identityColumns.map((field) => <td key={`identity-${field}`}>{analysis.identity?.[field] || ""}</td>)}
                         {metadataColumns.map((field) => <td key={`metadata-${field}`} title="Сохранено без интерпретации как исходный текст">{analysis.source_metadata?.[field] || ""}</td>)}
                         {measurementColumns.map((field) => {
