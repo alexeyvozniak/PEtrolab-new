@@ -23,6 +23,10 @@ The UI is a review surface. Scientific/import semantics remain in Python.
 - One worksheet may contain zero, one or many logical blocks.
 - Blocks can be disabled without deleting source data.
 - A block may be row-oriented or column-oriented (transposed).
+- Python evaluates both plausible orientations for a detected block. When the field labels form a strong column-oriented pattern and the row above contains multiple Analysis labels, PetroLab may **suggest** the transposed orientation.
+- A transposed suggestion must be visible in the import review as `По столбцам (инвертировано)` and accompanied by a `TRANSPOSED_TABLE_LIKELY` warning. The user can switch it back before any data are saved.
+- PetroLab never rewrites or physically transposes the source workbook to make this suggestion.
+- If confidence is insufficient, the default remains row-oriented; orientation is never guessed merely from a file name or instrument name.
 - Raw preview must precede semantic mapping.
 - Repeated headers must never silently become Analysis rows.
 
@@ -71,7 +75,7 @@ The regression matrix must cover at least:
 - long preambles and unit context rows;
 - repeated headers;
 - several logical tables on one sheet;
-- transposed tables;
+- transposed tables, including conservative automatic orientation suggestion and manual override;
 - atomic percent distinct from mol percent;
 - unfamiliar isotope/numeric tables;
 - same canonical field from different analytical methods;
