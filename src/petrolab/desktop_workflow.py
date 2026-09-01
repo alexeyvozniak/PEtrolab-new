@@ -13,7 +13,12 @@ from typing import Any
 
 from .import_apply import open_project
 from .import_preview import ImportCommandError, candidate_blocks, inspect_source, semantic_fingerprint
-from .import_recognition import IRON_FIELDS, mappings_for_column_header, mappings_for_row_header
+from .import_recognition import (
+    IRON_FIELDS,
+    mappings_for_column_block,
+    mappings_for_column_header,
+    mappings_for_row_block,
+)
 
 
 SERVICE_PREAMBLE_PREFIXES = (
@@ -33,12 +38,7 @@ def _meaningful_row_values(row: Any) -> list[str]:
 
 
 def _looks_like_service_preamble(row: Any) -> bool:
-    """Keep instrument metadata/context rows out of logical table sections.
-
-    This is intentionally narrow. Ordinary headers such as `Sample | SiO2`
-    remain eligible; only label/value preamble syntax and standalone unit
-    context phrases are rejected here.
-    """
+    """Keep instrument metadata/context rows out of logical table sections."""
     values = _meaningful_row_values(row)
     if not values:
         return False
@@ -51,12 +51,7 @@ def _looks_like_service_preamble(row: Any) -> bool:
 
 
 def _transposed_candidate(sheet: Any, block: dict[str, Any], context_unit: str | None) -> dict[str, Any] | None:
-    """Return conservative structural evidence for a column-oriented block.
-
-    Detection deliberately requires several recognizable field labels down one
-    physical column plus multiple populated Analysis labels across the header
-    row. Names of files/sheets/instruments are never used as evidence.
-    """
+    """Return conservative structural evidence for a column-oriented block."""
     header_row = int(block["header_row"])
     field_start = int(block["data_start_row"])
     field_end = int(block["data_end_row"])
@@ -66,9 +61,6 @@ def _transposed_candidate(sheet: Any, block: dict[str, Any], context_unit: str |
         return None
 
     best: dict[str, Any] | None = None
-    # Most real transposed analytical tables keep field labels in one of the
-    # first few columns. Limiting the scan also avoids treating helper regions
-    # far to the right as a second orientation for the same block.
     for header_column_index in range(min(max_columns, 4)):
         mappings, mapping_warnings = mappings_for_column_header(
             sheet.rows,
@@ -99,8 +91,6 @@ def _transposed_candidate(sheet: Any, block: dict[str, Any], context_unit: str |
             "data_end_column": max(analysis_columns) + 1,
             "analysis_column_count": len(analysis_columns),
             "field_evidence_count": evidence_count,
-            "mappings": mappings,
-            "mapping_warnings": mapping_warnings,
         }
         score = (evidence_count, len(analysis_columns), -header_column_index)
         if best is None or score > best["score"]:
@@ -126,23 +116,26 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
             if _looks_like_service_preamble(header):
                 continue
             context = block.get("unit_context")
-            # A block unit is evidence only when it is stated outside the column
-            # header itself. Mixed column headers such as Li (ppm) + F (unknown)
-            # must not leak ppm into F.
             if isinstance(context, dict) and context.get("row_number") == header_row:
                 context = None
             context_unit = context.get("unit") if isinstance(context, dict) else None
 
             transposed = _transposed_candidate(sheet, block, context_unit)
             if transposed is not None:
-                mappings = transposed["mappings"]
-                mapping_warnings = transposed["mapping_warnings"]
-                orientation = "columns_are_analyses"
+                mappings, mapping_warnings = mappings_for_column_block(
+                    sheet.rows,
+                    transposed["header_column"],
+                    int(block["data_start_row"]),
+                    int(block["data_end_row"]),
+                    transposed["data_start_column"],
+                    transposed["data_end_column"],
+                    context_unit,
+                )
                 section: dict[str, Any] = {
                     "sheet_name": sheet.name,
                     "block_id": block["block_id"],
                     "enabled": True,
-                    "orientation": orientation,
+                    "orientation": "columns_are_analyses",
                     "header_row": header_row,
                     "header_column": transposed["header_column"],
                     "data_start_row": int(block["data_start_row"]),
@@ -163,13 +156,18 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
                     "field_evidence_count": transposed["field_evidence_count"],
                 })
             else:
-                mappings, mapping_warnings = mappings_for_row_header(header, context_unit)
-                orientation = "rows_are_analyses"
+                mappings, mapping_warnings = mappings_for_row_block(
+                    sheet.rows,
+                    header_row,
+                    int(block["data_start_row"]),
+                    int(block["data_end_row"]),
+                    context_unit,
+                )
                 section = {
                     "sheet_name": sheet.name,
                     "block_id": block["block_id"],
                     "enabled": True,
-                    "orientation": orientation,
+                    "orientation": "rows_are_analyses",
                     "header_row": header_row,
                     "data_start_row": int(block["data_start_row"]),
                     "data_end_row": int(block["data_end_row"]),

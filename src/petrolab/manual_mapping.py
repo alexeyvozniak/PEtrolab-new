@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from .import_preview import ImportCommandError, create_import_plan, inspect_source, semantic_fingerprint, validate_recipe
-from .import_recognition import IRON_FIELDS, VALID_UNITS, mappings_for_column_header, mappings_for_row_header, normalized
+from .import_recognition import (
+    IRON_FIELDS,
+    VALID_UNITS,
+    mappings_for_column_block,
+    mappings_for_row_block,
+    normalized,
+)
 
 
 TARGETS = {
@@ -138,14 +144,22 @@ def _rebuild_section_mappings(inspection: Any, section: dict[str, Any]) -> list[
     context = section.get("unit_context")
     context_unit = context.get("unit") if isinstance(context, dict) else None
     if section.get("orientation", "rows_are_analyses") == "rows_are_analyses":
-        header_row = int(section["header_row"])
-        mappings, _ = mappings_for_row_header(sheet.rows[header_row - 1], context_unit)
+        mappings, _ = mappings_for_row_block(
+            sheet.rows,
+            int(section["header_row"]),
+            int(section["data_start_row"]),
+            int(section["data_end_row"]),
+            context_unit,
+        )
         return mappings
-    mappings, _ = mappings_for_column_header(
+    max_columns = max((len(row) for row in sheet.rows), default=0)
+    mappings, _ = mappings_for_column_block(
         sheet.rows,
         int(section.get("header_column", 1)),
         int(section["data_start_row"]),
         int(section["data_end_row"]),
+        int(section.get("data_start_column", 2)),
+        int(section.get("data_end_column", max_columns)),
         context_unit,
     )
     return mappings
@@ -157,6 +171,12 @@ def _apply_section_decision(inspection: Any, revised: dict[str, Any], decision: 
         raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Block decision needs a block ID.")
     section = _find_section(revised, block_id)
     previous_orientation = section.get("orientation", "rows_are_analyses")
+    previous_header_row = section.get("header_row")
+    previous_data_start = section.get("data_start_row")
+    previous_data_end = section.get("data_end_row")
+    previous_header_column = section.get("header_column")
+    previous_data_start_column = section.get("data_start_column")
+    previous_data_end_column = section.get("data_end_column")
     for field in ("enabled", "header_row", "data_start_row", "data_end_row", "header_column", "data_start_column", "data_end_column", "analysis_axis_role", "analysis_axis_field"):
         if field in decision:
             section[field] = decision[field]
@@ -174,7 +194,16 @@ def _apply_section_decision(inspection: Any, revised: dict[str, Any], decision: 
         section.setdefault("data_end_column", max_columns)
         section.setdefault("analysis_axis_role", "Analysis")
         section.setdefault("analysis_axis_field", "Analysis")
-    if previous_orientation != orientation or decision.get("rebuild_mappings"):
+    structure_affects_fields = any((
+        previous_orientation != orientation,
+        previous_header_row != section.get("header_row"),
+        previous_data_start != section.get("data_start_row"),
+        previous_data_end != section.get("data_end_row"),
+        previous_header_column != section.get("header_column"),
+        previous_data_start_column != section.get("data_start_column"),
+        previous_data_end_column != section.get("data_end_column"),
+    ))
+    if structure_affects_fields or decision.get("rebuild_mappings"):
         section["mappings"] = _rebuild_section_mappings(inspection, section)
 
 
@@ -210,11 +239,7 @@ def _duplicate_groups_fingerprint(groups: list[list[str]]) -> str:
 
 
 def review_duplicate_candidates(source_path: str | Path, recipe: dict[str, Any], decision: str) -> dict[str, Any]:
-    """Persist an explicit keep-all decision for the current duplicate groups.
-
-    No rows are merged or discarded. Any later block/mapping edit invalidates this
-    review because it can change identities or the candidate groups.
-    """
+    """Persist an explicit keep-all decision for the current duplicate groups."""
     if decision != "keep_all":
         raise ImportCommandError(
             "RECIPE_SCHEMA_INCOMPATIBLE",
