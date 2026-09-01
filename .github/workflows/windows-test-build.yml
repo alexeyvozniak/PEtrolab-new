@@ -78,6 +78,9 @@ jobs:
       - name: Build Windows installer
         working-directory: desktop
         run: npm run tauri build
+      - name: Install and launch packaged Windows app
+        shell: pwsh
+        run: .\\scripts\\smoke_windows_installer.ps1
       - name: Upload test installer
         uses: actions/upload-artifact@v4
         with:
