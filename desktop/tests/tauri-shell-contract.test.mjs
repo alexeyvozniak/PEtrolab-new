@@ -194,6 +194,18 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
   assert.match(api, /analytical_point\.create/);
 });
 
+test("Windows release gate installs and launches the packaged application", async () => {
+  const workflow = await read("../.github/workflows/windows-test-build.yml");
+  const smoke = await read("../scripts/smoke_windows_installer.ps1");
+  assert.match(workflow, /Install and launch packaged Windows app/);
+  assert.match(workflow, /smoke_windows_installer\.ps1/);
+  assert.match(smoke, /msiexec\.exe/);
+  assert.match(smoke, /MainWindowHandle/);
+  assert.match(smoke, /petrolab-service/);
+  assert.match(smoke, /petrolab-v2\.sqlite/);
+  assert.match(smoke, /Installed PetroLab smoke test passed/);
+});
+
 test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {
   const config = JSON.parse(await read("src-tauri/tauri.conf.json"));
   const cargo = await read("src-tauri/Cargo.toml");
