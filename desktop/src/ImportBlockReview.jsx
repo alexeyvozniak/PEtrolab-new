@@ -75,31 +75,52 @@ function previewResult(response) {
 
 function RawPreview({ preview, state, loading, error, onNavigate }) {
   const [jumpRow, setJumpRow] = useState(preview?.start_row || 1);
+  const [jumpColumn, setJumpColumn] = useState(Number(preview?.start_column || 0) + 1);
 
   useEffect(() => {
     if (preview?.start_row) setJumpRow(preview.start_row);
   }, [preview?.start_row]);
 
+  useEffect(() => {
+    if (Number.isInteger(preview?.start_column)) setJumpColumn(Number(preview.start_column) + 1);
+  }, [preview?.start_column]);
+
   if (!preview) return <div className="raw-preview-loading">Предпросмотр загружается…</div>;
 
   const totalRows = Number(preview.used_range?.rows || 0);
-  const currentCount = Math.max(1, Number(preview.end_row || 1) - Number(preview.start_row || 1) + 1);
-  const previousStart = Math.max(1, Number(preview.start_row || 1) - currentCount);
+  const totalColumns = Number(preview.used_range?.columns || 0);
+  const currentRowCount = Math.max(1, Number(preview.end_row || 1) - Number(preview.start_row || 1) + 1);
+  const previousStart = Math.max(1, Number(preview.start_row || 1) - currentRowCount);
   const nextStart = Math.min(Math.max(1, totalRows), Number(preview.end_row || 0) + 1);
   const canGoBack = Number(preview.start_row || 1) > 1;
   const canGoForward = Number(preview.end_row || 0) < totalRows;
 
-  const jump = () => {
+  const currentColumnCount = Math.max(1, Number(preview.end_column || 1) - Number(preview.start_column || 0));
+  const previousColumnStart = Math.max(0, Number(preview.start_column || 0) - currentColumnCount);
+  const nextColumnStart = Math.min(Math.max(0, totalColumns - 1), Number(preview.end_column || 0));
+  const canGoLeft = Number(preview.start_column || 0) > 0;
+  const canGoRight = Number(preview.end_column || 0) < totalColumns;
+  const firstColumnLabel = preview.column_labels?.[0] || "?";
+  const lastColumnLabel = preview.column_labels?.[preview.column_labels.length - 1] || "?";
+
+  const jumpToRow = () => {
     const row = Number(jumpRow);
     if (Number.isInteger(row) && row >= 1 && (!totalRows || row <= totalRows)) onNavigate(row, true);
+  };
+
+  const jumpToColumn = () => {
+    const column = Number(jumpColumn);
+    if (Number.isInteger(column) && column >= 1 && (!totalColumns || column <= totalColumns)) {
+      onNavigate(Number(preview.start_row || 1), false, column - 1);
+    }
   };
 
   return (
     <div className="raw-preview-shell">
       <div className="raw-preview-nav">
         <div>
-          <b>Строки {preview.start_row}–{preview.end_row}</b>
-          <span>из {totalRows || "?"} · лист целиком доступен через навигацию</span>
+          <b>Строки {preview.start_row}–{preview.end_row} · колонки {firstColumnLabel}–{lastColumnLabel}</b>
+          <span>из {totalRows || "?"} строк · {totalColumns || "?"} колонок · лист целиком доступен через навигацию</span>
         </div>
         <div className="raw-preview-nav-actions">
           <button type="button" onClick={() => onNavigate(previousStart, false)} disabled={!canGoBack || loading}>← Выше</button>
@@ -112,12 +133,27 @@ function RawPreview({ preview, state, loading, error, onNavigate }) {
               max={totalRows || undefined}
               value={jumpRow}
               onChange={(event) => setJumpRow(event.target.value)}
-              onKeyDown={(event) => { if (event.key === "Enter") jump(); }}
+              onKeyDown={(event) => { if (event.key === "Enter") jumpToRow(); }}
               disabled={loading}
             />
           </label>
-          <button type="button" onClick={jump} disabled={loading}>Перейти</button>
+          <button type="button" onClick={jumpToRow} disabled={loading}>Перейти</button>
           <button type="button" onClick={() => onNavigate(nextStart, false)} disabled={!canGoForward || loading}>Ниже →</button>
+          <button type="button" onClick={() => onNavigate(Number(preview.start_row || 1), false, previousColumnStart)} disabled={!canGoLeft || loading}>← Левее</button>
+          <label>
+            <span>К колонке №</span>
+            <input
+              type="number"
+              min="1"
+              max={totalColumns || undefined}
+              value={jumpColumn}
+              onChange={(event) => setJumpColumn(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") jumpToColumn(); }}
+              disabled={loading}
+            />
+          </label>
+          <button type="button" onClick={jumpToColumn} disabled={loading}>Показать</button>
+          <button type="button" onClick={() => onNavigate(Number(preview.start_row || 1), false, nextColumnStart)} disabled={!canGoRight || loading}>Правее →</button>
         </div>
       </div>
       {error && <div className="raw-preview-error"><Warning size={16} weight="fill" /> {error}</div>}
@@ -159,13 +195,16 @@ function BlockCard({ section, index, preview, value, busy, onChange }) {
     setPreviewError("");
   }, [preview]);
 
-  const fetchPreview = useCallback(async (row, center = true) => {
+  const fetchPreview = useCallback(async (row, center = true, requestedColumnStart = null) => {
     const sourcePath = livePreview?.source_path || preview?.source_path;
     if (!sourcePath || !section.sheet_name) return;
     const totalRows = Number(livePreview?.used_range?.rows || preview?.used_range?.rows || 0);
+    const totalColumns = Number(livePreview?.used_range?.columns || preview?.used_range?.columns || 0);
     const requested = Math.max(1, Math.min(Number(row) || 1, totalRows || Number(row) || 1));
     const startRow = center ? Math.max(1, requested - 4) : requested;
-    const startColumn = Number(livePreview?.start_column ?? preview?.start_column ?? 0);
+    const currentColumnStart = Number(livePreview?.start_column ?? preview?.start_column ?? 0);
+    const rawColumnStart = requestedColumnStart == null ? currentColumnStart : Number(requestedColumnStart);
+    const startColumn = Math.max(0, Math.min(Number.isFinite(rawColumnStart) ? rawColumnStart : 0, Math.max(0, totalColumns - 1)));
     setPreviewLoading(true);
     setPreviewError("");
     try {
