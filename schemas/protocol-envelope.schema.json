@@ -5,20 +5,59 @@
   "description": "NDJSON request envelope between Tauri and the Python application service.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["protocol_version", "request_id", "command", "payload"],
+  "required": [
+    "protocol_version",
+    "request_id",
+    "command",
+    "payload"
+  ],
   "properties": {
-    "protocol_version": {"const": "1.0"},
-    "request_id": {"type": "string", "format": "uuid"},
+    "protocol_version": {
+      "const": "1.0"
+    },
+    "request_id": {
+      "type": "string",
+      "format": "uuid"
+    },
     "command": {
       "type": "string",
       "enum": [
-        "project.open", "analysis.query", "selection.replace", "selection.union", "selection.subtract",
-        "work_group.create", "plot_spec.save", "plot_data.query", "plot_visibility.hide",
-        "source_filter.set", "import.inspect_source", "import.recipe.validate", "import.plan.create",
-        "import.plan.apply", "import.batch.rollback", "import.recipe.save_revision", "source.check_linked",
-        "analytical_point.create", "media.inspect_sources", "media.import.plan", "media.import.apply", "shutdown"
+        "project.open",
+        "analysis.query",
+        "selection.replace",
+        "selection.union",
+        "selection.subtract",
+        "work_group.create",
+        "plot_spec.save",
+        "plot_data.query",
+        "plot_visibility.hide",
+        "source_filter.set",
+        "import.inspect_source",
+        "import.recipe.validate",
+        "import.plan.create",
+        "import.plan.apply",
+        "import.batch.rollback",
+        "import.recipe.save_revision",
+        "source.check_linked",
+        "analytical_point.create",
+        "media.inspect_sources",
+        "media.import.plan",
+        "media.import.apply",
+        "shutdown",
+        "import.clean_table.classify",
+        "import.workspace.create",
+        "import.workspace.add_sources",
+        "import.workspace.get",
+        "import.workspace.preview_window",
+        "import.workspace.apply_decision",
+        "import.workspace.apply_bulk_decision",
+        "import.workspace.replan",
+        "import.workspace.commit",
+        "import.workspace.discard"
       ]
     },
-    "payload": {"type": "object"}
+    "payload": {
+      "type": "object"
+    }
   }
 }
