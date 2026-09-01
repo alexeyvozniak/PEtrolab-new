@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,6 +105,51 @@ class CleanTableTests(unittest.TestCase):
             self.assertEqual(classification["mode"], "raw_review")
             self.assertIn("CLEAN_TABLE_BLANK_HEADER", codes)
             self.assertIn("CLEAN_TABLE_INTERNAL_BLANK_ROW", codes)
+
+    def test_unused_header_only_template_sheet_does_not_block_fast_import(self) -> None:
+        workbook = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+        <workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">
+          <sheets>
+            <sheet name=\"01_EPMA_WDS\" sheetId=\"1\" r:id=\"rId1\"/>
+            <sheet name=\"03_LAICPMS_trace\" sheetId=\"2\" r:id=\"rId2\"/>
+          </sheets>
+        </workbook>"""
+        relationships = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+        <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">
+          <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>
+          <Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet2.xml\"/>
+        </Relationships>"""
+        used_sheet = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+        <worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>
+          <row r=\"1\">
+            <c r=\"A1\" t=\"inlineStr\"><is><t>Analysis</t></is></c>
+            <c r=\"B1\" t=\"inlineStr\"><is><t>Sample</t></is></c>
+            <c r=\"C1\" t=\"inlineStr\"><is><t>SiO2 [wt.%]</t></is></c>
+          </row>
+          <row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>A-1</t></is></c><c r=\"B2\" t=\"inlineStr\"><is><t>S1</t></is></c><c r=\"C2\"><v>40.1</v></c></row>
+          <row r=\"3\"><c r=\"A3\" t=\"inlineStr\"><is><t>A-2</t></is></c><c r=\"B3\" t=\"inlineStr\"><is><t>S2</t></is></c><c r=\"C3\"><v>39.8</v></c></row>
+        </sheetData></worksheet>"""
+        unused_sheet = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+        <worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>
+          <row r=\"1\">
+            <c r=\"A1\" t=\"inlineStr\"><is><t>Analysis</t></is></c>
+            <c r=\"B1\" t=\"inlineStr\"><is><t>Sample</t></is></c>
+            <c r=\"C1\" t=\"inlineStr\"><is><t>Li [ppm]</t></is></c>
+          </row>
+        </sheetData></worksheet>"""
+        with tempfile.TemporaryDirectory() as directory_name:
+            source = Path(directory_name) / "PetroLab_Clean_Table.xlsx"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("xl/workbook.xml", workbook)
+                archive.writestr("xl/_rels/workbook.xml.rels", relationships)
+                archive.writestr("xl/worksheets/sheet1.xml", used_sheet)
+                archive.writestr("xl/worksheets/sheet2.xml", unused_sheet)
+            classification = classify_clean_table(inspect_source(source))
+
+        self.assertEqual(classification["mode"], "clean_table_fast")
+        self.assertEqual(classification["ignored_empty_sheets"], ["03_LAICPMS_trace"])
+        self.assertEqual([section["sheet_name"] for section in classification["sections"]], ["01_EPMA_WDS"])
+        self.assertEqual(classification["plan_summary"]["planned_analysis_count"], 2)
 
 
 if __name__ == "__main__":
