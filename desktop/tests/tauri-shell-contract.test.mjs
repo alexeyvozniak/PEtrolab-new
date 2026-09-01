@@ -29,6 +29,7 @@ test("desktop stages selected files locally before the scientific service reads 
   const shell = await read("src-tauri/src/lib.rs");
   const api = await read("src/desktopApi.js");
   const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
   assert.match(shell, /import-staging/);
   assert.match(shell, /fs::copy\(&source, &staged\)/);
   assert.match(shell, /fn pick_import_file/);
@@ -37,7 +38,7 @@ test("desktop stages selected files locally before the scientific service reads 
   assert.match(api, /clear_import_staging/);
   assert.match(app, /stageImportFile\(selectedPath\)/);
   assert.match(app, /selected\.local_path/);
-  assert.match(app, /Отменить импорт/);
+  assert.match(workspace, /Отменить/);
 });
 
 test("replacement import is transactional and keeps previous preview on failure", async () => {
@@ -55,16 +56,31 @@ test("Clean Table fast path is classified by Python and skips raw review by defa
   assert.match(api, /import\.clean_table\.classify/);
   assert.match(app, /classifyCleanTable/);
   assert.match(app, /classification\.mode === "clean_table_fast"/);
-  assert.match(app, /Clean Table распознан/);
-  assert.match(app, /Импортировать Clean Table/);
-  assert.match(app, /Открыть подробную проверку/);
-  assert.match(app, /Файл требует подготовки/);
-  assert.match(app, /cleanReasonText/);
+  assert.match(workspace, /Таблица готова к импорту/);
+  assert.match(workspace, /Импортировать таблицу/);
+  assert.match(workspace, /Открыть подробную проверку/);
+  assert.match(workspace, /Файл требует внимания/);
+  assert.match(workspace, /Clean Table v/);
+});
+
+test("approved import workspace keeps source list, physical table, issue inspector and fixed commit bar together", async () => {
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
+  const styles = await read("src/importWorkspace.css");
+  assert.match(app, /<ImportWorkspace/);
+  assert.match(workspace, /Файл и листы/);
+  assert.match(workspace, /Нерешённые вопросы/);
+  assert.match(workspace, /Исходный файл не изменится/);
+  assert.match(workspace, /activeBlockId/);
+  assert.match(workspace, /ImportMappingEditor/);
+  assert.match(styles, /grid-template-columns: 235px minmax\(420px, 1fr\) 370px/);
+  assert.match(styles, /import-workspace-footer/);
 });
 
 test("raw block review precedes field mapping and supports transposed orientation", async () => {
   const api = await read("src/desktopApi.js");
   const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
   const review = await read("src/ImportBlockReview.jsx");
   assert.match(api, /import\.preview\.window/);
   assert.match(api, /import\.recipe\.revise_sections/);
@@ -136,22 +152,25 @@ test("analyses view exposes source metadata, method context and truthful physica
 test("duplicate candidates require explicit keep-all review before save", async () => {
   const api = await read("src/desktopApi.js");
   const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
   const review = await read("src/ImportDuplicateReview.jsx");
   assert.match(api, /import\.recipe\.review_duplicates/);
   assert.match(app, /reviewImportDuplicates/);
   assert.match(app, /duplicateReviewRequired/);
   assert.match(app, /!duplicateReviewRequired/);
-  assert.match(app, /Проверка возможных совпадений/);
+  assert.match(workspace, /ImportDuplicateReview/);
   assert.match(review, /ничего не объединяет автоматически/);
   assert.match(review, /Проверено: оставить все записи/);
 });
 
 test("save stays blocked while automatic structure validation or mapping drafts are pending", async () => {
   const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
   assert.match(app, /!blockDraftDirty/);
   assert.match(app, /!mappingDraftDirty/);
-  assert.match(app, /автоматически применяет корректные изменения структуры/);
-  assert.match(app, /Примени сопоставление полей одной кнопкой/);
+  assert.match(workspace, /Импортировать после проверки/);
+  assert.match(workspace, /blockDraftDirty/);
+  assert.match(workspace, /mappingDraftDirty/);
 });
 
 test("mistaken saved import can be retracted without deleting audit history", async () => {
