@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle, Eye, Warning } from "@phosphor-icons/react";
 import { previewImportWindow } from "./desktopApi";
 import "./importBlockReview.css";
 
 const PREVIEW_ROW_COUNT = 30;
 const PREVIEW_COLUMN_COUNT = 24;
+const STRUCTURE_DEBOUNCE_MS = 420;
 
 function stateFor(section) {
   return {
@@ -42,6 +43,28 @@ function sameState(left, right) {
     && Number(left.header_column) === Number(right.header_column)
     && Number(left.data_start_column) === Number(right.data_start_column)
     && Number(left.data_end_column || 0) === Number(right.data_end_column || 0);
+}
+
+function decisionFor(section, next, previous) {
+  const orientationChanged = next.orientation !== previous.orientation;
+  const headerChanged = Number(next.header_row) !== Number(previous.header_row);
+  const transposedBounds = next.orientation === "columns_are_analyses" ? {
+    header_column: Number(next.header_column),
+    data_start_column: Number(next.data_start_column),
+    ...(next.data_end_column != null ? { data_end_column: Number(next.data_end_column) } : {}),
+    analysis_axis_role: "Analysis",
+    analysis_axis_field: "Analysis",
+  } : {};
+  return {
+    block_id: section.block_id,
+    enabled: next.enabled,
+    orientation: next.orientation,
+    header_row: Number(next.header_row),
+    data_start_row: Number(next.data_start_row),
+    data_end_row: Number(next.data_end_row),
+    ...transposedBounds,
+    rebuild_mappings: orientationChanged || headerChanged,
+  };
 }
 
 function previewResult(response) {
@@ -173,7 +196,8 @@ function BlockCard({ section, index, preview, value, busy, onChange }) {
   }, [previewTarget, fetchPreview]);
 
   const set = (field, next) => {
-    onChange({ ...value, [field]: next });
+    const nextState = { ...value, [field]: next };
+    onChange(nextState, field);
     if (["header_row", "data_start_row", "data_end_row"].includes(field) && Number(next) >= 1) {
       setPreviewTarget(Number(next));
     }
@@ -234,10 +258,17 @@ function BlockCard({ section, index, preview, value, busy, onChange }) {
 
 export function ImportBlockReview({ recipe, previews = {}, busy, onApply, onDirtyChange }) {
   const [draft, setDraft] = useState(() => Object.fromEntries(recipe.sections.map((section) => [section.block_id, stateFor(section)])));
+  const timers = useRef(new Map());
 
   useEffect(() => {
+    for (const timer of timers.current.values()) window.clearTimeout(timer);
+    timers.current.clear();
     setDraft(Object.fromEntries(recipe.sections.map((section) => [section.block_id, stateFor(section)])));
   }, [recipe]);
+
+  useEffect(() => () => {
+    for (const timer of timers.current.values()) window.clearTimeout(timer);
+  }, []);
 
   const applied = useMemo(() => Object.fromEntries(recipe.sections.map((section) => [section.block_id, stateFor(section)])), [recipe]);
   const dirtyBlocks = useMemo(
@@ -249,39 +280,32 @@ export function ImportBlockReview({ recipe, previews = {}, busy, onApply, onDirt
 
   useEffect(() => { onDirtyChange?.(dirtyBlocks.length > 0); }, [dirtyBlocks.length, onDirtyChange]);
 
-  const submit = () => {
-    const decisions = dirtyBlocks.map((section) => {
-      const next = draft[section.block_id];
-      const previous = applied[section.block_id];
-      const orientationChanged = next.orientation !== previous.orientation;
-      const headerChanged = Number(next.header_row) !== Number(previous.header_row);
-      const transposedBounds = next.orientation === "columns_are_analyses" ? {
-        header_column: Number(next.header_column),
-        data_start_column: Number(next.data_start_column),
-        ...(next.data_end_column != null ? { data_end_column: Number(next.data_end_column) } : {}),
-        analysis_axis_role: "Analysis",
-        analysis_axis_field: "Analysis",
-      } : {};
-      return {
-        block_id: section.block_id,
-        enabled: next.enabled,
-        orientation: next.orientation,
-        header_row: Number(next.header_row),
-        data_start_row: Number(next.data_start_row),
-        data_end_row: Number(next.data_end_row),
-        ...transposedBounds,
-        rebuild_mappings: orientationChanged || headerChanged,
-      };
-    });
-    onApply(decisions);
+  const scheduleApply = (section, nextState, field, nextDraft) => {
+    const existing = timers.current.get(section.block_id);
+    if (existing) window.clearTimeout(existing);
+    if (invalidState(nextState) || Object.values(nextDraft).filter((item) => item.enabled).length === 0) return;
+    const previous = applied[section.block_id];
+    if (!previous || sameState(nextState, previous)) return;
+    const run = () => {
+      timers.current.delete(section.block_id);
+      onApply([decisionFor(section, nextState, previous)]);
+    };
+    if (["enabled", "orientation"].includes(field)) run();
+    else timers.current.set(section.block_id, window.setTimeout(run, STRUCTURE_DEBOUNCE_MS));
+  };
+
+  const changeBlock = (section, nextState, field) => {
+    const nextDraft = { ...draft, [section.block_id]: nextState };
+    setDraft(nextDraft);
+    scheduleApply(section, nextState, field, nextDraft);
   };
 
   return (
     <div className="block-review">
       <div className="block-review-intro">
         <div>
-          <b>Сначала проверь, где в Excel действительно находятся таблицы.</b>
-          <span>Зелёным показаны строки, которые войдут в блок, более тёмным — строка заголовка. Блок можно отключить целиком.</span>
+          <b>Проверь, где в Excel действительно находятся таблицы.</b>
+          <span>Выключение блока действует сразу. Границы и ориентация применяются автоматически после короткой паузы.</span>
         </div>
         <span>Включено: <b>{enabledCount}</b> из {recipe.sections.length}</span>
       </div>
@@ -294,15 +318,16 @@ export function ImportBlockReview({ recipe, previews = {}, busy, onApply, onDirt
             preview={previews[section.block_id]}
             value={draft[section.block_id] || stateFor(section)}
             busy={busy}
-            onChange={(next) => setDraft((current) => ({ ...current, [section.block_id]: next }))}
+            onChange={(nextState, field) => changeBlock(section, nextState, field)}
           />
         ))}
       </div>
       <div className="block-review-actions">
-        <span>{dirtyBlocks.length ? `Изменено блоков: ${dirtyBlocks.length}` : "Границы блоков не изменены"}</span>
-        <button className="primary-button" onClick={submit} disabled={busy || !dirtyBlocks.length || !enabledCount || invalidCount > 0}>
-          Применить структуру ({dirtyBlocks.length})
-        </button>
+        <span>{invalidCount > 0
+          ? `Проверь границы: некорректных блоков ${invalidCount}`
+          : dirtyBlocks.length
+            ? `Изменения структуры применяются автоматически… (${dirtyBlocks.length})`
+            : "Структура блоков синхронизирована"}</span>
       </div>
     </div>
   );
