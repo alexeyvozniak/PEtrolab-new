@@ -64,11 +64,22 @@ test("raw block review precedes field mapping and supports transposed orientatio
   assert.match(app, /TRANSPOSED_TABLE_LIKELY/);
   assert.match(app, /Похоже, анализы расположены по столбцам/);
   assert.match(review, /По столбцам \(инвертировано\)/);
-  assert.match(review, /Применить структуру/);
+  assert.match(review, /STRUCTURE_DEBOUNCE_MS/);
+  assert.match(review, /Изменения структуры применяются автоматически/);
+  assert.doesNotMatch(review, />\s*Применить структуру/);
   assert.match(review, /Единица из источника/);
   assert.match(review, /raw-preview-table/);
   assert.match(review, /placeholder="до конца"/);
   assert.match(review, /invalidState/);
+});
+
+test("mapping review exposes physical fields including blank headers", async () => {
+  const editor = await read("src/ImportMappingEditor.jsx");
+  assert.match(editor, /Здесь показаны все физические поля выбранного блока/);
+  assert.match(editor, /Без заголовка/);
+  assert.match(editor, /columnLetters/);
+  assert.match(editor, /колонка \$\{index \+ 1\}/);
+  assert.match(editor, /Не импортировать/);
 });
 
 test("mapping edits are applied once in bulk per logical block", async () => {
@@ -122,7 +133,7 @@ test("duplicate candidates require explicit keep-all review before save", async 
   assert.match(review, /Проверено: оставить все записи/);
 });
 
-test("save stays blocked while block or mapping drafts are unapplied", async () => {
+test("save stays blocked while automatic structure validation or mapping drafts are pending", async () => {
   const app = await read("src/App.jsx");
   assert.match(app, /!blockDraftDirty/);
   assert.match(app, /!mappingDraftDirty/);
@@ -153,8 +164,8 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
 test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {
   const config = JSON.parse(await read("src-tauri/tauri.conf.json"));
   const cargo = await read("src-tauri/Cargo.toml");
-  assert.equal(config.version, "0.1.4");
-  assert.match(cargo, /version = "0\.1\.4"/);
+  assert.equal(config.version, "0.1.5");
+  assert.match(cargo, /version = "0\.1\.5"/);
   assert.equal(config.app.windows[0].width, 1440);
   assert.equal(config.app.windows[0].height, 1024);
   assert.equal(config.app.windows[0].minWidth, 1180);
