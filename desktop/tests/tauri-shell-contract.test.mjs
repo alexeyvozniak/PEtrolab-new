@@ -86,12 +86,12 @@ test("raw block review precedes field mapping and supports transposed orientatio
   assert.match(api, /import\.recipe\.revise_sections/);
   assert.match(app, /previewImportWindow/);
   assert.match(app, /reviseImportSections/);
-  assert.match(app, /ImportBlockReview/);
+  assert.match(workspace, /ImportBlockReview/);
   assert.match(app, /blockDraftDirty/);
-  assert.match(app, /1\. Подготовка структуры/);
-  assert.match(app, /2\. Подготовка полей/);
-  assert.match(app, /TRANSPOSED_TABLE_LIKELY/);
-  assert.match(app, /Похоже, анализы расположены по столбцам/);
+  assert.match(workspace, /activeBlockId/);
+  assert.match(workspace, /ImportMappingEditor/);
+  assert.match(workspace, /анализы по столбцам/);
+  assert.match(workspace, /Каждый лист сохраняет собственную строку заголовка/);
   assert.match(review, /По столбцам \(инвертировано\)/);
   assert.match(review, /STRUCTURE_DEBOUNCE_MS/);
   assert.match(review, /Изменения структуры применяются автоматически/);
