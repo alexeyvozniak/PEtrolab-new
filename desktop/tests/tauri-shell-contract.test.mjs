@@ -46,7 +46,20 @@ test("replacement import is transactional and keeps previous preview on failure"
   const chooseFile = app.match(/const chooseFile = async \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
   assert.doesNotMatch(chooseFile, /catch[\s\S]*resetImportState\(\)/);
   assert.match(app, /Копирую файл в рабочую область PetroLab/);
-  assert.match(app, /Читаю листы и ищу логические таблицы/);
+  assert.match(app, /Проверяю, соответствует ли файл PetroLab Clean Table/);
+});
+
+test("Clean Table fast path is classified by Python and skips raw review by default", async () => {
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  assert.match(api, /import\.clean_table\.classify/);
+  assert.match(app, /classifyCleanTable/);
+  assert.match(app, /classification\.mode === "clean_table_fast"/);
+  assert.match(app, /Clean Table распознан/);
+  assert.match(app, /Импортировать Clean Table/);
+  assert.match(app, /Открыть подробную проверку/);
+  assert.match(app, /Файл требует подготовки/);
+  assert.match(app, /cleanReasonText/);
 });
 
 test("raw block review precedes field mapping and supports transposed orientation", async () => {
@@ -59,8 +72,8 @@ test("raw block review precedes field mapping and supports transposed orientatio
   assert.match(app, /reviseImportSections/);
   assert.match(app, /ImportBlockReview/);
   assert.match(app, /blockDraftDirty/);
-  assert.match(app, /1\. Где находятся данные/);
-  assert.match(app, /2\. Что означают поля/);
+  assert.match(app, /1\. Подготовка структуры/);
+  assert.match(app, /2\. Подготовка полей/);
   assert.match(app, /TRANSPOSED_TABLE_LIKELY/);
   assert.match(app, /Похоже, анализы расположены по столбцам/);
   assert.match(review, /По столбцам \(инвертировано\)/);
@@ -137,8 +150,8 @@ test("save stays blocked while automatic structure validation or mapping drafts 
   const app = await read("src/App.jsx");
   assert.match(app, /!blockDraftDirty/);
   assert.match(app, /!mappingDraftDirty/);
-  assert.match(app, /Сначала примени структуру блоков/);
-  assert.match(app, /Сначала примени сопоставление полей/);
+  assert.match(app, /автоматически применяет корректные изменения структуры/);
+  assert.match(app, /Примени сопоставление полей одной кнопкой/);
 });
 
 test("mistaken saved import can be retracted without deleting audit history", async () => {
@@ -164,8 +177,8 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
 test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {
   const config = JSON.parse(await read("src-tauri/tauri.conf.json"));
   const cargo = await read("src-tauri/Cargo.toml");
-  assert.equal(config.version, "0.1.5");
-  assert.match(cargo, /version = "0\.1\.5"/);
+  assert.equal(config.version, "0.1.6");
+  assert.match(cargo, /version = "0\.1\.6"/);
   assert.equal(config.app.windows[0].width, 1440);
   assert.equal(config.app.windows[0].height, 1024);
   assert.equal(config.app.windows[0].minWidth, 1180);
