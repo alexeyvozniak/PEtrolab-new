@@ -36,13 +36,9 @@ METADATA_ALIASES = {
     "agema": "Age [Ma]",
 }
 
-# These values are measurements from the source workbook, but their semantics
-# are calculated/source-derived rather than direct instrumental measurements.
 SOURCE_DERIVED_FIELDS = {"total", "mg#", "xmg", "fe3+"}
 IRON_FIELDS = {"feo", "feot", "fe2o3", "fe2o3t", "fe", "fetotal"}
 
-# Helper sheets bundled with the official human-facing template. They are not
-# scientific data and may be ignored only by this exact template contract.
 OFFICIAL_HELPER_SHEETS = {
     "00_Инструкция",
     "08_Сырые_сценарии",
@@ -76,8 +72,6 @@ def _used_columns(rows: tuple[tuple[str | None, ...], ...], end_row: int) -> lis
 
 def _unit_from_header(header: str) -> tuple[str, str] | None:
     stripped = header.strip()
-    # Clean Table requires an explicit bracketed unit so ordinary words such as
-    # "ppm note" cannot accidentally become measurements.
     match = re.fullmatch(r"(.+?)\s*\[\s*([^\]]+)\s*\]\s*", stripped)
     if not match:
         return None
@@ -160,12 +154,32 @@ def _section_summary(section: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _unused_clean_header(sheet: Any) -> bool:
+    """Return True only for a header-only sheet that is itself a valid Clean Table shape."""
+    if not sheet.rows:
+        return False
+    header = sheet.rows[0]
+    used_columns = [index for index, value in enumerate(header) if value not in (None, "")]
+    if not used_columns:
+        return False
+    mappings: list[dict[str, Any]] = []
+    for column in used_columns:
+        mapping, _ = _mapping(column, str(header[column]).strip())
+        if mapping is None:
+            return False
+        mappings.append(mapping)
+    identity_fields = [item["canonical_field"] for item in mappings if item["target_role"] == "identity"]
+    measurement_fields = [item for item in mappings if item["target_role"] == "measurement"]
+    return "Analysis" in identity_fields and bool(measurement_fields)
+
+
 def classify_clean_table(inspection: SourceInspection) -> dict[str, Any]:
     """Return strict fast-path classification and, when valid, a complete recipe."""
     reasons: list[dict[str, Any]] = []
     sections: list[dict[str, Any]] = []
     mapped_iron = False
     ignored_helper_sheets: list[str] = []
+    ignored_empty_sheets: list[str] = []
 
     inspection_warnings = [
         warning
@@ -182,7 +196,10 @@ def classify_clean_table(inspection: SourceInspection) -> dict[str, Any]:
         if sheet.name in OFFICIAL_HELPER_SHEETS:
             ignored_helper_sheets.append(sheet.name)
             continue
-        if end_row < 2:
+        if end_row == 1:
+            if _unused_clean_header(sheet):
+                ignored_empty_sheets.append(sheet.name)
+                continue
             reasons.append({"code": "CLEAN_TABLE_NO_DATA_ROWS", "sheet_name": sheet.name})
             continue
 
@@ -255,12 +272,16 @@ def classify_clean_table(inspection: SourceInspection) -> dict[str, Any]:
     if not sections:
         reasons.append({"code": "CLEAN_TABLE_NO_VALID_DATA_SHEETS"})
 
+    common = {
+        "clean_table_version": CLEAN_TABLE_VERSION,
+        "ignored_helper_sheets": ignored_helper_sheets,
+        "ignored_empty_sheets": ignored_empty_sheets,
+    }
     if reasons:
         return {
             "mode": "raw_review",
-            "clean_table_version": CLEAN_TABLE_VERSION,
+            **common,
             "reasons": reasons,
-            "ignored_helper_sheets": ignored_helper_sheets,
             "sections": [],
             "recipe": None,
         }
@@ -283,18 +304,16 @@ def classify_clean_table(inspection: SourceInspection) -> dict[str, Any]:
     if plan["summary"].get("duplicate_candidate_groups", 0):
         return {
             "mode": "raw_review",
-            "clean_table_version": CLEAN_TABLE_VERSION,
+            **common,
             "reasons": [{"code": "CLEAN_TABLE_DUPLICATE_IDENTITIES", "candidate_group_count": plan["summary"]["duplicate_candidate_groups"]}],
-            "ignored_helper_sheets": ignored_helper_sheets,
             "sections": [_section_summary(section) for section in sections],
             "recipe": None,
         }
 
     return {
         "mode": "clean_table_fast",
-        "clean_table_version": CLEAN_TABLE_VERSION,
+        **common,
         "reasons": [],
-        "ignored_helper_sheets": ignored_helper_sheets,
         "sections": [_section_summary(section) for section in sections],
         "plan_summary": plan["summary"],
         "recipe": recipe,
