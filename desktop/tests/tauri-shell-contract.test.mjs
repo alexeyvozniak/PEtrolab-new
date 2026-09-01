@@ -53,6 +53,7 @@ test("replacement import is transactional and keeps previous preview on failure"
 test("Clean Table fast path is classified by Python and skips raw review by default", async () => {
   const api = await read("src/desktopApi.js");
   const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
   assert.match(api, /import\.clean_table\.classify/);
   assert.match(app, /classifyCleanTable/);
   assert.match(app, /classification\.mode === "clean_table_fast"/);
