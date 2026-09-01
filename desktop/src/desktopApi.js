@@ -20,6 +20,9 @@ export const getProjectDatabasePath = () => invoke("project_database_path");
 export const inspectImportSource = (sourcePath) =>
   invokePetrolab("import.inspect_source", { source_path: sourcePath });
 
+export const classifyCleanTable = (sourcePath) =>
+  invokePetrolab("import.clean_table.classify", { source_path: sourcePath });
+
 export const previewImportWindow = async (sourcePath, sheetName, startRow, rowCount = 12, startColumn = 0, columnCount = 24) => {
   const response = await invokePetrolab("import.preview.window", {
     source_path: sourcePath,
