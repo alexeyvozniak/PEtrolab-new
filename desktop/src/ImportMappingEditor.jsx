@@ -12,6 +12,29 @@ function mappingIndex(mapping) {
   return mappingAxis(mapping) === "column" ? mapping.source_column_index : mapping.source_row_index;
 }
 
+function columnLetters(index) {
+  let value = Number(index) + 1;
+  let result = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    value = Math.floor((value - 1) / 26);
+  }
+  return result || "?";
+}
+
+function sourceCoordinate(mapping) {
+  const index = mappingIndex(mapping);
+  return mappingAxis(mapping) === "column"
+    ? `${columnLetters(index)} · колонка ${index + 1}`
+    : `строка ${index + 1}`;
+}
+
+function sourceTitle(mapping) {
+  const header = mapping.source_header;
+  return header == null || String(header).trim() === "" ? "Без заголовка" : String(header);
+}
+
 const keyFor = (blockId, axis, index) => `${blockId}::${axis}::${index}`;
 const keyForMapping = (blockId, mapping) => keyFor(blockId, mappingAxis(mapping), mappingIndex(mapping));
 
@@ -71,12 +94,11 @@ function statesEqual(left, right) {
 function MappingRow({ mapping, value, busy, onChange }) {
   const measurement = value.target === "Measurement";
   const invalid = measurement && (!value.field.trim() || !value.unit);
-  const axisLabel = mappingAxis(mapping) === "column" ? "колонка" : "строка";
   return (
     <tr className={`${mapping.target_role === "ignore" ? "muted-row " : ""}mapping-review-row${invalid ? " mapping-invalid" : ""}`}>
       <td>
-        <b>{mapping.source_header}</b>
-        <small>{axisLabel} {mappingIndex(mapping) + 1}</small>
+        <b className={mapping.source_header ? "" : "blank-source-header"}>{sourceTitle(mapping)}</b>
+        <small>{sourceCoordinate(mapping)}</small>
       </td>
       <td>
         <select
@@ -99,7 +121,7 @@ function MappingRow({ mapping, value, busy, onChange }) {
       </td>
       <td>
         {measurement ? (
-          <input value={value.field} onChange={(event) => onChange({ ...value, field: event.target.value })} disabled={busy} aria-label={`Поле ${mapping.source_header}`} />
+          <input value={value.field} onChange={(event) => onChange({ ...value, field: event.target.value })} disabled={busy} aria-label={`Поле ${sourceTitle(mapping)}`} placeholder={mapping.source_header ? "" : "Введите название поля"} />
         ) : <span>{value.target === "Ignore" ? "—" : value.target}</span>}
       </td>
       <td>
@@ -117,7 +139,7 @@ function MappingRow({ mapping, value, busy, onChange }) {
             onChange={(event) => onChange({ ...value, method: event.target.value })}
             disabled={busy}
             placeholder="EPMA / WDS / SIMS…"
-            aria-label={`Метод ${mapping.source_header}`}
+            aria-label={`Метод ${sourceTitle(mapping)}`}
           />
         ) : "—"}
       </td>
@@ -128,7 +150,7 @@ function MappingRow({ mapping, value, busy, onChange }) {
             onChange={(event) => onChange({ ...value, measurementSet: event.target.value })}
             disabled={busy}
             placeholder="major / trace…"
-            aria-label={`Набор ${mapping.source_header}`}
+            aria-label={`Набор ${sourceTitle(mapping)}`}
           />
         ) : "—"}
       </td>
@@ -213,8 +235,8 @@ export function ImportMappingEditor({ recipe, warnings = [], busy, onApplyAll, o
     <div className="mapping-editor">
       <div className="mapping-explainer">
         <div>
-          <b>Исправляй только то, что PetroLab понял неверно.</b>
-          <span>Mineral и Generation сохраняются как исходные метаданные. Для одинаковых полей разных методов можно явно указать метод и набор измерений.</span>
+          <b>Здесь показаны все физические поля выбранного блока.</b>
+          <span>Нераспознанные и колонки без заголовка не исчезают: они остаются видимыми как «Не импортировать», пока ты сам не назначишь им роль.</span>
         </div>
         <div className="mapping-summary">
           <span>Изменений: <b>{dirtyKeys.length}</b></span>
@@ -227,7 +249,7 @@ export function ImportMappingEditor({ recipe, warnings = [], busy, onApplyAll, o
           <div className="mapping-sheet-head">
             <div>
               <b>{section.sheet_name} · блок {sectionIndex + 1}</b>
-              <span>{section.orientation === "columns_are_analyses" ? "анализы по столбцам" : `заголовок: строка ${section.header_row}`}</span>
+              <span>{section.orientation === "columns_are_analyses" ? "анализы по столбцам" : `заголовок: строка ${section.header_row}`} · полей: {section.mappings.length}</span>
             </div>
             <div className="sheet-unit-control">
               <label>Единица для Measurement</label>
