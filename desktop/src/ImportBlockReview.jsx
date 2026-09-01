@@ -295,7 +295,7 @@ function BlockCard({ section, index, preview, value, busy, onChange }) {
   );
 }
 
-export function ImportBlockReview({ recipe, previews = {}, busy, onApply, onDirtyChange }) {
+export function ImportBlockReview({ recipe, previews = {}, activeBlockId = null, busy, onApply, onDirtyChange }) {
   const [draft, setDraft] = useState(() => Object.fromEntries(recipe.sections.map((section) => [section.block_id, stateFor(section)])));
   const timers = useRef(new Map());
 
@@ -339,6 +339,10 @@ export function ImportBlockReview({ recipe, previews = {}, busy, onApply, onDirt
     scheduleApply(section, nextState, field, nextDraft);
   };
 
+  const visibleSections = activeBlockId
+    ? recipe.sections.filter((section) => section.block_id === activeBlockId)
+    : recipe.sections;
+
   return (
     <div className="block-review">
       <div className="block-review-intro">
@@ -349,11 +353,11 @@ export function ImportBlockReview({ recipe, previews = {}, busy, onApply, onDirt
         <span>Включено: <b>{enabledCount}</b> из {recipe.sections.length}</span>
       </div>
       <div className="block-card-list">
-        {recipe.sections.map((section, index) => (
+        {visibleSections.map((section) => (
           <BlockCard
             key={section.block_id}
             section={section}
-            index={index}
+            index={recipe.sections.findIndex((item) => item.block_id === section.block_id)}
             preview={previews[section.block_id]}
             value={draft[section.block_id] || stateFor(section)}
             busy={busy}
