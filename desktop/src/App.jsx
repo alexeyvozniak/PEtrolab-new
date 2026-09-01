@@ -32,6 +32,7 @@ import {
 import { ImportBlockReview } from "./ImportBlockReview";
 import { ImportDuplicateReview } from "./ImportDuplicateReview";
 import { ImportMappingEditor } from "./ImportMappingEditor";
+import { ImportWorkspace } from "./ImportWorkspace";
 import "./styles.css";
 
 const navigation = [
@@ -544,7 +545,7 @@ export function App() {
         {success && <div className="global-message success"><CheckCircle size={20} weight="fill" /><span>{success}</span></div>}
 
         {screen === "Импорт" && (
-          <section className="live-page">
+          <section className={`live-page${sourcePath ? " import-live-page" : ""}`}>
             {!sourcePath && (
               <div className="file-start-card">
                 <div className="file-start-icon"><FileArrowUp size={46} weight="duotone" /></div>
@@ -559,119 +560,32 @@ export function App() {
             )}
 
             {sourcePath && inspection && recipe && plan && (
-              <>
-                <div className="source-heading">
-                  <div className="source-file"><File size={32} weight="duotone" /><div><b>{fileName(sourceDisplayPath || sourcePath)}</b><span title={sourceDisplayPath}>{inspection.source_format.toUpperCase()} · SHA-256 {inspection.source_fingerprint.slice(0, 12)}…</span></div></div>
-                  <div className="top-actions">
-                    <button className="outline-button" onClick={startNewImport} disabled={busy}>Отменить импорт</button>
-                    <button className="outline-button" onClick={chooseFile} disabled={busy}>Выбрать другой файл</button>
-                  </div>
-                </div>
-
-                <div className="metric-row">
-                  <div className="metric"><span>Листов</span><b>{inspection.sheets.length}</b></div>
-                  <div className="metric"><span>{isCleanFast ? "Clean Table" : "Логических блоков"}</span><b>{isCleanFast ? `v${cleanClassification.clean_table_version}` : `${enabledBlockCount}/${recipe.sections.length}`}</b></div>
-                  <div className="metric"><span>Будет Analysis</span><b>{plan.summary.planned_analysis_count}</b></div>
-                  <div className="metric"><span>Будет Measurement</span><b>{plannedMeasurementCount}</b></div>
-                  <div className="metric"><span>Групп совпадений</span><b>{duplicateCandidateGroups}</b></div>
-                </div>
-
-                {isCleanFast ? (
-                  <CleanTableSummary classification={cleanClassification} onDetailed={openDetailedReview} busy={busy} />
-                ) : (
-                  <>
-                    {cleanClassification?.mode === "raw_review" && cleanClassification.reasons?.length > 0 && (
-                      <div className="live-card warning-card">
-                        <div className="section-title"><div><h3>Файл требует подготовки</h3><p>Это не ошибка. PetroLab не считает структуру достаточно однозначной для быстрого импорта и поэтому показывает полный контроль.</p></div></div>
-                        <div className="warning-list">
-                          {cleanClassification.reasons.slice(0, 12).map((reason, index) => (
-                            <div key={`${reason.code}-${index}`}><Info size={18} weight="fill" /><span>{cleanReasonText(reason)}</span></div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="live-card">
-                      <div className="section-title"><div><h3>1. Подготовка структуры</h3><p>Проверь реальные строки Excel, границы таблиц и ориентацию. Ненужный блок можно выключить целиком.</p></div></div>
-                      <ImportBlockReview recipe={recipe} previews={blockPreviews} busy={busy} onApply={applySections} onDirtyChange={setBlockDraftDirty} />
-                    </div>
-
-                    <div className="live-card">
-                      <div className="section-title"><div><h3>2. Подготовка полей</h3><p>Задай роли только там, где исходник неоднозначен. Все физические колонки остаются видимыми.</p></div></div>
-                      <ImportMappingEditor recipe={recipe} warnings={recipeWarnings} busy={busy || blockDraftDirty} onApplyAll={applyMappings} onDirtyChange={setMappingDraftDirty} />
-                    </div>
-                  </>
-                )}
-
-                {(blockDraftDirty || mappingDraftDirty) && (
-                  <div className="import-blocker draft-blocker">
-                    <Info size={22} weight="fill" />
-                    <div><b>Есть неприменённые изменения</b><span>{blockDraftDirty ? "PetroLab автоматически применяет корректные изменения структуры после короткой паузы." : "Примени сопоставление полей одной кнопкой."}</span></div>
-                  </div>
-                )}
-
-                {!blockDraftDirty && !mappingDraftDirty && plannedMeasurementCount === 0 && plan.summary.planned_analysis_count > 0 && (
-                  <div className="import-blocker">
-                    <Warning size={22} weight="fill" />
-                    <div><b>Импорт пока нельзя сохранить</b><span>Найдены Analysis, но ни одного Measurement. Проверь роли и единицы.</span></div>
-                  </div>
-                )}
-
-                {(visibleRecipeWarnings.length > 0 || plan.warnings.length > 0) && (
-                  <div className="live-card warning-card">
-                    <div className="section-title"><div><h3>Предупреждения</h3><p>Перед сохранением PetroLab показывает всё, что требует внимания.</p></div></div>
-                    <div className="warning-list">
-                      {[...visibleRecipeWarnings, ...plan.warnings].map((warning, index) => (
-                        <div key={`${warning.code}-${warning.block_id || warning.sheet_name || ""}-${index}`}><Warning size={18} weight="fill" /><span><b>{warningText(warning)}</b>{warning.sheet_name ? ` · ${warning.sheet_name}` : ""}{warning.source_header ? ` · ${warning.source_header}` : ""}</span></div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {duplicateCandidateGroups > 0 && (
-                  <div className="live-card">
-                    <div className="section-title"><div><h3>Проверка возможных совпадений</h3><p>Совпадение идентичности не означает, что записи нужно объединить или удалить.</p></div></div>
-                    <ImportDuplicateReview
-                      plan={plan}
-                      recipe={recipe}
-                      busy={busy || blockDraftDirty || mappingDraftDirty}
-                      onKeepAll={keepAllDuplicateCandidates}
-                    />
-                  </div>
-                )}
-
-                <div className="live-card">
-                  <div className="section-title"><div><h3>Что будет записано</h3><p>Это нормализованный план. Координаты исходных ячеек сохраняются отдельно для воспроизводимости.</p></div></div>
-                  <div className="analysis-preview-list">
-                    {plan.planned_records.slice(0, 12).map((record) => (
-                      <div className="analysis-preview-row" key={record.preview_id}>
-                        <span className="row-origin">{recordOrigin(record)}</span>
-                        <b>{record.identity.filter(Boolean).join(" · ") || "Analysis без распознанного идентификатора"}</b>
-                        <span>{record.measurements.slice(0, 6).map(measurementPreview).join(" · ") || "Нет Measurement"}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {plan.planned_records.length > 12 && <p className="more-note">Показано 12 из {plan.planned_records.length} записей.</p>}
-                </div>
-
-                <div className={`commit-bar${canSaveImport ? "" : " blocked"}`}>
-                  <div>
-                    <b>Готово к записи: {plan.summary.planned_analysis_count} Analysis · {plannedMeasurementCount} Measurement</b>
-                    <span>{canSaveImport
-                      ? isCleanFast
-                        ? "Clean Table проверен автоматически. Исходник останется неизменным, provenance каждой ячейки сохранится."
-                        : "Исходник не меняется; PetroLab сохранит управляемую копию и точную provenance каждой импортированной ячейки."
-                      : mappingDraftDirty
-                        ? "Сначала примени сопоставление полей."
-                        : duplicateReviewRequired
-                          ? "Сначала проверь группы возможных совпадений и явно зафиксируй решение."
-                          : "Нужен хотя бы один Analysis и Measurement с явной единицей."}</span>
-                  </div>
-                  <button className="primary-button large" onClick={commitImport} disabled={busy || !canSaveImport}>
-                    {busy ? <SpinnerGap className="spin" size={20} /> : <CheckCircle size={20} />} {isCleanFast ? "Импортировать Clean Table" : "Сохранить импорт в проект"}
-                  </button>
-                </div>
-              </>
+              <ImportWorkspace
+                sourceName={fileName(sourceDisplayPath || sourcePath)}
+                sourceDisplayPath={sourceDisplayPath}
+                inspection={inspection}
+                recipe={recipe}
+                recipeWarnings={visibleRecipeWarnings}
+                plan={plan}
+                blockPreviews={blockPreviews}
+                cleanClassification={cleanClassification}
+                detailedReview={detailedReview}
+                blockDraftDirty={blockDraftDirty}
+                mappingDraftDirty={mappingDraftDirty}
+                duplicateReviewRequired={duplicateReviewRequired}
+                canSaveImport={canSaveImport}
+                plannedMeasurementCount={plannedMeasurementCount}
+                busy={busy}
+                onOpenDetailed={openDetailedReview}
+                onApplySections={applySections}
+                onApplyMappings={applyMappings}
+                onBlockDirtyChange={setBlockDraftDirty}
+                onMappingDirtyChange={setMappingDraftDirty}
+                onKeepAllDuplicates={keepAllDuplicateCandidates}
+                onCommit={commitImport}
+                onCancel={startNewImport}
+                onChooseOther={chooseFile}
+              />
             )}
           </section>
         )}
