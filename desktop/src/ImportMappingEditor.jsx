@@ -159,7 +159,7 @@ function MappingRow({ mapping, value, busy, onChange }) {
   );
 }
 
-export function ImportMappingEditor({ recipe, warnings = [], busy, onApplyAll, onDirtyChange }) {
+export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = null, busy, onApplyAll, onDirtyChange }) {
   const [draft, setDraft] = useState(() => buildDraft(recipe, warnings));
   const [blockUnits, setBlockUnits] = useState({});
 
@@ -229,7 +229,7 @@ export function ImportMappingEditor({ recipe, warnings = [], busy, onApplyAll, o
     onApplyAll(decisions);
   };
 
-  const enabledSections = recipe.sections.filter((section) => section.enabled !== false);
+  const enabledSections = recipe.sections.filter((section) => section.enabled !== false && (!activeBlockId || section.block_id === activeBlockId));
 
   return (
     <div className="mapping-editor">
