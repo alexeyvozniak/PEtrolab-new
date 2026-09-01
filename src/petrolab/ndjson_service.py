@@ -8,6 +8,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from typing import Any, TextIO
 
+from .clean_table import classify_clean_table
 from .desktop_workflow import list_project_analyses, suggest_import_recipe
 from .import_apply import (
     apply_import_plan,
@@ -18,6 +19,7 @@ from .import_apply import (
 )
 from .import_preview import (
     ImportCommandError,
+    inspect_source,
     run_import_inspect_source,
     run_import_plan_create,
     run_import_preview_window,
@@ -124,6 +126,10 @@ def _object(params: Mapping[str, Any], name: str) -> dict[str, Any]:
 
 def _dispatch_import_inspect(params: Mapping[str, Any]) -> dict[str, Any]:
     return run_import_inspect_source(_source_path(params))
+
+
+def _dispatch_import_clean_table_classify(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": classify_clean_table(inspect_source(_source_path(params)))}
 
 
 def _dispatch_import_preview_window(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -241,6 +247,7 @@ def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
 
 COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.inspect_source": _dispatch_import_inspect,
+    "import.clean_table.classify": _dispatch_import_clean_table_classify,
     "import.preview.window": _dispatch_import_preview_window,
     "import.recipe.suggest": _dispatch_recipe_suggest,
     "import.recipe.revise_mapping": _dispatch_recipe_revise_mapping,
