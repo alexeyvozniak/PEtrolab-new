@@ -1,7 +1,8 @@
 """Deterministic structural recognition for import review.
 
 This module proposes roles/fields from source headers. It never persists data and
-never guesses an unstated unit from chemistry alone.
+never guesses an unstated unit from chemistry alone. Automatic recognition may
+suggest Ignore, but populated physical source fields remain reviewable.
 """
 
 from __future__ import annotations
@@ -83,6 +84,23 @@ def unit_from_header(header: str) -> str | None:
     return None
 
 
+def _index_key(source_axis: str) -> str:
+    return "source_column_index" if source_axis == "column" else "source_row_index"
+
+
+def ignored_mapping(source_index: int, *, source_axis: str, source_header: str | None) -> dict[str, Any]:
+    """Return an explicit reversible Ignore mapping for a physical source field."""
+    return {
+        "source_axis": source_axis,
+        _index_key(source_axis): source_index,
+        "source_header": source_header,
+        "target_role": "ignore",
+        "canonical_field": source_header or "",
+        "unit": None,
+        "measurement_semantics": "ignored",
+    }
+
+
 def mapping_for_header(
     source_index: int,
     header: str,
@@ -93,7 +111,7 @@ def mapping_for_header(
     normalized_header = normalized(header)
     token = field_token(header)
     identity = IDENTITY_FIELDS.get(normalized_header) or IDENTITY_FIELDS.get(token)
-    index_key = "source_column_index" if source_axis == "column" else "source_row_index"
+    index_key = _index_key(source_axis)
     base = {"source_axis": source_axis, index_key: source_index, "source_header": header}
 
     if identity:
@@ -126,13 +144,7 @@ def mapping_for_header(
                 "unit": unit,
                 "measurement_semantics": "measured",
             }, None)
-        return ({
-            **base,
-            "target_role": "ignore",
-            "canonical_field": header,
-            "unit": None,
-            "measurement_semantics": "ignored",
-        }, {
+        return (ignored_mapping(source_index, source_axis=source_axis, source_header=header), {
             "code": "UNIT_REQUIRES_REVIEW",
             "source_header": header,
             index_key: source_index,
@@ -140,20 +152,53 @@ def mapping_for_header(
             "canonical_field": measurement,
         })
 
-    return ({
-        **base,
-        "target_role": "ignore",
-        "canonical_field": header,
-        "unit": None,
-        "measurement_semantics": "ignored",
-    }, None)
+    return (ignored_mapping(source_index, source_axis=source_axis, source_header=header), None)
 
 
 def mappings_for_row_header(header: tuple[str | None, ...], context_unit: str | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Compatibility helper for a header row only.
+
+    New block-based code should use `mappings_for_row_block` so populated blank-
+    header columns remain visible.
+    """
     mappings: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     for column, raw_header in enumerate(header):
         if raw_header in (None, ""):
+            continue
+        mapping, warning = mapping_for_header(column, str(raw_header), source_axis="column", context_unit=context_unit)
+        mappings.append(mapping)
+        if warning:
+            warnings.append(warning)
+    return mappings, warnings
+
+
+def mappings_for_row_block(
+    rows: tuple[tuple[str | None, ...], ...],
+    header_row: int,
+    data_start_row: int,
+    data_end_row: int,
+    context_unit: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build mappings for every populated physical column in a row-oriented block."""
+    header = rows[header_row - 1]
+    bounded_end = min(len(rows), data_end_row)
+    max_columns = max(
+        [len(header), *(len(rows[index - 1]) for index in range(data_start_row, bounded_end + 1))],
+        default=0,
+    )
+    mappings: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    for column in range(max_columns):
+        raw_header = header[column] if column < len(header) else None
+        has_data = any(
+            column < len(rows[row_number - 1]) and rows[row_number - 1][column] not in (None, "")
+            for row_number in range(data_start_row, bounded_end + 1)
+        )
+        if raw_header in (None, "") and not has_data:
+            continue
+        if raw_header in (None, ""):
+            mappings.append(ignored_mapping(column, source_axis="column", source_header=None))
             continue
         mapping, warning = mapping_for_header(column, str(raw_header), source_axis="column", context_unit=context_unit)
         mappings.append(mapping)
@@ -169,6 +214,7 @@ def mappings_for_column_header(
     field_end_row: int,
     context_unit: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Compatibility helper for transposed field labels only."""
     mappings: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     column_index = header_column - 1
@@ -178,6 +224,41 @@ def mappings_for_column_header(
         if raw_header in (None, ""):
             continue
         mapping, warning = mapping_for_header(row_number - 1, str(raw_header), source_axis="row", context_unit=context_unit)
+        mappings.append(mapping)
+        if warning:
+            warnings.append(warning)
+    return mappings, warnings
+
+
+def mappings_for_column_block(
+    rows: tuple[tuple[str | None, ...], ...],
+    header_column: int,
+    field_start_row: int,
+    field_end_row: int,
+    data_start_column: int,
+    data_end_column: int,
+    context_unit: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build mappings for every populated physical field row in a transposed block."""
+    mappings: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    header_column_index = header_column - 1
+    first_data_index = max(0, data_start_column - 1)
+    last_data_index = max(first_data_index, data_end_column - 1)
+    for row_number in range(field_start_row, min(field_end_row, len(rows)) + 1):
+        row = rows[row_number - 1]
+        raw_header = row[header_column_index] if header_column_index < len(row) else None
+        has_data = any(
+            column < len(row) and row[column] not in (None, "")
+            for column in range(first_data_index, last_data_index + 1)
+        )
+        if raw_header in (None, "") and not has_data:
+            continue
+        source_index = row_number - 1
+        if raw_header in (None, ""):
+            mappings.append(ignored_mapping(source_index, source_axis="row", source_header=None))
+            continue
+        mapping, warning = mapping_for_header(source_index, str(raw_header), source_axis="row", context_unit=context_unit)
         mappings.append(mapping)
         if warning:
             warnings.append(warning)
