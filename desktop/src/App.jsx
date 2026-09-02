@@ -19,6 +19,7 @@ import {
   createImportPlan,
   getProjectDatabasePath,
   inspectImportSource,
+  isPetrolabDesktop,
   listProjectAnalyses,
   pickImportFile,
   previewImportWindow,
@@ -161,6 +162,7 @@ function CleanTableSummary({ classification, onDetailed, busy }) {
 }
 
 export function App() {
+  const desktopRuntimeAvailable = isPetrolabDesktop();
   const [screen, setScreen] = useState("Импорт");
   const [databasePath, setDatabasePath] = useState("");
   const [project, setProject] = useState({ total: 0, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
@@ -187,6 +189,7 @@ export function App() {
   }, [databasePath]);
 
   useEffect(() => {
+    if (!desktopRuntimeAvailable) return undefined;
     let cancelled = false;
     (async () => {
       try {
@@ -200,7 +203,7 @@ export function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [desktopRuntimeAvailable]);
 
   const identityColumns = useMemo(() => {
     const fields = new Set();
@@ -535,12 +538,13 @@ export function App() {
             <p>Источников: <b>{project.source_count}</b> · импортов: <b>{project.import_batch_count}</b> · анализов: <b>{project.total}</b></p>
           </div>
           <div className="top-actions">
-            <button className="outline-button" onClick={startNewImport} disabled={busy}><Plus size={18} /> Добавить данные</button>
+            <button className="outline-button" onClick={startNewImport} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> Добавить данные</button>
             <button className="icon-button" disabled title="Настройки будут подключены позже"><GearSix size={21} /></button>
           </div>
         </header>
 
         {activity && <div className="global-message activity"><SpinnerGap className="spin" size={20} /><span>{activity}</span></div>}
+        {!desktopRuntimeAvailable && <div className="global-message activity"><Info size={20} /><span>Предпросмотр проверяет компоновку. Выбор и импорт файлов доступны в установленном PetroLab Desktop.</span></div>}
         {error && <div className="global-message error"><Warning size={20} weight="fill" /><span>{error}</span></div>}
         {success && <div className="global-message success"><CheckCircle size={20} weight="fill" /><span>{success}</span></div>}
 
@@ -551,7 +555,7 @@ export function App() {
                 <div className="file-start-icon"><FileArrowUp size={46} weight="duotone" /></div>
                 <h1>Добавить файл</h1>
                 <p>Если это PetroLab Clean Table, импорт будет коротким. Сырые и неоднозначные Excel откроются в отдельной подготовке.</p>
-                <button className="primary-button large" onClick={chooseFile} disabled={busy}>
+                <button className="primary-button large" onClick={chooseFile} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}>
                   {busy ? <SpinnerGap className="spin" size={20} /> : <FileArrowUp size={20} />}
                   {busy ? "Открываю файл…" : "Выбрать файл"}
                 </button>

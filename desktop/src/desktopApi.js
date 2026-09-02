@@ -2,6 +2,18 @@ import { invoke } from "@tauri-apps/api/core";
 
 export const PROTOCOL_VERSION = "1.0";
 
+function desktopInvoke(command, args) {
+  const internals = typeof window === "undefined" ? null : window.__TAURI_INTERNALS__;
+  if (!internals || typeof internals.invoke !== "function") {
+    throw new Error("Полный импорт доступен в установленном PetroLab Desktop. Этот preview предназначен только для проверки интерфейса.");
+  }
+  return invoke(command, args);
+}
+
+export function isPetrolabDesktop() {
+  return typeof window !== "undefined" && typeof window.__TAURI_INTERNALS__?.invoke === "function";
+}
+
 export async function invokePetrolab(command, payload) {
   const envelope = {
     protocol_version: PROTOCOL_VERSION,
@@ -9,13 +21,13 @@ export async function invokePetrolab(command, payload) {
     command,
     payload,
   };
-  return invoke("petrolab_command", { envelope });
+  return desktopInvoke("petrolab_command", { envelope });
 }
 
-export const pickImportFile = () => invoke("pick_import_file");
-export const stageImportFile = (sourcePath) => invoke("stage_import_file", { sourcePath });
-export const clearImportStaging = (stagedPath) => invoke("clear_import_staging", { stagedPath });
-export const getProjectDatabasePath = () => invoke("project_database_path");
+export const pickImportFile = () => desktopInvoke("pick_import_file");
+export const stageImportFile = (sourcePath) => desktopInvoke("stage_import_file", { sourcePath });
+export const clearImportStaging = (stagedPath) => desktopInvoke("clear_import_staging", { stagedPath });
+export const getProjectDatabasePath = () => desktopInvoke("project_database_path");
 
 export const inspectImportSource = (sourcePath) =>
   invokePetrolab("import.inspect_source", { source_path: sourcePath });

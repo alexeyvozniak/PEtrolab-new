@@ -187,7 +187,10 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
   const api = await read("src/desktopApi.js");
   assert.match(api, /protocol_version: PROTOCOL_VERSION/);
   assert.match(api, /request_id: crypto\.randomUUID\(\)/);
-  assert.match(api, /invoke\("petrolab_command", \{ envelope \}\)/);
+  assert.match(api, /desktopInvoke\("petrolab_command", \{ envelope \}\)/);
+  assert.match(api, /window\.__TAURI_INTERNALS__/);
+  assert.match(api, /isPetrolabDesktop/);
+  assert.match(api, /preview предназначен только для проверки интерфейса/);
   assert.match(api, /media\.inspect_sources/);
   assert.match(api, /media\.import\.plan/);
   assert.match(api, /media\.import\.apply/);
