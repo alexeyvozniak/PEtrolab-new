@@ -1,5 +1,6 @@
 # Quality gates
 
-- `AUTOMATED_QA.md` — общая автоматизированная стратегия QA.
-- `REAL_IMPORT_CORPUS.md` — нормативный приватный корпус реальных Excel.
-- `QA_MILESTONE_GATE.md` — условия, после которых milestone можно отдавать пользователю на ручную приёмку.
+- `AUTOMATED_QA.md` — общая стратегия автоматизированного QA и порядок gates.
+- `REAL_IMPORT_CORPUS.md` — нормативный приватный корпус реальных Excel и правила baseline.
+
+Исполняемые проверки находятся в `.github/workflows/`, `scripts/validate_real_import_corpus.py` и `scripts/run_milestone_qa.py`; отдельные документы не дублируют их поведение.
