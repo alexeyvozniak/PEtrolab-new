@@ -79,10 +79,12 @@ jobs:
           npm run build
           npm run test:sites
           npm run test:tauri-contract
-      - name: Build Windows installer
+      - name: Build Windows installer for milestone artifact
+        if: github.event_name != 'pull_request'
         working-directory: desktop
         run: npm run tauri build
-      - name: Upload test installer
+      - name: Upload milestone installer
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: PetroLab-Windows-test-${{ github.sha }}
