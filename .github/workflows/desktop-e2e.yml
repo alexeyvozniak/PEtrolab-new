@@ -21,6 +21,7 @@ concurrency:
 jobs:
   windows-desktop-smoke:
     runs-on: windows-latest
+    timeout-minutes: 45
     env:
       PYTHONUTF8: "1"
       PETROLAB_PYTHONPATH: ${{ github.workspace }}\src
