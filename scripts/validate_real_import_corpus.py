@@ -11,7 +11,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from petrolab.import_preview import inspect_source  # noqa: E402
+from petrolab.desktop_workflow import suggest_import_recipe  # noqa: E402
+from petrolab.import_preview import ImportCommandError, inspect_source  # noqa: E402
 
 
 REGISTRY_PATH = ROOT / "fixtures" / "import" / "real-corpus.registry.json"
@@ -89,12 +90,65 @@ def locate_case_file(corpus_dir: Path, case: dict) -> Path | None:
     return None
 
 
+def _mapping_summary(mapping: dict) -> dict:
+    source_axis = mapping.get("source_axis") or ("column" if "source_column_index" in mapping else "row")
+    source_index = mapping.get("source_column_index") if source_axis == "column" else mapping.get("source_row_index")
+    return {
+        "source_axis": source_axis,
+        "source_index": source_index,
+        "source_header": mapping.get("source_header"),
+        "target_role": mapping.get("target_role"),
+        "canonical_field": mapping.get("canonical_field"),
+        "unit": mapping.get("unit"),
+        "measurement_semantics": mapping.get("measurement_semantics"),
+    }
+
+
+def _recognition_snapshot(path: Path) -> dict:
+    try:
+        suggestion = suggest_import_recipe(path)
+    except ImportCommandError as exc:
+        raise SystemExit(
+            f"Normative workbook is not import-reviewable by the current recognizer: {path.name}: "
+            f"{exc.code}: {exc.message}"
+        ) from exc
+
+    recipe = suggestion["recipe"]
+    sections = []
+    for section in recipe.get("sections", []):
+        sections.append({
+            "sheet_name": section.get("sheet_name"),
+            "block_id": section.get("block_id"),
+            "enabled": section.get("enabled", True),
+            "orientation": section.get("orientation", "rows_are_analyses"),
+            "header_row": section.get("header_row"),
+            "data_start_row": section.get("data_start_row"),
+            "data_end_row": section.get("data_end_row"),
+            "header_column": section.get("header_column"),
+            "data_start_column": section.get("data_start_column"),
+            "data_end_column": section.get("data_end_column"),
+            "mappings": [_mapping_summary(mapping) for mapping in section.get("mappings", [])],
+        })
+
+    warning_codes = sorted({
+        warning.get("code")
+        for warning in suggestion.get("warnings", [])
+        if warning.get("code")
+    })
+    return {
+        "semantic_fingerprint": recipe.get("semantic_fingerprint"),
+        "sections": sections,
+        "warning_codes": warning_codes,
+    }
+
+
 def snapshot_workbook(path: Path) -> dict:
     before = sha256_file(path)
     inspection = inspect_source(path)
+    recognition = _recognition_snapshot(path)
     after = sha256_file(path)
     if before != after:
-        raise SystemExit(f"Import inspection mutated normative source workbook: {path}")
+        raise SystemExit(f"Import inspection/recognition mutated normative source workbook: {path}")
     if inspection.fingerprint != before:
         raise SystemExit(f"PetroLab source fingerprint differs from SHA-256 for {path}")
 
@@ -104,7 +158,7 @@ def snapshot_workbook(path: Path) -> dict:
     return {
         "sha256": before,
         "file_name": path.name,
-        "source_format": path.suffix.lower().lstrip("."),
+        "source_format": inspection.source_format,
         "sheets": [
             {
                 "name": sheet.name,
@@ -114,11 +168,19 @@ def snapshot_workbook(path: Path) -> dict:
         ],
         "candidate_block_count": len(projection.get("candidate_blocks", [])),
         "warning_codes": warning_codes,
+        "recognition": recognition,
     }
 
 
 def compare_snapshot(case_id: str, observed: dict, expected: dict) -> None:
-    keys = ("sha256", "source_format", "sheets", "candidate_block_count", "warning_codes")
+    keys = (
+        "sha256",
+        "source_format",
+        "sheets",
+        "candidate_block_count",
+        "warning_codes",
+        "recognition",
+    )
     differences = [key for key in keys if observed.get(key) != expected.get(key)]
     if differences:
         details = "\n".join(
@@ -197,6 +259,7 @@ def validate_real_corpus(corpus_dir: Path, cases: list[dict], require_all: bool)
         print(
             f"PASS {case['case_id']}: {source.name}; "
             f"sheets={len(observed['sheets'])}; blocks={observed['candidate_block_count']}; "
+            f"recipe={observed['recognition']['semantic_fingerprint'][:12]}…; "
             f"sha256={observed['sha256'][:12]}…"
         )
 
