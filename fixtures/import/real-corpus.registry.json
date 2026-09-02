@@ -4,56 +4,56 @@
   "storage": "external_private",
   "cases": [
     {
-      "case_id": "real-2024-phlogopite",
-      "accepted_names": ["2024 Phlogopite.xlsx"],
+      "case_id": "real-wide-multisheet-mica",
+      "accepted_names": ["real-wide-multisheet-mica.xlsx"],
       "required": true,
       "regression_focus": ["wide_workbook", "many_sheets", "mixed_metadata_and_measurements", "literature_data"]
     },
     {
-      "case_id": "real-2023-07-10",
-      "accepted_names": ["2023-07-10.xlsx"],
+      "case_id": "real-instrument-preamble-a",
+      "accepted_names": ["real-instrument-preamble-a.xlsx"],
       "required": true,
       "regression_focus": ["instrument_preamble", "logical_block_detection", "whole_sheet_navigation", "source_immutability"]
     },
     {
-      "case_id": "real-2023-12-10",
-      "accepted_names": ["2023-12-10.xlsx"],
+      "case_id": "real-instrument-export-b",
+      "accepted_names": ["real-instrument-export-b.xlsx"],
       "required": true,
       "regression_focus": ["instrument_export", "header_detection", "physical_field_review", "source_immutability"]
     },
     {
-      "case_id": "real-lukoil-wm-tube-2204-16c-phl",
-      "accepted_names": ["Lukoil WM Tube 2204-16C Phl.xlsx"],
+      "case_id": "real-mica-method-context",
+      "accepted_names": ["real-mica-method-context.xlsx"],
       "required": true,
       "regression_focus": ["mica_analyses", "method_context", "field_mapping", "source_immutability"]
     },
     {
-      "case_id": "real-turiy-mys-mica",
-      "accepted_names": ["слюды Турий мыс.xlsx", "слюды Турий мыс(2).xlsx"],
+      "case_id": "real-cyrillic-generations",
+      "accepted_names": ["real-cyrillic-generations.xlsx"],
       "required": true,
       "regression_focus": ["cyrillic_filename", "wide_workbook", "generations", "petrographic_metadata"]
     },
     {
-      "case_id": "real-kola-dykes",
-      "accepted_names": ["Kola_dykes.xlsx"],
+      "case_id": "real-multisample-mixed-fields",
+      "accepted_names": ["real-multisample-mixed-fields.xlsx"],
       "required": true,
       "regression_focus": ["multi_sample_dataset", "mixed_fields", "table_preservation", "source_immutability"]
     },
     {
-      "case_id": "real-la-icpms-2026-07-23-29",
-      "accepted_names": ["LA_ICPMS_флогопиты_23-29_07_2026.xlsx"],
+      "case_id": "real-laicpms-qc",
+      "accepted_names": ["real-laicpms-qc.xlsx"],
       "required": true,
       "regression_focus": ["la_icp_ms", "many_measurements", "qc_sheets", "cyrillic_headers", "negative_and_zero_values"]
     },
     {
-      "case_id": "real-la-icpms-38-40-42",
-      "accepted_names": ["LA_ICPMS_флогопиты_38-40-42_улучшенный_пересчёт.xlsx"],
+      "case_id": "real-laicpms-processing-variants",
+      "accepted_names": ["real-laicpms-processing-variants.xlsx"],
       "required": true,
       "regression_focus": ["la_icp_ms", "multiple_processing_variants", "many_sheets", "cyrillic_headers"]
     },
     {
-      "case_id": "real-la-icpms-inclusion-cleaning",
-      "accepted_names": ["LA_ICPMS_флогопиты_очистка_включений.xlsx"],
+      "case_id": "real-laicpms-cleanup-metadata",
+      "accepted_names": ["real-laicpms-cleanup-metadata.xlsx"],
       "required": true,
       "regression_focus": ["la_icp_ms", "qc_text_metadata", "derived_cleanup_fields", "interval_text"]
     }
