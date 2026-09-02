@@ -75,18 +75,17 @@ jobs:
           npm run build
           npm run test:sites
           npm run test:tauri-contract
+          npm run test:ui
       - name: Build Windows installer
         working-directory: desktop
         run: npm run tauri build
       - name: Install and launch packaged Windows app
         shell: pwsh
-        run: .\\scripts\\smoke_windows_installer.ps1 -ImportSource (Resolve-Path "fixtures/import/ui-clean-table.csv").Path -QaOutput (Join-Path $env:RUNNER_TEMP "petrolab-ui-smoke")
+        run: .\\scripts\\smoke_windows_installer.ps1
       - name: Upload test installer
         uses: actions/upload-artifact@v4
         with:
           name: PetroLab-Windows-test-${{ github.sha }}
-          path: |
-            desktop/src-tauri/target/release/bundle/**
-            ${{ runner.temp }}/petrolab-ui-smoke/**
+          path: desktop/src-tauri/target/release/bundle/**
           if-no-files-found: error
           retention-days: 14

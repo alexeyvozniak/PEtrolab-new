@@ -200,20 +200,21 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
 test("Windows release gate installs and launches the packaged application", async () => {
   const workflow = await read("../.github/workflows/windows-test-build.yml");
   const smoke = await read("../scripts/smoke_windows_installer.ps1");
+  const uiSmoke = await read("tests/import-ui.e2e.test.jsx");
   assert.match(workflow, /Install and launch packaged Windows app/);
   assert.match(workflow, /smoke_windows_installer\.ps1/);
-  assert.match(workflow, /ui-clean-table\.csv/);
-  assert.match(workflow, /petrolab-ui-smoke/);
+  assert.match(workflow, /npm run test:ui/);
   assert.match(smoke, /msiexec\.exe/);
   assert.match(smoke, /MainWindowHandle/);
   assert.match(smoke, /petrolab-service/);
   assert.match(smoke, /petrolab-v2\.sqlite/);
-  assert.match(smoke, /UIAutomationClient/);
-  assert.match(smoke, /Выбрать файл/);
-  assert.match(smoke, /Импортировать таблицу/);
-  assert.match(smoke, /UI-1/);
-  assert.match(smoke, /Get-FileHash/);
-  assert.match(smoke, /Installed PetroLab UI smoke test passed/);
+  assert.match(smoke, /Installed PetroLab smoke test passed/);
+  assert.match(uiSmoke, /user clicks through Clean Table import/);
+  assert.match(uiSmoke, /Выбрать файл/);
+  assert.match(uiSmoke, /Импортировать таблицу/);
+  assert.match(uiSmoke, /UI-1/);
+  assert.match(uiSmoke, /Windows UI smoke/);
+  assert.match(uiSmoke, /applyImportPlan/);
 });
 
 test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {
