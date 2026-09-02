@@ -1,0 +1,53 @@
+name: Desktop E2E smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "src/**"
+      - "scripts/build_windows_service.py"
+      - ".github/workflows/desktop-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-desktop-smoke:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Enable Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Build packaged scientific sidecar
+        run: |
+          python -m pip install --disable-pip-version-check pyinstaller
+          python scripts/build_windows_service.py
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Install Tauri WebDriver bridge
+        run: cargo install tauri-driver --locked
+      - name: Install E2E dependencies
+        working-directory: desktop/e2e
+        run: npm install --no-package-lock
+      - name: Build real Tauri debug executable
+        working-directory: desktop
+        run: npm run tauri -- build --debug --no-bundle
+      - name: Drive PetroLab.exe through WebDriver
+        working-directory: desktop/e2e
+        run: npm test
