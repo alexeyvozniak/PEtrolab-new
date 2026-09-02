@@ -17,3 +17,5 @@ target/
 desktop/src-tauri/binaries/*.exe
 desktop/src-tauri/icons/icon.ico
 desktop/src-tauri/icons/icon.png
+fixtures/import/real-private/*
+!fixtures/import/real-private/README.md
