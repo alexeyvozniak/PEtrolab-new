@@ -202,11 +202,18 @@ test("Windows release gate installs and launches the packaged application", asyn
   const smoke = await read("../scripts/smoke_windows_installer.ps1");
   assert.match(workflow, /Install and launch packaged Windows app/);
   assert.match(workflow, /smoke_windows_installer\.ps1/);
+  assert.match(workflow, /ui-clean-table\.csv/);
+  assert.match(workflow, /petrolab-ui-smoke/);
   assert.match(smoke, /msiexec\.exe/);
   assert.match(smoke, /MainWindowHandle/);
   assert.match(smoke, /petrolab-service/);
   assert.match(smoke, /petrolab-v2\.sqlite/);
-  assert.match(smoke, /Installed PetroLab smoke test passed/);
+  assert.match(smoke, /UIAutomationClient/);
+  assert.match(smoke, /Выбрать файл/);
+  assert.match(smoke, /Импортировать таблицу/);
+  assert.match(smoke, /UI-1/);
+  assert.match(smoke, /Get-FileHash/);
+  assert.match(smoke, /Installed PetroLab UI smoke test passed/);
 });
 
 test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {
