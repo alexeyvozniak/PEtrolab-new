@@ -34,6 +34,11 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+      - name: Install matching Microsoft Edge WebDriver
+        run: |
+          cargo install --git https://github.com/chippers/msedgedriver-tool
+          & "$HOME/.cargo/bin/msedgedriver-tool.exe"
+          $PWD.Path >> $env:GITHUB_PATH
       - name: Build packaged scientific sidecar
         run: |
           python -m pip install --disable-pip-version-check pyinstaller
