@@ -1,0 +1,14 @@
+{
+  "name": "petrolab-desktop-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "mocha --timeout 120000 \"test/**/*.e2e.js\""
+  },
+  "dependencies": {
+    "chai": "5.2.1",
+    "mocha": "11.7.1",
+    "selenium-webdriver": "4.34.0"
+  }
+}
