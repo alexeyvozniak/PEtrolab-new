@@ -12,19 +12,43 @@
 
 ### 2. Import Regression Corpus
 
-Каждый известный проблемный источник становится постоянным fixture case:
+У импорта два слоя, и их нельзя путать.
 
-- исходный файл `fixtures/import/<case>.<ext>`;
-- ожидаемый контракт `fixtures/import/<case>.expected.json`;
-- исходник должен оставаться byte-identical после inspect/plan;
-- ожидаемые листы, candidate blocks и предупреждения проверяются автоматически;
-- исправленный однажды дефект не может незаметно вернуться.
+#### 2.1. Нормативный real-workbook corpus — источник истины
 
-Новый баг импорта считается полностью исправленным только после добавления regression case, воспроизводящего его до исправления и проходящего после исправления.
+Авторитетным считается набор **реальных пользовательских Excel-файлов**, а не синтетические примеры. Обязательные сценарии зарегистрированы в `fixtures/import/real-corpus.registry.json`. Сами исходники не коммитятся, потому что репозиторий публичный и научные данные могут быть неопубликованными.
+
+Полный приватный gate фиксирует для каждой реальной книги:
+
+- SHA-256 точного исходного файла;
+- состав и порядок листов;
+- число физических строк по листам;
+- число распознанных logical blocks;
+- коды import warnings;
+- byte-identical состояние файла до и после чтения PetroLab.
+
+Первый полный прогон создаёт `real-corpus.baseline.json` со статусом `candidate`. Baseline становится нормативной только после явной проверки и смены `review_status` на `approved`. Любое последующее изменение SHA, структуры листов, блоков или предупреждений ломает milestone gate и требует осмысленного пересмотра baseline.
+
+Команда полного gate:
+
+```bash
+python scripts/validate_real_import_corpus.py --require-all --corpus-dir fixtures/import/real-private
+```
+
+#### 2.2. Public synthetic/minimized corpus — быстрый защитный слой
+
+`fixtures/import/*.expected.json` и генераторы в `tests/real_world_fixtures.py` нужны для быстрых воспроизводимых PR-проверок, минимальных reproductions и редких edge cases. Они помогают локализовать дефект, но **не заменяют реальные книги**.
+
+Новый баг, найденный на реальном workbook, считается закрытым только когда:
+
+1. исходный реальный workbook включён или уже присутствует в приватном normative corpus;
+2. его утверждённый baseline/contract отражает требуемое поведение;
+3. при необходимости добавлен маленький synthetic reproduction для быстрой диагностики;
+4. оба слоя проходят после исправления.
 
 ### 3. Real Desktop E2E
 
-Windows CI собирает настоящий Tauri executable и управляет им через WebDriver. Минимальный smoke gate обязан доказать, что приложение:
+Windows CI собирает настоящий Tauri executable и управляет им через WebDriver. Windows runner устанавливает matching Microsoft Edge Driver и `tauri-driver`, после чего smoke gate обязан доказать, что приложение:
 
 1. запускается как desktop executable;
 2. показывает рабочий Import screen;
@@ -44,23 +68,12 @@ Windows CI собирает настоящий Tauri executable и управл�
 
 ### 4. Release gate
 
-Полный installer, fresh-install smoke, migration/restore и updater проверяются только для release candidate. Они не должны замедлять каждую мелкую итерацию разработки.
+Полный installer, fresh-install smoke, migration/restore, updater и **обязательный полный real-workbook corpus** проверяются для milestone/release candidate. Они не должны замедлять каждую мелкую итерацию разработки.
 
-## Начальный Import Corpus backlog
+## Текущий нормативный real-workbook набор
 
-Существующие synthetic real-world generators уже покрывают основу будущего corpus:
-
-- long instrument preamble;
-- repeated headers;
-- multiple logical blocks;
-- complementary duplicate blocks;
-- transposed weight-percent data;
-- atomic-percent data;
-- duplicate fields from different methods;
-- generic isotope data.
-
-Следующие реальные случаи должны добавляться из пользовательских файлов после обезличивания или как минимальные synthetic reproductions: blank populated headers, mixed Fe semantics, `<DL`/blank/zero/negative, wide workbooks, Cyrillic/network paths и многолистовые instrument exports.
+Реестр сейчас содержит девять обязательных реальных книг: шесть исходных наборов, на которых уже развивался импорт PetroLab, и три реальные LA-ICP-MS книги 2026 года. Для кириллических вариантов имени допускаются только явно зарегистрированные aliases; случайный похожий Excel не может тихо подменить нормативный источник.
 
 ## Правило ручной приёмки
 
-Ручная milestone-проверка начинается только после зелёных contracts, corpus и Desktop E2E. Пользователь оценивает научный смысл и UX, а не повторяет механические smoke/regression сценарии.
+Ручная milestone-проверка начинается только после зелёных contracts, public corpus, real Desktop E2E и полного приватного real-workbook gate. Пользователь оценивает научный смысл и UX, а не повторяет механические smoke/regression сценарии.
