@@ -10,6 +10,7 @@ on:
       - "src/petrolab/import/**"
       - "scripts/validate_real_import_corpus.py"
       - "tests/test_import_regression_corpus.py"
+      - "tests/test_real_import_corpus_registry.py"
       - "tests/real_world_fixtures.py"
       - ".github/workflows/import-regression.yml"
   workflow_dispatch:
@@ -27,5 +28,5 @@ jobs:
           python-version: "3.12"
       - name: Validate normative real-workbook registry
         run: python scripts/validate_real_import_corpus.py --manifest-only
-      - name: Run immutable public import regression corpus
-        run: python -m unittest discover -s tests -p "test_import_regression_corpus.py" -v
+      - name: Run import corpus contracts
+        run: python -m unittest discover -s tests -p "test_*import*corpus*.py" -v
