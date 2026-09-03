@@ -39,6 +39,11 @@ vi.mock("../src/desktopApi", () => {
     { code: "UNMAPPED_FIELD_REQUIRES_REVIEW", sheet_name: "Details", block_id: "details-1", source_axis: "column", source_column_index: 1, source_header: "Sigma" },
     { code: "UNMAPPED_FIELD_REQUIRES_REVIEW", sheet_name: "Details", block_id: "details-2", source_axis: "column", source_column_index: 1, source_header: "Sigma" },
   ];
+  const complexCleanReasons = [
+    { code: "CLEAN_TABLE_BLANK_HEADER", sheet_name: "Summary", source_axis: "column", source_column_index: 4 },
+    { code: "CLEAN_TABLE_BLANK_HEADER", sheet_name: "Summary", source_axis: "column", source_column_index: 5 },
+    { code: "CLEAN_TABLE_BLANK_HEADER", sheet_name: "Summary", source_axis: "column", source_column_index: 6 },
+  ];
   const currentComplexRecipe = () => ({
     sections: [{
       block_id: "summary-main",
@@ -132,7 +137,7 @@ vi.mock("../src/desktopApi", () => {
       : { source_format: "xlsx", source_fingerprint: "fedcba9876543210", sheets: [{ name: "Summary" }, { name: "Details" }] } })),
     classifyCleanTable: vi.fn().mockImplementation(async () => ({ result: uiState.mode === "clean"
       ? { mode: "clean_table_fast", clean_table_version: "1", recipe, sections: [{ sheet_name: "Data", analysis_fields: ["Analysis"], measurements: [{ field: "SiO2", unit: "wt.%" }] }], ignored_helper_sheets: [] }
-      : { mode: "raw_review", reasons: [] } })),
+      : { mode: "raw_review", reasons: complexCleanReasons } })),
     suggestImportRecipe: vi.fn().mockImplementation(async () => ({ result: { recipe: currentComplexRecipe(), warnings: complexWarnings } })),
     createImportPlan: vi.fn().mockImplementation(async () => ({ result: uiState.mode === "clean" ? plan : complexPlan() })),
     getImportBulkUnitScopes: vi.fn().mockImplementation(async () => ({ result: { scopes: uiState.unitApplied ? [] : [{ bulk_scope_id: "summary-unit", block_count: 1, field_count: 1, fields: ["SiO2"], sheet_names: ["Summary"] }] } })),
@@ -159,7 +164,7 @@ vi.mock("../src/desktopApi", () => {
     } })),
     reviewImportDuplicates: vi.fn().mockImplementation(async () => {
       uiState.duplicatesReviewed = true;
-      return { result: { recipe: currentComplexRecipe(), plan: complexPlan(), duplicate_review: { candidate_group_count: 1 } } };
+      return { result: { recipe: currentComplexRecipe(), plan: complexPlan(), duplicate_review: { candidate_group_count: 1 } };
     }),
     applyImportPlan: vi.fn().mockImplementation(async () => {
       uiState.imported = true;
@@ -219,6 +224,22 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
     expect.any(Object),
   );
   await waitFor(() => expect(uiState.imported).toBe(true));
+});
+
+test("complex import always shows the source table and groups repeated structural issues", async () => {
+  uiState.mode = "complex";
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Выбрать файл" }));
+  await screen.findByRole("heading", { name: "Импорт таблиц" });
+
+  expect(screen.getByText("Исходная таблица")).toBeTruthy();
+  const sourceTable = screen.getByRole("table");
+  expect(within(sourceTable).getByText("Analysis")).toBeTruthy();
+  expect(within(sourceTable).getByText("SiO2")).toBeTruthy();
+  expect(within(sourceTable).getByText("Sigma")).toBeTruthy();
+  expect(screen.getByText("Колонка с данными не имеет заголовка · 3 мест")).toBeTruthy();
 });
 
 test("user resolves a repeated complex workbook with sheet-level and grouped decisions", async () => {
