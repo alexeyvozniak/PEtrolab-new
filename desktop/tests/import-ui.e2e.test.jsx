@@ -164,7 +164,7 @@ vi.mock("../src/desktopApi", () => {
     } })),
     reviewImportDuplicates: vi.fn().mockImplementation(async () => {
       uiState.duplicatesReviewed = true;
-      return { result: { recipe: currentComplexRecipe(), plan: complexPlan(), duplicate_review: { candidate_group_count: 1 } };
+      return { result: { recipe: currentComplexRecipe(), plan: complexPlan(), duplicate_review: { candidate_group_count: 1 } } };
     }),
     applyImportPlan: vi.fn().mockImplementation(async () => {
       uiState.imported = true;
