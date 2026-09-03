@@ -30,7 +30,7 @@ KNOWN_HEADER_TOKENS = {
     "li", "rb", "ba", "sr", "la", "ce", "nd", "u", "th",
 }
 IRON_FIELDS = {"feo", "feot", "fe2o3", "fe2o3t", "fetotal"}
-VALID_UNITS = {"wt.%", "mass%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio"}
+VALID_UNITS = {"wt.%", "mass%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon"}
 VALID_ORIENTATIONS = {"rows_are_analyses", "columns_are_analyses"}
 OLE_COMPOUND_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 VALID_OWNERSHIP_MODES = {"linked_external", "managed_copy"}
@@ -195,7 +195,16 @@ def _header_candidates(rows: list[list[str | None]]) -> tuple[int, ...]:
     result: list[int] = []
     for index, row in enumerate(rows):
         matches = sum(
-            any(_header_token(value).startswith(token) for token in KNOWN_HEADER_TOKENS)
+            any(
+                # ``n.d.`` is a common analytical value.  Its normalized form
+                # is ``nd``, which must not be mistaken for the Nd header.
+                # Compare the original token first so chemical symbols remain
+                # valid short headers while missing-value markers never start
+                # a new logical block.
+                str(value).strip().lower() not in {"n.d.", "n/d", "n.a.", "n/a", "#div/0!", "#value!"}
+                and (_header_token(value) == token if len(token) <= 2 else _header_token(value).startswith(token))
+                for token in KNOWN_HEADER_TOKENS
+            )
             for value in row if value
         )
         if matches >= 2 or _looks_like_generic_header(rows, index):
@@ -218,6 +227,13 @@ def _unit_from_text(text: str) -> str | None:
         return "mol%"
     if any(marker in compact for marker in ("wt.%", "wt%", "mass%", "мас.%", "мас%", "weight%", "вес%")):
         return "wt.%"
+    # Instrument exports often put the Russian label «вес» in a separate
+    # unit row above an elemental table.  It is an explicit source label, not
+    # a composition-based unit guess.
+    if compact in {"вес", "вес.", "weight", "mass"}:
+        return "wt.%"
+    if compact in {"атом", "атом.", "atomic"}:
+        return "at.%"
     return None
 
 
@@ -342,27 +358,78 @@ def _read_delimited(path: Path, delimiter: str) -> tuple[SheetInspection, ...]:
     return (SheetInspection(path.stem, tuple(tuple(row) for row in rows), _header_candidates(rows)),)
 
 
+def _read_xls(path: Path) -> tuple[SheetInspection, ...]:
+    """Read legacy BIFF workbooks without converting or rewriting the source."""
+    try:
+        import xlrd
+    except ImportError as exc:  # pragma: no cover - packaging contract installs xlrd
+        raise ImportCommandError(
+            "LEGACY_XLS_SUPPORT_UNAVAILABLE",
+            "Legacy Excel support is not included in this PetroLab build.",
+        ) from exc
+
+    try:
+        workbook = xlrd.open_workbook(path, on_demand=True, formatting_info=True)
+    except (OSError, xlrd.XLRDError, xlrd.compdoc.CompDocError) as exc:
+        message = str(exc).lower()
+        code = "WORKBOOK_ENCRYPTED" if "encrypt" in message or "password" in message else "SOURCE_UNREADABLE"
+        raise ImportCommandError(code, "Legacy Excel workbook could not be inspected.", {"reason": str(exc)}) from exc
+
+    inspections: list[SheetInspection] = []
+    try:
+        for sheet in workbook.sheets():
+            rows: list[list[str | None]] = []
+            for row_index in range(sheet.nrows):
+                values: list[str | None] = []
+                for cell in sheet.row(row_index):
+                    if cell.ctype in {xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK}:
+                        value = None
+                    elif cell.ctype == xlrd.XL_CELL_NUMBER:
+                        value = format(float(cell.value), ".15g")
+                    elif cell.ctype == xlrd.XL_CELL_BOOLEAN:
+                        value = "TRUE" if cell.value else "FALSE"
+                    elif cell.ctype == xlrd.XL_CELL_ERROR:
+                        value = xlrd.error_text_from_code.get(cell.value, f"#ERROR {cell.value}")
+                    else:
+                        value = str(cell.value)
+                    values.append(value)
+                while values and values[-1] is None:
+                    values.pop()
+                rows.append(values)
+
+            warnings: list[dict[str, Any]] = []
+            merged_ranges = [
+                f"{_column_letters(column_start)}{row_start + 1}:{_column_letters(column_end - 1)}{row_end}"
+                for row_start, row_end, column_start, column_end in sheet.merged_cells
+            ]
+            if merged_ranges:
+                warnings.append({"code": "MERGED_HEADERS", "sheet_name": sheet.name, "ranges": merged_ranges})
+            hidden_rows = [
+                row_index + 1
+                for row_index, row_info in sheet.rowinfo_map.items()
+                if row_info.hidden
+            ]
+            if hidden_rows:
+                warnings.append({"code": "HIDDEN_ROWS", "sheet_name": sheet.name, "row_numbers": hidden_rows})
+            inspections.append(SheetInspection(sheet.name, tuple(tuple(row) for row in rows), _header_candidates(rows), tuple(warnings)))
+    finally:
+        workbook.release_resources()
+    return tuple(inspections)
+
+
 def inspect_source(source_path: str | Path) -> SourceInspection:
     path = Path(source_path)
     if not path.is_file():
         raise ImportCommandError("SOURCE_UNREADABLE", "Source file does not exist.", {"path": str(path)})
     suffix = path.suffix.lower()
-    if suffix == ".xls":
-        with path.open("rb") as source:
-            signature = source.read(8)
-        if signature == OLE_COMPOUND_SIGNATURE:
-            raise ImportCommandError(
-                "LEGACY_XLS_REQUIRES_CONVERSION",
-                "Legacy Excel .xls is detected, but native BIFF import is not enabled yet. Keep the original and save a copy as .xlsx for this build.",
-                {"suffix": suffix},
-            )
     readers = {
         ".xlsx": ("xlsx", _read_xlsx),
+        ".xls": ("xls", _read_xls),
         ".csv": ("csv", lambda file: _read_delimited(file, ",")),
         ".tsv": ("tsv", lambda file: _read_delimited(file, "\t")),
     }
     if suffix not in readers:
-        raise ImportCommandError("SOURCE_UNREADABLE", "Only XLSX, CSV and TSV are supported by this import build.", {"suffix": suffix})
+        raise ImportCommandError("SOURCE_UNREADABLE", "Only XLS, XLSX, CSV and TSV are supported by this import build.", {"suffix": suffix})
     if suffix == ".xlsx":
         with path.open("rb") as source:
             if source.read(8) == OLE_COMPOUND_SIGNATURE:
@@ -456,6 +523,11 @@ def validate_recipe(inspection: SourceInspection, recipe: dict[str, Any]) -> dic
         orientation = section.get("orientation", "rows_are_analyses")
         if orientation not in VALID_ORIENTATIONS:
             raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Unknown block orientation.", {"orientation": orientation})
+        identity_policy = section.get("analysis_identity_policy")
+        if identity_policy not in (None, "source_row"):
+            raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Unknown analysis identity policy.")
+        if identity_policy == "source_row" and orientation != "rows_are_analyses":
+            raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Source-row identity is only valid for row-oriented blocks.")
         if enabled:
             enabled_count += 1
 
@@ -591,6 +663,8 @@ def _plan_rows(inspection: SourceInspection, sheet: SheetInspection, section: di
         if not any(value not in (None, "") for value in relevant):
             continue
         identity = tuple(str(_row_value(row, _mapping_index(item)) or "") for item in identities)
+        if not identity and section.get("analysis_identity_policy") == "source_row":
+            identity = (f"Source row {row_number}",)
         measurements = [
             _measurement(item, _row_value(row, _mapping_index(item)), row_number, _mapping_index(item))
             for item in mappings if item["target_role"] == "measurement"

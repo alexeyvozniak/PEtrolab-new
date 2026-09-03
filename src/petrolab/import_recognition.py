@@ -19,12 +19,29 @@ IDENTITY_FIELDS = {
     "sample": "Sample",
     "sampleid": "Sample",
     "образец": "Sample",
+    "образца": "Sample",
     "образецid": "Sample",
     "point": "Point",
     "spot": "Point",
     "точка": "Point",
     "analyticalno": "Analysis",
     "аналитическийномер": "Analysis",
+    "меткаспектра": "Analysis",
+    "анализаepma": "Analysis",
+    "анализаэпма": "Analysis",
+    "epma": "Analysis",
+    "epmanumber": "Analysis",
+    "epmaanalysis": "Analysis",
+    "epmaanalysisnumber": "Analysis",
+    "epmaномер": "Analysis",
+    "epmaанализа": "Analysis",
+    "epmaanalyzis": "Analysis",
+    "анализа": "Analysis",
+    "dotno": "Point",
+    "точкасims": "Point",
+    "точкассимс": "Point",
+    "номеробразца": "Sample",
+    "образцаномер": "Sample",
 }
 
 METADATA_FIELDS = {
@@ -34,6 +51,17 @@ METADATA_FIELDS = {
     "генерация": "Generation",
     "zone": "Generation",
     "зона": "Generation",
+    "порода": "Rock",
+    "rock": "Rock",
+    "источник": "Source",
+    "source": "Source",
+    "comment": "Comment",
+    "commentlena": "Comment",
+    "commentgalya": "Comment",
+    "position": "Position",
+    "photono": "Photo number",
+    "sizeµm": "Size (µm)",
+    "sizeum": "Size (µm)",
 }
 
 MEASUREMENT_FIELDS = {
@@ -46,10 +74,19 @@ MEASUREMENT_FIELDS = {
     "mo": "Mo", "cs": "Cs", "la": "La", "ce": "Ce", "pr": "Pr", "nd": "Nd", "sm": "Sm", "eu": "Eu",
     "gd": "Gd", "tb": "Tb", "dy": "Dy", "ho": "Ho", "er": "Er", "tm": "Tm", "yb": "Yb", "lu": "Lu",
     "hf": "Hf", "ta": "Ta", "w": "W", "pb": "Pb", "th": "Th", "u": "U",
+    "br": "Br", "b": "B", "as": "As", "se": "Se", "be": "Be", "bi": "Bi",
+    "feot": "FeOt", "feotot": "FeOt", "feototal": "FeOt", "feotot": "FeOt",
+    "total": "Total", "всего": "Total",
+}
+
+DIMENSIONLESS_FIELDS = {
+    "87sr86sr0": ("87Sr/86Sr(0)", "ratio"),
+    "esrt": ("εSr(t)", "epsilon"),
+    "endt": ("εNd(t)", "epsilon"),
 }
 
 IRON_FIELDS = {"FeO", "FeOt", "Fe2O3", "Fe2O3t", "Fe"}
-VALID_UNITS = {"wt.%", "ppm", "ppb", "apfu", "mol%", "at.%", "ratio"}
+VALID_UNITS = {"wt.%", "ppm", "ppb", "apfu", "mol%", "at.%", "ratio", "epsilon"}
 
 
 def normalized(value: str | None) -> str:
@@ -81,6 +118,8 @@ def unit_from_header(header: str) -> str | None:
         return "mol%"
     if any(marker in compact for marker in ("wt.%", "wt%", "mass%", "мас.%", "мас%", "weight%", "вес%")):
         return "wt.%"
+    if compact in {"атом", "атом.", "atomic"}:
+        return "at.%"
     return None
 
 
@@ -98,6 +137,7 @@ def ignored_mapping(source_index: int, *, source_axis: str, source_header: str |
         "canonical_field": source_header or "",
         "unit": None,
         "measurement_semantics": "ignored",
+        "review_decision": "unresolved",
     }
 
 
@@ -133,7 +173,19 @@ def mapping_for_header(
             "measurement_semantics": "metadata",
         }, None)
 
-    measurement = MEASUREMENT_FIELDS.get(token)
+    dimensionless = DIMENSIONLESS_FIELDS.get(normalized_header) or DIMENSIONLESS_FIELDS.get(token)
+    if dimensionless:
+        field, unit = dimensionless
+        return ({
+            **base,
+            "target_role": "measurement",
+            "canonical_field": field,
+            "unit": unit,
+            "measurement_semantics": "measured",
+            "review_decision": "recognized",
+        }, None)
+
+    measurement = MEASUREMENT_FIELDS.get(normalized_header) or MEASUREMENT_FIELDS.get(token)
     if measurement:
         unit = unit_from_header(header) or context_unit
         if unit:
@@ -143,8 +195,12 @@ def mapping_for_header(
                 "canonical_field": measurement,
                 "unit": unit,
                 "measurement_semantics": "measured",
+                "review_decision": "recognized",
             }, None)
-        return (ignored_mapping(source_index, source_axis=source_axis, source_header=header), {
+        ignored = ignored_mapping(source_index, source_axis=source_axis, source_header=header)
+        ignored["suggested_target"] = "measurement"
+        ignored["suggested_canonical_field"] = measurement
+        return (ignored, {
             "code": "UNIT_REQUIRES_REVIEW",
             "source_header": header,
             index_key: source_index,

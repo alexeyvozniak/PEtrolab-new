@@ -53,6 +53,27 @@ export const previewImportWindow = async (sourcePath, sheetName, startRow, rowCo
 export const suggestImportRecipe = (sourcePath) =>
   invokePetrolab("import.recipe.suggest", { source_path: sourcePath });
 
+export const getImportBulkUnitScopes = (sourcePath, recipe) =>
+  invokePetrolab("import.recipe.bulk_scopes", { source_path: sourcePath, recipe });
+
+export const applyImportBulkUnit = (sourcePath, recipe, bulkScopeId, unit) =>
+  invokePetrolab("import.recipe.apply_bulk_unit", {
+    source_path: sourcePath,
+    recipe,
+    bulk_scope_id: bulkScopeId,
+    unit,
+  });
+
+export const getImportBulkIgnoreScopes = (sourcePath, recipe) =>
+  invokePetrolab("import.recipe.bulk_ignore_scopes", { source_path: sourcePath, recipe });
+
+export const applyImportBulkIgnore = (sourcePath, recipe, bulkScopeId) =>
+  invokePetrolab("import.recipe.apply_bulk_ignore", {
+    source_path: sourcePath,
+    recipe,
+    bulk_scope_id: bulkScopeId,
+  });
+
 export const reviseImportMapping = (sourcePath, recipe, sheetName, sourceColumnIndex, target, canonicalField, unit) =>
   invokePetrolab("import.recipe.revise_mapping", {
     source_path: sourcePath,
@@ -95,10 +116,11 @@ export const applyImportPlan = (projectDatabasePath, sourcePath, recipe) =>
     recipe,
   });
 
-export const listProjectAnalyses = (projectDatabasePath, limit = 500) =>
+export const listProjectAnalyses = (projectDatabasePath, limit = 500, offset = 0) =>
   invokePetrolab("project.analyses.list", {
     project_database_path: projectDatabasePath,
     limit,
+    offset,
   });
 
 export const retractLastImport = (projectDatabasePath, reason = "user_retracted") =>

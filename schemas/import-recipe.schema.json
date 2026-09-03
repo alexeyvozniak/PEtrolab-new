@@ -12,7 +12,7 @@
     "name": {"type": "string", "minLength": 1, "maxLength": 160},
     "schema_version": {"type": "integer", "minimum": 1},
     "semantic_fingerprint": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
-    "source_format": {"type": "string", "enum": ["xlsx", "csv", "tsv"]},
+    "source_format": {"type": "string", "enum": ["xls", "xlsx", "csv", "tsv"]},
     "source_file_sha256": {"type": ["string", "null"], "pattern": "^[0-9A-Fa-f]{64}$"},
     "ownership_mode": {"type": "string", "enum": ["linked_external", "managed_copy"]},
     "sections": {

@@ -33,6 +33,7 @@ test("desktop stages selected files locally before the scientific service reads 
   assert.match(shell, /import-staging/);
   assert.match(shell, /fs::copy\(&source, &staged\)/);
   assert.match(shell, /fn pick_import_file/);
+  assert.match(shell, /\["xls", "xlsx", "csv", "tsv"\]/);
   assert.match(shell, /async fn stage_import_file/);
   assert.match(api, /stage_import_file/);
   assert.match(api, /clear_import_staging/);
@@ -121,7 +122,7 @@ test("mapping edits are applied once in bulk per logical block", async () => {
   assert.match(app, /mappingDraftDirty/);
   assert.match(app, /Применяю сопоставление/);
   assert.match(editor, /Применить сопоставление/);
-  assert.match(editor, /Назначить всему блоку/);
+  assert.match(editor, /Назначить полям без единицы/);
   assert.match(editor, /block_id/);
   assert.match(editor, /source_axis/);
   assert.match(editor, /source_index/);
@@ -133,21 +134,43 @@ test("mapping edits are applied once in bulk per logical block", async () => {
   assert.match(editor, /method/);
   assert.match(editor, /Метод/);
   assert.match(editor, /Набор/);
+  assert.match(editor, /Не импортировать \{unresolvedCount\} нераспознанных полей/);
   assert.doesNotMatch(editor, />Применить<\/button>/);
+});
+
+test("raw review groups repetitive issues and gets server-issued bulk unit scopes", async () => {
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
+  assert.match(api, /import\.recipe\.bulk_scopes/);
+  assert.match(api, /import\.recipe\.apply_bulk_unit/);
+  assert.match(api, /import\.recipe\.bulk_ignore_scopes/);
+  assert.match(api, /import\.recipe\.apply_bulk_ignore/);
+  assert.match(app, /getImportBulkUnitScopes/);
+  assert.match(app, /applyImportBulkUnit/);
+  assert.match(app, /applyImportBulkIgnore/);
+  assert.match(workspace, /Групповые решения/);
+  assert.match(workspace, /groupIssues/);
+  assert.match(workspace, /одинаковой физической структурой/);
+  assert.match(workspace, /Не импортировать все нераспознанные поля/);
 });
 
 test("analyses view exposes source metadata, method context and truthful physical origin", async () => {
   const app = await read("src/App.jsx");
-  assert.match(app, /metadataColumns/);
-  assert.match(app, /source_metadata/);
-  assert.match(app, /Исходное значение из файла/);
-  assert.match(app, /Сохранено без интерпретации как исходный текст/);
-  assert.match(app, /measurement\?\.method/);
-  assert.match(app, /measurement\?\.measurement_set/);
-  assert.match(app, /savedAnalysisOrigin/);
-  assert.match(app, /source_orientation === "columns_are_analyses"/);
-  assert.match(app, /source_column_number/);
-  assert.match(app, /Источник в файле/);
+  const workspace = await read("src/AnalysesWorkspace.jsx");
+  assert.match(app, /<AnalysesWorkspace/);
+  assert.match(workspace, /metadataFields/);
+  assert.match(workspace, /source_metadata/);
+  assert.match(workspace, /Исходные сведения/);
+  assert.match(workspace, /Все измерения/);
+  assert.match(workspace, /measurement\.method/);
+  assert.match(workspace, /measurement\.measurement_set/);
+  assert.match(workspace, /originLabel/);
+  assert.match(workspace, /source_orientation === "columns_are_analyses"/);
+  assert.match(workspace, /source_column_number/);
+  assert.match(workspace, /В файле/);
+  assert.match(workspace, /Выбранные строки закреплены сверху/);
+  assert.match(workspace, /Поиск работает по всем полям/);
 });
 
 test("duplicate candidates require explicit keep-all review before save", async () => {

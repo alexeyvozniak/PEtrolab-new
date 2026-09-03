@@ -84,6 +84,44 @@ def _require_duplicate_review(plan: dict[str, Any], recipe: dict[str, Any]) -> N
         )
 
 
+def _require_non_empty_plan(plan: dict[str, Any]) -> None:
+    summary = plan.get("summary") if isinstance(plan, dict) else None
+    analysis_count = summary.get("planned_analysis_count", 0) if isinstance(summary, dict) else 0
+    measurement_count = summary.get("planned_measurement_count", 0) if isinstance(summary, dict) else 0
+    if not isinstance(analysis_count, int) or not isinstance(measurement_count, int) or analysis_count < 1 or measurement_count < 1:
+        raise ImportCommandError(
+            "IMPORT_PLAN_EMPTY",
+            "Import needs at least one Analysis and one Measurement; no records were written.",
+            {"planned_analysis_count": analysis_count, "planned_measurement_count": measurement_count},
+        )
+
+
+def _require_mapping_review(recipe: dict[str, Any]) -> None:
+    """Keep an undecided populated source field from being silently discarded.
+
+    The UI makes this state visible, but the service must enforce it too: a
+    direct NDJSON caller cannot bypass the scientist's explicit assignment or
+    explicit Ignore decision.
+    """
+    unresolved: list[dict[str, Any]] = []
+    for section in recipe.get("sections", []):
+        if not section.get("enabled", True):
+            continue
+        for mapping in section.get("mappings", []):
+            if mapping.get("target_role") == "ignore" and mapping.get("review_decision") == "unresolved":
+                unresolved.append({
+                    "sheet_name": section.get("sheet_name"),
+                    "block_id": section.get("block_id"),
+                    "source_header": mapping.get("source_header"),
+                })
+    if unresolved:
+        raise ImportCommandError(
+            "MAPPING_REVIEW_REQUIRED",
+            "Every populated unrecognized field needs an explicit assignment or an explicit Ignore decision before import.",
+            {"unresolved_field_count": len(unresolved), "examples": unresolved[:8]},
+        )
+
+
 def _section_for_record(recipe: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
     for section in recipe.get("sections", []):
         if section.get("sheet_name") == record.get("sheet_name") and section.get("block_id") == record.get("block_id"):
@@ -250,6 +288,8 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
     """Apply a fresh plan atomically; this function never writes the source file."""
     inspection = inspect_source(source_path)
     plan = create_import_plan(inspection, recipe)
+    _require_non_empty_plan(plan)
+    _require_mapping_review(recipe)
     _require_duplicate_review(plan, recipe)
     source_kind = "managed_copy" if recipe["ownership_mode"] == "managed_copy" else "linked_reference"
     source_id, batch_id = _id(), _id()

@@ -260,25 +260,31 @@ function BlockCard({ section, index, preview, value, busy, onChange }) {
         </div>
       </div>
 
-      <div className="block-controls">
-        <label>
-          <span>Как расположены анализы</span>
-          <select value={value.orientation} onChange={(event) => set("orientation", event.target.value)} disabled={busy || !value.enabled}>
-            <option value="rows_are_analyses">По строкам</option>
-            <option value="columns_are_analyses">По столбцам (инвертировано)</option>
-          </select>
-        </label>
-        <label><span>Строка заголовка</span><input type="number" min="1" value={value.header_row} onChange={(event) => set("header_row", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
-        <label><span>{transposed ? "Первая строка полей" : "Первая строка данных"}</span><input type="number" min="1" value={value.data_start_row} onChange={(event) => set("data_start_row", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
-        <label><span>{transposed ? "Последняя строка полей" : "Последняя строка данных"}</span><input type="number" min="1" value={value.data_end_row} onChange={(event) => set("data_end_row", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
-        {transposed && (
-          <>
-            <label><span>Колонка названий полей</span><input type="number" min="1" value={value.header_column} onChange={(event) => set("header_column", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
-            <label><span>Первая колонка Analysis</span><input type="number" min="1" value={value.data_start_column} onChange={(event) => set("data_start_column", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
-            <label><span>Последняя колонка Analysis</span><input type="number" min="1" value={value.data_end_column || ""} onChange={(event) => set("data_end_column", event.target.value ? Number(event.target.value) : null)} disabled={busy || !value.enabled} placeholder="до конца" /></label>
-          </>
-        )}
-      </div>
+      <details className="block-structure-settings" open={invalid || undefined}>
+        <summary>
+          <span>Структура: {transposed ? "анализы по столбцам" : "анализы по строкам"} · заголовок {value.header_row} · данные {value.data_start_row}–{value.data_end_row}</span>
+          <b>Изменить</b>
+        </summary>
+        <div className="block-controls">
+          <label>
+            <span>Как расположены анализы</span>
+            <select value={value.orientation} onChange={(event) => set("orientation", event.target.value)} disabled={busy || !value.enabled}>
+              <option value="rows_are_analyses">По строкам</option>
+              <option value="columns_are_analyses">По столбцам (инвертировано)</option>
+            </select>
+          </label>
+          <label><span>Строка заголовка</span><input type="number" min="1" value={value.header_row} onChange={(event) => set("header_row", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
+          <label><span>{transposed ? "Первая строка полей" : "Первая строка данных"}</span><input type="number" min="1" value={value.data_start_row} onChange={(event) => set("data_start_row", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
+          <label><span>{transposed ? "Последняя строка полей" : "Последняя строка данных"}</span><input type="number" min="1" value={value.data_end_row} onChange={(event) => set("data_end_row", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
+          {transposed && (
+            <>
+              <label><span>Колонка названий полей</span><input type="number" min="1" value={value.header_column} onChange={(event) => set("header_column", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
+              <label><span>Первая колонка Analysis</span><input type="number" min="1" value={value.data_start_column} onChange={(event) => set("data_start_column", Number(event.target.value))} disabled={busy || !value.enabled} /></label>
+              <label><span>Последняя колонка Analysis</span><input type="number" min="1" value={value.data_end_column || ""} onChange={(event) => set("data_end_column", event.target.value ? Number(event.target.value) : null)} disabled={busy || !value.enabled} placeholder="до конца" /></label>
+            </>
+          )}
+        </div>
+      </details>
 
       {context && (
         <div className="unit-evidence"><Eye size={17} /><span>Единица из источника: <b>{context.unit}</b> · строка {context.row_number}: «{context.text}»</span></div>

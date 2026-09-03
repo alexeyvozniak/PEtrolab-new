@@ -10,7 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe  # noqa: E402
+from petrolab.desktop_workflow import apply_bulk_unit_scope, bulk_unit_scopes, list_project_analyses, suggest_import_recipe  # noqa: E402
 from petrolab.import_apply import apply_import_plan, retract_latest_import  # noqa: E402
 from petrolab.import_preview import ImportCommandError, create_import_plan, inspect_source, validate_recipe  # noqa: E402
 from petrolab.manual_mapping import review_duplicate_candidates  # noqa: E402
@@ -19,8 +19,17 @@ from petrolab.manual_mapping import review_duplicate_candidates  # noqa: E402
 FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
 
 
+def unit_reviewed_recipe(recipe: dict) -> dict:
+    while True:
+        scopes = bulk_unit_scopes(FIXTURE, recipe)["scopes"]
+        if not scopes:
+            return recipe
+        scope = scopes[0]
+        recipe = apply_bulk_unit_scope(FIXTURE, recipe, scope["bulk_scope_id"], "ppm")["recipe"]
+
+
 def reviewed_recipe() -> dict:
-    recipe = suggest_import_recipe(FIXTURE)["recipe"]
+    recipe = unit_reviewed_recipe(suggest_import_recipe(FIXTURE)["recipe"])
     plan = create_import_plan(inspect_source(FIXTURE), recipe)
     if plan["summary"]["duplicate_candidate_groups"]:
         return review_duplicate_candidates(FIXTURE, recipe, "keep_all")["recipe"]
@@ -53,6 +62,12 @@ class DesktopWorkflowTests(unittest.TestCase):
             database = Path(directory) / "blocked.sqlite"
             with self.assertRaises(ImportCommandError) as blocked:
                 apply_import_plan(database, FIXTURE, recipe)
+            self.assertEqual(blocked.exception.code, "MAPPING_REVIEW_REQUIRED")
+            self.assertFalse(database.exists())
+
+            reviewed_units = unit_reviewed_recipe(recipe)
+            with self.assertRaises(ImportCommandError) as blocked:
+                apply_import_plan(database, FIXTURE, reviewed_units)
             self.assertEqual(blocked.exception.code, "DUPLICATE_REVIEW_REQUIRED")
             self.assertFalse(database.exists())
 
@@ -93,6 +108,21 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertTrue(any(row["source_metadata"].get("Mineral") for row in projection["analyses"]))
         self.assertTrue(all("Mineral" not in row["identity"] for row in projection["analyses"]))
         self.assertTrue(all("Mineral" not in row["measurements"] for row in projection["analyses"]))
+
+    def test_analysis_projection_is_pageable_without_silently_hiding_rows(self) -> None:
+        recipe = reviewed_recipe()
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "petrolab.sqlite"
+            applied = apply_import_plan(database, FIXTURE, recipe)
+            first = list_project_analyses(database, limit=3, offset=0)
+            second = list_project_analyses(database, limit=3, offset=3)
+
+        self.assertEqual(first["returned"], 3)
+        self.assertEqual(first["offset"], 0)
+        self.assertTrue(first["has_more"])
+        self.assertEqual(second["offset"], 3)
+        self.assertEqual(first["total"], applied["analysis_count"])
+        self.assertFalse({row["analysis_id"] for row in first["analyses"]} & {row["analysis_id"] for row in second["analyses"]})
 
     def test_retracted_latest_import_is_preserved_but_hidden_from_active_projection(self) -> None:
         recipe = reviewed_recipe()

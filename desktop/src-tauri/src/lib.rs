@@ -136,7 +136,7 @@ fn staging_root(app: &AppHandle) -> Result<PathBuf, String> {
 #[tauri::command]
 fn pick_import_file() -> Option<String> {
     rfd::FileDialog::new()
-        .add_filter("PetroLab data", &["xlsx", "csv", "tsv"])
+        .add_filter("PetroLab data", &["xls", "xlsx", "csv", "tsv"])
         .pick_file()
         .map(|source| source.to_string_lossy().into_owned())
 }

@@ -13,10 +13,29 @@ sys.path.insert(0, str(ROOT / "tests"))
 from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe  # noqa: E402
 from petrolab.import_apply import apply_import_plan  # noqa: E402
 from petrolab.import_preview import create_import_plan, inspect_source  # noqa: E402
-from real_world_fixtures import long_preamble_weight_percent, repeated_headers, transposed_weight_percent  # noqa: E402
+from real_world_fixtures import long_preamble_weight_percent, repeated_headers, transposed_weight_percent, write_xlsx  # noqa: E402
 
 
 class TransposedOrientationSuggestionTests(unittest.TestCase):
+    def test_wide_table_with_spectrum_identity_is_not_false_positive_transposed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = write_xlsx(Path(directory) / "wide-spectra.xlsx", {
+                "summary": [
+                    ["in oxides", None, None, None],
+                    ["Метка спектра", "Si", "Ca", "Fe"],
+                    ["Спектр 1", 30.47, 31.45, 22.8],
+                    ["Спектр 2", 35.05, 6.6, 12.1],
+                ],
+            })
+            suggestion = suggest_import_recipe(source)
+            section = suggestion["recipe"]["sections"][0]
+            self.assertEqual(section["orientation"], "rows_are_analyses")
+            self.assertEqual(section["mappings"][0]["target_role"], "identity")
+            self.assertEqual(
+                [mapping["suggested_canonical_field"] for mapping in section["mappings"][1:]],
+                ["Si", "Ca", "Fe"],
+            )
+
     def test_clear_transposed_table_is_suggested_and_plans_without_manual_toggle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source = transposed_weight_percent(Path(directory) / "transposed.xlsx")
