@@ -8,7 +8,8 @@ import uuid
 from collections.abc import Callable, Mapping
 from typing import Any, TextIO
 
-from .desktop_workflow import list_project_analyses, suggest_import_recipe
+from .clean_table import classify_clean_table
+from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, suggest_import_recipe
 from .import_apply import (
     apply_import_plan,
     check_linked_source,
@@ -18,6 +19,7 @@ from .import_apply import (
 )
 from .import_preview import (
     ImportCommandError,
+    inspect_source,
     run_import_inspect_source,
     run_import_plan_create,
     run_import_preview_window,
@@ -126,6 +128,10 @@ def _dispatch_import_inspect(params: Mapping[str, Any]) -> dict[str, Any]:
     return run_import_inspect_source(_source_path(params))
 
 
+def _dispatch_import_clean_table_classify(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": classify_clean_table(inspect_source(_source_path(params)))}
+
+
 def _dispatch_import_preview_window(params: Mapping[str, Any]) -> dict[str, Any]:
     return run_import_preview_window(
         _source_path(params),
@@ -139,6 +145,26 @@ def _dispatch_import_preview_window(params: Mapping[str, Any]) -> dict[str, Any]
 
 def _dispatch_recipe_suggest(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": suggest_import_recipe(_source_path(params))}
+
+
+def _dispatch_recipe_bulk_scopes(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": bulk_unit_scopes(_source_path(params), _recipe(params))}
+
+
+def _dispatch_recipe_apply_bulk_unit(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": apply_bulk_unit_scope(
+        _source_path(params), _recipe(params), _string(params, "bulk_scope_id"), _string(params, "unit")
+    )}
+
+
+def _dispatch_recipe_bulk_ignore_scopes(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": bulk_ignore_scopes(_source_path(params), _recipe(params))}
+
+
+def _dispatch_recipe_apply_bulk_ignore(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": apply_bulk_ignore_scope(
+        _source_path(params), _recipe(params), _string(params, "bulk_scope_id")
+    )}
 
 
 def _dispatch_recipe_revise_mapping(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -191,9 +217,10 @@ def _dispatch_plan_apply(params: Mapping[str, Any]) -> dict[str, Any]:
 
 def _dispatch_project_analyses_list(params: Mapping[str, Any]) -> dict[str, Any]:
     raw_limit = params.get("limit", 500)
-    if not isinstance(raw_limit, int):
+    raw_offset = params.get("offset", 0)
+    if not isinstance(raw_limit, int) or not isinstance(raw_offset, int):
         raise ValueError("limit")
-    return {"result": list_project_analyses(_project_database_path(params), raw_limit)}
+    return {"result": list_project_analyses(_project_database_path(params), raw_limit, raw_offset)}
 
 
 def _dispatch_project_last_import_retract(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -241,8 +268,13 @@ def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
 
 COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.inspect_source": _dispatch_import_inspect,
+    "import.clean_table.classify": _dispatch_import_clean_table_classify,
     "import.preview.window": _dispatch_import_preview_window,
     "import.recipe.suggest": _dispatch_recipe_suggest,
+    "import.recipe.bulk_scopes": _dispatch_recipe_bulk_scopes,
+    "import.recipe.apply_bulk_unit": _dispatch_recipe_apply_bulk_unit,
+    "import.recipe.bulk_ignore_scopes": _dispatch_recipe_bulk_ignore_scopes,
+    "import.recipe.apply_bulk_ignore": _dispatch_recipe_apply_bulk_ignore,
     "import.recipe.revise_mapping": _dispatch_recipe_revise_mapping,
     "import.recipe.revise_mappings": _dispatch_recipe_revise_mappings,
     "import.recipe.revise_sections": _dispatch_recipe_revise_sections,

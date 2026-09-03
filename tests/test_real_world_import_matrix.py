@@ -29,7 +29,7 @@ from real_world_fixtures import (  # noqa: E402
 
 
 class RealWorldImportMatrixTests(unittest.TestCase):
-    def test_generic_numeric_table_does_not_require_known_geochemistry_headers(self) -> None:
+    def test_common_isotope_headers_are_imported_with_explicit_dimensionless_units(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source = generic_isotope(Path(directory) / "MORB-like.xlsx")
             inspection = inspect_source(source)
@@ -37,20 +37,9 @@ class RealWorldImportMatrixTests(unittest.TestCase):
             suggestion = suggest_import_recipe(source)
             section = suggestion["recipe"]["sections"][0]
             self.assertEqual(section["header_row"], 1)
-            self.assertTrue(all(mapping["target_role"] == "ignore" for mapping in section["mappings"]))
-            decisions = [
-                {
-                    "block_id": section["block_id"],
-                    "source_axis": "column",
-                    "source_index": mapping["source_column_index"],
-                    "target": "Measurement",
-                    "canonical_field": mapping["source_header"],
-                    "unit": "ratio",
-                }
-                for mapping in section["mappings"]
-            ]
-            revised = revise_import_mappings(source, suggestion["recipe"], decisions)["recipe"]
-            plan = create_import_plan(inspection, revised)
+            self.assertTrue(all(mapping["target_role"] == "measurement" for mapping in section["mappings"]))
+            self.assertEqual([mapping["unit"] for mapping in section["mappings"]], ["ratio", "epsilon", "epsilon"])
+            plan = create_import_plan(inspection, suggestion["recipe"])
             self.assertEqual(plan["summary"]["planned_analysis_count"], 3)
             self.assertEqual(plan["summary"]["planned_measurement_count"], 9)
 
@@ -214,13 +203,25 @@ class RealWorldImportMatrixTests(unittest.TestCase):
             self.assertEqual(preview["rows"][1]["values"], ["Analysis", "SiO2", "MgO", "FeO"])
             self.assertEqual(preview["rows"][2]["values"], [None, None, None, None])
 
-    def test_legacy_xls_is_identified_honestly_instead_of_called_encrypted_xlsx(self) -> None:
+    def test_legacy_xls_is_read_natively_without_rewriting_the_source(self) -> None:
+        source = ROOT / "fixtures" / "import" / "ui-clean-table.xls"
+        original = source.read_bytes()
+        inspection = inspect_source(source)
+        self.assertEqual(inspection.source_format, "xls")
+        self.assertEqual(inspection.sheets[0].rows[0][0], "Analysis")
+        suggestion = suggest_import_recipe(source)
+        plan = create_import_plan(inspection, suggestion["recipe"])
+        self.assertGreater(plan["summary"]["planned_analysis_count"], 0)
+        self.assertGreater(plan["summary"]["planned_measurement_count"], 0)
+        self.assertEqual(source.read_bytes(), original)
+
+    def test_broken_legacy_xls_is_reported_honestly_instead_of_called_encrypted_xlsx(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "legacy.xls"
             source.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"synthetic-biff")
             with self.assertRaises(ImportCommandError) as raised:
                 inspect_source(source)
-            self.assertEqual(raised.exception.code, "LEGACY_XLS_REQUIRES_CONVERSION")
+            self.assertEqual(raised.exception.code, "SOURCE_UNREADABLE")
 
 
 if __name__ == "__main__":

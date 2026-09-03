@@ -29,15 +29,17 @@ test("desktop stages selected files locally before the scientific service reads 
   const shell = await read("src-tauri/src/lib.rs");
   const api = await read("src/desktopApi.js");
   const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
   assert.match(shell, /import-staging/);
   assert.match(shell, /fs::copy\(&source, &staged\)/);
   assert.match(shell, /fn pick_import_file/);
+  assert.match(shell, /\["xls", "xlsx", "csv", "tsv"\]/);
   assert.match(shell, /async fn stage_import_file/);
   assert.match(api, /stage_import_file/);
   assert.match(api, /clear_import_staging/);
   assert.match(app, /stageImportFile\(selectedPath\)/);
   assert.match(app, /selected\.local_path/);
-  assert.match(app, /Отменить импорт/);
+  assert.match(workspace, /Отменить/);
 });
 
 test("replacement import is transactional and keeps previous preview on failure", async () => {
@@ -46,23 +48,52 @@ test("replacement import is transactional and keeps previous preview on failure"
   const chooseFile = app.match(/const chooseFile = async \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
   assert.doesNotMatch(chooseFile, /catch[\s\S]*resetImportState\(\)/);
   assert.match(app, /Копирую файл в рабочую область PetroLab/);
-  assert.match(app, /Читаю листы и ищу логические таблицы/);
+  assert.match(app, /Проверяю, соответствует ли файл PetroLab Clean Table/);
+});
+
+test("Clean Table fast path is classified by Python and skips raw review by default", async () => {
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
+  assert.match(api, /import\.clean_table\.classify/);
+  assert.match(app, /classifyCleanTable/);
+  assert.match(app, /classification\.mode === "clean_table_fast"/);
+  assert.match(workspace, /Таблица готова к импорту/);
+  assert.match(workspace, /Импортировать таблицу/);
+  assert.match(workspace, /Открыть подробную проверку/);
+  assert.match(workspace, /Файл требует внимания/);
+  assert.match(workspace, /Clean Table v/);
+});
+
+test("approved import workspace keeps source list, physical table, issue inspector and fixed commit bar together", async () => {
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
+  const styles = await read("src/importWorkspace.css");
+  assert.match(app, /<ImportWorkspace/);
+  assert.match(workspace, /Файл и листы/);
+  assert.match(workspace, /Нерешённые вопросы/);
+  assert.match(workspace, /Исходный файл не изменится/);
+  assert.match(workspace, /activeBlockId/);
+  assert.match(workspace, /ImportMappingEditor/);
+  assert.match(styles, /grid-template-columns: 235px minmax\(420px, 1fr\) 370px/);
+  assert.match(styles, /import-workspace-footer/);
 });
 
 test("raw block review precedes field mapping and supports transposed orientation", async () => {
   const api = await read("src/desktopApi.js");
   const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
   const review = await read("src/ImportBlockReview.jsx");
   assert.match(api, /import\.preview\.window/);
   assert.match(api, /import\.recipe\.revise_sections/);
   assert.match(app, /previewImportWindow/);
   assert.match(app, /reviseImportSections/);
-  assert.match(app, /ImportBlockReview/);
+  assert.match(workspace, /ImportBlockReview/);
   assert.match(app, /blockDraftDirty/);
-  assert.match(app, /1\. Где находятся данные/);
-  assert.match(app, /2\. Что означают поля/);
-  assert.match(app, /TRANSPOSED_TABLE_LIKELY/);
-  assert.match(app, /Похоже, анализы расположены по столбцам/);
+  assert.match(workspace, /activeBlockId/);
+  assert.match(workspace, /ImportMappingEditor/);
+  assert.match(workspace, /анализы по столбцам/);
+  assert.match(workspace, /Каждый лист сохраняет собственную строку заголовка/);
   assert.match(review, /По столбцам \(инвертировано\)/);
   assert.match(review, /STRUCTURE_DEBOUNCE_MS/);
   assert.match(review, /Изменения структуры применяются автоматически/);
@@ -91,7 +122,7 @@ test("mapping edits are applied once in bulk per logical block", async () => {
   assert.match(app, /mappingDraftDirty/);
   assert.match(app, /Применяю сопоставление/);
   assert.match(editor, /Применить сопоставление/);
-  assert.match(editor, /Назначить всему блоку/);
+  assert.match(editor, /Назначить полям без единицы/);
   assert.match(editor, /block_id/);
   assert.match(editor, /source_axis/);
   assert.match(editor, /source_index/);
@@ -103,42 +134,67 @@ test("mapping edits are applied once in bulk per logical block", async () => {
   assert.match(editor, /method/);
   assert.match(editor, /Метод/);
   assert.match(editor, /Набор/);
+  assert.match(editor, /Не импортировать \{unresolvedCount\} нераспознанных полей/);
   assert.doesNotMatch(editor, />Применить<\/button>/);
+});
+
+test("raw review groups repetitive issues and gets server-issued bulk unit scopes", async () => {
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
+  assert.match(api, /import\.recipe\.bulk_scopes/);
+  assert.match(api, /import\.recipe\.apply_bulk_unit/);
+  assert.match(api, /import\.recipe\.bulk_ignore_scopes/);
+  assert.match(api, /import\.recipe\.apply_bulk_ignore/);
+  assert.match(app, /getImportBulkUnitScopes/);
+  assert.match(app, /applyImportBulkUnit/);
+  assert.match(app, /applyImportBulkIgnore/);
+  assert.match(workspace, /Групповые решения/);
+  assert.match(workspace, /groupIssues/);
+  assert.match(workspace, /одинаковой физической структурой/);
+  assert.match(workspace, /Не импортировать все нераспознанные поля/);
 });
 
 test("analyses view exposes source metadata, method context and truthful physical origin", async () => {
   const app = await read("src/App.jsx");
-  assert.match(app, /metadataColumns/);
-  assert.match(app, /source_metadata/);
-  assert.match(app, /Исходное значение из файла/);
-  assert.match(app, /Сохранено без интерпретации как исходный текст/);
-  assert.match(app, /measurement\?\.method/);
-  assert.match(app, /measurement\?\.measurement_set/);
-  assert.match(app, /savedAnalysisOrigin/);
-  assert.match(app, /source_orientation === "columns_are_analyses"/);
-  assert.match(app, /source_column_number/);
-  assert.match(app, /Источник в файле/);
+  const workspace = await read("src/AnalysesWorkspace.jsx");
+  assert.match(app, /<AnalysesWorkspace/);
+  assert.match(workspace, /metadataFields/);
+  assert.match(workspace, /source_metadata/);
+  assert.match(workspace, /Исходные сведения/);
+  assert.match(workspace, /Все измерения/);
+  assert.match(workspace, /measurement\.method/);
+  assert.match(workspace, /measurement\.measurement_set/);
+  assert.match(workspace, /originLabel/);
+  assert.match(workspace, /source_orientation === "columns_are_analyses"/);
+  assert.match(workspace, /source_column_number/);
+  assert.match(workspace, /В файле/);
+  assert.match(workspace, /Выбранные строки закреплены сверху/);
+  assert.match(workspace, /Поиск работает по всем полям/);
 });
 
 test("duplicate candidates require explicit keep-all review before save", async () => {
   const api = await read("src/desktopApi.js");
   const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
   const review = await read("src/ImportDuplicateReview.jsx");
   assert.match(api, /import\.recipe\.review_duplicates/);
   assert.match(app, /reviewImportDuplicates/);
   assert.match(app, /duplicateReviewRequired/);
   assert.match(app, /!duplicateReviewRequired/);
-  assert.match(app, /Проверка возможных совпадений/);
+  assert.match(workspace, /ImportDuplicateReview/);
   assert.match(review, /ничего не объединяет автоматически/);
   assert.match(review, /Проверено: оставить все записи/);
 });
 
 test("save stays blocked while automatic structure validation or mapping drafts are pending", async () => {
   const app = await read("src/App.jsx");
+  const workspace = await read("src/ImportWorkspace.jsx");
   assert.match(app, /!blockDraftDirty/);
   assert.match(app, /!mappingDraftDirty/);
-  assert.match(app, /Сначала примени структуру блоков/);
-  assert.match(app, /Сначала примени сопоставление полей/);
+  assert.match(workspace, /Импортировать после проверки/);
+  assert.match(workspace, /blockDraftDirty/);
+  assert.match(workspace, /mappingDraftDirty/);
 });
 
 test("mistaken saved import can be retracted without deleting audit history", async () => {
@@ -154,18 +210,41 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
   const api = await read("src/desktopApi.js");
   assert.match(api, /protocol_version: PROTOCOL_VERSION/);
   assert.match(api, /request_id: crypto\.randomUUID\(\)/);
-  assert.match(api, /invoke\("petrolab_command", \{ envelope \}\)/);
+  assert.match(api, /desktopInvoke\("petrolab_command", \{ envelope \}\)/);
+  assert.match(api, /window\.__TAURI_INTERNALS__/);
+  assert.match(api, /isPetrolabDesktop/);
+  assert.match(api, /preview предназначен только для проверки интерфейса/);
   assert.match(api, /media\.inspect_sources/);
   assert.match(api, /media\.import\.plan/);
   assert.match(api, /media\.import\.apply/);
   assert.match(api, /analytical_point\.create/);
 });
 
+test("Windows release gate installs and launches the packaged application", async () => {
+  const workflow = await read("../.github/workflows/windows-test-build.yml");
+  const smoke = await read("../scripts/smoke_windows_installer.ps1");
+  const uiSmoke = await read("tests/import-ui.e2e.test.jsx");
+  assert.match(workflow, /Install and launch packaged Windows app/);
+  assert.match(workflow, /smoke_windows_installer\.ps1/);
+  assert.match(workflow, /npm run test:ui/);
+  assert.match(smoke, /msiexec\.exe/);
+  assert.match(smoke, /MainWindowHandle/);
+  assert.match(smoke, /petrolab-service/);
+  assert.match(smoke, /petrolab-v2\.sqlite/);
+  assert.match(smoke, /Installed PetroLab smoke test passed/);
+  assert.match(uiSmoke, /user clicks through Clean Table import/);
+  assert.match(uiSmoke, /Выбрать файл/);
+  assert.match(uiSmoke, /Импортировать таблицу/);
+  assert.match(uiSmoke, /UI-1/);
+  assert.match(uiSmoke, /Windows UI smoke/);
+  assert.match(uiSmoke, /applyImportPlan/);
+});
+
 test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {
   const config = JSON.parse(await read("src-tauri/tauri.conf.json"));
   const cargo = await read("src-tauri/Cargo.toml");
-  assert.equal(config.version, "0.1.5");
-  assert.match(cargo, /version = "0\.1\.5"/);
+  assert.equal(config.version, "0.1.6");
+  assert.match(cargo, /version = "0\.1\.6"/);
   assert.equal(config.app.windows[0].width, 1440);
   assert.equal(config.app.windows[0].height, 1024);
   assert.equal(config.app.windows[0].minWidth, 1180);

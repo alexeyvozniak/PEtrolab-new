@@ -2,6 +2,18 @@ import { invoke } from "@tauri-apps/api/core";
 
 export const PROTOCOL_VERSION = "1.0";
 
+function desktopInvoke(command, args) {
+  const internals = typeof window === "undefined" ? null : window.__TAURI_INTERNALS__;
+  if (!internals || typeof internals.invoke !== "function") {
+    throw new Error("Полный импорт доступен в установленном PetroLab Desktop. Этот preview предназначен только для проверки интерфейса.");
+  }
+  return invoke(command, args);
+}
+
+export function isPetrolabDesktop() {
+  return typeof window !== "undefined" && typeof window.__TAURI_INTERNALS__?.invoke === "function";
+}
+
 export async function invokePetrolab(command, payload) {
   const envelope = {
     protocol_version: PROTOCOL_VERSION,
@@ -9,16 +21,19 @@ export async function invokePetrolab(command, payload) {
     command,
     payload,
   };
-  return invoke("petrolab_command", { envelope });
+  return desktopInvoke("petrolab_command", { envelope });
 }
 
-export const pickImportFile = () => invoke("pick_import_file");
-export const stageImportFile = (sourcePath) => invoke("stage_import_file", { sourcePath });
-export const clearImportStaging = (stagedPath) => invoke("clear_import_staging", { stagedPath });
-export const getProjectDatabasePath = () => invoke("project_database_path");
+export const pickImportFile = () => desktopInvoke("pick_import_file");
+export const stageImportFile = (sourcePath) => desktopInvoke("stage_import_file", { sourcePath });
+export const clearImportStaging = (stagedPath) => desktopInvoke("clear_import_staging", { stagedPath });
+export const getProjectDatabasePath = () => desktopInvoke("project_database_path");
 
 export const inspectImportSource = (sourcePath) =>
   invokePetrolab("import.inspect_source", { source_path: sourcePath });
+
+export const classifyCleanTable = (sourcePath) =>
+  invokePetrolab("import.clean_table.classify", { source_path: sourcePath });
 
 export const previewImportWindow = async (sourcePath, sheetName, startRow, rowCount = 12, startColumn = 0, columnCount = 24) => {
   const response = await invokePetrolab("import.preview.window", {
@@ -37,6 +52,27 @@ export const previewImportWindow = async (sourcePath, sheetName, startRow, rowCo
 
 export const suggestImportRecipe = (sourcePath) =>
   invokePetrolab("import.recipe.suggest", { source_path: sourcePath });
+
+export const getImportBulkUnitScopes = (sourcePath, recipe) =>
+  invokePetrolab("import.recipe.bulk_scopes", { source_path: sourcePath, recipe });
+
+export const applyImportBulkUnit = (sourcePath, recipe, bulkScopeId, unit) =>
+  invokePetrolab("import.recipe.apply_bulk_unit", {
+    source_path: sourcePath,
+    recipe,
+    bulk_scope_id: bulkScopeId,
+    unit,
+  });
+
+export const getImportBulkIgnoreScopes = (sourcePath, recipe) =>
+  invokePetrolab("import.recipe.bulk_ignore_scopes", { source_path: sourcePath, recipe });
+
+export const applyImportBulkIgnore = (sourcePath, recipe, bulkScopeId) =>
+  invokePetrolab("import.recipe.apply_bulk_ignore", {
+    source_path: sourcePath,
+    recipe,
+    bulk_scope_id: bulkScopeId,
+  });
 
 export const reviseImportMapping = (sourcePath, recipe, sheetName, sourceColumnIndex, target, canonicalField, unit) =>
   invokePetrolab("import.recipe.revise_mapping", {
@@ -80,10 +116,11 @@ export const applyImportPlan = (projectDatabasePath, sourcePath, recipe) =>
     recipe,
   });
 
-export const listProjectAnalyses = (projectDatabasePath, limit = 500) =>
+export const listProjectAnalyses = (projectDatabasePath, limit = 500, offset = 0) =>
   invokePetrolab("project.analyses.list", {
     project_database_path: projectDatabasePath,
     limit,
+    offset,
   });
 
 export const retractLastImport = (projectDatabasePath, reason = "user_retracted") =>

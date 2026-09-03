@@ -7,18 +7,20 @@ logical blocks and explicit review warnings; it does not infer import semantics.
 from __future__ import annotations
 
 import json
-from collections import Counter
+from collections import Counter, defaultdict
+import hashlib
 from pathlib import Path
 from typing import Any
 
 from .import_apply import open_project
-from .import_preview import ImportCommandError, candidate_blocks, inspect_source, semantic_fingerprint
+from .import_preview import ImportCommandError, candidate_blocks, inspect_source, semantic_fingerprint, validate_recipe
 from .import_recognition import (
     IRON_FIELDS,
     mappings_for_column_block,
     mappings_for_column_header,
     mappings_for_row_block,
 )
+from .manual_mapping import revise_import_mappings
 
 
 SERVICE_PREAMBLE_PREFIXES = (
@@ -120,7 +122,23 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
                 context = None
             context_unit = context.get("unit") if isinstance(context, dict) else None
 
-            transposed = _transposed_candidate(sheet, block, context_unit)
+            row_mappings, row_mapping_warnings = mappings_for_row_block(
+                sheet.rows,
+                header_row,
+                int(block["data_start_row"]),
+                int(block["data_end_row"]),
+                context_unit,
+            )
+            row_has_identity = any(mapping.get("target_role") == "identity" for mapping in row_mappings)
+            row_measurement_evidence = sum(
+                mapping.get("target_role") == "measurement" or mapping.get("suggested_target") == "measurement"
+                for mapping in row_mappings
+            )
+            # A wide table with an explicit identity column and several
+            # measurement-like headers is already structurally decisive. Do
+            # not transpose it merely because its first column also contains
+            # many analysis labels (for example "Спектр 1", "Спектр 2").
+            transposed = None if row_has_identity and row_measurement_evidence >= 2 else _transposed_candidate(sheet, block, context_unit)
             if transposed is not None:
                 mappings, mapping_warnings = mappings_for_column_block(
                     sheet.rows,
@@ -156,13 +174,7 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
                     "field_evidence_count": transposed["field_evidence_count"],
                 })
             else:
-                mappings, mapping_warnings = mappings_for_row_block(
-                    sheet.rows,
-                    header_row,
-                    int(block["data_start_row"]),
-                    int(block["data_end_row"]),
-                    context_unit,
-                )
+                mappings, mapping_warnings = row_mappings, row_mapping_warnings
                 section = {
                     "sheet_name": sheet.name,
                     "block_id": block["block_id"],
@@ -178,8 +190,47 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
             if not mappings:
                 warnings.append({"code": "NO_COLUMNS_DETECTED", "sheet_name": sheet.name, "block_id": block["block_id"]})
                 continue
+            # A measurement-only export (for example an isotope data table)
+            # often has no analytical name column at all.  Use its immutable
+            # physical source row as a transparent local identifier instead of
+            # creating thousands of anonymous Analyses.  This is provenance,
+            # not a scientific classification.
+            has_identity = any(mapping.get("target_role") == "identity" for mapping in mappings)
+            has_measurement = any(mapping.get("target_role") == "measurement" for mapping in mappings)
+            if section["orientation"] == "rows_are_analyses" and not has_identity and has_measurement:
+                section["analysis_identity_policy"] = "source_row"
+                warnings.append({
+                    "code": "SOURCE_ROW_IDENTITY_ASSIGNED",
+                    "sheet_name": sheet.name,
+                    "block_id": block["block_id"],
+                    "identity_field": "Source row",
+                })
             for warning in mapping_warnings:
                 warnings.append({"sheet_name": sheet.name, "block_id": block["block_id"], **warning})
+            warned_coordinates = {
+                (
+                    warning.get("source_axis", "column"),
+                    warning.get("source_column_index") if warning.get("source_axis", "column") == "column" else warning.get("source_row_index"),
+                )
+                for warning in mapping_warnings
+            }
+            for mapping in mappings:
+                axis = mapping.get("source_axis", "column")
+                index_key = "source_column_index" if axis == "column" else "source_row_index"
+                coordinate = (axis, mapping.get(index_key))
+                if (
+                    mapping.get("target_role") == "ignore"
+                    and mapping.get("review_decision") == "unresolved"
+                    and coordinate not in warned_coordinates
+                ):
+                    warnings.append({
+                        "code": "UNMAPPED_FIELD_REQUIRES_REVIEW",
+                        "sheet_name": sheet.name,
+                        "block_id": block["block_id"],
+                        "source_axis": axis,
+                        index_key: mapping.get(index_key),
+                        "source_header": mapping.get("source_header"),
+                    })
             mapped_iron = mapped_iron or any(
                 mapping["target_role"] == "measurement" and mapping["canonical_field"] in IRON_FIELDS
                 for mapping in mappings
@@ -206,13 +257,175 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
     return {"recipe": recipe, "warnings": warnings}
 
 
+def bulk_unit_scopes(source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
+    """Return server-issued scopes for one explicit unit decision.
+
+    A scope contains only blocks with the same orientation and the same ordered
+    set of unresolved recognised measurements.  The client cannot broaden it
+    by filename, sheet name or prior choices.
+    """
+    inspection = inspect_source(source_path)
+    validate_recipe(inspection, recipe)
+    grouped: dict[tuple[str, tuple[tuple[str, str, str], ...]], list[tuple[dict[str, Any], list[dict[str, Any]]]]] = defaultdict(list)
+    for section in recipe.get("sections", []):
+        if not section.get("enabled", True):
+            continue
+        targets = [
+            mapping for mapping in section.get("mappings", [])
+            if mapping.get("target_role") == "ignore"
+            and mapping.get("review_decision") == "unresolved"
+            and mapping.get("suggested_target") == "measurement"
+            and isinstance(mapping.get("suggested_canonical_field"), str)
+            and mapping.get("suggested_canonical_field")
+        ]
+        if not targets:
+            continue
+        signature = tuple(sorted(
+            (
+                str(mapping.get("source_axis", "column")),
+                str(mapping.get("source_header") or ""),
+                str(mapping["suggested_canonical_field"]),
+            )
+            for mapping in targets
+        ))
+        grouped[(str(section.get("orientation", "rows_are_analyses")), signature)].append((section, targets))
+
+    scopes: list[dict[str, Any]] = []
+    recipe_fingerprint = semantic_fingerprint(recipe)
+    for (orientation, signature), grouped_targets in sorted(grouped.items(), key=lambda item: min(str(pair[0].get("block_id")) for pair in item[1])):
+        targets = [
+            {
+                "block_id": section["block_id"],
+                "source_axis": mapping.get("source_axis", "column"),
+                "source_index": mapping.get("source_column_index") if mapping.get("source_axis", "column") == "column" else mapping.get("source_row_index"),
+                "canonical_field": mapping["suggested_canonical_field"],
+            }
+            for section, mappings in grouped_targets for mapping in mappings
+        ]
+        identity = {
+            "source_fingerprint": inspection.fingerprint,
+            "recipe_fingerprint": recipe_fingerprint,
+            "orientation": orientation,
+            "signature": signature,
+            "targets": targets,
+        }
+        scope_id = hashlib.sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:24]
+        scopes.append({
+            "bulk_scope_id": scope_id,
+            "decision_kind": "measurement_unit",
+            "orientation": orientation,
+            "block_count": len(grouped_targets),
+            "field_count": len(targets),
+            "sheet_names": sorted({str(section["sheet_name"]) for section, _ in grouped_targets}),
+            "fields": sorted({target["canonical_field"] for target in targets}),
+            "targets": targets,
+        })
+    return {"source_fingerprint": inspection.fingerprint, "recipe_fingerprint": recipe_fingerprint, "scopes": scopes}
+
+
+def apply_bulk_unit_scope(source_path: str | Path, recipe: dict[str, Any], bulk_scope_id: str, unit: str) -> dict[str, Any]:
+    if not isinstance(bulk_scope_id, str) or not bulk_scope_id:
+        raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Bulk scope identifier is required.")
+    scopes = bulk_unit_scopes(source_path, recipe)["scopes"]
+    scope = next((item for item in scopes if item["bulk_scope_id"] == bulk_scope_id), None)
+    if scope is None:
+        raise ImportCommandError("STALE_BULK_SCOPE", "Bulk scope no longer matches the current source and recipe.")
+    decisions = [
+        {
+            "block_id": target["block_id"],
+            "source_axis": target["source_axis"],
+            "source_index": target["source_index"],
+            "target": "Measurement",
+            "canonical_field": target["canonical_field"],
+            "unit": unit,
+        }
+        for target in scope["targets"]
+    ]
+    revised = revise_import_mappings(source_path, recipe, decisions)
+    return {**revised, "bulk_scope_id": bulk_scope_id, "applied_decision_count": len(decisions)}
+
+
+def bulk_ignore_scopes(source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
+    """Return the exact current set of unrecognized fields for explicit skip.
+
+    Measurement candidates never enter this scope. The user may therefore
+    skip all genuinely unrecognized fields once, after reviewing their names,
+    without repeating the same Ignore decision for every physical block. The
+    scope is bound to every coordinate and becomes stale after any recipe edit.
+    """
+    inspection = inspect_source(source_path)
+    validate_recipe(inspection, recipe)
+    targets: list[dict[str, Any]] = []
+    for section in recipe.get("sections", []):
+        if not section.get("enabled", True):
+            continue
+        for mapping in section.get("mappings", []):
+            if not (
+                mapping.get("target_role") == "ignore"
+                and mapping.get("review_decision") == "unresolved"
+                and mapping.get("suggested_target") != "measurement"
+            ):
+                continue
+            axis = str(mapping.get("source_axis", "column"))
+            index = mapping.get("source_column_index") if axis == "column" else mapping.get("source_row_index")
+            targets.append({
+                "block_id": section["block_id"],
+                "sheet_name": section["sheet_name"],
+                "source_axis": axis,
+                "source_index": int(index),
+                "source_header": str(mapping.get("source_header") or ""),
+            })
+
+    recipe_fingerprint = semantic_fingerprint(recipe)
+    if not targets:
+        return {"source_fingerprint": inspection.fingerprint, "recipe_fingerprint": recipe_fingerprint, "scopes": []}
+    identity = {
+        "source_fingerprint": inspection.fingerprint,
+        "recipe_fingerprint": recipe_fingerprint,
+        "decision_kind": "explicit_ignore_all_unrecognized",
+        "targets": targets,
+    }
+    scope_id = hashlib.sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:24]
+    scope = {
+        "bulk_scope_id": scope_id,
+        "decision_kind": "explicit_ignore_all_unrecognized",
+        "block_count": len({target["block_id"] for target in targets}),
+        "field_count": len(targets),
+        "sheet_names": sorted({str(target["sheet_name"]) for target in targets}),
+        "fields": sorted({target["source_header"] or "Без заголовка" for target in targets}),
+        "targets": targets,
+    }
+    return {"source_fingerprint": inspection.fingerprint, "recipe_fingerprint": recipe_fingerprint, "scopes": [scope]}
+
+
+def apply_bulk_ignore_scope(source_path: str | Path, recipe: dict[str, Any], bulk_scope_id: str) -> dict[str, Any]:
+    if not isinstance(bulk_scope_id, str) or not bulk_scope_id:
+        raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Bulk scope identifier is required.")
+    scopes = bulk_ignore_scopes(source_path, recipe)["scopes"]
+    scope = next((item for item in scopes if item["bulk_scope_id"] == bulk_scope_id), None)
+    if scope is None:
+        raise ImportCommandError("STALE_BULK_SCOPE", "Bulk scope no longer matches the current source and recipe.")
+    decisions = [
+        {
+            "block_id": target["block_id"],
+            "source_axis": target["source_axis"],
+            "source_index": target["source_index"],
+            "target": "Ignore",
+        }
+        for target in scope["targets"]
+    ]
+    revised = revise_import_mappings(source_path, recipe, decisions)
+    return {**revised, "bulk_scope_id": bulk_scope_id, "applied_decision_count": len(decisions)}
+
+
 def _active_import_filter() -> str:
     return "b.status = 'applied' AND x.import_batch_id IS NULL"
 
 
-def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[str, Any]:
+def list_project_analyses(database_path: str | Path, limit: int = 500, offset: int = 0) -> dict[str, Any]:
     """Return active Analysis/Measurement rows plus lossless source metadata."""
-    limit = max(1, min(int(limit), 2000))
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
     connection = open_project(database_path)
     try:
         active_filter = _active_import_filter()
@@ -234,8 +447,8 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                 LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
                 WHERE {active_filter}
                 ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number, a.source_column_number
-                LIMIT ?""",
-            (limit,),
+                LIMIT ? OFFSET ?""",
+            (limit, offset),
         ).fetchall()
         result: list[dict[str, Any]] = []
         for row in rows:
@@ -247,6 +460,8 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
                     continue
                 if section.get("orientation", "rows_are_analyses") == "columns_are_analyses" and section.get("analysis_axis_role", "Analysis") != "Ignore":
                     identity_names.append(section.get("analysis_axis_field") or "Analysis")
+                elif section.get("analysis_identity_policy") == "source_row":
+                    identity_names.append("Source row")
                 identity_names.extend(
                     mapping.get("canonical_field") or mapping.get("source_header")
                     for mapping in section.get("mappings", [])
@@ -366,6 +581,8 @@ def list_project_analyses(database_path: str | Path, limit: int = 500) -> dict[s
         return {
             "total": total,
             "returned": len(result),
+            "offset": offset,
+            "has_more": offset + len(result) < total,
             "source_count": source_count,
             "import_batch_count": batch_count,
             "latest_import": latest_import,

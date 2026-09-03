@@ -14,10 +14,16 @@ import {
 } from "@phosphor-icons/react";
 import {
   applyImportPlan,
+  applyImportBulkIgnore,
+  applyImportBulkUnit,
+  classifyCleanTable,
   clearImportStaging,
   createImportPlan,
   getProjectDatabasePath,
+  getImportBulkIgnoreScopes,
+  getImportBulkUnitScopes,
   inspectImportSource,
+  isPetrolabDesktop,
   listProjectAnalyses,
   pickImportFile,
   previewImportWindow,
@@ -31,7 +37,11 @@ import {
 import { ImportBlockReview } from "./ImportBlockReview";
 import { ImportDuplicateReview } from "./ImportDuplicateReview";
 import { ImportMappingEditor } from "./ImportMappingEditor";
+import { ImportWorkspace } from "./ImportWorkspace";
+import { AnalysesWorkspace } from "./AnalysesWorkspace";
 import "./styles.css";
+
+const ANALYSES_PAGE_SIZE = 500;
 
 const navigation = [
   [MagnifyingGlass, "Поиск", false],
@@ -64,14 +74,39 @@ function warningText(warning) {
   const names = {
     HEADER_NOT_DETECTED: "Табличный заголовок не распознан",
     UNIT_REQUIRES_REVIEW: "Колонка похожа на измерение, но единица не указана явно",
+    UNMAPPED_FIELD_REQUIRES_REVIEW: "Поле с данными пока не имеет роли в PetroLab",
     MERGED_HEADERS: "В заголовке есть объединённые ячейки",
     HIDDEN_ROWS: "В файле есть скрытые строки",
     FORMULA_WITHOUT_CACHED_VALUE: "Есть формулы без сохранённого значения",
     DUPLICATE_CANDIDATES: "Найдены возможные совпадения идентичности",
     TRANSPOSED_TABLE_LIKELY: "Похоже, анализы расположены по столбцам — проверь ориентацию блока",
-    LEGACY_XLS_REQUIRES_CONVERSION: "Старый XLS пока требует сохранения копии как XLSX",
+    LEGACY_XLS_SUPPORT_UNAVAILABLE: "В этой сборке недоступен модуль чтения старых XLS",
   };
   return names[warning.code] || warning.code || "Предупреждение импорта";
+}
+
+function cleanReasonText(reason) {
+  const names = {
+    CLEAN_TABLE_NO_DATA_ROWS: "На листе нет строк данных после заголовка",
+    CLEAN_TABLE_BLANK_HEADER: "Есть колонка с данными, но без заголовка",
+    CLEAN_TABLE_DUPLICATE_HEADER: "Есть повторяющиеся заголовки колонок",
+    CLEAN_TABLE_INTERNAL_BLANK_ROW: "Внутри таблицы есть пустая строка",
+    CLEAN_TABLE_REPEATED_HEADER: "Строка заголовков повторяется внутри данных",
+    CLEAN_TABLE_ANALYSIS_REQUIRED: "Нет явной колонки Analysis",
+    CLEAN_TABLE_MEASUREMENT_REQUIRED: "Нет ни одного Measurement с явной единицей",
+    CLEAN_TABLE_NO_VALID_DATA_SHEETS: "Не найден ни один лист, полностью соответствующий Clean Table",
+    CLEAN_TABLE_DUPLICATE_IDENTITIES: "Есть повторяющиеся идентичности Analysis — нужна проверка совпадений",
+    UNRECOGNIZED_CLEAN_FIELD: "Есть поле без однозначной роли или явной единицы",
+    MERGED_HEADERS: "В исходнике есть объединённые ячейки",
+    HIDDEN_ROWS: "В исходнике есть скрытые строки",
+    FORMULA_WITHOUT_CACHED_VALUE: "Есть формулы без сохранённого значения",
+  };
+  const base = names[reason.code] || reason.code || "Нужна проверка структуры";
+  const location = reason.sheet_name ? ` · ${reason.sheet_name}` : "";
+  const field = reason.source_header ? ` · ${reason.source_header}` : "";
+  const row = reason.row_number ? ` · строка ${reason.row_number}` : "";
+  const column = Number.isInteger(reason.source_column_index) ? ` · колонка ${reason.source_column_index + 1}` : "";
+  return `${base}${location}${field}${row}${column}`;
 }
 
 function warningCoordinate(warning) {
@@ -91,91 +126,112 @@ function recordOrigin(record) {
   return `${record.sheet_name} · строка ${record.row_number}`;
 }
 
-function savedAnalysisOrigin(analysis) {
-  if (analysis.source_orientation === "columns_are_analyses") {
-    return `колонка ${analysis.source_column_number ?? "?"}`;
-  }
-  return `строка ${analysis.source_row_number ?? "?"}`;
-}
-
 function measurementPreview(measurement) {
   const context = measurement.method || measurement.measurement_set;
   const label = context ? `${measurement.field} (${context})` : measurement.field;
   return `${label}=${measurement.raw_token ?? "∅"} ${measurement.unit} [${measurement.source_cell || ""}]`;
 }
 
+function CleanTableSummary({ classification, onDetailed, busy }) {
+  return (
+    <div className="live-card">
+      <div className="section-title">
+        <div>
+          <h3><CheckCircle size={20} weight="fill" /> Clean Table распознан</h3>
+          <p>Структура однозначна: PetroLab не требует ручного выбора блоков, ролей и единиц.</p>
+        </div>
+        <button className="outline-button" type="button" onClick={onDetailed} disabled={busy}>Открыть подробную проверку</button>
+      </div>
+      <div className="warning-list">
+        {classification.sections.map((section) => (
+          <div key={section.sheet_name}>
+            <CheckCircle size={18} weight="fill" />
+            <span>
+              <b>{section.sheet_name}</b>
+              {section.analysis_fields?.length ? ` · ${section.analysis_fields.join(", ")}` : ""}
+              {section.metadata_fields?.length ? ` · metadata: ${section.metadata_fields.join(", ")}` : ""}
+              {section.measurements?.length ? ` · ${section.measurements.map((item) => `${item.field} [${item.unit}]`).join(", ")}` : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+      {classification.ignored_helper_sheets?.length > 0 && (
+        <p className="more-note">Служебные листы официального шаблона не импортируются: {classification.ignored_helper_sheets.join(", ")}.</p>
+      )}
+    </div>
+  );
+}
+
 export function App() {
+  const desktopRuntimeAvailable = isPetrolabDesktop();
   const [screen, setScreen] = useState("Импорт");
   const [databasePath, setDatabasePath] = useState("");
-  const [project, setProject] = useState({ total: 0, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
+  const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
   const [sourcePath, setSourcePath] = useState("");
   const [sourceDisplayPath, setSourceDisplayPath] = useState("");
   const [inspection, setInspection] = useState(null);
   const [recipe, setRecipe] = useState(null);
   const [recipeWarnings, setRecipeWarnings] = useState([]);
+  const [bulkUnitScopes, setBulkUnitScopes] = useState([]);
+  const [bulkIgnoreScopes, setBulkIgnoreScopes] = useState([]);
   const [plan, setPlan] = useState(null);
   const [blockPreviews, setBlockPreviews] = useState({});
+  const [cleanClassification, setCleanClassification] = useState(null);
+  const [detailedReview, setDetailedReview] = useState(false);
   const [blockDraftDirty, setBlockDraftDirty] = useState(false);
   const [mappingDraftDirty, setMappingDraftDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [activity, setActivity] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [query, setQuery] = useState("");
 
   const refreshAnalyses = useCallback(async (path = databasePath) => {
     if (!path) return;
-    setProject(unwrap(await listProjectAnalyses(path)));
+    setProject(unwrap(await listProjectAnalyses(path, ANALYSES_PAGE_SIZE, 0)));
   }, [databasePath]);
 
+  const loadMoreAnalyses = useCallback(async () => {
+    if (!databasePath || busy || !project.has_more) return;
+    setBusy(true);
+    setActivity("Загружаю следующую страницу анализов…");
+    try {
+      const next = unwrap(await listProjectAnalyses(databasePath, ANALYSES_PAGE_SIZE, project.analyses.length));
+      setProject((current) => ({
+        ...next,
+        returned: current.analyses.length + next.analyses.length,
+        analyses: [...current.analyses, ...next.analyses],
+      }));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  }, [busy, databasePath, project.analyses.length, project.has_more]);
+
   useEffect(() => {
+    if (!desktopRuntimeAvailable) return undefined;
     let cancelled = false;
     (async () => {
       try {
         const path = await getProjectDatabasePath();
         if (cancelled) return;
         setDatabasePath(path);
-        const result = unwrap(await listProjectAnalyses(path));
+        const result = unwrap(await listProjectAnalyses(path, ANALYSES_PAGE_SIZE, 0));
         if (!cancelled) setProject(result);
       } catch (caught) {
         if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
       }
     })();
     return () => { cancelled = true; };
-  }, []);
-
-  const identityColumns = useMemo(() => {
-    const fields = new Set();
-    project.analyses.forEach((analysis) => Object.keys(analysis.identity || {}).forEach((field) => fields.add(field)));
-    return [...fields];
-  }, [project.analyses]);
-
-  const metadataColumns = useMemo(() => {
-    const fields = new Set();
-    project.analyses.forEach((analysis) => Object.keys(analysis.source_metadata || {}).forEach((field) => fields.add(field)));
-    return [...fields];
-  }, [project.analyses]);
-
-  const measurementColumns = useMemo(() => {
-    const fields = new Set();
-    project.analyses.forEach((analysis) => Object.keys(analysis.measurements || {}).forEach((field) => fields.add(field)));
-    return [...fields].slice(0, 14);
-  }, [project.analyses]);
-
-  const filteredAnalyses = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return project.analyses;
-    return project.analyses.filter((analysis) => JSON.stringify(analysis).toLowerCase().includes(needle));
-  }, [project.analyses, query]);
+  }, [desktopRuntimeAvailable]);
 
   const plannedMeasurementCount = plan?.summary?.planned_measurement_count
     ?? plan?.planned_records?.reduce((total, record) => total + record.measurements.length, 0)
     ?? 0;
-
   const enabledBlockCount = plan?.summary?.enabled_block_count
     ?? recipe?.sections?.filter((section) => section.enabled !== false).length
     ?? 0;
-
   const duplicateCandidateGroups = plan?.summary?.duplicate_candidate_groups ?? 0;
   const duplicateReview = recipe?.global_decisions?.duplicate_review;
   const duplicateReviewRequired = duplicateCandidateGroups > 0 && !(
@@ -183,6 +239,7 @@ export function App() {
     && duplicateReview?.decision === "keep_all"
     && duplicateReview?.candidate_group_count === duplicateCandidateGroups
   );
+  const isCleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview;
 
   const visibleRecipeWarnings = useMemo(() => {
     if (!recipe) return recipeWarnings;
@@ -192,7 +249,7 @@ export function App() {
       if (warning.code === "TRANSPOSED_TABLE_LIKELY") {
         return Boolean(section && section.enabled !== false && section.orientation === "columns_are_analyses");
       }
-      if (warning.code !== "UNIT_REQUIRES_REVIEW") return true;
+      if (!["UNIT_REQUIRES_REVIEW", "UNMAPPED_FIELD_REQUIRES_REVIEW"].includes(warning.code)) return true;
       if (!section || section.enabled === false) return false;
       const axis = warning.source_axis || "column";
       const index = axis === "column" ? warning.source_column_index : warning.source_row_index;
@@ -201,15 +258,20 @@ export function App() {
         const itemIndex = itemAxis === "column" ? item.source_column_index : item.source_row_index;
         return itemAxis === axis && itemIndex === index;
       });
-      return !mapping || mapping.target_role === "ignore";
+      return !mapping || (mapping.target_role === "ignore" && mapping.review_decision !== "explicit_ignore");
     });
   }, [recipe, recipeWarnings]);
+
+  const unresolvedReviewCount = visibleRecipeWarnings.filter((warning) => (
+    warning.code === "UNIT_REQUIRES_REVIEW" || warning.code === "UNMAPPED_FIELD_REQUIRES_REVIEW"
+  )).length;
 
   const canSaveImport = Boolean(
     plan
     && plan.summary.planned_analysis_count > 0
     && plannedMeasurementCount > 0
     && enabledBlockCount > 0
+    && unresolvedReviewCount === 0
     && !blockDraftDirty
     && !mappingDraftDirty
     && !duplicateReviewRequired,
@@ -231,8 +293,12 @@ export function App() {
     setInspection(null);
     setRecipe(null);
     setRecipeWarnings([]);
+    setBulkUnitScopes([]);
+    setBulkIgnoreScopes([]);
     setPlan(null);
     setBlockPreviews({});
+    setCleanClassification(null);
+    setDetailedReview(false);
     setBlockDraftDirty(false);
     setMappingDraftDirty(false);
   };
@@ -251,22 +317,47 @@ export function App() {
       setActivity("Копирую файл в рабочую область PetroLab…");
       const selected = await stageImportFile(selectedPath);
       newlyStaged = selected.local_path;
-      setActivity("Читаю листы и ищу логические таблицы…");
-      const inspected = unwrap(await inspectImportSource(newlyStaged));
-      const suggestion = unwrap(await suggestImportRecipe(newlyStaged));
-      setActivity("Строю предпросмотр исходных строк…");
-      const [planned, previews] = await Promise.all([
-        createImportPlan(newlyStaged, suggestion.recipe).then(unwrap),
-        loadBlockPreviews(newlyStaged, suggestion.recipe),
+      setActivity("Проверяю, соответствует ли файл PetroLab Clean Table…");
+      const [inspected, classification] = await Promise.all([
+        inspectImportSource(newlyStaged).then(unwrap),
+        classifyCleanTable(newlyStaged).then(unwrap),
       ]);
+
+      let nextRecipe;
+      let nextWarnings = [];
+      let previews = {};
+      let nextBulkUnitScopes = [];
+      let nextBulkIgnoreScopes = [];
+      if (classification.mode === "clean_table_fast") {
+        nextRecipe = classification.recipe;
+        setActivity("Clean Table распознан. Строю итоговый план…");
+      } else {
+        setActivity("Файл требует подготовки. Ищу логические таблицы…");
+        const suggestion = unwrap(await suggestImportRecipe(newlyStaged));
+        nextRecipe = suggestion.recipe;
+        nextWarnings = suggestion.warnings || [];
+        const [unitScopes, ignoreScopes] = await Promise.all([
+          getImportBulkUnitScopes(newlyStaged, nextRecipe).then(unwrap),
+          getImportBulkIgnoreScopes(newlyStaged, nextRecipe).then(unwrap),
+        ]);
+        nextBulkUnitScopes = unitScopes.scopes || [];
+        nextBulkIgnoreScopes = ignoreScopes.scopes || [];
+        setActivity("Строю предпросмотр исходных строк…");
+        previews = await loadBlockPreviews(newlyStaged, nextRecipe);
+      }
+      const planned = unwrap(await createImportPlan(newlyStaged, nextRecipe));
 
       setSourcePath(newlyStaged);
       setSourceDisplayPath(selected.original_path || selectedPath);
       setInspection(inspected);
-      setRecipe(suggestion.recipe);
-      setRecipeWarnings(suggestion.warnings || []);
+      setRecipe(nextRecipe);
+      setRecipeWarnings(nextWarnings);
+      setBulkUnitScopes(nextBulkUnitScopes);
+      setBulkIgnoreScopes(nextBulkIgnoreScopes);
       setPlan(planned);
       setBlockPreviews(previews);
+      setCleanClassification(classification);
+      setDetailedReview(false);
       setBlockDraftDirty(false);
       setMappingDraftDirty(false);
       setScreen("Импорт");
@@ -282,6 +373,22 @@ export function App() {
     }
   };
 
+  const openDetailedReview = async () => {
+    if (busy || !sourcePath || !recipe) return;
+    setBusy(true);
+    setActivity("Открываю подробную проверку исходника…");
+    try {
+      const previews = await loadBlockPreviews(sourcePath, recipe);
+      setBlockPreviews(previews);
+      setDetailedReview(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
   const applySections = async (decisions) => {
     if (busy || !sourcePath || !recipe || !decisions?.length) return;
     setBusy(true);
@@ -290,13 +397,18 @@ export function App() {
     setSuccess("");
     try {
       const revised = unwrap(await reviseImportSections(sourcePath, recipe, decisions));
-      const [planned, previews] = await Promise.all([
+      const [planned, previews, bulkScopes, ignoreScopes] = await Promise.all([
         createImportPlan(sourcePath, revised.recipe).then(unwrap),
         loadBlockPreviews(sourcePath, revised.recipe),
+        getImportBulkUnitScopes(sourcePath, revised.recipe).then(unwrap),
+        getImportBulkIgnoreScopes(sourcePath, revised.recipe).then(unwrap),
       ]);
       setRecipe(revised.recipe);
       setPlan(planned);
       setBlockPreviews(previews);
+      setBulkUnitScopes(bulkScopes.scopes || []);
+      setBulkIgnoreScopes(ignoreScopes.scopes || []);
+      setDetailedReview(true);
       setBlockDraftDirty(false);
       setMappingDraftDirty(false);
       setSuccess(`Структура применена: ${decisions.length} блоков. Теперь проверь роли полей.`);
@@ -316,13 +428,74 @@ export function App() {
     setSuccess("");
     try {
       const revised = unwrap(await reviseImportMappings(sourcePath, recipe, decisions));
-      const planned = unwrap(await createImportPlan(sourcePath, revised.recipe));
+      const [planned, bulkScopes, ignoreScopes] = await Promise.all([
+        createImportPlan(sourcePath, revised.recipe).then(unwrap),
+        getImportBulkUnitScopes(sourcePath, revised.recipe).then(unwrap),
+        getImportBulkIgnoreScopes(sourcePath, revised.recipe).then(unwrap),
+      ]);
       const resolved = new Set(decisions.map(decisionCoordinate));
       setRecipeWarnings((current) => current.filter((warning) => warning.code !== "UNIT_REQUIRES_REVIEW" || !resolved.has(warningCoordinate(warning))));
       setRecipe(revised.recipe);
       setPlan(planned);
+      setBulkUnitScopes(bulkScopes.scopes || []);
+      setBulkIgnoreScopes(ignoreScopes.scopes || []);
+      setDetailedReview(true);
       setMappingDraftDirty(false);
       setSuccess(`Сопоставление применено: ${decisions.length} полей. Проверь итоговый план.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const applyBulkUnit = async (bulkScopeId, unit) => {
+    if (busy || !sourcePath || !recipe || !bulkScopeId || !unit) return;
+    setBusy(true);
+    setActivity("Применяю единицу к доказанно одинаковым полям…");
+    setError("");
+    setSuccess("");
+    try {
+      const revised = unwrap(await applyImportBulkUnit(sourcePath, recipe, bulkScopeId, unit));
+      const [planned, scopes, ignoreScopes] = await Promise.all([
+        createImportPlan(sourcePath, revised.recipe).then(unwrap),
+        getImportBulkUnitScopes(sourcePath, revised.recipe).then(unwrap),
+        getImportBulkIgnoreScopes(sourcePath, revised.recipe).then(unwrap),
+      ]);
+      setRecipe(revised.recipe);
+      setPlan(planned);
+      setBulkUnitScopes(scopes.scopes || []);
+      setBulkIgnoreScopes(ignoreScopes.scopes || []);
+      setMappingDraftDirty(false);
+      setSuccess(`Единица ${unit} назначена ${revised.applied_decision_count} полям с одинаковой структурой.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const applyBulkIgnore = async (bulkScopeId) => {
+    if (busy || !sourcePath || !recipe || !bulkScopeId) return;
+    setBusy(true);
+    setActivity("Исключаю повторяющиеся нераспознанные поля…");
+    setError("");
+    setSuccess("");
+    try {
+      const revised = unwrap(await applyImportBulkIgnore(sourcePath, recipe, bulkScopeId));
+      const [planned, unitScopes, ignoreScopes] = await Promise.all([
+        createImportPlan(sourcePath, revised.recipe).then(unwrap),
+        getImportBulkUnitScopes(sourcePath, revised.recipe).then(unwrap),
+        getImportBulkIgnoreScopes(sourcePath, revised.recipe).then(unwrap),
+      ]);
+      setRecipe(revised.recipe);
+      setPlan(planned);
+      setBulkUnitScopes(unitScopes.scopes || []);
+      setBulkIgnoreScopes(ignoreScopes.scopes || []);
+      setMappingDraftDirty(false);
+      setSuccess(`Явно исключено ${revised.applied_decision_count} повторяющихся полей. Исходные значения остались в файле.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -443,23 +616,24 @@ export function App() {
             <p>Источников: <b>{project.source_count}</b> · импортов: <b>{project.import_batch_count}</b> · анализов: <b>{project.total}</b></p>
           </div>
           <div className="top-actions">
-            <button className="outline-button" onClick={startNewImport} disabled={busy}><Plus size={18} /> Добавить данные</button>
+            <button className="outline-button" onClick={startNewImport} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> Добавить данные</button>
             <button className="icon-button" disabled title="Настройки будут подключены позже"><GearSix size={21} /></button>
           </div>
         </header>
 
         {activity && <div className="global-message activity"><SpinnerGap className="spin" size={20} /><span>{activity}</span></div>}
+        {!desktopRuntimeAvailable && <div className="global-message activity"><Info size={20} /><span>Предпросмотр проверяет компоновку. Выбор и импорт файлов доступны в установленном PetroLab Desktop.</span></div>}
         {error && <div className="global-message error"><Warning size={20} weight="fill" /><span>{error}</span></div>}
         {success && <div className="global-message success"><CheckCircle size={20} weight="fill" /><span>{success}</span></div>}
 
         {screen === "Импорт" && (
-          <section className="live-page">
+          <section className={`live-page${sourcePath ? " import-live-page" : ""}`}>
             {!sourcePath && (
               <div className="file-start-card">
                 <div className="file-start-icon"><FileArrowUp size={46} weight="duotone" /></div>
                 <h1>Добавить файл</h1>
-                <p>PetroLab найдёт логические таблицы, покажет реальные строки исходника и ничего не запишет до твоего подтверждения.</p>
-                <button className="primary-button large" onClick={chooseFile} disabled={busy}>
+                <p>Если это PetroLab Clean Table, импорт будет коротким. Сырые и неоднозначные Excel откроются в отдельной подготовке.</p>
+                <button className="primary-button large" onClick={chooseFile} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}>
                   {busy ? <SpinnerGap className="spin" size={20} /> : <FileArrowUp size={20} />}
                   {busy ? "Открываю файл…" : "Выбрать файл"}
                 </button>
@@ -468,139 +642,50 @@ export function App() {
             )}
 
             {sourcePath && inspection && recipe && plan && (
-              <>
-                <div className="source-heading">
-                  <div className="source-file"><File size={32} weight="duotone" /><div><b>{fileName(sourceDisplayPath || sourcePath)}</b><span title={sourceDisplayPath}>{inspection.source_format.toUpperCase()} · SHA-256 {inspection.source_fingerprint.slice(0, 12)}…</span></div></div>
-                  <div className="top-actions">
-                    <button className="outline-button" onClick={startNewImport} disabled={busy}>Отменить импорт</button>
-                    <button className="outline-button" onClick={chooseFile} disabled={busy}>Выбрать другой файл</button>
-                  </div>
-                </div>
-
-                <div className="metric-row">
-                  <div className="metric"><span>Листов</span><b>{inspection.sheets.length}</b></div>
-                  <div className="metric"><span>Логических блоков</span><b>{enabledBlockCount}/{recipe.sections.length}</b></div>
-                  <div className="metric"><span>Будет Analysis</span><b>{plan.summary.planned_analysis_count}</b></div>
-                  <div className="metric"><span>Будет Measurement</span><b>{plannedMeasurementCount}</b></div>
-                  <div className="metric"><span>Групп совпадений</span><b>{duplicateCandidateGroups}</b></div>
-                </div>
-
-                <div className="live-card">
-                  <div className="section-title"><div><h3>1. Где находятся данные</h3><p>Проверь реальные строки Excel, границы блоков и ориентацию. Ненужный блок можно выключить целиком.</p></div></div>
-                  <ImportBlockReview recipe={recipe} previews={blockPreviews} busy={busy} onApply={applySections} onDirtyChange={setBlockDraftDirty} />
-                </div>
-
-                <div className="live-card">
-                  <div className="section-title"><div><h3>2. Что означают поля</h3><p>PetroLab предлагает очевидные роли. Исправляй только ошибки и применяй все изменения одной кнопкой.</p></div></div>
-                  <ImportMappingEditor recipe={recipe} warnings={recipeWarnings} busy={busy || blockDraftDirty} onApplyAll={applyMappings} onDirtyChange={setMappingDraftDirty} />
-                </div>
-
-                {(blockDraftDirty || mappingDraftDirty) && (
-                  <div className="import-blocker draft-blocker">
-                    <Info size={22} weight="fill" />
-                    <div><b>Есть неприменённые изменения</b><span>{blockDraftDirty ? "Сначала примени изменения структуры блоков." : "Сначала примени сопоставление полей."} PetroLab пересчитает план только после этого.</span></div>
-                  </div>
-                )}
-
-                {!blockDraftDirty && !mappingDraftDirty && plannedMeasurementCount === 0 && plan.summary.planned_analysis_count > 0 && (
-                  <div className="import-blocker">
-                    <Warning size={22} weight="fill" />
-                    <div><b>Импорт пока нельзя сохранить</b><span>Найдены Analysis, но ни одного Measurement. Проверь роли и единицы.</span></div>
-                  </div>
-                )}
-
-                {(visibleRecipeWarnings.length > 0 || plan.warnings.length > 0) && (
-                  <div className="live-card warning-card">
-                    <div className="section-title"><div><h3>Предупреждения</h3><p>Перед сохранением PetroLab показывает всё, что требует внимания.</p></div></div>
-                    <div className="warning-list">
-                      {[...visibleRecipeWarnings, ...plan.warnings].map((warning, index) => (
-                        <div key={`${warning.code}-${warning.block_id || warning.sheet_name || ""}-${index}`}><Warning size={18} weight="fill" /><span><b>{warningText(warning)}</b>{warning.sheet_name ? ` · ${warning.sheet_name}` : ""}{warning.source_header ? ` · ${warning.source_header}` : ""}</span></div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {duplicateCandidateGroups > 0 && (
-                  <div className="live-card">
-                    <div className="section-title"><div><h3>3. Проверка возможных совпадений</h3><p>Совпадение идентичности не означает, что записи нужно объединить или удалить.</p></div></div>
-                    <ImportDuplicateReview
-                      plan={plan}
-                      recipe={recipe}
-                      busy={busy || blockDraftDirty || mappingDraftDirty}
-                      onKeepAll={keepAllDuplicateCandidates}
-                    />
-                  </div>
-                )}
-
-                <div className="live-card">
-                  <div className="section-title"><div><h3>{duplicateCandidateGroups > 0 ? "4" : "3"}. Что будет записано</h3><p>Это уже нормализованный план. Координаты исходных ячеек сохраняются отдельно для воспроизводимости.</p></div></div>
-                  <div className="analysis-preview-list">
-                    {plan.planned_records.slice(0, 12).map((record) => (
-                      <div className="analysis-preview-row" key={record.preview_id}>
-                        <span className="row-origin">{recordOrigin(record)}</span>
-                        <b>{record.identity.filter(Boolean).join(" · ") || "Analysis без распознанного идентификатора"}</b>
-                        <span>{record.measurements.slice(0, 6).map(measurementPreview).join(" · ") || "Нет Measurement"}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {plan.planned_records.length > 12 && <p className="more-note">Показано 12 из {plan.planned_records.length} записей.</p>}
-                </div>
-
-                <div className={`commit-bar${canSaveImport ? "" : " blocked"}`}>
-                  <div>
-                    <b>Готово к записи: {plan.summary.planned_analysis_count} Analysis · {plannedMeasurementCount} Measurement</b>
-                    <span>{canSaveImport
-                      ? "Исходник не меняется; PetroLab сохранит управляемую копию и точную provenance каждой импортированной ячейки."
-                      : blockDraftDirty
-                        ? "Сначала примени структуру блоков."
-                        : mappingDraftDirty
-                          ? "Сначала примени сопоставление полей."
-                          : duplicateReviewRequired
-                            ? "Сначала проверь группы возможных совпадений и явно зафиксируй решение."
-                            : "Нужен хотя бы один Analysis и Measurement с явной единицей."}</span>
-                  </div>
-                  <button className="primary-button large" onClick={commitImport} disabled={busy || !canSaveImport}>
-                    {busy ? <SpinnerGap className="spin" size={20} /> : <CheckCircle size={20} />} Сохранить импорт в проект
-                  </button>
-                </div>
-              </>
+              <ImportWorkspace
+                sourceName={fileName(sourceDisplayPath || sourcePath)}
+                sourceDisplayPath={sourceDisplayPath}
+                inspection={inspection}
+                recipe={recipe}
+                recipeWarnings={visibleRecipeWarnings}
+                bulkUnitScopes={bulkUnitScopes}
+                bulkIgnoreScopes={bulkIgnoreScopes}
+                plan={plan}
+                blockPreviews={blockPreviews}
+                cleanClassification={cleanClassification}
+                detailedReview={detailedReview}
+                blockDraftDirty={blockDraftDirty}
+                mappingDraftDirty={mappingDraftDirty}
+                duplicateReviewRequired={duplicateReviewRequired}
+                canSaveImport={canSaveImport}
+                plannedMeasurementCount={plannedMeasurementCount}
+                unresolvedReviewCount={unresolvedReviewCount}
+                busy={busy}
+                onOpenDetailed={openDetailedReview}
+                onApplySections={applySections}
+                onApplyMappings={applyMappings}
+                onApplyBulkUnit={applyBulkUnit}
+                onApplyBulkIgnore={applyBulkIgnore}
+                onBlockDirtyChange={setBlockDraftDirty}
+                onMappingDirtyChange={setMappingDraftDirty}
+                onKeepAllDuplicates={keepAllDuplicateCandidates}
+                onCommit={commitImport}
+                onCancel={startNewImport}
+                onChooseOther={chooseFile}
+              />
             )}
           </section>
         )}
 
         {screen === "Анализы" && (
-          <section className="live-page analyses-page">
-            <div className="analysis-toolbar">
-              <div className="search-box"><MagnifyingGlass size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти по Sample, Mineral, Generation, Source, значению…" /></div>
-              <span>Показано {filteredAnalyses.length} из {project.total}</span>
-              {project.latest_import && <button className="outline-button danger-outline" onClick={retractLatest} disabled={busy} title={`Последний импорт: ${project.latest_import.source_name}`}>Отменить последний импорт</button>}
-              <button className="outline-button" onClick={() => refreshAnalyses().catch((caught) => setError(caught.message))} disabled={busy}>Обновить</button>
-            </div>
-
-            {project.total === 0 ? (
-              <div className="empty-analyses"><Database size={48} weight="duotone" /><h2>В проекте пока нет анализов</h2><p>После проверенного импорта строки появятся здесь и сохранятся после перезапуска PetroLab.</p><button className="primary-button" onClick={startNewImport} disabled={busy}>Добавить данные</button></div>
-            ) : (
-              <div className="analysis-table-wrap">
-                <table className="analysis-table">
-                  <thead><tr><th>Source</th><th>Лист</th><th>Источник в файле</th>{identityColumns.map((field) => <th key={`identity-${field}`}>{field}</th>)}{metadataColumns.map((field) => <th key={`metadata-${field}`} title="Исходное значение из файла">{field} · исходное</th>)}{measurementColumns.map((field) => <th key={`measurement-${field}`}>{field}</th>)}</tr></thead>
-                  <tbody>
-                    {filteredAnalyses.map((analysis) => (
-                      <tr key={analysis.analysis_id} title={analysis.analysis_id}>
-                        <td><b>{analysis.source_name}</b></td><td>{analysis.sheet_name}</td><td>{savedAnalysisOrigin(analysis)}</td>
-                        {identityColumns.map((field) => <td key={`identity-${field}`}>{analysis.identity?.[field] || ""}</td>)}
-                        {metadataColumns.map((field) => <td key={`metadata-${field}`} title="Сохранено без интерпретации как исходный текст">{analysis.source_metadata?.[field] || ""}</td>)}
-                        {measurementColumns.map((field) => {
-                          const measurement = analysis.measurements?.[field];
-                          const context = measurement?.method || measurement?.measurement_set;
-                          return <td key={`measurement-${field}`}>{measurement ? <><span>{measurement.raw_token ?? "∅"}</span><small>{measurement.unit}{context ? ` · ${context}` : ""}</small></> : ""}</td>;
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+          <AnalysesWorkspace
+            project={project}
+            busy={busy}
+            onRefresh={() => refreshAnalyses().catch((caught) => setError(caught.message))}
+            onRetract={retractLatest}
+            onAddData={startNewImport}
+            onLoadMore={loadMoreAnalyses}
+          />
         )}
       </section>
     </main>

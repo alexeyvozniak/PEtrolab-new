@@ -29,6 +29,12 @@ TARGETS = {
     "Point": ("identity", "identity"),
     "Mineral": ("metadata", "metadata"),
     "Generation": ("metadata", "metadata"),
+    "Rock": ("metadata", "metadata"),
+    "Source": ("metadata", "metadata"),
+    "Comment": ("metadata", "metadata"),
+    "Position": ("metadata", "metadata"),
+    "Photo number": ("metadata", "metadata"),
+    "Size (µm)": ("metadata", "metadata"),
     "Measurement": ("measurement", "measured"),
 }
 
@@ -126,6 +132,7 @@ def _apply_mapping_decision(revised: dict[str, Any], decision: dict[str, Any]) -
         "canonical_field": field,
         "unit": selected_unit,
         "measurement_semantics": semantics,
+        "review_decision": "explicit_ignore" if target == "Ignore" else "assigned",
     })
     if target == "Measurement":
         if "measurement_set" in decision:
