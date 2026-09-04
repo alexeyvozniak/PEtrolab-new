@@ -13,6 +13,19 @@ import { ImportDuplicateReview } from "./ImportDuplicateReview";
 import { ImportMappingEditor } from "./ImportMappingEditor";
 import "./importWorkspace.css";
 
+const REPEATABLE_ISSUE_CODES = new Set([
+  "CLEAN_TABLE_BLANK_HEADER",
+  "CLEAN_TABLE_DUPLICATE_HEADER",
+  "CLEAN_TABLE_INTERNAL_BLANK_ROW",
+  "CLEAN_TABLE_REPEATED_HEADER",
+  "UNRECOGNIZED_CLEAN_FIELD",
+  "UNIT_REQUIRES_REVIEW",
+  "UNMAPPED_FIELD_REQUIRES_REVIEW",
+  "FORMULA_WITHOUT_CACHED_VALUE",
+  "HIDDEN_ROWS",
+  "MERGED_HEADERS",
+]);
+
 function warningLabel(item) {
   const labels = {
     CLEAN_TABLE_NO_DATA_ROWS: "На листе нет строк данных",
@@ -60,8 +73,8 @@ function issueKey(item, index) {
 }
 
 function issueGroupKey(item) {
-  if (["UNIT_REQUIRES_REVIEW", "UNMAPPED_FIELD_REQUIRES_REVIEW"].includes(item.code)) {
-    return `${item.code}::${item.block_id || item.sheet_name || ""}`;
+  if (REPEATABLE_ISSUE_CODES.has(item.code)) {
+    return `${item.code}::${item.block_id || item.sheet_name || "source"}`;
   }
   return issueKey(item, 0);
 }
@@ -82,6 +95,10 @@ function sectionIssues(section, issues) {
     (item.block_id && item.block_id === section.block_id)
     || (!item.block_id && item.sheet_name && item.sheet_name === section.sheet_name)
   ));
+}
+
+function sectionIssueCount(section, issues) {
+  return groupIssues(sectionIssues(section, issues)).length;
 }
 
 function sectionSubtitle(section) {
@@ -303,7 +320,7 @@ export function ImportWorkspace({
           <File size={25} weight="duotone" />
           <div>
             <h1>Импорт таблиц</h1>
-            <p>{cleanFast ? "Таблица готова к импорту" : issueGroups.length ? `Файл требует внимания: ${issueGroups.length} ${issueGroups.length === 1 ? "группа вопросов" : "группы вопросов"}` : "Подробная проверка"}</p>
+            <p>{cleanFast ? "Таблица готова к импорту" : issueGroups.length ? `Файл требует внимания: ${issueGroups.length} ${issueGroups.length === 1 ? "тип вопроса" : "типов вопросов"}` : "Подробная проверка"}</p>
           </div>
         </div>
         <div className="import-workspace-head-actions">
@@ -322,7 +339,7 @@ export function ImportWorkspace({
           </div>
           <div className="import-sheet-list">
             {sheetGroups.map((group) => {
-              const count = group.sections.reduce((total, section) => total + sectionIssues(section, issues).length, 0);
+              const count = group.sections.reduce((total, section) => total + sectionIssueCount(section, issues), 0);
               const active = group.sections.some((section) => section.block_id === activeBlockId);
               const enabledCount = group.sections.filter((section) => section.enabled !== false).length;
               const disabled = enabledCount === 0;
@@ -337,7 +354,7 @@ export function ImportWorkspace({
                         <small>{group.sections.length === 1 ? sectionSubtitle(group.sections[0]) : `${group.sections.length} таблиц · включено ${enabledCount}`}</small>
                       </span>
                       <span className={`import-sheet-status${count ? " warning" : ""}`}>
-                        {disabled ? "Пропущен" : count ? `${count} вопр.` : "Готов"}
+                        {disabled ? "Пропущен" : count ? `${count} типов` : "Готов"}
                       </span>
                       <CaretRight size={14} />
                     </button>
@@ -355,7 +372,7 @@ export function ImportWorkspace({
                   {active && group.sections.length > 1 && (
                     <div className="import-block-list" aria-label={`Таблицы листа ${group.sheet_name}`}>
                       {group.sections.map((section, index) => {
-                        const blockIssues = sectionIssues(section, issues).length;
+                        const blockIssues = sectionIssueCount(section, issues);
                         return (
                           <button
                             className={`import-block-row${section.block_id === activeBlockId ? " active" : ""}${section.enabled === false ? " excluded" : ""}`}
@@ -364,7 +381,7 @@ export function ImportWorkspace({
                             onClick={() => setActiveBlockId(section.block_id)}
                           >
                             <span>Таблица {index + 1}</span>
-                            <small>{section.enabled === false ? "пропущена" : blockIssues ? `${blockIssues} вопр.` : "готова"}</small>
+                            <small>{section.enabled === false ? "пропущена" : blockIssues ? `${blockIssues} типов` : "готова"}</small>
                           </button>
                         );
                       })}
@@ -381,7 +398,7 @@ export function ImportWorkspace({
               </div>
             ))}
           </div>
-          <div className="import-source-note"><Info size={15} /><span>Каждый лист сохраняет собственную строку заголовка, ориентацию и сопоставление.</span></div>
+          <div className="import-source-note"><Info size={15} /><span>Выбери лист слева. Его исходная таблица всегда должна быть видна в центре.</span></div>
         </aside>
 
         <main className="import-table-pane">
@@ -392,6 +409,7 @@ export function ImportWorkspace({
               recipe={recipe}
               previews={blockPreviews}
               activeBlockId={activeBlockId}
+              focusedIssue={selectedIssue}
               busy={busy}
               onApply={onApplySections}
               onDirtyChange={onBlockDirtyChange}
@@ -400,7 +418,7 @@ export function ImportWorkspace({
         </main>
 
         <aside className="import-inspector-pane">
-          <div className="import-pane-label">Нерешённые вопросы · {issueGroups.length}</div>
+          <div className="import-pane-label">Вопросы · {issueGroups.length} типов · {issues.length} мест</div>
           {issueGroups.length > 0 ? (
             <div className="import-issue-list">
               {issueGroups.map((entry) => (
@@ -411,7 +429,7 @@ export function ImportWorkspace({
                   onClick={() => selectIssue(entry)}
                 >
                   <Warning size={16} weight="fill" />
-                  <span><b>{warningLabel(entry.item)}{entry.items.length > 1 ? ` · ${entry.items.length} полей` : ""}</b><small>{issueDetail(entry.item) || "Требуется явное решение"}</small></span>
+                  <span><b>{warningLabel(entry.item)}{entry.items.length > 1 ? ` · ${entry.items.length} мест` : ""}</b><small>{issueDetail(entry.item) || "Нажми, чтобы перейти к соответствующему листу"}</small></span>
                 </button>
               ))}
             </div>
@@ -447,7 +465,7 @@ export function ImportWorkspace({
                 </div>
               )}
               <div className="import-inspector-title">
-                <span>Поля листа</span>
+                <span>Поля выбранной таблицы</span>
                 <b>{activeSection.sheet_name}</b>
                 {selectedIssue && <small>{warningLabel(selectedIssue)}</small>}
               </div>

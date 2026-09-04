@@ -1,6 +1,6 @@
 [package]
 name = "petrolab-desktop"
-version = "0.1.6"
+version = "0.1.7"
 description = "PetroLab Desktop v2 shell"
 edition = "2021"
 

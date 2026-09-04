@@ -73,7 +73,21 @@ function previewResult(response) {
   return response.result;
 }
 
-function RawPreview({ preview, state, loading, error, onNavigate }) {
+function issueCoordinates(issue) {
+  if (!issue) return { row: null, column: null };
+  const axis = issue.source_axis || "column";
+  const row = Number.isInteger(issue.row_number)
+    ? Number(issue.row_number)
+    : axis === "row" && Number.isInteger(issue.source_row_index)
+      ? Number(issue.source_row_index) + 1
+      : null;
+  const column = axis === "column" && Number.isInteger(issue.source_column_index)
+    ? Number(issue.source_column_index)
+    : null;
+  return { row, column };
+}
+
+function RawPreview({ preview, state, loading, error, onNavigate, focusIssue }) {
   const [jumpRow, setJumpRow] = useState(preview?.start_row || 1);
   const [jumpColumn, setJumpColumn] = useState(Number(preview?.start_column || 0) + 1);
 
@@ -85,7 +99,26 @@ function RawPreview({ preview, state, loading, error, onNavigate }) {
     if (Number.isInteger(preview?.start_column)) setJumpColumn(Number(preview.start_column) + 1);
   }, [preview?.start_column]);
 
-  if (!preview) return <div className="raw-preview-loading">Предпросмотр загружается…</div>;
+  if (!preview || preview.preview_error || !Array.isArray(preview.rows)) {
+    const message = error || preview?.preview_error || "PetroLab не получил строки этого листа.";
+    return (
+      <div className="raw-preview-unavailable" role="status">
+        <Warning size={24} weight="fill" />
+        <div>
+          <b>Таблица не отображается</b>
+          <span>{message}</span>
+          <small>Импорт нельзя продолжать вслепую: сначала должен быть виден исходный лист.</small>
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigate(Number(state.header_row) || 1, true, 0)}
+          disabled={loading || !preview?.source_path}
+        >
+          Перечитать лист
+        </button>
+      </div>
+    );
+  }
 
   const totalRows = Number(preview.used_range?.rows || 0);
   const totalColumns = Number(preview.used_range?.columns || 0);
@@ -102,6 +135,7 @@ function RawPreview({ preview, state, loading, error, onNavigate }) {
   const canGoRight = Number(preview.end_column || 0) < totalColumns;
   const firstColumnLabel = preview.column_labels?.[0] || "?";
   const lastColumnLabel = preview.column_labels?.[preview.column_labels.length - 1] || "?";
+  const focused = issueCoordinates(focusIssue);
 
   const jumpToRow = () => {
     const row = Number(jumpRow);
@@ -119,8 +153,8 @@ function RawPreview({ preview, state, loading, error, onNavigate }) {
     <div className="raw-preview-shell">
       <div className="raw-preview-nav">
         <div>
-          <b>Строки {preview.start_row}–{preview.end_row} · колонки {firstColumnLabel}–{lastColumnLabel}</b>
-          <span>из {totalRows || "?"} строк · {totalColumns || "?"} колонок · лист целиком доступен через навигацию</span>
+          <b>{preview.sheet_name || "Лист"} · строки {preview.start_row}–{preview.end_row} · колонки {firstColumnLabel}–{lastColumnLabel}</b>
+          <span>из {totalRows || "?"} строк · {totalColumns || "?"} колонок · это исходная таблица, а не результат импорта</span>
         </div>
         <div className="raw-preview-nav-actions">
           <button type="button" onClick={() => onNavigate(previousStart, false)} disabled={!canGoBack || loading}>← Выше</button>
@@ -158,19 +192,31 @@ function RawPreview({ preview, state, loading, error, onNavigate }) {
       </div>
       {error && <div className="raw-preview-error"><Warning size={16} weight="fill" /> {error}</div>}
       {loading && <div className="raw-preview-loading-line">Читаю другой участок листа…</div>}
-      <div className="raw-preview-wrap">
+      <div className="raw-preview-wrap" aria-label={`Исходная таблица ${preview.sheet_name || "Excel"}`}>
         <table className="raw-preview-table">
           <thead>
-            <tr><th className="raw-row-number">#</th>{preview.column_labels.map((label) => <th key={label}>{label}</th>)}</tr>
+            <tr>
+              <th className="raw-row-number">#</th>
+              {(preview.column_labels || []).map((label, index) => {
+                const physicalColumn = Number(preview.start_column || 0) + index;
+                return <th className={focused.column === physicalColumn ? "raw-focused-column" : ""} key={`${label}-${physicalColumn}`}>{label}</th>;
+              })}
+            </tr>
           </thead>
           <tbody>
             {preview.rows.map((row) => {
               const isHeader = row.row_number === Number(state.header_row);
               const isData = row.row_number >= Number(state.data_start_row) && row.row_number <= Number(state.data_end_row);
+              const isFocusedRow = focused.row === row.row_number;
+              const rowClass = [isHeader ? "raw-header-row" : isData ? "raw-data-row" : "", isFocusedRow ? "raw-focused-row" : ""].filter(Boolean).join(" ");
               return (
-                <tr key={row.row_number} className={isHeader ? "raw-header-row" : isData ? "raw-data-row" : ""}>
+                <tr key={row.row_number} className={rowClass}>
                   <th className="raw-row-number">{row.row_number}</th>
-                  {row.values.map((value, index) => <td key={`${row.row_number}-${index}`}>{value ?? ""}</td>)}
+                  {(row.values || []).map((value, index) => {
+                    const physicalColumn = Number(preview.start_column || 0) + index;
+                    const focusedCell = focused.column === physicalColumn && (!focused.row || focused.row === row.row_number);
+                    return <td className={focusedCell ? "raw-focused-cell" : focused.column === physicalColumn ? "raw-focused-column" : ""} key={`${row.row_number}-${physicalColumn}`}>{value ?? ""}</td>;
+                  })}
                 </tr>
               );
             })}
@@ -181,23 +227,27 @@ function RawPreview({ preview, state, loading, error, onNavigate }) {
   );
 }
 
-function BlockCard({ section, index, preview, value, busy, onChange }) {
+function BlockCard({ section, index, preview, value, busy, onChange, focusIssue }) {
   const transposed = value.orientation === "columns_are_analyses";
   const context = section.unit_context;
   const invalid = invalidState(value);
   const [livePreview, setLivePreview] = useState(preview);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState("");
+  const [previewError, setPreviewError] = useState(preview?.preview_error || "");
   const [previewTarget, setPreviewTarget] = useState(null);
+  const lastFocusKey = useRef("");
 
   useEffect(() => {
     setLivePreview(preview);
-    setPreviewError("");
+    setPreviewError(preview?.preview_error || "");
   }, [preview]);
 
   const fetchPreview = useCallback(async (row, center = true, requestedColumnStart = null) => {
     const sourcePath = livePreview?.source_path || preview?.source_path;
-    if (!sourcePath || !section.sheet_name) return;
+    if (!sourcePath || !section.sheet_name) {
+      setPreviewError("Не найден путь к временной копии источника. Выбери файл заново.");
+      return;
+    }
     const totalRows = Number(livePreview?.used_range?.rows || preview?.used_range?.rows || 0);
     const totalColumns = Number(livePreview?.used_range?.columns || preview?.used_range?.columns || 0);
     const requested = Math.max(1, Math.min(Number(row) || 1, totalRows || Number(row) || 1));
@@ -234,6 +284,26 @@ function BlockCard({ section, index, preview, value, busy, onChange }) {
     return () => window.clearTimeout(timer);
   }, [previewTarget, fetchPreview]);
 
+  useEffect(() => {
+    if (!focusIssue) return;
+    const coordinates = issueCoordinates(focusIssue);
+    const focusKey = [focusIssue.code, coordinates.row, coordinates.column].join("::");
+    if (!focusKey || lastFocusKey.current === focusKey) return;
+    lastFocusKey.current = focusKey;
+
+    const currentStartRow = Number(livePreview?.start_row || 0);
+    const currentEndRow = Number(livePreview?.end_row || 0);
+    const currentStartColumn = Number(livePreview?.start_column || 0);
+    const currentEndColumn = Number(livePreview?.end_column || 0) - 1;
+    const rowVisible = !coordinates.row || (coordinates.row >= currentStartRow && coordinates.row <= currentEndRow);
+    const columnVisible = coordinates.column == null || (coordinates.column >= currentStartColumn && coordinates.column <= currentEndColumn);
+    if (rowVisible && columnVisible) return;
+
+    const row = coordinates.row || Number(value.header_row) || 1;
+    const columnStart = coordinates.column == null ? null : Math.max(0, coordinates.column - 2);
+    fetchPreview(row, true, columnStart);
+  }, [focusIssue]);
+
   const set = (field, next) => {
     const nextState = { ...value, [field]: next };
     onChange(nextState, field);
@@ -251,19 +321,28 @@ function BlockCard({ section, index, preview, value, busy, onChange }) {
             <span />
           </label>
           <div>
-            <b>{section.sheet_name} · блок {index + 1}</b>
-            <small>{section.block_id}</small>
+            <b>{section.sheet_name} · таблица {index + 1}</b>
+            <small>{transposed ? "анализы по столбцам" : "анализы по строкам"} · заголовок {value.header_row}</small>
           </div>
         </div>
         <div className="block-confidence">
-          {value.enabled ? <><CheckCircle size={17} weight="fill" /> включён</> : "пропущен"}
+          {value.enabled ? <><CheckCircle size={17} weight="fill" /> импортируется</> : "пропущена"}
         </div>
       </div>
+
+      <RawPreview
+        preview={livePreview}
+        state={value}
+        loading={previewLoading}
+        error={previewError}
+        onNavigate={fetchPreview}
+        focusIssue={focusIssue}
+      />
 
       <details className="block-structure-settings" open={invalid || undefined}>
         <summary>
           <span>Структура: {transposed ? "анализы по столбцам" : "анализы по строкам"} · заголовок {value.header_row} · данные {value.data_start_row}–{value.data_end_row}</span>
-          <b>Изменить</b>
+          <b>Изменить структуру</b>
         </summary>
         <div className="block-controls">
           <label>
@@ -290,18 +369,11 @@ function BlockCard({ section, index, preview, value, busy, onChange }) {
         <div className="unit-evidence"><Eye size={17} /><span>Единица из источника: <b>{context.unit}</b> · строка {context.row_number}: «{context.text}»</span></div>
       )}
       {invalid && <div className="block-error"><Warning size={17} weight="fill" /> Проверь границы блока.</div>}
-      <RawPreview
-        preview={livePreview}
-        state={value}
-        loading={previewLoading}
-        error={previewError}
-        onNavigate={fetchPreview}
-      />
     </article>
   );
 }
 
-export function ImportBlockReview({ recipe, previews = {}, activeBlockId = null, busy, onApply, onDirtyChange }) {
+export function ImportBlockReview({ recipe, previews = {}, activeBlockId = null, busy, onApply, onDirtyChange, focusedIssue = null }) {
   const [draft, setDraft] = useState(() => Object.fromEntries(recipe.sections.map((section) => [section.block_id, stateFor(section)])));
   const timers = useRef(new Map());
 
@@ -345,16 +417,21 @@ export function ImportBlockReview({ recipe, previews = {}, activeBlockId = null,
     scheduleApply(section, nextState, field, nextDraft);
   };
 
-  const visibleSections = activeBlockId
-    ? recipe.sections.filter((section) => section.block_id === activeBlockId)
-    : recipe.sections;
+  const requestedSection = activeBlockId
+    ? recipe.sections.find((section) => section.block_id === activeBlockId)
+    : null;
+  const activeSection = requestedSection
+    || recipe.sections.find((section) => section.enabled !== false)
+    || recipe.sections[0]
+    || null;
+  const visibleSections = activeSection ? [activeSection] : [];
 
   return (
     <div className="block-review">
       <div className="block-review-intro">
         <div>
-          <b>Проверь, где в Excel действительно находятся таблицы.</b>
-          <span>Выключение блока действует сразу. Границы и ориентация применяются автоматически после короткой паузы.</span>
+          <b>Исходная таблица</b>
+          <span>Сначала смотри на Excel. Настройки структуры спрятаны ниже таблицы и нужны только если автоматическое распознавание ошиблось.</span>
         </div>
         <span>Включено: <b>{enabledCount}</b> из {recipe.sections.length}</span>
       </div>
@@ -367,16 +444,26 @@ export function ImportBlockReview({ recipe, previews = {}, activeBlockId = null,
             preview={previews[section.block_id]}
             value={draft[section.block_id] || stateFor(section)}
             busy={busy}
+            focusIssue={focusedIssue && (
+              (focusedIssue.block_id && focusedIssue.block_id === section.block_id)
+              || (!focusedIssue.block_id && focusedIssue.sheet_name === section.sheet_name)
+            ) ? focusedIssue : null}
             onChange={(nextState, field) => changeBlock(section, nextState, field)}
           />
         ))}
+        {!activeSection && (
+          <div className="block-review-empty">
+            <Warning size={24} weight="fill" />
+            <div><b>PetroLab не нашёл таблицу для отображения</b><span>Этот файл нельзя импортировать до явного выбора структуры.</span></div>
+          </div>
+        )}
       </div>
       <div className="block-review-actions">
         <span>{invalidCount > 0
           ? `Проверь границы: некорректных блоков ${invalidCount}`
           : dirtyBlocks.length
             ? `Изменения структуры применяются автоматически… (${dirtyBlocks.length})`
-            : "Структура блоков синхронизирована"}</span>
+            : "Таблица отображается · структура синхронизирована"}</span>
       </div>
     </div>
   );

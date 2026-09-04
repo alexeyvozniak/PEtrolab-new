@@ -68,14 +68,18 @@ test("Clean Table fast path is classified by Python and skips raw review by defa
 test("approved import workspace keeps source list, physical table, issue inspector and fixed commit bar together", async () => {
   const app = await read("src/App.jsx");
   const workspace = await read("src/ImportWorkspace.jsx");
+  const review = await read("src/ImportBlockReview.jsx");
   const styles = await read("src/importWorkspace.css");
   assert.match(app, /<ImportWorkspace/);
   assert.match(workspace, /Файл и листы/);
-  assert.match(workspace, /Нерешённые вопросы/);
+  assert.match(workspace, /Вопросы · \{issueGroups\.length\} типов/);
   assert.match(workspace, /Исходный файл не изменится/);
   assert.match(workspace, /activeBlockId/);
+  assert.match(workspace, /focusedIssue=\{selectedIssue\}/);
   assert.match(workspace, /ImportMappingEditor/);
-  assert.match(styles, /grid-template-columns: 235px minmax\(420px, 1fr\) 370px/);
+  assert.match(review, /Исходная таблица/);
+  assert.match(review, /Таблица не отображается/);
+  assert.match(styles, /grid-template-columns: 210px minmax\(520px, 1fr\) 330px/);
   assert.match(styles, /import-workspace-footer/);
 });
 
@@ -93,7 +97,7 @@ test("raw block review precedes field mapping and supports transposed orientatio
   assert.match(workspace, /activeBlockId/);
   assert.match(workspace, /ImportMappingEditor/);
   assert.match(workspace, /анализы по столбцам/);
-  assert.match(workspace, /Каждый лист сохраняет собственную строку заголовка/);
+  assert.match(workspace, /исходная таблица всегда должна быть видна в центре/);
   assert.match(review, /По столбцам \(инвертировано\)/);
   assert.match(review, /STRUCTURE_DEBOUNCE_MS/);
   assert.match(review, /Изменения структуры применяются автоматически/);
@@ -150,6 +154,7 @@ test("raw review groups repetitive issues and gets server-issued bulk unit scope
   assert.match(app, /applyImportBulkUnit/);
   assert.match(app, /applyImportBulkIgnore/);
   assert.match(workspace, /Групповые решения/);
+  assert.match(workspace, /REPEATABLE_ISSUE_CODES/);
   assert.match(workspace, /groupIssues/);
   assert.match(workspace, /одинаковой физической структурой/);
   assert.match(workspace, /Не импортировать все нераспознанные поля/);
@@ -233,6 +238,7 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(smoke, /petrolab-v2\.sqlite/);
   assert.match(smoke, /Installed PetroLab smoke test passed/);
   assert.match(uiSmoke, /user clicks through Clean Table import/);
+  assert.match(uiSmoke, /complex import always shows the source table/);
   assert.match(uiSmoke, /Выбрать файл/);
   assert.match(uiSmoke, /Импортировать таблицу/);
   assert.match(uiSmoke, /UI-1/);
@@ -243,8 +249,8 @@ test("Windows release gate installs and launches the packaged application", asyn
 test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {
   const config = JSON.parse(await read("src-tauri/tauri.conf.json"));
   const cargo = await read("src-tauri/Cargo.toml");
-  assert.equal(config.version, "0.1.6");
-  assert.match(cargo, /version = "0\.1\.6"/);
+  assert.equal(config.version, "0.1.7");
+  assert.match(cargo, /version = "0\.1\.7"/);
   assert.equal(config.app.windows[0].width, 1440);
   assert.equal(config.app.windows[0].height, 1024);
   assert.equal(config.app.windows[0].minWidth, 1180);
