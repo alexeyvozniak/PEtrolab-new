@@ -171,6 +171,10 @@ function AnalysisDetail({ analysis }) {
 
 export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
   const analyses = project.analyses || [];
+  const mineralStatusCounts = project.mineral_status_counts || {};
+  const mineralAttentionCount = Object.entries(mineralStatusCounts)
+    .filter(([status]) => !["consistent", "verified"].includes(status))
+    .reduce((total, [, count]) => total + count, 0);
   const identityFields = useMemo(() => uniqueFields(analyses, "identity"), [analyses]);
   const metadataFields = useMemo(() => uniqueFields(analyses, "source_metadata"), [analyses]);
   const measurementFields = useMemo(() => uniqueFields(analyses, "measurements"), [analyses]);
@@ -294,6 +298,9 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
         <div className="analyses-toolbar">
           <div className="analysis-search"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sample, Mineral, Generation, значение…" aria-label="Поиск анализов" /></div>
           <span className="analyses-result-count">{ordered.length} из {project.total}</span>
+          <span className={`analysis-mineral-health ${mineralAttentionCount ? "attention" : "ok"}`}>
+            {mineralAttentionCount ? `${mineralAttentionCount} требуют проверки минерала` : "Минералы проверены"}
+          </span>
           <label className="analysis-status-filter">Минерал
             <select value={mineralStatusFilter} onChange={(event) => setMineralStatusFilter(event.target.value)} aria-label="Статус идентификации минерала">
               <option value="all">Все статусы</option>
