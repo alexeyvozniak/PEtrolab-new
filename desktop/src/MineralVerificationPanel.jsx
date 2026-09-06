@@ -2,7 +2,8 @@ import { useState } from 'react';
 
 const statusLabels = { consistent: 'Совпадает на уровне химической группы', conflict: 'Расхождение с источником',
   missing_reported: 'Минерал не указан в источнике', low_confidence: 'Неоднозначное предложение',
-  insufficient_input: 'Недостаточно надёжных данных', unrecognized_reported: 'Проверьте исходное название', verified: 'Принято пользователем' };
+  insufficient_input: 'Недостаточно надёжных данных', unrecognized_reported: 'Проверьте исходное название',
+  not_checked: 'Проверка не запускалась', reported_only: 'Только исходное название', verified: 'Принято пользователем' };
 
 export function MineralVerificationPanel({ records, scopes, busy, onAccept, onReveal }) {
   const [showAll, setShowAll] = useState(false);
@@ -16,12 +17,13 @@ export function MineralVerificationPanel({ records, scopes, busy, onAccept, onRe
     <label className="mineral-show-all"><input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> Показать все результаты</label>
     {visible.slice(0, visibleCount).map((record) => {
       const result = record.mineral_verification;
+      const evidence = result.reasons?.length ? result.reasons : (result.issues || []);
       return <div className="mineral-review-item" key={record.preview_id}>
         <button type="button" className="mineral-origin" onClick={() => onReveal(record)} disabled={busy}>{record.identity.join(' · ')} · {record.sheet_name}, строка {record.row_number}</button>
         <b>{statusLabels[result.status] || result.status}</b>
         <dl><dt>В источнике</dt><dd>{result.reported_mineral || 'Не указан'}</dd><dt>Предложение</dt><dd>{result.prediction || 'Не определено'} · {result.confidence}</dd><dt>Принято</dt><dd>{result.accepted?.target || 'Не принято'}</dd></dl>
         {result.issues.length > 0 && <p>Проверьте полноту состава, единицы, пропуски и форму Fe. Догадки не подставляются вместо измерений.</p>}
-        <details><summary>Основания и версия</summary><small>{result.ruleset_version}</small>{(result.reasons || result.issues).map((reason) => <p key={reason}>{reason}</p>)}</details>
+        <details><summary>Основания и версия</summary><small>{result.ruleset_version}</small>{evidence.map((reason) => <p key={reason}>{reason}</p>)}</details>
         {result.prediction && !result.accepted && <button type="button" disabled={busy} onClick={() => onAccept({ preview_id: record.preview_id, input_fingerprint: result.input_fingerprint })}>Принять предложение</button>}
       </div>;
     })}
