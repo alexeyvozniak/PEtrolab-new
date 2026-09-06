@@ -138,6 +138,13 @@ export const listProjectAnalyses = (projectDatabasePath, limit = 500, offset = 0
     offset,
   });
 
+export const listProjectMineralIdentifications = (projectDatabasePath, limit = 500, offset = 0) =>
+  invokePetrolab("project.mineral_identification.list", {
+    project_database_path: projectDatabasePath,
+    limit,
+    offset,
+  });
+
 export const retractLastImport = (projectDatabasePath, reason = "user_retracted") =>
   invokePetrolab("project.last_import.retract", {
     project_database_path: projectDatabasePath,
