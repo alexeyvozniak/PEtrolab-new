@@ -597,3 +597,43 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
         }
     finally:
         connection.close()
+
+
+def list_project_mineral_identifications(database_path: str | Path, limit: int = 500, offset: int = 0) -> dict[str, Any]:
+    """Re-evaluate active imported analyses without changing stored source data.
+
+    This is an explicit review projection: suggestions are calculated from the
+    lossless Measurement rows and never silently become accepted assignments.
+    """
+    projection = list_project_analyses(database_path, limit, offset)
+    from .mineral_verification import verify_record
+
+    identifications: list[dict[str, Any]] = []
+    for analysis in projection["analyses"]:
+        reported = analysis.get("reported_mineral")
+        if not reported and analysis.get("source_metadata", {}).get("Mineral"):
+            reported = {"value": analysis["source_metadata"]["Mineral"], "origin": "source_metadata"}
+        verification = verify_record({
+            "preview_id": analysis["analysis_id"],
+            "measurements": analysis.get("measurement_list", []),
+            "reported_mineral": reported,
+            "mineral_assignment": analysis.get("mineral_assignment"),
+        })
+        identifications.append({
+            "analysis_id": analysis["analysis_id"],
+            "source_id": analysis["source_id"],
+            "source_name": analysis["source_name"],
+            "sheet_name": analysis["sheet_name"],
+            "source_row_number": analysis["source_row_number"],
+            "source_column_number": analysis["source_column_number"],
+            **verification,
+        })
+    counts = Counter(item["status"] for item in identifications)
+    return {
+        "total": projection["total"],
+        "returned": len(identifications),
+        "offset": projection["offset"],
+        "has_more": projection["has_more"],
+        "identifications": identifications,
+        "status_counts": dict(sorted(counts.items())),
+    }
