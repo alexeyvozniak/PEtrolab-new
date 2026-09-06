@@ -196,6 +196,17 @@ test("analyses view exposes source metadata, method context and truthful physica
   assert.match(workspace, /Поиск работает по всем полям/);
 });
 
+test("analyses view exposes mineral identification status and evidence", async () => {
+  const workspace = await read("src/AnalysesWorkspace.jsx");
+  const styles = await read("src/analysesWorkspace.css");
+  assert.match(workspace, /Идентификация минерала/);
+  assert.match(workspace, /Статус идентификации минерала/);
+  assert.match(workspace, /Кандидаты/);
+  assert.match(workspace, /ruleset_version/);
+  assert.match(workspace, /mineralStatusFilter/);
+  assert.match(styles, /analysis-mineral-review/);
+});
+
 test("duplicate candidates require explicit keep-all review before save", async () => {
   const api = await read("src/desktopApi.js");
   const app = await read("src/App.jsx");
