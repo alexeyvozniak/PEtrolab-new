@@ -14,17 +14,33 @@ REPORTED_TARGETS = {m.name.casefold(): m.chemical_target for m in (*MINERALS, *A
 REPORTED_TARGETS.update({m.chemical_target.casefold(): m.chemical_target for m in (*MINERALS, *ALKALINE_MINERALS)})
 
 
+def _reported_text(reported):
+    """Normalize either semantic evidence objects or legacy string labels."""
+    if isinstance(reported, dict):
+        value = reported.get("value")
+    elif isinstance(reported, str):
+        value = reported
+    else:
+        value = None
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
 def verify_record(record, accepted=None):
-    evidence = record['measurements']
+    evidence = record.get('measurements') or []
+    if accepted is None and isinstance(record.get('mineral_assignment'), dict):
+        accepted = record.get('mineral_assignment')
     inputs = {}
     problems = []
     for measurement in evidence:
-        field = measurement['field']
-        if measurement['unit'] != 'wt.%':
+        field = measurement.get('field') if isinstance(measurement, dict) else None
+        if not isinstance(field, str) or not field.strip():
+            problems.append('missing_component_field')
+            continue
+        if measurement.get('unit') != 'wt.%':
             continue
         if field in inputs:
             problems.append('duplicate_component')
@@ -33,7 +49,11 @@ def verify_record(record, accepted=None):
         if measurement.get('value_status') != 'numeric':
             problems.append('missing_or_censored_input')
             continue
-        value = float(str(measurement['raw_token']).replace(',', '.'))
+        try:
+            value = float(str(measurement.get('raw_token')).replace(',', '.'))
+        except (TypeError, ValueError):
+            problems.append('invalid_numeric_input')
+            continue
         if not math.isfinite(value) or value < 0:
             problems.append('invalid_numeric_input')
             continue
@@ -45,7 +65,7 @@ def verify_record(record, accepted=None):
     input_hash = fingerprint([evidence, record.get('reported_mineral'), record.get('mineral_assignment'),
                               EXTENDED_RULESET_VERSION, INPUT_GATE_VERSION])
     reported = record.get('reported_mineral')
-    reported_text = reported.get('value') if reported else None
+    reported_text = _reported_text(reported)
     result = {'preview_id': record['preview_id'], 'reported_mineral': reported_text,
               'prediction': None, 'confidence': 'unresolved', 'candidates': [],
               'input_fingerprint': input_hash, 'ruleset_version': EXTENDED_RULESET_VERSION,
