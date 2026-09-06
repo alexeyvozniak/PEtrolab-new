@@ -19,6 +19,7 @@ import {
   getProjectDatabasePath,
   isPetrolabDesktop,
   listProjectAnalyses,
+  listProjectMineralIdentifications,
   pickImportFile,
   retractLastImport,
   stageImportFile,
@@ -56,6 +57,19 @@ function fileName(path) {
   return path.split(/[\\/]/).pop();
 }
 
+async function attachMineralIdentifications(path, project) {
+  const review = unwrap(await listProjectMineralIdentifications(path, project.returned || project.analyses.length, project.offset || 0));
+  const byId = new Map((review.identifications || []).map((item) => [item.analysis_id, item]));
+  return {
+    ...project,
+    mineral_status_counts: review.status_counts || {},
+    analyses: project.analyses.map((analysis) => ({
+      ...analysis,
+      mineral_verification: byId.get(analysis.analysis_id) || analysis.mineral_verification,
+    })),
+  };
+}
+
 export function App() {
   const desktopRuntimeAvailable = isPetrolabDesktop();
   const [screen, setScreen] = useState("Импорт");
@@ -84,7 +98,8 @@ export function App() {
 
   const refreshAnalyses = useCallback(async (path = databasePath) => {
     if (!path) return;
-    setProject(unwrap(await listProjectAnalyses(path, ANALYSES_PAGE_SIZE, 0)));
+    const listed = unwrap(await listProjectAnalyses(path, ANALYSES_PAGE_SIZE, 0));
+    setProject(await attachMineralIdentifications(path, listed));
   }, [databasePath]);
 
   const loadMoreAnalyses = useCallback(async () => {
@@ -93,10 +108,11 @@ export function App() {
     setActivity("Загружаю следующую страницу анализов…");
     try {
       const next = unwrap(await listProjectAnalyses(databasePath, ANALYSES_PAGE_SIZE, project.analyses.length));
+      const enriched = await attachMineralIdentifications(databasePath, next);
       setProject((current) => ({
-        ...next,
-        returned: current.analyses.length + next.analyses.length,
-        analyses: [...current.analyses, ...next.analyses],
+        ...enriched,
+        returned: current.analyses.length + enriched.analyses.length,
+        analyses: [...current.analyses, ...enriched.analyses],
       }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -115,7 +131,8 @@ export function App() {
         if (cancelled) return;
         setDatabasePath(path);
         const result = unwrap(await listProjectAnalyses(path, ANALYSES_PAGE_SIZE, 0));
-        if (!cancelled) setProject(result);
+        const enriched = await attachMineralIdentifications(path, result);
+        if (!cancelled) setProject(enriched);
       } catch (caught) {
         if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
       }
