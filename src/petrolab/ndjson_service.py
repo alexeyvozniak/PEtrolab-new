@@ -10,7 +10,7 @@ from typing import Any, TextIO
 
 from .clean_table import classify_clean_table
 from .import_workspace import ImportWorkspaceStore
-from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, suggest_import_recipe
+from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe
 from .import_apply import (
     apply_import_plan,
     check_linked_source,
@@ -224,6 +224,14 @@ def _dispatch_project_analyses_list(params: Mapping[str, Any]) -> dict[str, Any]
     return {"result": list_project_analyses(_project_database_path(params), raw_limit, raw_offset)}
 
 
+def _dispatch_project_mineral_identification_list(params: Mapping[str, Any]) -> dict[str, Any]:
+    raw_limit = params.get("limit", 500)
+    raw_offset = params.get("offset", 0)
+    if not isinstance(raw_limit, int) or not isinstance(raw_offset, int):
+        raise ValueError("limit")
+    return {"result": list_project_mineral_identifications(_project_database_path(params), raw_limit, raw_offset)}
+
+
 def _dispatch_project_last_import_retract(params: Mapping[str, Any]) -> dict[str, Any]:
     reason = params.get("reason", "user_retracted")
     if not isinstance(reason, str) or not reason:
@@ -284,6 +292,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.plan.create": _dispatch_plan_create,
     "import.plan.apply": _dispatch_plan_apply,
     "project.analyses.list": _dispatch_project_analyses_list,
+    "project.mineral_identification.list": _dispatch_project_mineral_identification_list,
     "project.last_import.retract": _dispatch_project_last_import_retract,
     "source.check_linked": _dispatch_linked_source_check,
     "import.batch.rollback": _dispatch_batch_rollback,
