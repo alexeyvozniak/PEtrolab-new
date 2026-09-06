@@ -50,6 +50,7 @@
         "import.recipe.save_revision",
         "source.check_linked",
         "project.analyses.list",
+        "project.mineral_identification.list",
         "project.last_import.retract",
         "analytical_point.create",
         "media.inspect_sources",
