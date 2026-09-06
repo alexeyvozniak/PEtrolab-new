@@ -40,6 +40,18 @@ const MINERAL_STATUS_LABELS = {
   reported_only: "только исходное название",
 };
 
+const MINERAL_CONFIDENCE_LABELS = {
+  high: "высокая",
+  medium: "средняя",
+  ambiguous: "неоднозначная",
+  unresolved: "не определена",
+  insufficient_input: "недостаточно данных",
+};
+
+function confidenceLabel(value) {
+  return MINERAL_CONFIDENCE_LABELS[value] || value || "—";
+}
+
 function reportedMineral(analysis) {
   const value = analysis.reported_mineral;
   if (value && typeof value === "object") return value.value || "";
@@ -98,20 +110,21 @@ function AnalysisMineralReview({ analysis }) {
     </section>;
   }
   const status = MINERAL_STATUS_LABELS[verification.status] || verification.status;
+  const evidence = verification.reasons?.length ? verification.reasons : (verification.issues || []);
   return <section className="analysis-mineral-review">
     <div className="analysis-detail-section-head"><h3>Идентификация минерала</h3><span>{status}</span></div>
     <dl className="analysis-mineral-facts">
       <div><dt>В источнике</dt><dd>{reported || "Не указан"}</dd></div>
-      <div><dt>Предложение</dt><dd>{verification.prediction || "Не определено"} · {verification.confidence}</dd></div>
+      <div><dt>Предложение</dt><dd>{verification.prediction || "Не определено"} · {confidenceLabel(verification.confidence)}</dd></div>
       <div><dt>Принято</dt><dd>{verification.accepted?.target || "Не принято"}</dd></div>
     </dl>
     {(verification.candidates || []).length > 0 && <div className="analysis-mineral-candidates">
       <b>Кандидаты</b>
       {verification.candidates.slice(0, 5).map((candidate) => <div key={candidate.target}><span>{candidate.target}</span><small>{candidate.score}</small></div>)}
     </div>}
-    {(verification.reasons || verification.issues || []).length > 0 && <details>
+    {evidence.length > 0 && <details>
       <summary>Почему так</summary>
-      {(verification.reasons || verification.issues || []).map((reason) => <p key={reason}>{reason}</p>)}
+      {evidence.map((reason) => <p key={reason}>{reason}</p>)}
     </details>}
     <small className="analysis-mineral-version">Правила: {verification.ruleset_version || "—"}</small>
   </section>;
@@ -172,9 +185,10 @@ function AnalysisDetail({ analysis }) {
 export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
   const analyses = project.analyses || [];
   const mineralStatusCounts = project.mineral_status_counts || {};
+  const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
   const mineralAttentionCount = Object.entries(mineralStatusCounts)
     .filter(([status]) => !["consistent", "verified"].includes(status))
-    .reduce((total, [, count]) => total + count, 0);
+    .reduce((total, [, count]) => total + Number(count || 0), 0);
   const identityFields = useMemo(() => uniqueFields(analyses, "identity"), [analyses]);
   const metadataFields = useMemo(() => uniqueFields(analyses, "source_metadata"), [analyses]);
   const measurementFields = useMemo(() => uniqueFields(analyses, "measurements"), [analyses]);
@@ -298,8 +312,12 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
         <div className="analyses-toolbar">
           <div className="analysis-search"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sample, Mineral, Generation, значение…" aria-label="Поиск анализов" /></div>
           <span className="analyses-result-count">{ordered.length} из {project.total}</span>
-          <span className={`analysis-mineral-health ${mineralAttentionCount ? "attention" : "ok"}`}>
-            {mineralAttentionCount ? `${mineralAttentionCount} требуют проверки минерала` : "Минералы проверены"}
+          <span className={`analysis-mineral-health ${mineralReviewedCount === 0 || mineralAttentionCount ? "attention" : "ok"}`} title={`Проверено для ${mineralReviewedCount} загруженных анализов`}>
+            {mineralReviewedCount === 0
+              ? "Проверка минералов ожидает данных"
+              : mineralAttentionCount
+                ? `${mineralAttentionCount} требуют проверки`
+                : "Все загруженные минералы проверены"}
           </span>
           <label className="analysis-status-filter">Минерал
             <select value={mineralStatusFilter} onChange={(event) => setMineralStatusFilter(event.target.value)} aria-label="Статус идентификации минерала">
