@@ -37,6 +37,7 @@ const MINERAL_STATUS_LABELS = {
   insufficient_input: "мало данных",
   unrecognized_reported: "нужно проверить",
   not_checked: "не проверен",
+  reported_only: "только исходное название",
 };
 
 function reportedMineral(analysis) {
