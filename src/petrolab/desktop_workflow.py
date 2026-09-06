@@ -611,14 +611,16 @@ def list_project_mineral_identifications(database_path: str | Path, limit: int =
     identifications: list[dict[str, Any]] = []
     for analysis in projection["analyses"]:
         reported = analysis.get("reported_mineral")
-        if not reported and analysis.get("source_metadata", {}).get("Mineral"):
-            reported = {"value": analysis["source_metadata"]["Mineral"], "origin": "source_metadata"}
+        if not reported:
+            for field, value in analysis.get("source_metadata", {}).items():
+                if str(field).split(" · ", 1)[0].casefold() == "mineral" and value not in (None, ""):
+                    reported = {"value": value, "origin": "source_metadata"}
+                    break
         verification = verify_record({
             "preview_id": analysis["analysis_id"],
             "measurements": analysis.get("measurement_list", []),
             "reported_mineral": reported,
-            "mineral_assignment": analysis.get("mineral_assignment"),
-        })
+        }, accepted=analysis.get("mineral_assignment"))
         identifications.append({
             "analysis_id": analysis["analysis_id"],
             "source_id": analysis["source_id"],
