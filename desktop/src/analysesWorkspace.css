@@ -133,3 +133,14 @@
 .analysis-mineral-health { min-height: 25px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 9px; font-weight: 700; white-space: nowrap; }
 .analysis-mineral-health.ok { background: #e9f3ea; color: #356348; }
 .analysis-mineral-health.attention { background: #fff2da; color: #8b621f; }
+
+
+.analysis-composition-summary { background: #f8fbf8; }
+.analysis-composition-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.analysis-composition-grid > div { padding: 7px 6px; border: 1px solid #e2eae3; border-radius: 7px; background: #fff; text-align: center; }
+.analysis-composition-grid b,
+.analysis-composition-grid small { display: block; }
+.analysis-composition-grid b { color: #315d45; font-size: 14px; }
+.analysis-composition-grid small { margin-top: 2px; color: #78847c; font-size: 8px; }
+.analysis-composition-summary > p { margin: 8px 0 0; color: #758078; font-size: 9px; line-height: 1.4; }
+.analysis-composition-summary > p b { color: #40584a; }
