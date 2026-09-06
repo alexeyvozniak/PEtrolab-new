@@ -88,6 +88,32 @@ function measurementContext(measurement) {
   return measurement.method || measurement.measurement_set || "";
 }
 
+function numericMeasurementValue(measurement) {
+  if (!measurement || (measurement.value_status && measurement.value_status !== "numeric")) return null;
+  const value = Number(String(measurement.raw_token ?? "").replace(",", "."));
+  return Number.isFinite(value) ? value : null;
+}
+
+function AnalysisCompositionSummary({ measurements }) {
+  const numeric = measurements.map(numericMeasurementValue).filter((value) => value !== null);
+  const wtPercent = measurements
+    .map((measurement) => ({ measurement, value: numericMeasurementValue(measurement) }))
+    .filter(({ measurement, value }) => measurement.unit === "wt.%" && value !== null);
+  const reportedTotal = wtPercent.reduce((total, item) => total + item.value, 0);
+  const nonNumeric = Math.max(0, measurements.length - numeric.length);
+  return (
+    <section className="analysis-composition-summary">
+      <div className="analysis-detail-section-head"><h3>Сводка состава</h3><span>{measurements.length}</span></div>
+      <div className="analysis-composition-grid">
+        <div><b>{numeric.length}</b><small>числовых</small></div>
+        <div><b>{wtPercent.length}</b><small>wt.%</small></div>
+        <div><b>{nonNumeric}</b><small>нечисловых</small></div>
+      </div>
+      {wtPercent.length > 0 && <p>Сумма сообщённых wt.%: <b>{reportedTotal.toFixed(2)}</b>. Справочно, без нормализации исходных значений.</p>}
+    </section>
+  );
+}
+
 function EmptyAnalyses({ onAddData }) {
   return (
     <div className="analyses-empty">
@@ -166,6 +192,8 @@ function AnalysisDetail({ analysis }) {
           </dl>
         </section>
       )}
+
+      <AnalysisCompositionSummary measurements={measurements} />
 
       <section className="analysis-measurements-section">
         <div className="analysis-detail-section-head"><h3>Все измерения</h3><span>{measurements.length}</span></div>
