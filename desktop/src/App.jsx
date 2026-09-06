@@ -57,6 +57,15 @@ function fileName(path) {
   return path.split(/[\\/]/).pop();
 }
 
+function mergeStatusCounts(...counts) {
+  return counts.reduce((merged, current) => {
+    Object.entries(current || {}).forEach(([status, count]) => {
+      merged[status] = (merged[status] || 0) + Number(count || 0);
+    });
+    return merged;
+  }, {});
+}
+
 async function attachMineralIdentifications(path, project) {
   const review = unwrap(await listProjectMineralIdentifications(path, project.returned || project.analyses.length, project.offset || 0));
   const byId = new Map((review.identifications || []).map((item) => [item.analysis_id, item]));
@@ -110,8 +119,10 @@ export function App() {
       const next = unwrap(await listProjectAnalyses(databasePath, ANALYSES_PAGE_SIZE, project.analyses.length));
       const enriched = await attachMineralIdentifications(databasePath, next);
       setProject((current) => ({
+        ...current,
         ...enriched,
         returned: current.analyses.length + enriched.analyses.length,
+        mineral_status_counts: mergeStatusCounts(current.mineral_status_counts, enriched.mineral_status_counts),
         analyses: [...current.analyses, ...enriched.analyses],
       }));
     } catch (caught) {
