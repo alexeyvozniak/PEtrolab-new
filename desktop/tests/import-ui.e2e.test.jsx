@@ -129,6 +129,30 @@ vi.mock("../src/desktopApi", () => {
     isPetrolabDesktop: () => true,
     getProjectDatabasePath: vi.fn().mockResolvedValue("C:/PetroLab/project.sqlite"),
     listProjectAnalyses: vi.fn().mockImplementation(async () => ({ result: uiState.imported ? importedProject : emptyProject })),
+    listProjectMineralIdentifications: vi.fn().mockImplementation(async () => {
+      const analyses = uiState.imported ? importedProject.analyses : [];
+      return { result: {
+        total: analyses.length,
+        returned: analyses.length,
+        offset: 0,
+        has_more: false,
+        identifications: analyses.map((analysis) => ({
+          analysis_id: analysis.analysis_id,
+          source_id: "source-ui",
+          source_name: analysis.source_name,
+          sheet_name: analysis.sheet_name,
+          source_row_number: analysis.source_row_number,
+          status: "not_checked",
+          prediction: null,
+          confidence: "insufficient_input",
+          accepted: null,
+          candidates: [],
+          reasons: [],
+          ruleset_version: "test-ruleset",
+        })),
+        status_counts: analyses.length ? { not_checked: analyses.length } : {},
+      } };
+    }),
     pickImportFile: vi.fn().mockImplementation(async () => uiState.mode === "clean" ? "C:/fixtures/ui-clean-table.csv" : "C:/fixtures/complex-workbook.xlsx"),
     stageImportFile: vi.fn().mockImplementation(async (path) => ({ local_path: `C:/PetroLab/staging/${path.split("/").pop()}`, original_path: path })),
     clearImportStaging: vi.fn().mockResolvedValue(undefined),
