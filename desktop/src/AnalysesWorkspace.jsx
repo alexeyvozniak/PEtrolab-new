@@ -28,10 +28,38 @@ function columnId(kind, field) {
   return `${kind}:${field}`;
 }
 
+const MINERAL_STATUS_LABELS = {
+  consistent: "совпадает",
+  verified: "принято",
+  conflict: "конфликт",
+  missing_reported: "нет названия",
+  low_confidence: "неоднозначно",
+  insufficient_input: "мало данных",
+  unrecognized_reported: "нужно проверить",
+  not_checked: "не проверен",
+};
+
+function reportedMineral(analysis) {
+  const value = analysis.reported_mineral;
+  if (value && typeof value === "object") return value.value || "";
+  return value || analysis.source_metadata?.Mineral || "";
+}
+
+function mineralLabel(analysis) {
+  const verification = analysis.mineral_verification;
+  return verification?.accepted?.target || verification?.prediction || reportedMineral(analysis) || "Не определён";
+}
+
+function mineralStatus(analysis) {
+  return analysis.mineral_verification?.status || (reportedMineral(analysis) ? "reported_only" : "not_checked");
+}
+
 function valueFor(analysis, column) {
   if (column.kind === "source") return analysis.source_name || "";
   if (column.kind === "sheet") return analysis.sheet_name || "";
   if (column.kind === "origin") return originLabel(analysis);
+  if (column.kind === "mineral") return mineralLabel(analysis);
+  if (column.kind === "mineral-status") return MINERAL_STATUS_LABELS[mineralStatus(analysis)] || mineralStatus(analysis);
   if (column.kind === "identity") return analysis.identity?.[column.field] || "";
   if (column.kind === "metadata") return analysis.source_metadata?.[column.field] || "";
   if (column.kind === "measurement") return analysis.measurements?.[column.field]?.raw_token ?? "";
@@ -58,6 +86,36 @@ function EmptyAnalyses({ onAddData }) {
   );
 }
 
+function AnalysisMineralReview({ analysis }) {
+  const verification = analysis?.mineral_verification;
+  const reported = reportedMineral(analysis);
+  if (!verification) {
+    return <section className="analysis-mineral-review">
+      <div className="analysis-detail-section-head"><h3>Идентификация минерала</h3><span>не запускалась</span></div>
+      <p>Для этой записи сохранено исходное название, но химическая проверка ещё не выполнялась.</p>
+      {reported && <dl className="analysis-mineral-facts"><div><dt>В источнике</dt><dd>{reported}</dd></div></dl>}
+    </section>;
+  }
+  const status = MINERAL_STATUS_LABELS[verification.status] || verification.status;
+  return <section className="analysis-mineral-review">
+    <div className="analysis-detail-section-head"><h3>Идентификация минерала</h3><span>{status}</span></div>
+    <dl className="analysis-mineral-facts">
+      <div><dt>В источнике</dt><dd>{reported || "Не указан"}</dd></div>
+      <div><dt>Предложение</dt><dd>{verification.prediction || "Не определено"} · {verification.confidence}</dd></div>
+      <div><dt>Принято</dt><dd>{verification.accepted?.target || "Не принято"}</dd></div>
+    </dl>
+    {(verification.candidates || []).length > 0 && <div className="analysis-mineral-candidates">
+      <b>Кандидаты</b>
+      {verification.candidates.slice(0, 5).map((candidate) => <div key={candidate.target}><span>{candidate.target}</span><small>{candidate.score}</small></div>)}
+    </div>}
+    {(verification.reasons || verification.issues || []).length > 0 && <details>
+      <summary>Почему так</summary>
+      {(verification.reasons || verification.issues || []).map((reason) => <p key={reason}>{reason}</p>)}
+    </details>}
+    <small className="analysis-mineral-version">Правила: {verification.ruleset_version || "—"}</small>
+  </section>;
+}
+
 function AnalysisDetail({ analysis }) {
   if (!analysis) {
     return <aside className="analysis-detail empty"><SquaresFour size={24} /><span>Выбери строку, чтобы увидеть все поля и происхождение значений.</span></aside>;
@@ -81,6 +139,8 @@ function AnalysisDetail({ analysis }) {
           {identities.map(([field, value]) => <div key={field}><dt>{field}</dt><dd>{value || "—"}</dd></div>)}
         </dl>
       </section>
+
+      <AnalysisMineralReview analysis={analysis} />
 
       {metadata.length > 0 && (
         <section>
@@ -117,6 +177,8 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
     { id: "source", kind: "source", label: "Источник" },
     { id: "sheet", kind: "sheet", label: "Лист" },
     { id: "origin", kind: "origin", label: "В файле" },
+    { id: "mineral", kind: "mineral", label: "Минерал" },
+    { id: "mineral-status", kind: "mineral-status", label: "Проверка минерала" },
     ...identityFields.map((field) => ({ id: columnId("identity", field), kind: "identity", field, label: field })),
     ...metadataFields.map((field) => ({ id: columnId("metadata", field), kind: "metadata", field, label: `${field} · исходное` })),
     ...measurementFields.map((field) => ({ id: columnId("measurement", field), kind: "measurement", field, label: field })),
@@ -125,6 +187,8 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
     "source",
     "sheet",
     "origin",
+    "mineral",
+    "mineral-status",
     ...identityFields.map((field) => columnId("identity", field)),
     ...metadataFields.slice(0, 2).map((field) => columnId("metadata", field)),
     ...measurementFields.slice(0, 8).map((field) => columnId("measurement", field)),
@@ -133,6 +197,7 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [sheetFilter, setSheetFilter] = useState("all");
+  const [mineralStatusFilter, setMineralStatusFilter] = useState("all");
   const [columnFilters, setColumnFilters] = useState({});
   const [visibleColumnIds, setVisibleColumnIds] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -159,19 +224,21 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
   }, [analyses]);
   const sheets = useMemo(() => [...new Set(analyses.filter((analysis) => sourceFilter === "all" || analysis.source_name === sourceFilter).map((analysis) => analysis.sheet_name))].sort((a, b) => a.localeCompare(b, "ru")), [analyses, sourceFilter]);
   const visibleColumns = availableColumns.filter((column) => visibleColumnIds.includes(column.id));
+  const mineralStatuses = useMemo(() => [...new Set(analyses.map(mineralStatus))].sort(), [analyses]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return analyses.filter((analysis) => {
       if (sourceFilter !== "all" && analysis.source_name !== sourceFilter) return false;
       if (sheetFilter !== "all" && analysis.sheet_name !== sheetFilter) return false;
+      if (mineralStatusFilter !== "all" && mineralStatus(analysis) !== mineralStatusFilter) return false;
       if (needle && !JSON.stringify(analysis).toLowerCase().includes(needle)) return false;
       return availableColumns.every((column) => {
         const filter = (columnFilters[column.id] || "").trim().toLowerCase();
         return !filter || String(valueFor(analysis, column)).toLowerCase().includes(filter);
       });
     });
-  }, [analyses, availableColumns, columnFilters, query, sheetFilter, sourceFilter]);
+  }, [analyses, availableColumns, columnFilters, mineralStatusFilter, query, sheetFilter, sourceFilter]);
 
   const ordered = useMemo(() => {
     const selected = new Set(selectedIds);
@@ -226,6 +293,12 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
         <div className="analyses-toolbar">
           <div className="analysis-search"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sample, Mineral, Generation, значение…" aria-label="Поиск анализов" /></div>
           <span className="analyses-result-count">{ordered.length} из {project.total}</span>
+          <label className="analysis-status-filter">Минерал
+            <select value={mineralStatusFilter} onChange={(event) => setMineralStatusFilter(event.target.value)} aria-label="Статус идентификации минерала">
+              <option value="all">Все статусы</option>
+              {mineralStatuses.map((status) => <option key={status} value={status}>{MINERAL_STATUS_LABELS[status] || status}</option>)}
+            </select>
+          </label>
           <details className="analysis-columns-menu">
             <summary><SquaresFour size={17} /> Колонки <span>{visibleColumns.length}</span></summary>
             <div>
