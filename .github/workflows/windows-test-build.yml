@@ -11,6 +11,7 @@ jobs:
     runs-on: windows-latest
     env:
       PYTHONUTF8: "1"
+      PYTHONPATH: ${{ github.workspace }}\\src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
