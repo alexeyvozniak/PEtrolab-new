@@ -8,7 +8,7 @@
     "dev:tauri": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "vite build && node scripts/prepare-sites-build.mjs",
     "preview": "vite preview",
-    "test:ui": "vitest run tests/import-ui.e2e.test.jsx",
+    "test:ui": "vitest run tests/import-ui.e2e.test.jsx tests/import-workspace.integration.test.jsx",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "test:tauri-contract": "node --test tests/tauri-shell-contract.test.mjs",
     "tauri": "tauri"

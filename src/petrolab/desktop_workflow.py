@@ -498,7 +498,8 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
 
             measurement_rows = connection.execute(
                 """SELECT canonical_field, unit, raw_token, qualifier, detection_limit,
-                          source_column_name, source_column_index, measurement_set, method, source_cell
+                          source_column_name, source_column_index, measurement_set, method, source_cell,
+                          value_status, reported_fe_form, fe_handling
                    FROM measurement WHERE analysis_id = ? ORDER BY source_column_index, rowid""",
                 (row["analysis_id"],),
             ).fetchall()
@@ -509,6 +510,9 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                     "unit": measurement["unit"],
                     "qualifier": measurement["qualifier"],
                     "detection_limit": measurement["detection_limit"],
+                    "value_status": measurement["value_status"],
+                    "reported_fe_form": measurement["reported_fe_form"],
+                    "fe_handling": measurement["fe_handling"],
                     "source_header": measurement["source_column_name"],
                     "source_index": measurement["source_column_index"],
                     "source_cell": measurement["source_cell"],
@@ -531,7 +535,10 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                     if key in measurement_map:
                         key = f"{key} [{seen[field]}]"
                 measurement_map[key] = measurement
+            semantic_row = connection.execute('SELECT * FROM analysis_import_semantics WHERE analysis_id = ?', (row['analysis_id'],)).fetchone()
+            semantic_evidence = {key.removesuffix('_json'): json.loads(semantic_row[key]) for key in semantic_row.keys() if key.endswith('_json') and semantic_row[key]} if semantic_row else {}
             result.append({
+                **semantic_evidence,
                 "analysis_id": row["analysis_id"],
                 "source_id": row["source_id"],
                 "source_name": row["source_name"],

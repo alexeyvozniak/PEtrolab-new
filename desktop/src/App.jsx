@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   CheckCircle,
   Columns,
@@ -13,30 +13,16 @@ import {
   Warning,
 } from "@phosphor-icons/react";
 import {
+  createImportWorkspace, addWorkspaceSources, getImportWorkspace, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
   applyImportPlan,
-  applyImportBulkIgnore,
-  applyImportBulkUnit,
-  classifyCleanTable,
   clearImportStaging,
-  createImportPlan,
   getProjectDatabasePath,
-  getImportBulkIgnoreScopes,
-  getImportBulkUnitScopes,
-  inspectImportSource,
   isPetrolabDesktop,
   listProjectAnalyses,
   pickImportFile,
-  previewImportWindow,
   retractLastImport,
-  reviewImportDuplicates,
-  reviseImportMappings,
-  reviseImportSections,
   stageImportFile,
-  suggestImportRecipe,
 } from "./desktopApi";
-import { ImportBlockReview } from "./ImportBlockReview";
-import { ImportDuplicateReview } from "./ImportDuplicateReview";
-import { ImportMappingEditor } from "./ImportMappingEditor";
 import { ImportWorkspace } from "./ImportWorkspace";
 import { AnalysesWorkspace } from "./AnalysesWorkspace";
 import "./styles.css";
@@ -70,108 +56,19 @@ function fileName(path) {
   return path.split(/[\\/]/).pop();
 }
 
-function warningText(warning) {
-  const names = {
-    HEADER_NOT_DETECTED: "Табличный заголовок не распознан",
-    UNIT_REQUIRES_REVIEW: "Колонка похожа на измерение, но единица не указана явно",
-    UNMAPPED_FIELD_REQUIRES_REVIEW: "Поле с данными пока не имеет роли в PetroLab",
-    MERGED_HEADERS: "В заголовке есть объединённые ячейки",
-    HIDDEN_ROWS: "В файле есть скрытые строки",
-    FORMULA_WITHOUT_CACHED_VALUE: "Есть формулы без сохранённого значения",
-    DUPLICATE_CANDIDATES: "Найдены возможные совпадения идентичности",
-    TRANSPOSED_TABLE_LIKELY: "Похоже, анализы расположены по столбцам — проверь ориентацию блока",
-    LEGACY_XLS_SUPPORT_UNAVAILABLE: "В этой сборке недоступен модуль чтения старых XLS",
-  };
-  return names[warning.code] || warning.code || "Предупреждение импорта";
-}
-
-function cleanReasonText(reason) {
-  const names = {
-    CLEAN_TABLE_NO_DATA_ROWS: "На листе нет строк данных после заголовка",
-    CLEAN_TABLE_BLANK_HEADER: "Есть колонка с данными, но без заголовка",
-    CLEAN_TABLE_DUPLICATE_HEADER: "Есть повторяющиеся заголовки колонок",
-    CLEAN_TABLE_INTERNAL_BLANK_ROW: "Внутри таблицы есть пустая строка",
-    CLEAN_TABLE_REPEATED_HEADER: "Строка заголовков повторяется внутри данных",
-    CLEAN_TABLE_ANALYSIS_REQUIRED: "Нет явной колонки Analysis",
-    CLEAN_TABLE_MEASUREMENT_REQUIRED: "Нет ни одного Measurement с явной единицей",
-    CLEAN_TABLE_NO_VALID_DATA_SHEETS: "Не найден ни один лист, полностью соответствующий Clean Table",
-    CLEAN_TABLE_DUPLICATE_IDENTITIES: "Есть повторяющиеся идентичности Analysis — нужна проверка совпадений",
-    UNRECOGNIZED_CLEAN_FIELD: "Есть поле без однозначной роли или явной единицы",
-    MERGED_HEADERS: "В исходнике есть объединённые ячейки",
-    HIDDEN_ROWS: "В исходнике есть скрытые строки",
-    FORMULA_WITHOUT_CACHED_VALUE: "Есть формулы без сохранённого значения",
-  };
-  const base = names[reason.code] || reason.code || "Нужна проверка структуры";
-  const location = reason.sheet_name ? ` · ${reason.sheet_name}` : "";
-  const field = reason.source_header ? ` · ${reason.source_header}` : "";
-  const row = reason.row_number ? ` · строка ${reason.row_number}` : "";
-  const column = Number.isInteger(reason.source_column_index) ? ` · колонка ${reason.source_column_index + 1}` : "";
-  return `${base}${location}${field}${row}${column}`;
-}
-
-function warningCoordinate(warning) {
-  const axis = warning.source_axis || "column";
-  const index = axis === "column" ? warning.source_column_index : warning.source_row_index;
-  return `${warning.block_id || warning.sheet_name || ""}::${axis}::${index}`;
-}
-
-function decisionCoordinate(decision) {
-  return `${decision.block_id || ""}::${decision.source_axis || "column"}::${decision.source_index}`;
-}
-
-function recordOrigin(record) {
-  if (record.orientation === "columns_are_analyses") {
-    return `${record.sheet_name} · колонка ${record.source_column_number}`;
-  }
-  return `${record.sheet_name} · строка ${record.row_number}`;
-}
-
-function measurementPreview(measurement) {
-  const context = measurement.method || measurement.measurement_set;
-  const label = context ? `${measurement.field} (${context})` : measurement.field;
-  return `${label}=${measurement.raw_token ?? "∅"} ${measurement.unit} [${measurement.source_cell || ""}]`;
-}
-
-function CleanTableSummary({ classification, onDetailed, busy }) {
-  return (
-    <div className="live-card">
-      <div className="section-title">
-        <div>
-          <h3><CheckCircle size={20} weight="fill" /> Clean Table распознан</h3>
-          <p>Структура однозначна: PetroLab не требует ручного выбора блоков, ролей и единиц.</p>
-        </div>
-        <button className="outline-button" type="button" onClick={onDetailed} disabled={busy}>Открыть подробную проверку</button>
-      </div>
-      <div className="warning-list">
-        {classification.sections.map((section) => (
-          <div key={section.sheet_name}>
-            <CheckCircle size={18} weight="fill" />
-            <span>
-              <b>{section.sheet_name}</b>
-              {section.analysis_fields?.length ? ` · ${section.analysis_fields.join(", ")}` : ""}
-              {section.metadata_fields?.length ? ` · metadata: ${section.metadata_fields.join(", ")}` : ""}
-              {section.measurements?.length ? ` · ${section.measurements.map((item) => `${item.field} [${item.unit}]`).join(", ")}` : ""}
-            </span>
-          </div>
-        ))}
-      </div>
-      {classification.ignored_helper_sheets?.length > 0 && (
-        <p className="more-note">Служебные листы официального шаблона не импортируются: {classification.ignored_helper_sheets.join(", ")}.</p>
-      )}
-    </div>
-  );
-}
-
 export function App() {
   const desktopRuntimeAvailable = isPetrolabDesktop();
   const [screen, setScreen] = useState("Импорт");
   const [databasePath, setDatabasePath] = useState("");
   const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
+  const [workspace, setWorkspace] = useState(null);
+  const [sourceIssues, setSourceIssues] = useState([]);
+  const [focusedIssueKey, setFocusedIssueKey] = useState("");
+  const [semanticTools, setSemanticTools] = useState({ actions: [], analytes: [] });
   const [sourcePath, setSourcePath] = useState("");
   const [sourceDisplayPath, setSourceDisplayPath] = useState("");
   const [inspection, setInspection] = useState(null);
   const [recipe, setRecipe] = useState(null);
-  const [recipeWarnings, setRecipeWarnings] = useState([]);
   const [bulkUnitScopes, setBulkUnitScopes] = useState([]);
   const [bulkIgnoreScopes, setBulkIgnoreScopes] = useState([]);
   const [plan, setPlan] = useState(null);
@@ -229,74 +126,59 @@ export function App() {
   const plannedMeasurementCount = plan?.summary?.planned_measurement_count
     ?? plan?.planned_records?.reduce((total, record) => total + record.measurements.length, 0)
     ?? 0;
-  const enabledBlockCount = plan?.summary?.enabled_block_count
-    ?? recipe?.sections?.filter((section) => section.enabled !== false).length
-    ?? 0;
-  const duplicateCandidateGroups = plan?.summary?.duplicate_candidate_groups ?? 0;
-  const duplicateReview = recipe?.global_decisions?.duplicate_review;
-  const duplicateReviewRequired = duplicateCandidateGroups > 0 && !(
-    recipe?.global_decisions?.duplicate_policy === "keep_all"
-    && duplicateReview?.decision === "keep_all"
-    && duplicateReview?.candidate_group_count === duplicateCandidateGroups
-  );
-  const isCleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview;
-
-  const visibleRecipeWarnings = useMemo(() => {
-    if (!recipe) return recipeWarnings;
-    return recipeWarnings.filter((warning) => {
-      const section = recipe.sections.find((item) => item.block_id === warning.block_id)
-        || recipe.sections.find((item) => item.sheet_name === warning.sheet_name);
-      if (warning.code === "TRANSPOSED_TABLE_LIKELY") {
-        return Boolean(section && section.enabled !== false && section.orientation === "columns_are_analyses");
-      }
-      if (!["UNIT_REQUIRES_REVIEW", "UNMAPPED_FIELD_REQUIRES_REVIEW"].includes(warning.code)) return true;
-      if (!section || section.enabled === false) return false;
-      const axis = warning.source_axis || "column";
-      const index = axis === "column" ? warning.source_column_index : warning.source_row_index;
-      const mapping = section.mappings.find((item) => {
-        const itemAxis = item.source_axis || (Number.isInteger(item.source_column_index) ? "column" : "row");
-        const itemIndex = itemAxis === "column" ? item.source_column_index : item.source_row_index;
-        return itemAxis === axis && itemIndex === index;
-      });
-      return !mapping || (mapping.target_role === "ignore" && mapping.review_decision !== "explicit_ignore");
-    });
-  }, [recipe, recipeWarnings]);
-
-  const unresolvedReviewCount = visibleRecipeWarnings.filter((warning) => (
-    warning.code === "UNIT_REQUIRES_REVIEW" || warning.code === "UNMAPPED_FIELD_REQUIRES_REVIEW"
-  )).length;
+  // Readiness and scientific review requirements are service-owned projections.
+  const duplicateReviewRequired = sourceIssues.some((issue) => issue.code === "DUPLICATE_REVIEW_REQUIRED" && issue.blocking);
+  const visibleRecipeWarnings = sourceIssues;
+  const unresolvedReviewCount = sourceIssues.filter((issue) => issue.blocking && ["UNIT_REQUIRES_REVIEW", "UNMAPPED_FIELD_REQUIRES_REVIEW"].includes(issue.code)).length;
 
   const canSaveImport = Boolean(
     plan
-    && plan.summary.planned_analysis_count > 0
-    && plannedMeasurementCount > 0
-    && enabledBlockCount > 0
-    && unresolvedReviewCount === 0
+    && workspace?.readiness.ready_to_commit
     && !blockDraftDirty
     && !mappingDraftDirty
     && !duplicateReviewRequired,
   );
 
-  const loadBlockPreviews = useCallback(async (path, nextRecipe) => {
-    if (!path || !nextRecipe?.sections?.length) return {};
-    const pairs = await Promise.all(nextRecipe.sections.map(async (section) => {
-      const startRow = Math.max(1, Number(section.header_row || 1) - 2);
-      const preview = unwrap(await previewImportWindow(path, section.sheet_name, startRow, 12, 0, 18));
-      return [section.block_id, preview];
+
+  const receiveWorkspace = async (result, detailed = false) => {
+    const { session, active } = result;
+    // Publish the accepted revision before preview I/O: a failed preview must
+    // not leave the client using a stale revision after a successful decision.
+    setWorkspace(session);
+    setBlockPreviews({});
+    const source = session.sources.find((item) => item.source_id === session.active_source_id);
+    setSourcePath(source.staged_path);
+    setSourceDisplayPath(source.original_display_path);
+    setInspection(active.inspection);
+    setRecipe(active.recipe);
+    setSourceIssues(active.issues);
+    setSemanticTools({ actions: active.semantic_actions || [], analytes: active.canonical_analytes || [], mineralScopes: active.mineral_acceptance_scopes || [], records: active.plan.planned_records || [] });
+    setBulkUnitScopes(active.bulk_unit_scopes);
+    setBulkIgnoreScopes(active.bulk_ignore_scopes);
+    setPlan(active.plan);
+    setCleanClassification(active.classification);
+    setDetailedReview(detailed || session.sources.length > 1 || active.classification.mode !== "clean_table_fast");
+    setBlockDraftDirty(false);
+    setMappingDraftDirty(false);
+    const pairs = await Promise.all(active.recipe.sections.map(async (section) => {
+      const preview = unwrap(await previewWorkspaceWindow(session.workspace_id, source.source_id,
+        section.sheet_name, Math.max(1, section.header_row), 12, 0, 18));
+      return [section.block_id, { ...preview, workspace_id: session.workspace_id, source_id: source.source_id, source_path: source.staged_path }];
     }));
-    return Object.fromEntries(pairs);
-  }, []);
+    setBlockPreviews(Object.fromEntries(pairs));
+  };
 
   const resetImportState = () => {
+    setWorkspace(null);
+    setSourceIssues([]);
     setSourcePath("");
     setSourceDisplayPath("");
     setInspection(null);
     setRecipe(null);
-    setRecipeWarnings([]);
-    setBulkUnitScopes([]);
-    setBulkIgnoreScopes([]);
     setPlan(null);
     setBlockPreviews({});
+    setBulkUnitScopes([]);
+    setBulkIgnoreScopes([]);
     setCleanClassification(null);
     setDetailedReview(false);
     setBlockDraftDirty(false);
@@ -304,13 +186,13 @@ export function App() {
   };
 
   const chooseFile = async () => {
-    if (busy) return;
+    if (busy || blockDraftDirty || mappingDraftDirty) return;
     setBusy(true);
     setActivity("Выберите файл…");
     setError("");
     setSuccess("");
-    const previousStaged = sourcePath;
     let newlyStaged = "";
+    let accepted = false;
     try {
       const selectedPath = await pickImportFile();
       if (!selectedPath) return;
@@ -318,54 +200,15 @@ export function App() {
       const selected = await stageImportFile(selectedPath);
       newlyStaged = selected.local_path;
       setActivity("Проверяю, соответствует ли файл PetroLab Clean Table…");
-      const [inspected, classification] = await Promise.all([
-        inspectImportSource(newlyStaged).then(unwrap),
-        classifyCleanTable(newlyStaged).then(unwrap),
-      ]);
-
-      let nextRecipe;
-      let nextWarnings = [];
-      let previews = {};
-      let nextBulkUnitScopes = [];
-      let nextBulkIgnoreScopes = [];
-      if (classification.mode === "clean_table_fast") {
-        nextRecipe = classification.recipe;
-        setActivity("Clean Table распознан. Строю итоговый план…");
-      } else {
-        setActivity("Файл требует подготовки. Ищу логические таблицы…");
-        const suggestion = unwrap(await suggestImportRecipe(newlyStaged));
-        nextRecipe = suggestion.recipe;
-        nextWarnings = suggestion.warnings || [];
-        const [unitScopes, ignoreScopes] = await Promise.all([
-          getImportBulkUnitScopes(newlyStaged, nextRecipe).then(unwrap),
-          getImportBulkIgnoreScopes(newlyStaged, nextRecipe).then(unwrap),
-        ]);
-        nextBulkUnitScopes = unitScopes.scopes || [];
-        nextBulkIgnoreScopes = ignoreScopes.scopes || [];
-        setActivity("Строю предпросмотр исходных строк…");
-        previews = await loadBlockPreviews(newlyStaged, nextRecipe);
-      }
-      const planned = unwrap(await createImportPlan(newlyStaged, nextRecipe));
-
-      setSourcePath(newlyStaged);
-      setSourceDisplayPath(selected.original_path || selectedPath);
-      setInspection(inspected);
-      setRecipe(nextRecipe);
-      setRecipeWarnings(nextWarnings);
-      setBulkUnitScopes(nextBulkUnitScopes);
-      setBulkIgnoreScopes(nextBulkIgnoreScopes);
-      setPlan(planned);
-      setBlockPreviews(previews);
-      setCleanClassification(classification);
-      setDetailedReview(false);
-      setBlockDraftDirty(false);
-      setMappingDraftDirty(false);
+      const sources = [{ staged_path: newlyStaged, original_display_path: selected.original_path || selectedPath }];
+      const result = unwrap(await (workspace
+        ? addWorkspaceSources(workspace.workspace_id, workspace.draft_revision, sources)
+        : createImportWorkspace(sources, databasePath)));
+      accepted = true;
+      await receiveWorkspace(result);
       setScreen("Импорт");
-
-      if (previousStaged && previousStaged !== newlyStaged) clearImportStaging(previousStaged).catch(() => {});
     } catch (caught) {
-      if (newlyStaged) clearImportStaging(newlyStaged).catch(() => {});
-      setScreen("Импорт");
+      if (newlyStaged && !accepted) clearImportStaging(newlyStaged).catch(() => {});
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setActivity("");
@@ -373,45 +216,16 @@ export function App() {
     }
   };
 
-  const openDetailedReview = async () => {
-    if (busy || !sourcePath || !recipe) return;
+  const decide = async (decision, sourceId = workspace?.active_source_id, bulk = false) => {
+    if (busy || !workspace) return;
     setBusy(true);
-    setActivity("Открываю подробную проверку исходника…");
-    try {
-      const previews = await loadBlockPreviews(sourcePath, recipe);
-      setBlockPreviews(previews);
-      setDetailedReview(true);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setActivity("");
-      setBusy(false);
-    }
-  };
-
-  const applySections = async (decisions) => {
-    if (busy || !sourcePath || !recipe || !decisions?.length) return;
-    setBusy(true);
-    setActivity(`Проверяю структуру ${decisions.length} блоков…`);
+    setActivity(decision.kind === "activate" ? "Открываю исходную таблицу…" : "Проверяю и сохраняю решение…");
     setError("");
     setSuccess("");
     try {
-      const revised = unwrap(await reviseImportSections(sourcePath, recipe, decisions));
-      const [planned, previews, bulkScopes, ignoreScopes] = await Promise.all([
-        createImportPlan(sourcePath, revised.recipe).then(unwrap),
-        loadBlockPreviews(sourcePath, revised.recipe),
-        getImportBulkUnitScopes(sourcePath, revised.recipe).then(unwrap),
-        getImportBulkIgnoreScopes(sourcePath, revised.recipe).then(unwrap),
-      ]);
-      setRecipe(revised.recipe);
-      setPlan(planned);
-      setBlockPreviews(previews);
-      setBulkUnitScopes(bulkScopes.scopes || []);
-      setBulkIgnoreScopes(ignoreScopes.scopes || []);
-      setDetailedReview(true);
-      setBlockDraftDirty(false);
-      setMappingDraftDirty(false);
-      setSuccess(`Структура применена: ${decisions.length} блоков. Теперь проверь роли полей.`);
+      const result = unwrap(await applyWorkspaceDecision(workspace.workspace_id, workspace.draft_revision, sourceId, decision, bulk));
+      await receiveWorkspace(result, true);
+      if (decision.kind !== "activate") setSuccess("Решение сохранено в этой очереди. Исходный файл не изменён.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -420,123 +234,42 @@ export function App() {
     }
   };
 
-  const applyMappings = async (decisions) => {
-    if (busy || !sourcePath || !recipe || !decisions?.length) return;
-    setBusy(true);
-    setActivity(`Применяю сопоставление ${decisions.length} полей…`);
-    setError("");
-    setSuccess("");
-    try {
-      const revised = unwrap(await reviseImportMappings(sourcePath, recipe, decisions));
-      const [planned, bulkScopes, ignoreScopes] = await Promise.all([
-        createImportPlan(sourcePath, revised.recipe).then(unwrap),
-        getImportBulkUnitScopes(sourcePath, revised.recipe).then(unwrap),
-        getImportBulkIgnoreScopes(sourcePath, revised.recipe).then(unwrap),
-      ]);
-      const resolved = new Set(decisions.map(decisionCoordinate));
-      setRecipeWarnings((current) => current.filter((warning) => warning.code !== "UNIT_REQUIRES_REVIEW" || !resolved.has(warningCoordinate(warning))));
-      setRecipe(revised.recipe);
-      setPlan(planned);
-      setBulkUnitScopes(bulkScopes.scopes || []);
-      setBulkIgnoreScopes(ignoreScopes.scopes || []);
-      setDetailedReview(true);
-      setMappingDraftDirty(false);
-      setSuccess(`Сопоставление применено: ${decisions.length} полей. Проверь итоговый план.`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setActivity("");
-      setBusy(false);
-    }
+  const applySections = (decisions) => decide({ kind: "sections", decisions });
+  const applyMappings = (decisions) => decide({ kind: "mappings", decisions });
+  const applyBulkUnit = (bulkScopeId, unit) => decide({ kind: "unit", bulk_scope_id: bulkScopeId, unit }, undefined, true);
+  const applyBulkIgnore = (bulkScopeId) => decide({ kind: "ignore", bulk_scope_id: bulkScopeId }, undefined, true);
+  const keepAllDuplicateCandidates = () => decide({ kind: "duplicates" });
+  const openDetailedReview = () => setDetailedReview(true);
+  const selectWorkspaceSource = (sourceId, blockId, issueKey = "") => {
+    if (blockDraftDirty || mappingDraftDirty) return;
+    setFocusedIssueKey(issueKey);
+    return decide({ kind: "activate", block_id: blockId }, sourceId);
   };
-
-  const applyBulkUnit = async (bulkScopeId, unit) => {
-    if (busy || !sourcePath || !recipe || !bulkScopeId || !unit) return;
-    setBusy(true);
-    setActivity("Применяю единицу к доказанно одинаковым полям…");
-    setError("");
-    setSuccess("");
-    try {
-      const revised = unwrap(await applyImportBulkUnit(sourcePath, recipe, bulkScopeId, unit));
-      const [planned, scopes, ignoreScopes] = await Promise.all([
-        createImportPlan(sourcePath, revised.recipe).then(unwrap),
-        getImportBulkUnitScopes(sourcePath, revised.recipe).then(unwrap),
-        getImportBulkIgnoreScopes(sourcePath, revised.recipe).then(unwrap),
-      ]);
-      setRecipe(revised.recipe);
-      setPlan(planned);
-      setBulkUnitScopes(scopes.scopes || []);
-      setBulkIgnoreScopes(ignoreScopes.scopes || []);
-      setMappingDraftDirty(false);
-      setSuccess(`Единица ${unit} назначена ${revised.applied_decision_count} полям с одинаковой структурой.`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setActivity("");
-      setBusy(false);
-    }
-  };
-
-  const applyBulkIgnore = async (bulkScopeId) => {
-    if (busy || !sourcePath || !recipe || !bulkScopeId) return;
-    setBusy(true);
-    setActivity("Исключаю повторяющиеся нераспознанные поля…");
-    setError("");
-    setSuccess("");
-    try {
-      const revised = unwrap(await applyImportBulkIgnore(sourcePath, recipe, bulkScopeId));
-      const [planned, unitScopes, ignoreScopes] = await Promise.all([
-        createImportPlan(sourcePath, revised.recipe).then(unwrap),
-        getImportBulkUnitScopes(sourcePath, revised.recipe).then(unwrap),
-        getImportBulkIgnoreScopes(sourcePath, revised.recipe).then(unwrap),
-      ]);
-      setRecipe(revised.recipe);
-      setPlan(planned);
-      setBulkUnitScopes(unitScopes.scopes || []);
-      setBulkIgnoreScopes(ignoreScopes.scopes || []);
-      setMappingDraftDirty(false);
-      setSuccess(`Явно исключено ${revised.applied_decision_count} повторяющихся полей. Исходные значения остались в файле.`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setActivity("");
-      setBusy(false);
-    }
-  };
-
-  const keepAllDuplicateCandidates = async () => {
-    if (busy || !sourcePath || !recipe || !duplicateCandidateGroups) return;
-    setBusy(true);
-    setActivity(`Фиксирую решение по ${duplicateCandidateGroups} группам совпадений…`);
-    setError("");
-    setSuccess("");
-    try {
-      const reviewed = unwrap(await reviewImportDuplicates(sourcePath, recipe, "keep_all"));
-      setRecipe(reviewed.recipe);
-      setPlan(reviewed.plan);
-      setSuccess(`Совпадения проверены: ${reviewed.duplicate_review.candidate_group_count} групп. Все записи останутся отдельными.`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setActivity("");
-      setBusy(false);
-    }
+  const toggleWorkspaceSource = (source) => {
+    if (blockDraftDirty || mappingDraftDirty) return;
+    return decide({ kind: "source_inclusion", included: !source.included,
+      reason: "Исключено пользователем из текущей очереди" }, source.source_id);
   };
 
   const commitImport = async () => {
-    if (busy || !canSaveImport || !databasePath || !sourcePath || !recipe || !plan) return;
-    const stagedPath = sourcePath;
+    if (busy || !canSaveImport || !databasePath || !workspace) return;
     setBusy(true);
-    setActivity("Сохраняю проверенный импорт в проект…");
     setError("");
-    setSuccess("");
+    setActivity("Проверяю очередь перед сохранением…");
     try {
-      const result = unwrap(await applyImportPlan(databasePath, stagedPath, recipe));
-      await refreshAnalyses(databasePath);
+      const current = unwrap(await getImportWorkspace(workspace.workspace_id));
+      if (!current.session.readiness.ready_to_commit) {
+        await receiveWorkspace(current, true);
+        throw new Error("Сохранение недоступно: проверьте обязательные вопросы очереди.");
+      }
+      const source = current.session.sources[0];
+      const result = unwrap(await applyImportPlan(databasePath, source.staged_path, current.active.recipe));
+      // Commit has succeeded. Never offer a second apply if refresh/cleanup fails.
       resetImportState();
-      clearImportStaging(stagedPath).catch(() => {});
-      const metadataNote = result.source_metadata_count ? `, ${result.source_metadata_count} исходных метаданных` : "";
-      setSuccess(`Импорт сохранён: ${result.analysis_count} Analysis, ${result.measurement_count} Measurement${metadataNote}.`);
+      setSuccess(`Импорт сохранён: ${result.analysis_count} Analysis, ${result.measurement_count} Measurement.`);
+      await discardImportWorkspace(workspace.workspace_id, current.session.draft_revision).then(unwrap);
+      clearImportStaging(source.staged_path).catch(() => {});
+      await refreshAnalyses(databasePath);
       setScreen("Анализы");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -569,18 +302,30 @@ export function App() {
     }
   };
 
+
   const startNewImport = () => {
     if (busy) return;
-    const stagedPath = sourcePath;
-    resetImportState();
-    if (stagedPath) clearImportStaging(stagedPath).catch(() => {});
-    setError("");
-    setSuccess("");
     setScreen("Импорт");
+    if (!workspace) chooseFile();
+  };
+
+  const cancelImport = async () => {
+    if (busy || !workspace) return;
+    if (!window.confirm("Закрыть очередь и сбросить решения по файлам? Исходники и сохранённые анализы останутся.")) return;
+    setBusy(true);
+    try {
+      const discarded = unwrap(await discardImportWorkspace(workspace.workspace_id, workspace.draft_revision));
+      resetImportState();
+      await Promise.all(discarded.staged_paths.map((path) => clearImportStaging(path).catch(() => {})));
+      setError("");
+      setSuccess("");
+    } catch (caught) {
+      setError(caught.message);
+    } finally { setBusy(false); }
   };
 
   const goTo = (label, enabled) => {
-    if (!enabled || busy) return;
+    if (!enabled || busy || blockDraftDirty || mappingDraftDirty) return;
     setError("");
     setScreen(label);
     if (label === "Анализы") refreshAnalyses().catch((caught) => setError(caught.message));
@@ -598,7 +343,7 @@ export function App() {
             <button
               className={`${screen === label ? "nav-item active" : "nav-item"}${enabled ? "" : " disabled"}`}
               key={label}
-              disabled={!enabled || busy}
+              disabled={!enabled || busy || blockDraftDirty || mappingDraftDirty}
               onClick={() => goTo(label, enabled)}
               title={enabled ? label : "Экран ещё не подключён в этой alpha-сборке"}
             >
@@ -643,6 +388,15 @@ export function App() {
 
             {sourcePath && inspection && recipe && plan && (
               <ImportWorkspace
+                key={workspace?.active_source_id}
+                workspace={workspace}
+                focusedIssueKey={focusedIssueKey}
+                semanticTools={semanticTools}
+                onSemanticDecision={(decision) => decide({ ...decision, kind: 'semantic' })}
+                onVerifyMinerals={() => decide({ kind: 'verify_minerals' })}
+                onAcceptMineral={(decision) => decide({ ...decision, kind: 'accept_mineral' })}
+                onSelectSource={selectWorkspaceSource}
+                onToggleSource={toggleWorkspaceSource}
                 sourceName={fileName(sourceDisplayPath || sourcePath)}
                 sourceDisplayPath={sourceDisplayPath}
                 inspection={inspection}
@@ -670,7 +424,7 @@ export function App() {
                 onMappingDirtyChange={setMappingDraftDirty}
                 onKeepAllDuplicates={keepAllDuplicateCandidates}
                 onCommit={commitImport}
-                onCancel={startNewImport}
+                onCancel={cancelImport}
                 onChooseOther={chooseFile}
               />
             )}

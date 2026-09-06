@@ -1,0 +1,382 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_file_sha256",
+    "source_format",
+    "ownership_mode",
+    "sections",
+    "global_decisions",
+    "semantic_fingerprint"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "source_file_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_format": {
+      "enum": [
+        "xls",
+        "xlsx",
+        "csv",
+        "tsv"
+      ]
+    },
+    "ownership_mode": {
+      "enum": [
+        "managed_copy",
+        "linked_external"
+      ]
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/section"
+      }
+    },
+    "global_decisions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fe_semantics",
+        "censored_value_policy",
+        "duplicate_policy",
+        "unit_policy"
+      ],
+      "properties": {
+        "fe_semantics": {
+          "type": "string"
+        },
+        "censored_value_policy": {
+          "const": "preserve_original_token_and_detection_limit"
+        },
+        "duplicate_policy": {
+          "enum": [
+            "review_each",
+            "keep_all",
+            "skip_exact_after_review"
+          ]
+        },
+        "unit_policy": {
+          "const": "explicit_per_measurement_column"
+        },
+        "duplicate_review": {
+          "type": "object"
+        },
+        "semantic_annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/annotation"
+          }
+        },
+        "semantic_history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sections",
+              "annotations"
+            ],
+            "properties": {
+              "sections": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/section"
+                }
+              },
+              "annotations": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/annotation"
+                }
+              }
+            }
+          }
+        },
+        "project_aliases": {
+          "type": "object"
+        },
+        "mineral_verification_enabled": {
+          "type": "boolean"
+        },
+        "mineral_acceptances": {
+          "type": "object"
+        }
+      }
+    },
+    "semantic_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/import-recipe-v2.schema.json",
+  "title": "Desktop runtime import recipe v2",
+  "description": "Transient runtime semantic recipe; persisted recipe entity v1 is a separate contract. Coordinates and scientific invariants are also checked by Python validate_recipe.",
+  "$defs": {
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sheet_name",
+        "block_id",
+        "header_row",
+        "data_start_row",
+        "data_end_row",
+        "mappings"
+      ],
+      "properties": {
+        "sheet_name": {
+          "type": "string"
+        },
+        "block_id": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "exclusion_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "orientation": {
+          "enum": [
+            "rows_are_analyses",
+            "columns_are_analyses"
+          ]
+        },
+        "header_row": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "header_column": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "data_start_row": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "data_end_row": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "data_start_column": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "data_end_column": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "analysis_axis_role": {
+          "type": "string"
+        },
+        "analysis_axis_field": {
+          "type": "string"
+        },
+        "analysis_identity_policy": {
+          "const": "source_row"
+        },
+        "unit_context": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "mappings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_header",
+              "target_role",
+              "canonical_field",
+              "unit",
+              "measurement_semantics"
+            ],
+            "properties": {
+              "source_axis": {
+                "enum": [
+                  "row",
+                  "column"
+                ]
+              },
+              "source_column_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "source_row_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "source_header": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "target_role": {
+                "enum": [
+                  "identity",
+                  "metadata",
+                  "interpretation",
+                  "measurement",
+                  "ignore"
+                ]
+              },
+              "canonical_field": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "unit": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "measurement_semantics": {
+                "type": "string"
+              },
+              "review_decision": {
+                "enum": [
+                  "recognized",
+                  "unresolved",
+                  "assigned",
+                  "explicit_ignore"
+                ]
+              },
+              "original_token_policy": {
+                "type": "string"
+              },
+              "suggested_target": {
+                "type": "string"
+              },
+              "suggested_canonical_field": {
+                "type": "string"
+              },
+              "method": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "measurement_set": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "recognition": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_row",
+        "end_row",
+        "start_column",
+        "end_column"
+      ],
+      "properties": {
+        "start_row": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_row": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "start_column": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_column": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "block_id",
+        "sheet_name",
+        "range",
+        "role",
+        "value",
+        "origin",
+        "source_fingerprint",
+        "decided_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "block_id": {
+          "type": "string"
+        },
+        "sheet_name": {
+          "type": "string"
+        },
+        "range": {
+          "$ref": "#/$defs/range"
+        },
+        "role": {
+          "enum": [
+            "sample",
+            "sample_id_column",
+            "sample_name_column",
+            "analysis_column",
+            "mineral_column",
+            "mineral",
+            "component",
+            "units",
+            "header",
+            "block",
+            "metadata",
+            "method",
+            "ignore"
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "origin": {
+          "const": "user_assigned"
+        },
+        "source_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "decided_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

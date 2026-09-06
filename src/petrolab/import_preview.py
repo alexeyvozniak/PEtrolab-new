@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import math
 import json
 import re
 import zipfile
@@ -30,7 +31,7 @@ KNOWN_HEADER_TOKENS = {
     "li", "rb", "ba", "sr", "la", "ce", "nd", "u", "th",
 }
 IRON_FIELDS = {"feo", "feot", "fe2o3", "fe2o3t", "fetotal"}
-VALID_UNITS = {"wt.%", "mass%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon"}
+VALID_UNITS = {"wt.%", "mass%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon", "permil"}
 VALID_ORIENTATIONS = {"rows_are_analyses", "columns_are_analyses"}
 OLE_COMPOUND_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 VALID_OWNERSHIP_MODES = {"linked_external", "managed_copy"}
@@ -209,6 +210,15 @@ def _header_candidates(rows: list[list[str | None]]) -> tuple[int, ...]:
         )
         if matches >= 2 or _looks_like_generic_header(rows, index):
             result.append(index + 1)
+    # Narrow fallback for an otherwise unrecognized two-column labelled table.
+    # Do not change block boundaries in already recognized complex workbooks.
+    if not result:
+        for index, row in enumerate(rows):
+            identity = any(_header_token(value) in {"analysis", "sample", "point", "spot"} for value in row)
+            measurement = any(value and _unit_from_text(value) for value in row)
+            if identity and measurement:
+                result.append(index + 1)
+                break
     return tuple(result)
 
 
@@ -301,6 +311,7 @@ def _read_xlsx(path: Path) -> tuple[SheetInspection, ...]:
             root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
             shared = ["".join(item.itertext()) for item in root.findall("x:si", NS)]
         inspections: list[SheetInspection] = []
+        embedded_media_count = sum(name.startswith('xl/media/') and not name.endswith('/') for name in archive.namelist())
         for sheet in workbook.findall("x:sheets/x:sheet", NS):
             relation_id = sheet.attrib.get(f"{{{XLSX_REL}}}id")
             target = targets.get(relation_id or "")
@@ -313,6 +324,9 @@ def _read_xlsx(path: Path) -> tuple[SheetInspection, ...]:
                 raise ImportCommandError("SOURCE_UNREADABLE", "Worksheet XML is invalid.") from exc
             rows: list[list[str | None]] = []
             warnings: list[dict[str, Any]] = []
+            if root.find('x:drawing', NS) is not None or root.find('x:legacyDrawing', NS) is not None:
+                warnings.append({'code': 'EMBEDDED_DRAWINGS_NOT_PREVIEWED', 'sheet_name': sheet.attrib['name'],
+                                 'workbook_embedded_media_count': embedded_media_count})
             hidden_rows: list[int] = []
             uncached_formula_cells: list[str] = []
             merged_ranges = [item.attrib.get("ref") for item in root.findall("x:mergeCells/x:mergeCell", NS)]
@@ -454,11 +468,12 @@ def preview_source_window(source_path: str | Path, sheet_name: str, start_row: i
     end_row = min(len(sheet.rows), start_row + row_count - 1)
     max_columns = max((len(row) for row in sheet.rows), default=0)
     rows = []
+    end_column = min(max_columns, start_column + column_count)
     for row_number in range(start_row, end_row + 1):
         row = sheet.rows[row_number - 1]
         rows.append({
             "row_number": row_number,
-            "values": [row[column] if column < len(row) else None for column in range(start_column, start_column + column_count)],
+            "values": [row[column] if column < len(row) else None for column in range(start_column, end_column)],
         })
     end_column = min(max_columns, start_column + column_count)
     return {
@@ -470,6 +485,7 @@ def preview_source_window(source_path: str | Path, sheet_name: str, start_row: i
         "column_labels": [_column_letters(index) for index in range(start_column, end_column)],
         "rows": rows,
         "used_range": {"rows": len(sheet.rows), "columns": max_columns},
+        "warnings": list(sheet.warnings),
     }
 
 
@@ -603,6 +619,16 @@ def validate_recipe(inspection: SourceInspection, recipe: dict[str, Any]) -> dic
         raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Duplicate policy is required.")
     if decisions.get("unit_policy") != "explicit_per_measurement_column":
         raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Each measurement field must declare its unit.")
+    from .semantic_import import validate_annotation
+    annotations = decisions.get('semantic_annotations', [])
+    if not isinstance(annotations, list):
+        raise ImportCommandError('INVALID_SEMANTIC_RANGE', 'Annotations must be a list.')
+    annotation_ids = set()
+    for annotation in annotations:
+        validate_annotation(inspection, recipe, annotation, replacing=annotation.get('id') if isinstance(annotation, dict) else None)
+        if annotation['id'] in annotation_ids:
+            raise ImportCommandError('INVALID_SEMANTIC_RANGE', 'Annotation IDs must be unique.')
+        annotation_ids.add(annotation['id'])
     calculated = semantic_fingerprint(recipe)
     if recipe.get("semantic_fingerprint") != calculated:
         raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Recipe semantic fingerprint does not match its current decisions.", {"expected": calculated, "observed": recipe.get("semantic_fingerprint")})
@@ -610,12 +636,38 @@ def validate_recipe(inspection: SourceInspection, recipe: dict[str, Any]) -> dic
 
 
 def _qualifier(token: str | None) -> tuple[str | None, float | None]:
-    if token is None or token == "":
+    if token is None or not token.strip():
         return "missing", None
     match = re.fullmatch(r"\s*<\s*([0-9]+(?:[.,][0-9]+)?)\s*", token)
     if match:
         return "below_detection_limit", float(match.group(1).replace(",", "."))
+    if token.strip().lower() in {"<dl", "<dl>", "bdl"}:
+        return "below_detection_limit", None
     return None, None
+
+
+def value_status(token: str | None) -> str:
+    """Classify notation, without substituting a concentration or guessing ND's meaning."""
+    qualifier, _ = _qualifier(token)
+    if qualifier:
+        return qualifier
+    if str(token).strip().lower() in {"n.d.", "nd"}:
+        return "not_determined"
+    number = _number(token)
+    return "numeric" if number is not None and math.isfinite(number) else "non_numeric"
+
+
+def reported_fe_form(header: str | None) -> str | None:
+    """Only the source header is evidence of the reported form. Never convert Fe."""
+    text = str(header or "").lower().replace("₂", "2").replace("₃", "3")
+    if not re.search(r"\bfe", text):
+        return None
+    total = bool(re.search(r"total|tot\b|feot\b|fe2o3t\b", text))
+    if "fe2o3" in text:
+        return "Fe2O3t" if total else "Fe2O3"
+    if "feo" in text:
+        return "FeOt" if total else "FeO"
+    return "unresolved"
 
 
 def _preview_id(fingerprint: str, sheet_name: str, primary: int, block_id: str, orientation: str) -> str:
@@ -635,12 +687,18 @@ def _is_repeated_header(sheet: SheetInspection, section: dict[str, Any], row_num
 
 def _measurement(mapping: dict[str, Any], token: str | None, physical_row: int, physical_column: int) -> dict[str, Any]:
     qualifier, detection_limit = _qualifier(token)
+    fe_form = reported_fe_form(mapping.get("source_header"))
+    if fe_form is None and _header_token(mapping.get("canonical_field")) in IRON_FIELDS | {"fe"}:
+        fe_form = "unresolved"
     return {
         "field": mapping["canonical_field"],
         "unit": mapping["unit"],
         "raw_token": token,
         "qualifier": qualifier,
         "detection_limit": detection_limit,
+        "value_status": value_status(token),
+        "reported_fe_form": fe_form,
+        "fe_handling": "strictly_as_reported_no_conversion" if fe_form else None,
         "source_header": mapping["source_header"],
         "source_column_index": _mapping_index(mapping),
         "physical_source_row_number": physical_row,
@@ -743,8 +801,47 @@ def create_import_plan(inspection: SourceInspection, recipe: dict[str, Any]) -> 
             "analysis_count": len(block_entries),
             "measurement_count": sum(len(record["measurements"]) for record in block_entries),
         })
-    duplicates = [ids for key, ids in duplicate_keys.items() if key and any(key) and len(ids) > 1]
+    from .semantic_import import interpret_records
+    entries = interpret_records(inspection, recipe, entries)
+    for block in block_summaries:
+        remaining = [record for record in entries if record['block_id'] == block['block_id']]
+        block['analysis_count'] = len(remaining)
+        block['measurement_count'] = sum(len(record['measurements']) for record in remaining)
+    if recipe['global_decisions'].get('mineral_verification_enabled'):
+        from .mineral_verification import add_verification
+        add_verification(entries, recipe)
+    duplicate_keys = {}
+    for record in entries:
+        duplicate_keys.setdefault(tuple(record['identity']), []).append(record['preview_id'])
+    duplicates = [ids for key, ids in duplicate_keys.items() if key and any(key)]
+    duplicates = [ids for ids in duplicates if len(ids) > 1]
     warnings = []
+    issues = []
+    for record in entries:
+        if not any(str(value).strip() for value in record["identity"]):
+            issues.append({
+                "code": "ANALYSIS_IDENTITY_REQUIRED", "severity": "error", "blocking": True,
+                "sheet_name": record["sheet_name"], "block_id": record["block_id"],
+                "row_number": record["row_number"],
+                "source_column_index": (record.get("source_column_number") or 1) - 1,
+                "message": "Нет идентичности Analysis: назначьте заполненное поле Analysis, Sample или Point.",
+            })
+    for section in recipe["sections"]:
+        if not section.get("enabled", True):
+            continue
+        for mapping in section["mappings"]:
+            if mapping["target_role"] != "measurement":
+                continue
+            form = reported_fe_form(mapping.get("source_header"))
+            if form == "unresolved" or (form is None and _header_token(mapping.get("canonical_field")) in IRON_FIELDS | {"fe"}):
+                warnings.append({
+                    "code": "FE_STRICTLY_REPORTED", "severity": "warning", "blocking": False,
+                    "sheet_name": section["sheet_name"], "block_id": section["block_id"],
+                    "source_header": mapping.get("source_header"), "source_axis": _mapping_axis(mapping),
+                    "source_column_index": _mapping_index(mapping) if _mapping_axis(mapping) == "column" else int(section.get("header_column", 1)) - 1,
+                    "row_number": int(section["header_row"]) if _mapping_axis(mapping) == "column" else _mapping_index(mapping) + 1,
+                    "message": "Форма Fe не определена. Сохранение только как сообщено источником; без пересчёта и без подтверждённой валентности.",
+                })
     if duplicates:
         warnings.append({"code": "DUPLICATE_CANDIDATES", "preview_ids": duplicates, "policy": recipe["global_decisions"]["duplicate_policy"]})
     return {
@@ -759,6 +856,8 @@ def create_import_plan(inspection: SourceInspection, recipe: dict[str, Any]) -> 
         },
         "block_summaries": block_summaries,
         "warnings": warnings,
+        "issues": issues,
+        "ready_to_commit": not issues,
     }
 
 

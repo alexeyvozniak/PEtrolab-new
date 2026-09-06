@@ -2,6 +2,21 @@ import { invoke } from "@tauri-apps/api/core";
 
 export const PROTOCOL_VERSION = "1.0";
 
+export const createImportWorkspace = (sources, projectDatabasePath) => invokePetrolab("import.workspace.create", { sources, project_database_path: projectDatabasePath });
+export const previewSemanticExtension = (workspaceId, sourceId, decision) => invokePetrolab("import.workspace.preview_window", { workspace_id: workspaceId, source_id: sourceId, semantic_extension: decision });
+export const addWorkspaceSources = (workspaceId, revision, sources) =>
+  invokePetrolab("import.workspace.add_sources", { workspace_id: workspaceId, expected_revision: revision, sources });
+export const getImportWorkspace = (workspaceId) => invokePetrolab("import.workspace.get", { workspace_id: workspaceId });
+export const applyWorkspaceDecision = (workspaceId, revision, sourceId, decision, bulk = false) =>
+  invokePetrolab(bulk ? "import.workspace.apply_bulk_decision" : "import.workspace.apply_decision", {
+    workspace_id: workspaceId, expected_revision: revision, source_id: sourceId, decision,
+  });
+export const discardImportWorkspace = (workspaceId, revision) =>
+  invokePetrolab("import.workspace.discard", { workspace_id: workspaceId, expected_revision: revision });
+export const previewWorkspaceWindow = (workspaceId, sourceId, sheetName, startRow, rowCount = 30, startColumn = 0, columnCount = 24) =>
+  invokePetrolab("import.workspace.preview_window", { workspace_id: workspaceId, source_id: sourceId,
+    sheet_name: sheetName, start_row: startRow, row_count: rowCount, start_column: startColumn, column_count: columnCount });
+
 function desktopInvoke(command, args) {
   const internals = typeof window === "undefined" ? null : window.__TAURI_INTERNALS__;
   if (!internals || typeof internals.invoke !== "function") {

@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, TextIO
 
 from .clean_table import classify_clean_table
+from .import_workspace import ImportWorkspaceStore
 from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, suggest_import_recipe
 from .import_apply import (
     apply_import_plan,
@@ -292,6 +293,10 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "media.import.plan": _dispatch_media_plan,
     "media.import.apply": _dispatch_media_apply,
 }
+
+WORKSPACES = ImportWorkspaceStore()
+for _operation in ('create', 'add_sources', 'get', 'preview_window', 'apply_decision', 'apply_bulk_decision', 'replan', 'discard'):
+    COMMANDS[f'import.workspace.{_operation}'] = lambda params, operation=_operation: {'result': WORKSPACES.command(operation, params)}
 
 
 def handle_request(request: object) -> dict[str, Any]:
