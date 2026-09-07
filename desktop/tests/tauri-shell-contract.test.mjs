@@ -207,6 +207,23 @@ test("analyses view exposes mineral identification status and evidence", async (
   assert.match(styles, /analysis-mineral-review/);
 });
 
+test("dedicated mineral queue keeps reported, suggested and accepted values separate", async () => {
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/MineralsWorkspace.jsx");
+  const api = await read("src/desktopApi.js");
+  const styles = await read("src/mineralsWorkspace.css");
+  assert.match(app, /<MineralsWorkspace/);
+  assert.match(workspace, /Требуют решения/);
+  assert.match(workspace, /В источнике/);
+  assert.match(workspace, /Предложение/);
+  assert.match(workspace, /Принято/);
+  assert.match(workspace, /Принять предложение/);
+  assert.match(workspace, /Оставить исходное/);
+  assert.match(workspace, /Сбросить решение/);
+  assert.match(api, /project\.mineral_assignment\.decide/);
+  assert.match(styles, /grid-template-columns: 210px minmax\(500px, 1fr\) 380px/);
+});
+
 test("duplicate candidates require explicit keep-all review before save", async () => {
   const api = await read("src/desktopApi.js");
   const app = await read("src/App.jsx");
@@ -250,6 +267,7 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
   assert.match(api, /preview предназначен только для проверки интерфейса/);
   assert.match(api, /media\.inspect_sources/);
   assert.match(api, /project\.mineral_identification\.list/);
+  assert.match(api, /project\.mineral_assignment\.decide/);
   assert.match(api, /media\.import\.plan/);
   assert.match(api, /media\.import\.apply/);
   assert.match(api, /analytical_point\.create/);
