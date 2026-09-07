@@ -51,6 +51,7 @@
         "source.check_linked",
         "project.analyses.list",
         "project.mineral_identification.list",
+        "project.mineral_assignment.decide",
         "project.last_import.retract",
         "analytical_point.create",
         "media.inspect_sources",

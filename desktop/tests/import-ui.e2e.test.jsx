@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-const uiState = vi.hoisted(() => ({ imported: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false }));
+const uiState = vi.hoisted(() => ({ imported: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false }));
 
 vi.mock("../src/desktopApi", () => {
   const recipe = {
@@ -136,22 +136,29 @@ vi.mock("../src/desktopApi", () => {
         returned: analyses.length,
         offset: 0,
         has_more: false,
-        identifications: analyses.map((analysis) => ({
+        identifications: analyses.map((analysis, index) => ({
           analysis_id: analysis.analysis_id,
           source_id: "source-ui",
           source_name: analysis.source_name,
           sheet_name: analysis.sheet_name,
           source_row_number: analysis.source_row_number,
-          status: "not_checked",
-          prediction: null,
-          confidence: "insufficient_input",
-          accepted: null,
-          candidates: [],
-          reasons: [],
+          status: index === 0 ? (uiState.mineralAccepted ? "verified" : "conflict") : "insufficient_input",
+          reported_mineral: index === 0 ? "garnet" : null,
+          reported_target: index === 0 ? "garnet" : null,
+          prediction: index === 0 ? "clinopyroxene" : null,
+          confidence: index === 0 ? "high" : "insufficient_input",
+          input_fingerprint: `fingerprint-${analysis.analysis_id}`,
+          accepted: index === 0 && uiState.mineralAccepted ? { target: "clinopyroxene", decision_kind: "accept_suggestion" } : null,
+          candidates: index === 0 ? [{ target: "clinopyroxene", score: 9 }, { target: "garnet", score: 5 }] : [],
+          reasons: index === 0 ? ["Ca-Mg-Fe pyroxene chemistry"] : [],
           ruleset_version: "test-ruleset",
         })),
-        status_counts: analyses.length ? { not_checked: analyses.length } : {},
+        status_counts: analyses.length ? { [uiState.mineralAccepted ? "verified" : "conflict"]: 1, insufficient_input: Math.max(0, analyses.length - 1) } : {},
       } };
+    }),
+    decideProjectMineralAssignment: vi.fn().mockImplementation(async (_path, analysisId, verification, target) => {
+      uiState.mineralAccepted = Boolean(target);
+      return { result: { analysis_id: analysisId, decision: target ? { target } : null, verification } };
     }),
     pickImportFile: vi.fn().mockImplementation(async () => uiState.mode === "clean" ? "C:/fixtures/ui-clean-table.csv" : "C:/fixtures/complex-workbook.xlsx"),
     stageImportFile: vi.fn().mockImplementation(async (path) => ({ local_path: `C:/PetroLab/staging/${path.split("/").pop()}`, original_path: path })),
@@ -251,6 +258,7 @@ afterEach(() => {
   uiState.detailsEnabled = true;
   uiState.unitApplied = false;
   uiState.duplicatesReviewed = false;
+  uiState.mineralAccepted = false;
   vi.clearAllMocks();
   cleanup();
 });
@@ -307,6 +315,20 @@ test("complex import always shows the source table and groups repeated structura
   expect(within(sourceTable).getByLabelText("Ячейка 1:2").textContent).toBe("SiO2");
   expect(within(sourceTable).getByText("Sigma")).toBeTruthy();
   expect(screen.getByText("Колонка с данными не имеет заголовка · 3 мест")).toBeTruthy();
+});
+
+test("post-import mineral queue keeps source, suggestion and accepted decision separate", async () => {
+  uiState.imported = true;
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(screen.getByRole("button", { name: "Минералы" }));
+  expect(await screen.findByRole("listbox", { name: "Очередь проверки минералов" })).toBeTruthy();
+  expect(screen.getByText("garnet")).toBeTruthy();
+  expect(screen.getAllByText("clinopyroxene").length).toBeGreaterThan(0);
+  await user.click(screen.getByRole("button", { name: "Принять предложение" }));
+  await waitFor(() => expect(uiState.mineralAccepted).toBe(true));
+  expect(await screen.findByText("принято")).toBeTruthy();
+  expect(screen.getByText("исходный текст")).toBeTruthy();
 });
 
 test("Python identity blocker is visible, navigable and prevents saving", async () => {

@@ -422,19 +422,49 @@ def _active_import_filter() -> str:
     return "b.status = 'applied' AND x.import_batch_id IS NULL"
 
 
-def list_project_analyses(database_path: str | Path, limit: int = 500, offset: int = 0) -> dict[str, Any]:
+def _latest_mineral_decision(connection, analysis_id: str) -> dict[str, Any] | None:
+    row = connection.execute(
+        """SELECT decision_id, decision_kind, target, input_fingerprint_sha256,
+                  ruleset_version, reason, created_at
+           FROM mineral_assignment_decision
+           WHERE analysis_id = ? ORDER BY rowid DESC LIMIT 1""",
+        (analysis_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "decision_id": row["decision_id"],
+        "target": row["target"],
+        "origin": "user_accepted_after_import" if row["decision_kind"] != "clear" else "user_cleared_after_import",
+        "decision_kind": row["decision_kind"],
+        "decided_at": row["created_at"],
+        "input_fingerprint": row["input_fingerprint_sha256"],
+        "ruleset_version": row["ruleset_version"],
+        "reason": row["reason"],
+    }
+
+
+def list_project_analyses(
+    database_path: str | Path,
+    limit: int = 500,
+    offset: int = 0,
+    analysis_id: str | None = None,
+) -> dict[str, Any]:
     """Return active Analysis/Measurement rows plus lossless source metadata."""
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))
     connection = open_project(database_path)
     try:
         active_filter = _active_import_filter()
+        identity_filter = " AND a.analysis_id = ?" if analysis_id else ""
+        identity_params = (analysis_id,) if analysis_id else ()
         total = connection.execute(
             f"""SELECT COUNT(*)
                 FROM analysis a
                 JOIN import_batch b ON b.import_batch_id = a.import_batch_id
                 LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-                WHERE {active_filter}"""
+                WHERE {active_filter}{identity_filter}""",
+            identity_params,
         ).fetchone()[0]
         rows = connection.execute(
             f"""SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number,
@@ -445,10 +475,10 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                 JOIN import_batch b ON b.import_batch_id = a.import_batch_id
                 JOIN import_recipe_revision r ON r.recipe_revision_id = b.recipe_revision_id
                 LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-                WHERE {active_filter}
+                WHERE {active_filter}{identity_filter}
                 ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number, a.source_column_number
                 LIMIT ? OFFSET ?""",
-            (limit, offset),
+            (*identity_params, limit, offset),
         ).fetchall()
         result: list[dict[str, Any]] = []
         for row in rows:
@@ -537,6 +567,12 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                 measurement_map[key] = measurement
             semantic_row = connection.execute('SELECT * FROM analysis_import_semantics WHERE analysis_id = ?', (row['analysis_id'],)).fetchone()
             semantic_evidence = {key.removesuffix('_json'): json.loads(semantic_row[key]) for key in semantic_row.keys() if key.endswith('_json') and semantic_row[key]} if semantic_row else {}
+            latest_mineral_decision = _latest_mineral_decision(connection, row["analysis_id"])
+            if latest_mineral_decision is not None:
+                if latest_mineral_decision["decision_kind"] == "clear":
+                    semantic_evidence.pop("mineral_assignment", None)
+                else:
+                    semantic_evidence["mineral_assignment"] = latest_mineral_decision
             result.append({
                 **semantic_evidence,
                 "analysis_id": row["analysis_id"],
@@ -639,3 +675,83 @@ def list_project_mineral_identifications(database_path: str | Path, limit: int =
         "identifications": identifications,
         "status_counts": dict(sorted(counts.items())),
     }
+
+
+def decide_project_mineral_assignment(
+    database_path: str | Path,
+    analysis_id: str,
+    target: str | None,
+    input_fingerprint: str,
+    ruleset_version: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Append an explicit, stale-safe interpretation for one imported analysis."""
+    from .import_apply import _id, _now
+    from .mineral_verification import reported_target, verify_record
+
+    projection = list_project_analyses(database_path, limit=1, analysis_id=analysis_id)
+    if not projection["analyses"]:
+        raise ImportCommandError("ANALYSIS_NOT_FOUND", "Анализ не найден в активном проекте.")
+    analysis = projection["analyses"][0]
+    reported = analysis.get("reported_mineral")
+    if not reported:
+        for field, value in analysis.get("source_metadata", {}).items():
+            if str(field).split(" · ", 1)[0].casefold() == "mineral" and value not in (None, ""):
+                reported = {"value": value, "origin": "source_metadata"}
+                break
+    verification = verify_record({
+        "preview_id": analysis_id,
+        "measurements": analysis.get("measurement_list", []),
+        "reported_mineral": reported,
+    })
+    if verification["input_fingerprint"] != input_fingerprint or verification["ruleset_version"] != ruleset_version:
+        raise ImportCommandError(
+            "STALE_MINERAL_INPUT",
+            "Состав или версия правил изменились. Обновите проверку перед решением.",
+        )
+    if not isinstance(reason, str) or not reason.strip():
+        raise ImportCommandError("MINERAL_REASON_REQUIRED", "Для решения нужно сохранить основание.")
+
+    if target is None:
+        decision_kind = "clear"
+    elif target == verification.get("prediction") and verification.get("confidence") in {"high", "medium"}:
+        decision_kind = "accept_suggestion"
+    elif target == reported_target(reported):
+        decision_kind = "keep_reported"
+    else:
+        raise ImportCommandError(
+            "MINERAL_TARGET_UNAVAILABLE",
+            "Выбранный минерал не соответствует текущему предложению или распознанному исходному названию.",
+        )
+
+    decision_id = _id()
+    created_at = _now()
+    connection = open_project(database_path)
+    try:
+        with connection:
+            connection.execute(
+                """INSERT INTO mineral_assignment_decision
+                       (decision_id, analysis_id, decision_kind, target,
+                        input_fingerprint_sha256, ruleset_version, reason, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (decision_id, analysis_id, decision_kind, target, input_fingerprint,
+                 ruleset_version, reason.strip(), created_at),
+            )
+    finally:
+        connection.close()
+    accepted = None if target is None else {
+        "decision_id": decision_id,
+        "target": target,
+        "origin": "user_accepted_after_import",
+        "decision_kind": decision_kind,
+        "decided_at": created_at,
+        "input_fingerprint": input_fingerprint,
+        "ruleset_version": ruleset_version,
+        "reason": reason.strip(),
+    }
+    updated = verify_record({
+        "preview_id": analysis_id,
+        "measurements": analysis.get("measurement_list", []),
+        "reported_mineral": reported,
+    }, accepted=accepted)
+    return {"analysis_id": analysis_id, "decision": accepted, "verification": updated}

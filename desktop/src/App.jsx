@@ -16,6 +16,7 @@ import {
   createImportWorkspace, addWorkspaceSources, getImportWorkspace, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
   applyImportPlan,
   clearImportStaging,
+  decideProjectMineralAssignment,
   getProjectDatabasePath,
   isPetrolabDesktop,
   listProjectAnalyses,
@@ -26,6 +27,7 @@ import {
 } from "./desktopApi";
 import { ImportWorkspace } from "./ImportWorkspace";
 import { AnalysesWorkspace } from "./AnalysesWorkspace";
+import { MineralsWorkspace } from "./MineralsWorkspace";
 import "./styles.css";
 
 const ANALYSES_PAGE_SIZE = 500;
@@ -35,7 +37,7 @@ const navigation = [
   [FileArrowUp, "Импорт", true],
   [Database, "Анализы", true],
   [Columns, "Образцы", false],
-  [Columns, "Минералы", false],
+  [Columns, "Минералы", true],
   [Columns, "Связи", false],
   [File, "Изображения", false],
   [Columns, "Построение", false],
@@ -330,6 +332,32 @@ export function App() {
     }
   };
 
+  const decideMineral = async (analysis, target, reason) => {
+    if (busy || !databasePath || !analysis?.mineral_verification) return;
+    setBusy(true);
+    setActivity(target ? "Сохраняю решение по минералу…" : "Возвращаю анализ в очередь проверки…");
+    setError("");
+    setSuccess("");
+    try {
+      await decideProjectMineralAssignment(
+        databasePath,
+        analysis.analysis_id,
+        analysis.mineral_verification,
+        target,
+        reason,
+      ).then(unwrap);
+      await refreshAnalyses(databasePath);
+      setSuccess(target
+        ? `Решение сохранено отдельно от исходных данных: ${target}.`
+        : "Решение сброшено. Анализ снова требует проверки.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
 
   const startNewImport = () => {
     if (busy) return;
@@ -356,7 +384,7 @@ export function App() {
     if (!enabled || busy || blockDraftDirty || mappingDraftDirty) return;
     setError("");
     setScreen(label);
-    if (label === "Анализы") refreshAnalyses().catch((caught) => setError(caught.message));
+    if (["Анализы", "Минералы"].includes(label)) refreshAnalyses().catch((caught) => setError(caught.message));
   };
 
   return (
@@ -379,7 +407,7 @@ export function App() {
             </button>
           ))}
         </nav>
-        <div className="side-footer"><Info size={18} /><span>Сейчас оживлены: импорт и анализы</span></div>
+        <div className="side-footer"><Info size={18} /><span>Оживлены: импорт, анализы и минералы</span></div>
       </aside>
 
       <section className="workspace">
@@ -467,6 +495,17 @@ export function App() {
             onRetract={retractLatest}
             onAddData={startNewImport}
             onLoadMore={loadMoreAnalyses}
+          />
+        )}
+
+        {screen === "Минералы" && (
+          <MineralsWorkspace
+            project={project}
+            busy={busy}
+            onRefresh={() => refreshAnalyses().catch((caught) => setError(caught.message))}
+            onDecide={decideMineral}
+            onLoadMore={loadMoreAnalyses}
+            onAddData={startNewImport}
           />
         )}
       </section>
