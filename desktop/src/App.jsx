@@ -14,18 +14,23 @@ import {
 } from "@phosphor-icons/react";
 import {
   createImportWorkspace, addWorkspaceSources, getImportWorkspace, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
+  applyMediaImportPlan,
   applyImportPlan,
   clearImportStaging,
+  createMediaImportPlan,
   getProjectDatabasePath,
+  inspectMediaSources,
   isPetrolabDesktop,
   listProjectAnalyses,
   listProjectMineralIdentifications,
   pickImportFile,
+  pickMediaFiles,
   retractLastImport,
   stageImportFile,
 } from "./desktopApi";
 import { ImportWorkspace } from "./ImportWorkspace";
 import { AnalysesWorkspace } from "./AnalysesWorkspace";
+import { ImagesWorkspace } from "./ImagesWorkspace";
 import "./styles.css";
 
 const ANALYSES_PAGE_SIZE = 500;
@@ -37,7 +42,7 @@ const navigation = [
   [Columns, "Образцы", false],
   [Columns, "Минералы", false],
   [Columns, "Связи", false],
-  [File, "Изображения", false],
+  [File, "Изображения", true],
   [Columns, "Построение", false],
   [Columns, "Статистика", false],
   [Columns, "Публикации", false],
@@ -104,6 +109,8 @@ export function App() {
   const [activity, setActivity] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [mediaInspection, setMediaInspection] = useState(null);
+  const [mediaPlan, setMediaPlan] = useState(null);
 
   const refreshAnalyses = useCallback(async (path = databasePath) => {
     if (!path) return;
@@ -330,6 +337,73 @@ export function App() {
     }
   };
 
+  const chooseImages = async () => {
+    if (busy || !desktopRuntimeAvailable) return;
+    setBusy(true);
+    setActivity("Выберите изображения…");
+    setError("");
+    setSuccess("");
+    try {
+      const paths = await pickMediaFiles();
+      if (!paths?.length) return;
+      setActivity("Проверяю форматы, размеры и отпечатки изображений…");
+      const result = unwrap(await inspectMediaSources(paths));
+      setMediaInspection(result);
+      setMediaPlan(null);
+      setScreen("Изображения");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const planImages = async (assignments) => {
+    if (busy || !databasePath) return;
+    setBusy(true);
+    setActivity("Проверяю назначения изображений…");
+    setError("");
+    setSuccess("");
+    try {
+      const result = unwrap(await createMediaImportPlan(databasePath, assignments));
+      setMediaPlan(result);
+      setSuccess(`План проверен: ${result.items.length} изображений. Точки можно разместить отдельным следующим шагом.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const importImagesWithoutPoints = async (reviewedPlan) => {
+    if (busy || !databasePath || !reviewedPlan) return;
+    setBusy(true);
+    setActivity("Повторно проверяю файлы и сохраняю изображения…");
+    setError("");
+    setSuccess("");
+    try {
+      const result = unwrap(await applyMediaImportPlan(databasePath, reviewedPlan));
+      setMediaInspection(null);
+      setMediaPlan(null);
+      setSuccess(`Импортировано изображений: ${result.created_media_asset_count + result.reused_media_asset_count}. Пространственных точек: ${result.spatial_annotation_count}.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const cancelImageImport = () => {
+    if (busy) return;
+    setMediaInspection(null);
+    setMediaPlan(null);
+    setError("");
+    setSuccess("");
+  };
+
 
   const startNewImport = () => {
     if (busy) return;
@@ -379,7 +453,7 @@ export function App() {
             </button>
           ))}
         </nav>
-        <div className="side-footer"><Info size={18} /><span>Сейчас оживлены: импорт и анализы</span></div>
+        <div className="side-footer"><Info size={18} /><span>Оживлены: таблицы, анализы и изображения</span></div>
       </aside>
 
       <section className="workspace">
@@ -389,7 +463,7 @@ export function App() {
             <p>Источников: <b>{project.source_count}</b> · импортов: <b>{project.import_batch_count}</b> · анализов: <b>{project.total}</b></p>
           </div>
           <div className="top-actions">
-            <button className="outline-button" onClick={startNewImport} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> Добавить данные</button>
+            <button className="outline-button" onClick={screen === "Изображения" ? chooseImages : startNewImport} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> {screen === "Изображения" ? "Добавить изображения" : "Добавить данные"}</button>
             <button className="icon-button" disabled title="Настройки будут подключены позже"><GearSix size={21} /></button>
           </div>
         </header>
@@ -467,6 +541,19 @@ export function App() {
             onRetract={retractLatest}
             onAddData={startNewImport}
             onLoadMore={loadMoreAnalyses}
+          />
+        )}
+
+        {screen === "Изображения" && (
+          <ImagesWorkspace
+            inspection={mediaInspection}
+            plan={mediaPlan}
+            busy={busy}
+            onChoose={chooseImages}
+            onPlan={planImages}
+            onApply={importImagesWithoutPoints}
+            onCancel={cancelImageImport}
+            onInvalidatePlan={() => setMediaPlan(null)}
           />
         )}
       </section>

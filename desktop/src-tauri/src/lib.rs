@@ -141,6 +141,17 @@ fn pick_import_file() -> Option<String> {
         .map(|source| source.to_string_lossy().into_owned())
 }
 
+#[tauri::command]
+fn pick_media_files() -> Vec<String> {
+    rfd::FileDialog::new()
+        .add_filter("PetroLab images", &["png", "jpg", "jpeg", "tif", "tiff", "bmp"])
+        .pick_files()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|source| source.to_string_lossy().into_owned())
+        .collect()
+}
+
 fn stage_import_copy(root: PathBuf, source: PathBuf) -> Result<Value, String> {
     if !source.is_file() {
         return Err(format!("Selected source is no longer available: {}", source.to_string_lossy()));
@@ -215,6 +226,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             petrolab_command,
             pick_import_file,
+            pick_media_files,
             stage_import_file,
             clear_import_staging,
             project_database_path

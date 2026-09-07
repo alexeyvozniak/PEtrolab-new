@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import sqlite3
 import struct
@@ -42,6 +43,30 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _filename_suggestions(path: Path) -> dict[str, Any]:
+    """Return conservative, review-only assignments inferred from a filename."""
+    stem = path.stem.strip()
+    modality = re.search(r"(?:^|[_\-\s])(BSE|PPL|XPL)(?=$|[_\-\s])", stem, re.IGNORECASE)
+    media_type = modality.group(1).upper() if modality else None
+    prefix = stem[:modality.start()].rstrip("_- ") if modality else ""
+    parts = [part for part in re.split(r"[_\s]+", prefix) if part]
+    sample_name = parts[0] if parts else None
+    thin_section_name = "-".join(parts) if len(parts) >= 2 else None
+    basis: list[str] = []
+    if media_type:
+        basis.append("filename_modality_token")
+    if sample_name:
+        basis.append("filename_prefix")
+    if thin_section_name:
+        basis.append("filename_section_prefix")
+    return {
+        "suggested_media_type": media_type,
+        "suggested_sample_name": sample_name,
+        "suggested_thin_section_name": thin_section_name,
+        "suggestion_basis": basis,
+    }
 
 
 def _png_dimensions(path: Path) -> tuple[int, int]:
@@ -142,6 +167,7 @@ def inspect_media_source(source_path: str | Path) -> dict[str, Any]:
         "format": format_name,
         "width_px": width,
         "height_px": height,
+        **_filename_suggestions(path),
     }
 
 

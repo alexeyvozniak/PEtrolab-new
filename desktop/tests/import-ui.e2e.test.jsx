@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-const uiState = vi.hoisted(() => ({ imported: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false }));
+const uiState = vi.hoisted(() => ({ imported: false, mediaImported: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false }));
 
 vi.mock("../src/desktopApi", () => {
   const recipe = {
@@ -125,6 +125,22 @@ vi.mock("../src/desktopApi", () => {
       measurements: { SiO2: { raw_token: "39.8", unit: "wt.%", source_cell: "C3" } },
     }],
   };
+  const mediaInspection = {
+    items: ["BSE", "PPL", "XPL"].map((type) => ({
+      source_path: `C:/fixtures/KIV-2_A_${type}_01.tif`,
+      display_name: `KIV-2_A_${type}_01.tif`,
+      source_fingerprint: `fingerprint-${type}`,
+      mime_type: "image/tiff",
+      format: "tiff",
+      width_px: 640,
+      height_px: 480,
+      suggested_media_type: type,
+      suggested_sample_name: "KIV-2",
+      suggested_thin_section_name: "KIV-2-A",
+      suggestion_basis: ["filename_modality_token", "filename_prefix", "filename_section_prefix"],
+    })),
+    duplicate_groups: [],
+  };
   const api = {
     isPetrolabDesktop: () => true,
     getProjectDatabasePath: vi.fn().mockResolvedValue("C:/PetroLab/project.sqlite"),
@@ -154,6 +170,18 @@ vi.mock("../src/desktopApi", () => {
       } };
     }),
     pickImportFile: vi.fn().mockImplementation(async () => uiState.mode === "clean" ? "C:/fixtures/ui-clean-table.csv" : "C:/fixtures/complex-workbook.xlsx"),
+    pickMediaFiles: vi.fn().mockResolvedValue(mediaInspection.items.map((item) => item.source_path)),
+    inspectMediaSources: vi.fn().mockResolvedValue({ result: mediaInspection }),
+    createMediaImportPlan: vi.fn().mockImplementation(async (_path, assignments) => ({ result: {
+      schema_version: 1,
+      semantic_fingerprint: "media-plan",
+      items: assignments.map((assignment, index) => ({ ...mediaInspection.items[index], ...assignment, media_asset_id: `asset-${index}`, existing_media_asset_id: null })),
+      warnings: assignments.map((assignment) => ({ code: "UNPLACED_MEDIA", message: `${assignment.source_path} has no placed Analytical Points.` })),
+    } })),
+    applyMediaImportPlan: vi.fn().mockImplementation(async () => {
+      uiState.mediaImported = true;
+      return { result: { created_media_asset_count: 3, reused_media_asset_count: 0, spatial_annotation_count: 0 } };
+    }),
     stageImportFile: vi.fn().mockImplementation(async (path) => ({ local_path: `C:/PetroLab/staging/${path.split("/").pop()}`, original_path: path })),
     clearImportStaging: vi.fn().mockResolvedValue(undefined),
     inspectImportSource: vi.fn().mockImplementation(async () => ({ result: uiState.mode === "clean"
@@ -247,12 +275,33 @@ import { App } from "../src/App";
 
 afterEach(() => {
   uiState.imported = false;
+  uiState.mediaImported = false;
   uiState.mode = "clean";
   uiState.detailsEnabled = true;
   uiState.unitApplied = false;
   uiState.duplicatesReviewed = false;
   vi.clearAllMocks();
   cleanup();
+});
+
+test("user confirms a filename-suggested image batch and imports it without implicit points", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать изображения" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  expect(screen.getAllByText("KIV-2_A_BSE_01.tif").length).toBeGreaterThan(1);
+  expect(screen.getByText("0 готово")).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  expect(await screen.findByText("3 готово")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Проверить план" }));
+  await user.click(await screen.findByRole("button", { name: "Импортировать без точек" }));
+
+  await waitFor(() => expect(uiState.mediaImported).toBe(true));
+  expect(await screen.findByRole("heading", { name: "Добавить изображения" })).toBeTruthy();
+  expect(screen.getByText(/Импортировано изображений: 3/)).toBeTruthy();
 });
 
 test("user clicks through Clean Table import and sees the saved Analysis", async () => {

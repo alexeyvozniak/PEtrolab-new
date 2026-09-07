@@ -97,6 +97,20 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(len(result["items"]), 2)
             self.assertEqual(len(result["duplicate_groups"]), 1)
 
+    def test_filename_suggestions_are_review_only_and_keep_the_source_name(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            image = Path(directory_name) / "KIV-2_A_BSE_01.png"
+            write_png(image)
+            result = inspect_media_source(image)
+            self.assertEqual(result["display_name"], "KIV-2_A_BSE_01.png")
+            self.assertEqual(result["suggested_sample_name"], "KIV-2")
+            self.assertEqual(result["suggested_thin_section_name"], "KIV-2-A")
+            self.assertEqual(result["suggested_media_type"], "BSE")
+            self.assertEqual(
+                result["suggestion_basis"],
+                ["filename_modality_token", "filename_prefix", "filename_section_prefix"],
+            )
+
     def test_windows_batch_file_is_not_treated_as_an_image(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             script = Path(directory_name) / "images.bat"

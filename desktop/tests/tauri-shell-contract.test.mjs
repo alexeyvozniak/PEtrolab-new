@@ -59,6 +59,21 @@ test("desktop stages selected files locally before the scientific service reads 
   assert.match(workspace, /Отменить/);
 });
 
+test("desktop image import selects a batch with only supported raster extensions", async () => {
+  const shell = await read("src-tauri/src/lib.rs");
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/ImagesWorkspace.jsx");
+  assert.match(shell, /fn pick_media_files/);
+  assert.match(shell, /\["png", "jpg", "jpeg", "tif", "tiff", "bmp"\]/);
+  assert.match(shell, /\.pick_files\(\)/);
+  assert.match(api, /pick_media_files/);
+  assert.match(app, /inspectMediaSources\(paths\)/);
+  assert.match(workspace, /Подтвердить предложения/);
+  assert.match(workspace, /Пространственные точки создаются на следующем шаге/);
+  assert.match(workspace, /Исходные файлы не изменяются/);
+});
+
 test("adding import is transactional and keeps the existing queue on failure", async () => {
   const app = await read("src/App.jsx");
   assert.match(app, /newlyStaged && !accepted/);
