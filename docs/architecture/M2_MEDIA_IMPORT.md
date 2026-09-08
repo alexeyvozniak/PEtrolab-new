@@ -44,7 +44,9 @@
 | Команда | Запись | Результат |
 |---|---:|---|
 | `analytical_point.create` | да | явно созданная Analytical Point и contributing Analysis IDs |
+| `analytical_point.list` | нет | устойчивые Point/Analysis IDs, Sample, методы и число существующих размещений |
 | `media.inspect_sources` | нет | форматы, размеры, SHA-256 и группы дубликатов |
+| `media.preview` | нет | ограниченный PNG preview в неизменённых осях исходных пикселей |
 | `media.import.plan` | нет | полный проверяемый план, предупреждения и semantic fingerprint |
 | `media.import.apply` | да | Media Assets, Spatial Annotations и связи одной транзакцией |
 

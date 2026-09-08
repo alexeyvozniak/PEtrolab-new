@@ -18,10 +18,12 @@ import {
   applyImportPlan,
   clearImportStaging,
   createMediaImportPlan,
+  getMediaPreview,
   getProjectDatabasePath,
   inspectMediaSources,
   isPetrolabDesktop,
   listProjectAnalyses,
+  listAnalyticalPoints,
   listProjectMineralIdentifications,
   pickImportFile,
   pickMediaFiles,
@@ -111,6 +113,11 @@ export function App() {
   const [success, setSuccess] = useState("");
   const [mediaInspection, setMediaInspection] = useState(null);
   const [mediaPlan, setMediaPlan] = useState(null);
+  const [mediaPoints, setMediaPoints] = useState({ total: 0, sample_names: [], items: [] });
+
+  const loadMediaPreview = useCallback(async (sourcePathValue) => (
+    unwrap(await getMediaPreview(sourcePathValue))
+  ), []);
 
   const refreshAnalyses = useCallback(async (path = databasePath) => {
     if (!path) return;
@@ -347,8 +354,12 @@ export function App() {
       const paths = await pickMediaFiles();
       if (!paths?.length) return;
       setActivity("Проверяю форматы, размеры и отпечатки изображений…");
-      const result = unwrap(await inspectMediaSources(paths));
+      const [result, pointProjection] = await Promise.all([
+        inspectMediaSources(paths).then(unwrap),
+        listAnalyticalPoints(databasePath).then(unwrap),
+      ]);
       setMediaInspection(result);
+      setMediaPoints(pointProjection);
       setMediaPlan(null);
       setScreen("Изображения");
     } catch (caught) {
@@ -368,7 +379,8 @@ export function App() {
     try {
       const result = unwrap(await createMediaImportPlan(databasePath, assignments));
       setMediaPlan(result);
-      setSuccess(`План проверен: ${result.items.length} изображений. Точки можно разместить отдельным следующим шагом.`);
+      const placementCount = result.items.reduce((count, item) => count + item.placements.length, 0);
+      setSuccess(`План проверен: ${result.items.length} изображений, ${placementCount} пространственных связей.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -377,7 +389,7 @@ export function App() {
     }
   };
 
-  const importImagesWithoutPoints = async (reviewedPlan) => {
+  const importImages = async (reviewedPlan) => {
     if (busy || !databasePath || !reviewedPlan) return;
     setBusy(true);
     setActivity("Повторно проверяю файлы и сохраняю изображения…");
@@ -387,6 +399,7 @@ export function App() {
       const result = unwrap(await applyMediaImportPlan(databasePath, reviewedPlan));
       setMediaInspection(null);
       setMediaPlan(null);
+      setMediaPoints({ total: 0, sample_names: [], items: [] });
       setSuccess(`Импортировано изображений: ${result.created_media_asset_count + result.reused_media_asset_count}. Пространственных точек: ${result.spatial_annotation_count}.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -400,6 +413,7 @@ export function App() {
     if (busy) return;
     setMediaInspection(null);
     setMediaPlan(null);
+    setMediaPoints({ total: 0, sample_names: [], items: [] });
     setError("");
     setSuccess("");
   };
@@ -548,10 +562,12 @@ export function App() {
           <ImagesWorkspace
             inspection={mediaInspection}
             plan={mediaPlan}
+            points={mediaPoints}
             busy={busy}
             onChoose={chooseImages}
+            onPreview={loadMediaPreview}
             onPlan={planImages}
-            onApply={importImagesWithoutPoints}
+            onApply={importImages}
             onCancel={cancelImageImport}
             onInvalidatePlan={() => setMediaPlan(null)}
           />

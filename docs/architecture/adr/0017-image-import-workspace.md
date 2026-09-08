@@ -1,6 +1,6 @@
 # ADR 0017 — Image import workspace boundary
 
-Status: accepted for the first UI slice requested on 2026-09-07.
+Status: accepted and implemented through manual placement on 2026-09-08.
 
 ## Context
 
@@ -27,10 +27,21 @@ reach `media.import.plan` until every row is explicitly confirmed. Duplicate
 fingerprints block planning. Editing a confirmed field invalidates the reviewed
 plan.
 
-The first vertical slice may explicitly apply a valid plan with no placements;
-the backend already records `UNPLACED_MEDIA` warnings and the approved final
-review permits completion without unplaced points. The next slice adds the
-manual Point/Rectangle/Square screen without changing this assignment contract.
+The workspace may explicitly apply a valid plan with no placements; the backend
+records `UNPLACED_MEDIA` warnings and the approved final review permits
+completion without unplaced points.
+
+Python exposes a read-only `analytical_point.list` projection and generates a
+bounded PNG preview on demand. The preview preserves source-pixel axes and does
+not apply EXIF rotation, so viewport clicks can be converted to the exact image
+coordinates validated by `media.import.plan`. The full-resolution source never
+crosses into React.
+
+Point, Rectangle and Square placement remains a UI draft until the user presses
+the explicit save action. Same-Sample filtering is the default. Choosing a Point
+from another Sample requires a structured reason before the draft can enter the
+plan. The final review shows image, assignment, placement and exception totals
+before the single atomic apply.
 
 ## Consequences
 
@@ -39,6 +50,5 @@ manual Point/Rectangle/Square screen without changing this assignment contract.
 - Ambiguous filenames require manual fields but do not block other files.
 - Importing without points is honest and reversible at the association layer;
   it is never presented as automatic point placement.
-- The point-placement PR work can consume the same reviewed assignments and
-  append source-pixel geometry before the atomic apply.
-
+- Preview generation adds Pillow to the packaged Python service; Rust remains a
+  file-dialog/process boundary and receives no media-domain rules.
