@@ -2,6 +2,8 @@
 .images-empty h1 { margin: 14px 0 7px; }
 .images-empty p { max-width: 620px; margin: 0 0 20px; color: #6e7b73; line-height: 1.55; }
 .images-empty small { margin-top: 13px; color: #7d8881; }
+.images-empty-actions, .image-source-actions { display: flex; align-items: center; gap: 9px; }
+.images-empty-actions .outline-button.large { min-height: 46px; padding: 0 20px; }
 .images-workspace { min-width: 0; min-height: calc(100vh - 76px); display: grid; grid-template-columns: 260px minmax(480px, 1fr) 340px; grid-template-rows: minmax(0, 1fr) 68px; background: #f7f8f6; overflow: hidden; }
 .image-source-pane, .image-assignment-pane, .image-inspector { min-width: 0; min-height: 0; background: #fff; }
 .image-source-pane { border-right: 1px solid #dfe5e0; overflow: auto; }

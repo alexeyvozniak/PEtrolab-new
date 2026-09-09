@@ -5,7 +5,8 @@ assignment, manual point-placement and final-review states.
 
 ## Main flow
 
-1. Select multiple PNG, JPEG, TIFF or BMP files in one native dialog.
+1. Select multiple PNG, JPEG, TIFF or BMP files in one native dialog, or select
+   a folder and collect supported images from its nested folders as one batch.
 2. Inspect format, dimensions, SHA-256 and physical duplicates before any
    project write.
 3. Review conservative Sample, Thin Section and BSE/PPL/XPL suggestions parsed
@@ -36,4 +37,6 @@ assignment, manual point-placement and final-review states.
 - Cross-Sample placement preserves both Sample assignments and records the
   explicit exception reason.
 - Source files are never renamed, edited or deleted.
+- Folder enumeration is deterministic, does not follow filesystem links and is
+  capped at 5,000 supported images before Python inspection begins.
 - Executable `.bat` files are not images and never appear in the picker.

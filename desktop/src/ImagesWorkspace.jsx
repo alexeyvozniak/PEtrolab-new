@@ -5,6 +5,7 @@ import {
   CheckCircle,
   Copy,
   FileImage,
+  FolderOpen,
   Images,
   Info,
   MagnifyingGlass,
@@ -81,6 +82,11 @@ function shortenId(value) {
   return value.length > 12 ? `${value.slice(0, 8)}…` : value;
 }
 
+function parentFolder(path) {
+  const segments = (path || "").split(/[\\/]/).filter(Boolean);
+  return segments.length > 1 ? segments[segments.length - 2] : "";
+}
+
 function SourcePane({ items, assignments, activePath, setActivePath, phase }) {
   return <aside className="image-source-pane">
     <header><b>{phase === "review" ? "Импортируемые изображения" : "Загруженные изображения"}</b><span>{items.length}</span></header>
@@ -91,7 +97,7 @@ function SourcePane({ items, assignments, activePath, setActivePath, phase }) {
         const placementCount = assignment?.placements?.length || 0;
         return <button className={focused ? "focused" : ""} type="button" key={item.source_path} onClick={() => setActivePath(item.source_path)}>
           <span className="image-source-icon"><FileImage size={24} weight="duotone" /></span>
-          <span><b>{index + 1}. {item.display_name}</b><small>{item.width_px} × {item.height_px} px · {(item.format || item.mime_type?.split("/").pop() || "image").toUpperCase()}</small><em>{phase === "assignment" ? (assignmentReady(assignment) ? "назначено" : "нужно подтвердить") : `${placementCount} размещено`}</em></span>
+          <span><b title={item.source_path}>{index + 1}. {item.display_name}</b><small>{parentFolder(item.source_path) ? `${parentFolder(item.source_path)} · ` : ""}{item.width_px} × {item.height_px} px · {(item.format || item.mime_type?.split("/").pop() || "image").toUpperCase()}</small><em>{phase === "assignment" ? (assignmentReady(assignment) ? "назначено" : "нужно подтвердить") : `${placementCount} размещено`}</em></span>
         </button>;
       })}
     </div>
@@ -99,7 +105,7 @@ function SourcePane({ items, assignments, activePath, setActivePath, phase }) {
   </aside>;
 }
 
-function AssignmentStep({ items, inspection, assignments, setAssignments, selected, setSelected, activeItem, activeAssignment, setActivePath, busy, onChoose, onCancel, onInvalidatePlan, onContinue }) {
+function AssignmentStep({ items, inspection, assignments, setAssignments, selected, setSelected, activeItem, activeAssignment, setActivePath, busy, onChoose, onChooseFolder, onCancel, onInvalidatePlan, onContinue }) {
   const duplicatePaths = useMemo(() => new Set((inspection?.duplicate_groups || []).flat()), [inspection]);
   const readyCount = items.filter((item) => assignmentReady(assignments[item.source_path])).length;
   const selectedItems = items.filter((item) => selected.has(item.source_path));
@@ -156,7 +162,10 @@ function AssignmentStep({ items, inspection, assignments, setAssignments, select
     <main className="image-assignment-pane">
       <header>
         <div><h2>Назначь Sample и шлиф</h2><p>Предложения из имени файла не сохраняются без подтверждения.</p></div>
-        <button className="outline-button" type="button" onClick={onChoose} disabled={busy}>Выбрать другие</button>
+        <div className="image-source-actions">
+          <button className="outline-button" type="button" onClick={onChoose} disabled={busy}>Другие файлы</button>
+          <button className="outline-button" type="button" onClick={onChooseFolder} disabled={busy}><FolderOpen size={16} /> Другая папка</button>
+        </div>
       </header>
       <div className="image-bulk-toolbar">
         <label><input type="checkbox" checked={selected.size === items.length} onChange={() => setSelected(selected.size === items.length ? new Set() : new Set(items.map((item) => item.source_path)))} /> Выбрано: {selected.size} из {items.length}</label>
@@ -169,7 +178,7 @@ function AssignmentStep({ items, inspection, assignments, setAssignments, select
           const assignment = assignments[item.source_path];
           return <div className={`${item.source_path === activeItem?.source_path ? "active " : ""}${duplicatePaths.has(item.source_path) ? "duplicate" : ""}`} role="row" key={item.source_path} onClick={() => setActivePath(item.source_path)}>
             <span><input aria-label={`Выбрать ${item.display_name}`} type="checkbox" checked={selected.has(item.source_path)} onChange={() => toggleSelected(item.source_path)} onClick={(event) => event.stopPropagation()} /></span>
-            <button type="button" onClick={() => setActivePath(item.source_path)}>{item.display_name}</button>
+            <button type="button" title={item.source_path} onClick={() => setActivePath(item.source_path)}>{item.display_name}</button>
             <span>{assignment?.sample_name || "—"}</span><span>{assignment?.thin_section_name || "—"}</span>
             <span className={`image-type type-${assignment?.media_type || "unknown"}`}>{assignment?.media_type || "—"}</span>
             <span className={assignmentReady(assignment) ? "image-ready" : "image-pending"}>{duplicatePaths.has(item.source_path) ? "дубликат" : assignmentReady(assignment) ? "готово" : "проверь"}</span>
@@ -179,7 +188,7 @@ function AssignmentStep({ items, inspection, assignments, setAssignments, select
       <div className="image-assignment-note"><Info size={18} /><p>Массовое назначение применяется только к отмеченным строкам. Пространственные точки создаются на следующем шаге.</p></div>
     </main>
     <aside className="image-inspector">
-      <header><span>Выбрано изображение</span><h2>{activeItem?.display_name}</h2><p>{activeItem?.width_px} × {activeItem?.height_px} px · SHA-256 проверен</p></header>
+      <header><span>Выбрано изображение</span><h2>{activeItem?.display_name}</h2><p title={activeItem?.source_path}>{parentFolder(activeItem?.source_path) ? `${parentFolder(activeItem?.source_path)} · ` : ""}{activeItem?.width_px} × {activeItem?.height_px} px · SHA-256 проверен</p></header>
       <section><h3>Предложено из имени файла</h3><dl><div><dt>Sample</dt><dd>{activeItem?.suggested_sample_name || "не определён"}</dd></div><div><dt>Шлиф</dt><dd>{activeItem?.suggested_thin_section_name || "не определён"}</dd></div><div><dt>Тип</dt><dd>{activeItem?.suggested_media_type || "не определён"}</dd></div></dl></section>
       <section className="image-assignment-form">
         <h3>Назначение для выбранных</h3>
@@ -434,7 +443,7 @@ function ReviewStep({ plan, assignments, activePath, setActivePath, previews, pr
   </>;
 }
 
-export function ImagesWorkspace({ inspection, plan, points = { items: [] }, busy, onChoose, onPreview = async () => null, onPlan, onApply, onCancel, onInvalidatePlan = () => {} }) {
+export function ImagesWorkspace({ inspection, plan, points = { items: [] }, busy, onChoose, onChooseFolder, onPreview = async () => null, onPlan, onApply, onCancel, onInvalidatePlan = () => {} }) {
   const items = inspection?.items || [];
   const [phase, setPhase] = useState("assignment");
   const [assignments, setAssignments] = useState({});
@@ -472,13 +481,13 @@ export function ImagesWorkspace({ inspection, plan, points = { items: [] }, busy
   }, [onPreview]);
 
   if (items.length === 0) {
-    return <section className="images-empty"><Images size={52} weight="duotone" /><h1>Добавить изображения</h1><p>Выбери сразу серию BSE, PPL, XPL или обычных фотографий. PetroLab проверит контейнеры и предложит назначения из имён файлов.</p><button className="primary-button large" type="button" onClick={onChoose} disabled={busy}><Plus size={20} /> Выбрать изображения</button><small>PNG, JPEG, TIFF и BMP. Исходные файлы не переименовываются и не изменяются.</small></section>;
+    return <section className="images-empty"><Images size={52} weight="duotone" /><h1>Добавить изображения</h1><p>Выбери отдельные файлы или целую папку с сериями BSE, PPL, XPL и фотографиями. PetroLab проверит каждый файл и предложит назначения из имён.</p><div className="images-empty-actions"><button className="primary-button large" type="button" onClick={onChoose} disabled={busy}><Plus size={20} /> Выбрать файлы</button><button className="outline-button large" type="button" onClick={onChooseFolder} disabled={busy}><FolderOpen size={20} /> Выбрать папку</button></div><small>PNG, JPEG, TIFF и BMP. Папка сканируется вместе с вложенными папками; исходники не изменяются.</small></section>;
   }
   if (phase === "review" && plan) return <section className="images-workspace image-review-workspace"><ReviewStep plan={plan} assignments={assignments} activePath={activePath} setActivePath={setActivePath} previews={previews} previewLoading={previewLoading} previewError={previewError} onPreview={loadPreview} busy={busy} onBack={() => { onInvalidatePlan(); setPhase("points"); }} onApply={onApply} /></section>;
   return <section className={`images-workspace${phase === "points" ? " image-placement-workspace" : ""}`}>
     {phase === "assignment" && <SourcePane items={items} assignments={assignments} activePath={activeItem?.source_path} setActivePath={setActivePath} phase="assignment" />}
     {phase === "assignment"
-      ? <AssignmentStep items={items} inspection={inspection} assignments={assignments} setAssignments={setAssignments} selected={selected} setSelected={setSelected} activeItem={activeItem} activeAssignment={activeAssignment} setActivePath={setActivePath} busy={busy} onChoose={onChoose} onCancel={onCancel} onInvalidatePlan={onInvalidatePlan} onContinue={() => setPhase("points")} />
+      ? <AssignmentStep items={items} inspection={inspection} assignments={assignments} setAssignments={setAssignments} selected={selected} setSelected={setSelected} activeItem={activeItem} activeAssignment={activeAssignment} setActivePath={setActivePath} busy={busy} onChoose={onChoose} onChooseFolder={onChooseFolder} onCancel={onCancel} onInvalidatePlan={onInvalidatePlan} onContinue={() => setPhase("points")} />
       : <PlacementStep items={items} assignments={assignments} setAssignments={setAssignments} points={points} activeItem={activeItem} activeAssignment={activeAssignment} activePath={activePath} setActivePath={setActivePath} busy={busy} previews={previews} previewLoading={previewLoading} previewError={previewError} onInvalidatePlan={onInvalidatePlan} onBack={() => setPhase("assignment")} onPreview={loadPreview} onPlan={onPlan} />}
   </section>;
 }

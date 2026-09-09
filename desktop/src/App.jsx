@@ -5,6 +5,7 @@ import {
   Database,
   File,
   FileArrowUp,
+  FolderOpen,
   GearSix,
   Info,
   MagnifyingGlass,
@@ -27,6 +28,7 @@ import {
   listProjectMineralIdentifications,
   pickImportFile,
   pickMediaFiles,
+  pickMediaFolder,
   retractLastImport,
   stageImportFile,
 } from "./desktopApi";
@@ -344,24 +346,56 @@ export function App() {
     }
   };
 
+  const inspectImageBatch = async (paths) => {
+    setActivity("Проверяю форматы, размеры и отпечатки изображений…");
+    const [result, pointProjection] = await Promise.all([
+      inspectMediaSources(paths).then(unwrap),
+      listAnalyticalPoints(databasePath).then(unwrap),
+    ]);
+    setMediaInspection(result);
+    setMediaPoints(pointProjection);
+    setMediaPlan(null);
+    setScreen("Изображения");
+  };
+
+  const mayReplaceImageBatch = () => !mediaInspection || window.confirm(
+    "Заменить текущий пакет изображений? Несохранённые назначения и размещения точек будут сброшены.",
+  );
+
   const chooseImages = async () => {
     if (busy || !desktopRuntimeAvailable) return;
+    if (!mayReplaceImageBatch()) return;
     setBusy(true);
-    setActivity("Выберите изображения…");
+    setActivity("Выберите файлы изображений…");
     setError("");
     setSuccess("");
     try {
       const paths = await pickMediaFiles();
       if (!paths?.length) return;
-      setActivity("Проверяю форматы, размеры и отпечатки изображений…");
-      const [result, pointProjection] = await Promise.all([
-        inspectMediaSources(paths).then(unwrap),
-        listAnalyticalPoints(databasePath).then(unwrap),
-      ]);
-      setMediaInspection(result);
-      setMediaPoints(pointProjection);
-      setMediaPlan(null);
-      setScreen("Изображения");
+      await inspectImageBatch(paths);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const chooseImageFolder = async () => {
+    if (busy || !desktopRuntimeAvailable) return;
+    if (!mayReplaceImageBatch()) return;
+    setBusy(true);
+    setActivity("Выберите папку с изображениями…");
+    setError("");
+    setSuccess("");
+    try {
+      const paths = await pickMediaFolder();
+      if (paths === null) return;
+      if (!paths?.length) {
+        setError("В выбранной папке и её вложенных папках нет PNG, JPEG, TIFF или BMP.");
+        return;
+      }
+      await inspectImageBatch(paths);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -477,7 +511,10 @@ export function App() {
             <p>Источников: <b>{project.source_count}</b> · импортов: <b>{project.import_batch_count}</b> · анализов: <b>{project.total}</b></p>
           </div>
           <div className="top-actions">
-            <button className="outline-button" onClick={screen === "Изображения" ? chooseImages : startNewImport} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> {screen === "Изображения" ? "Добавить изображения" : "Добавить данные"}</button>
+            {screen === "Изображения" ? <>
+              <button className="outline-button" onClick={chooseImages} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? "Начать новый пакет из выбранных файлов" : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> Файлы</button>
+              <button className="outline-button" onClick={chooseImageFolder} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? "Начать новый пакет из изображений в папке" : "Полный импорт доступен в установленном PetroLab Desktop"}><FolderOpen size={18} /> Папка</button>
+            </> : <button className="outline-button" onClick={startNewImport} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> Добавить данные</button>}
             <button className="icon-button" disabled title="Настройки будут подключены позже"><GearSix size={21} /></button>
           </div>
         </header>
@@ -565,6 +602,7 @@ export function App() {
             points={mediaPoints}
             busy={busy}
             onChoose={chooseImages}
+            onChooseFolder={chooseImageFolder}
             onPreview={loadMediaPreview}
             onPlan={planImages}
             onApply={importImages}

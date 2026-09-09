@@ -14,8 +14,10 @@ project metadata.
 ## Decision
 
 Tauri exposes a narrow multi-file picker filtered to the supported raster
-extensions. It returns only the paths explicitly chosen by the user. Python
-remains responsible for reading each image header and SHA-256.
+extensions and a folder picker. Folder selection recursively enumerates only
+supported regular files, skips filesystem links, sorts the resulting paths and
+rejects collections above 5,000 files. It returns only paths inside the selected
+tree. Python remains responsible for reading each image header and SHA-256.
 
 `media.inspect_sources` now adds conservative filename suggestions to its
 read-only projection. A modality token must be a separate `BSE`, `PPL` or `XPL`

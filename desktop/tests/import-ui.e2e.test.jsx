@@ -192,6 +192,7 @@ vi.mock("../src/desktopApi", () => {
     }),
     pickImportFile: vi.fn().mockImplementation(async () => uiState.mode === "clean" ? "C:/fixtures/ui-clean-table.csv" : "C:/fixtures/complex-workbook.xlsx"),
     pickMediaFiles: vi.fn().mockResolvedValue(mediaInspection.items.map((item) => item.source_path)),
+    pickMediaFolder: vi.fn().mockResolvedValue(mediaInspection.items.map((item) => item.source_path)),
     inspectMediaSources: vi.fn().mockResolvedValue({ result: mediaInspection }),
     listAnalyticalPoints: vi.fn().mockResolvedValue({ result: analyticalPoints }),
     getMediaPreview: vi.fn().mockImplementation(async (sourcePath) => ({ result: {
@@ -313,7 +314,7 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { applyImportPlan, pickImportFile, createImportPlan } from "../src/desktopApi";
+import { applyImportPlan, pickImportFile, pickMediaFolder, createImportPlan } from "../src/desktopApi";
 import { App } from "../src/App";
 
 afterEach(() => {
@@ -333,7 +334,7 @@ test("user confirms an image batch, places same- and cross-sample points, review
   render(<App />);
 
   await user.click(await screen.findByRole("button", { name: "Изображения" }));
-  await user.click(screen.getByRole("button", { name: "Выбрать изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
   await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
   expect(screen.getAllByText("KIV-2_A_BSE_01.tif").length).toBeGreaterThan(1);
   expect(screen.getByText("0 готово")).toBeTruthy();
@@ -369,6 +370,31 @@ test("user confirms an image batch, places same- and cross-sample points, review
   expect(await screen.findByRole("heading", { name: "Добавить изображения" })).toBeTruthy();
   expect(screen.getByText(/Импортировано изображений: 3/)).toBeTruthy();
   expect(screen.getByText(/Пространственных точек: 2/)).toBeTruthy();
+});
+
+test("user opens a recursively collected image folder as one batch", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать папку" }));
+
+  expect(pickMediaFolder).toHaveBeenCalledOnce();
+  expect(await screen.findByRole("heading", { name: "Назначь Sample и шлиф" })).toBeTruthy();
+  expect(screen.getAllByText("KIV-2_A_BSE_01.tif").length).toBeGreaterThan(1);
+  expect(screen.getByText("Выбрано: 3 из 3")).toBeTruthy();
+});
+
+test("an image folder without supported files explains why no batch opened", async () => {
+  pickMediaFolder.mockResolvedValueOnce([]);
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать папку" }));
+
+  expect(await screen.findByText("В выбранной папке и её вложенных папках нет PNG, JPEG, TIFF или BMP.")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Добавить изображения" })).toBeTruthy();
 });
 
 test("user clicks through Clean Table import and sees the saved Analysis", async () => {
