@@ -27,7 +27,21 @@ token. The source display name and fingerprint remain unchanged.
 React keeps suggestions and confirmed assignments separate. The batch cannot
 reach `media.import.plan` until every row is explicitly confirmed. Duplicate
 fingerprints block planning. Editing a confirmed field invalidates the reviewed
-plan.
+plan. Adding files or another folder extends the existing queue. Removing rows
+only removes those draft entries, never source files. Retained assignments and
+placements survive reinspection only when both path and SHA-256 are unchanged;
+changed sources require fresh confirmation and placement. A late preview from
+an earlier inspection cannot replace the current preview.
+
+The image workspace stays mounted while a batch exists so navigation to Analyses
+or Import preserves its assignments, placement draft and review phase. This is
+in-session UI state, not a persistent draft across application restarts.
+
+Bulk Sample/Thin Section and bulk media type are separate explicit operations.
+Sample/Thin Section changes preserve per-image BSE/PPL/XPL/custom modality and
+ownership mode. Each field group must have been reviewed before the combined
+assignment becomes confirmed. A single-image confirmation accepts all displayed
+fields. Selecting filename suggestions resets any previous custom-type editor.
 
 The workspace may explicitly apply a valid plan with no placements; the backend
 records `UNPLACED_MEDIA` warnings and the approved final review permits

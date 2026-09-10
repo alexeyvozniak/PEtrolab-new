@@ -303,6 +303,8 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(workflow, /Install and launch packaged Windows app/);
   assert.match(workflow, /smoke_windows_installer\.ps1/);
   assert.match(workflow, /npm run test:ui/);
+  assert.match(workflow, /Test Tauri shell/);
+  assert.match(workflow, /cargo test --manifest-path src-tauri\/Cargo\.toml/);
   assert.match(smoke, /msiexec\.exe/);
   assert.match(smoke, /MainWindowHandle/);
   assert.match(smoke, /petrolab-service/);

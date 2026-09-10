@@ -295,3 +295,48 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("Tauri application failed");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TemporaryDirectory(PathBuf);
+
+    impl TemporaryDirectory {
+        fn new() -> Self {
+            let path = env::temp_dir().join(format!("petrolab-media-folder-{}", Uuid::new_v4()));
+            fs::create_dir_all(&path).expect("temporary media folder must be created");
+            Self(path)
+        }
+    }
+
+    impl Drop for TemporaryDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn media_folder_is_recursive_sorted_case_insensitive_and_excludes_batch_scripts() {
+        let folder = TemporaryDirectory::new();
+        let nested = folder.0.join("nested");
+        fs::create_dir_all(&nested).expect("nested media folder must be created");
+        fs::write(folder.0.join("A.TIFF"), b"image").expect("TIFF fixture must be written");
+        fs::write(nested.join("b.png"), b"image").expect("PNG fixture must be written");
+        fs::write(nested.join("images.bat"), b"echo unsafe").expect("BAT fixture must be written");
+        fs::write(folder.0.join("notes.txt"), b"not an image").expect("text fixture must be written");
+
+        let sources = collect_media_folder(&folder.0).expect("media folder must be enumerated");
+        let names: Vec<_> = sources
+            .iter()
+            .map(|source| {
+                Path::new(source)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("fixture path must have a UTF-8 file name")
+            })
+            .collect();
+
+        assert_eq!(names, vec!["A.TIFF", "b.png"]);
+    }
+}

@@ -11,8 +11,9 @@ assignment, manual point-placement and final-review states.
    project write.
 3. Review conservative Sample, Thin Section and BSE/PPL/XPL suggestions parsed
    from the filename.
-4. Confirm each file explicitly or apply one checked assignment to selected
-   rows in bulk.
+4. Confirm each file explicitly or confirm the filename suggestions for checked
+   rows. Bulk Sample/Thin Section and bulk image type are separate actions so a
+   BSE/PPL/XPL series keeps its modalities. Custom image types are supported.
 5. Open a bounded preview of each real image and show same-Sample Analytical
    Points first, with not-yet-placed points above placed points.
 6. Choose Point, Rectangle or Square and place it manually. The viewport turns
@@ -40,3 +41,11 @@ assignment, manual point-placement and final-review states.
 - Folder enumeration is deterministic, does not follow filesystem links and is
   capped at 5,000 supported images before Python inspection begins.
 - Executable `.bat` files are not images and never appear in the picker.
+- Add files or folders to the current queue without losing reviewed assignments
+  or saved placements on unchanged sources; remove checked entries to resolve
+  duplicate blocking. Show source paths to distinguish equal filenames.
+- Navigation between Images, Import and Analyses preserves the current image
+  draft in memory. Application-restart persistence is not part of this slice.
+- A source whose fingerprint changed loses its former confirmation and spatial
+  placements and must be reviewed again. Cancelled/empty folder selection leaves
+  the current queue intact.

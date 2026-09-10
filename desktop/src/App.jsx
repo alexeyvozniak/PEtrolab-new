@@ -27,8 +27,8 @@ import {
   listAnalyticalPoints,
   listProjectMineralIdentifications,
   pickImportFile,
-  pickMediaFiles,
   pickMediaFolder,
+  pickMediaFiles,
   retractLastImport,
   stageImportFile,
 } from "./desktopApi";
@@ -346,7 +346,9 @@ export function App() {
     }
   };
 
-  const inspectImageBatch = async (paths) => {
+  const inspectImageBatch = async (newPaths) => {
+    const existingPaths = (mediaInspection?.items || []).map((item) => item.source_path);
+    const paths = [...new Set([...existingPaths, ...newPaths])];
     setActivity("Проверяю форматы, размеры и отпечатки изображений…");
     const [result, pointProjection] = await Promise.all([
       inspectMediaSources(paths).then(unwrap),
@@ -358,15 +360,10 @@ export function App() {
     setScreen("Изображения");
   };
 
-  const mayReplaceImageBatch = () => !mediaInspection || window.confirm(
-    "Заменить текущий пакет изображений? Несохранённые назначения и размещения точек будут сброшены.",
-  );
-
   const chooseImages = async () => {
     if (busy || !desktopRuntimeAvailable) return;
-    if (!mayReplaceImageBatch()) return;
     setBusy(true);
-    setActivity("Выберите файлы изображений…");
+    setActivity("Выберите изображения…");
     setError("");
     setSuccess("");
     try {
@@ -383,19 +380,42 @@ export function App() {
 
   const chooseImageFolder = async () => {
     if (busy || !desktopRuntimeAvailable) return;
-    if (!mayReplaceImageBatch()) return;
     setBusy(true);
     setActivity("Выберите папку с изображениями…");
     setError("");
     setSuccess("");
     try {
       const paths = await pickMediaFolder();
-      if (paths === null) return;
-      if (!paths?.length) {
-        setError("В выбранной папке и её вложенных папках нет PNG, JPEG, TIFF или BMP.");
-        return;
+      if (!paths) return;
+      if (!paths.length) {
+        throw new Error("В выбранной папке и вложенных папках нет PNG, JPEG, TIFF или BMP.");
       }
       await inspectImageBatch(paths);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const removeImagesFromBatch = async (sourcePaths) => {
+    if (busy || !sourcePaths?.length) return;
+    const removed = new Set(sourcePaths);
+    const remaining = (mediaInspection?.items || [])
+      .map((item) => item.source_path)
+      .filter((path) => !removed.has(path));
+    setMediaPlan(null);
+    if (!remaining.length) {
+      setMediaInspection(null);
+      return;
+    }
+    setBusy(true);
+    setActivity("Обновляю очередь изображений…");
+    setError("");
+    try {
+      const result = unwrap(await inspectMediaSources(remaining));
+      setMediaInspection(result);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -511,10 +531,8 @@ export function App() {
             <p>Источников: <b>{project.source_count}</b> · импортов: <b>{project.import_batch_count}</b> · анализов: <b>{project.total}</b></p>
           </div>
           <div className="top-actions">
-            {screen === "Изображения" ? <>
-              <button className="outline-button" onClick={chooseImages} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? "Начать новый пакет из выбранных файлов" : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> Файлы</button>
-              <button className="outline-button" onClick={chooseImageFolder} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? "Начать новый пакет из изображений в папке" : "Полный импорт доступен в установленном PetroLab Desktop"}><FolderOpen size={18} /> Папка</button>
-            </> : <button className="outline-button" onClick={startNewImport} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> Добавить данные</button>}
+            {screen === "Изображения" && <button className="outline-button" onClick={chooseImageFolder} disabled={busy || !desktopRuntimeAvailable} title="Добавить изображения из папки и вложенных папок"><FolderOpen size={18} /> Папка</button>}
+            <button className="outline-button" onClick={screen === "Изображения" ? chooseImages : startNewImport} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> {screen === "Изображения" ? "Добавить изображения" : "Добавить данные"}</button>
             <button className="icon-button" disabled title="Настройки будут подключены позже"><GearSix size={21} /></button>
           </div>
         </header>
@@ -595,21 +613,22 @@ export function App() {
           />
         )}
 
-        {screen === "Изображения" && (
+        {(screen === "Изображения" || mediaInspection) && <div hidden={screen !== "Изображения"} className="image-workspace-container">
           <ImagesWorkspace
             inspection={mediaInspection}
             plan={mediaPlan}
             points={mediaPoints}
             busy={busy}
-            onChoose={chooseImages}
+            onChooseFiles={chooseImages}
             onChooseFolder={chooseImageFolder}
+            onRemove={removeImagesFromBatch}
             onPreview={loadMediaPreview}
             onPlan={planImages}
             onApply={importImages}
             onCancel={cancelImageImport}
             onInvalidatePlan={() => setMediaPlan(null)}
           />
-        )}
+        </div>}
       </section>
     </main>
   );
