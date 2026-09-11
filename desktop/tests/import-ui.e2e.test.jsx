@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-const uiState = vi.hoisted(() => ({ imported: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false }));
+const uiState = vi.hoisted(() => ({ imported: false, mediaImported: false, mediaPlacementCount: 0, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false }));
 
 vi.mock("../src/desktopApi", () => {
   const recipe = {
@@ -125,6 +125,43 @@ vi.mock("../src/desktopApi", () => {
       measurements: { SiO2: { raw_token: "39.8", unit: "wt.%", source_cell: "C3" } },
     }],
   };
+  const mediaInspection = {
+    items: ["BSE", "PPL", "XPL"].map((type) => ({
+      source_path: `C:/fixtures/KIV-2_A_${type}_01.tif`,
+      display_name: `KIV-2_A_${type}_01.tif`,
+      source_fingerprint: `fingerprint-${type}`,
+      mime_type: "image/tiff",
+      format: "tiff",
+      width_px: 640,
+      height_px: 480,
+      suggested_media_type: type,
+      suggested_sample_name: "KIV-2",
+      suggested_thin_section_name: "KIV-2-A",
+      suggestion_basis: ["filename_modality_token", "filename_prefix", "filename_section_prefix"],
+    })),
+    duplicate_groups: [],
+  };
+  const analyticalPoints = {
+    total: 2,
+    sample_names: ["KIV-2", "OTHER"],
+    items: [{
+      analytical_point_id: "point-kiv-2-p07",
+      point_name: "P-07",
+      sample_id: "sample-kiv-2",
+      sample_name: "KIV-2",
+      analysis_ids: ["analysis-ui-1", "analysis-la-87"],
+      methods: ["EPMA", "LA-ICP-MS"],
+      placement_count: 0,
+    }, {
+      analytical_point_id: "point-other-p03",
+      point_name: "P-03",
+      sample_id: "sample-other",
+      sample_name: "OTHER",
+      analysis_ids: ["analysis-other-3"],
+      methods: ["EPMA"],
+      placement_count: 0,
+    }],
+  };
   const api = {
     isPetrolabDesktop: () => true,
     getProjectDatabasePath: vi.fn().mockResolvedValue("C:/PetroLab/project.sqlite"),
@@ -154,6 +191,44 @@ vi.mock("../src/desktopApi", () => {
       } };
     }),
     pickImportFile: vi.fn().mockImplementation(async () => uiState.mode === "clean" ? "C:/fixtures/ui-clean-table.csv" : "C:/fixtures/complex-workbook.xlsx"),
+    pickMediaFiles: vi.fn().mockResolvedValue(mediaInspection.items.map((item) => item.source_path)),
+    pickMediaFolder: vi.fn().mockResolvedValue(mediaInspection.items.map((item) => item.source_path)),
+    inspectMediaSources: vi.fn().mockImplementation(async (paths) => ({ result: {
+      items: mediaInspection.items.filter((item) => paths.includes(item.source_path)),
+      duplicate_groups: [],
+    } })),
+    listAnalyticalPoints: vi.fn().mockResolvedValue({ result: analyticalPoints }),
+    getMediaPreview: vi.fn().mockImplementation(async (sourcePath) => ({ result: {
+      source_path: sourcePath,
+      source_fingerprint: mediaInspection.items.find((item) => item.source_path === sourcePath).source_fingerprint,
+      source_width_px: 640,
+      source_height_px: 480,
+      preview_width_px: 640,
+      preview_height_px: 480,
+      preview_data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+    } })),
+    createMediaImportPlan: vi.fn().mockImplementation(async (_path, assignments) => {
+      uiState.mediaPlacementCount = assignments.reduce((count, assignment) => count + assignment.placements.length, 0);
+      return { result: {
+        schema_version: 1,
+        semantic_fingerprint: "media-plan",
+        items: assignments.map((assignment, index) => ({
+          ...mediaInspection.items[index],
+          ...assignment,
+          media_asset_id: `asset-${index}`,
+          existing_media_asset_id: null,
+          placements: assignment.placements.map((placement, placementIndex) => {
+            const point = analyticalPoints.items.find((item) => item.analytical_point_id === placement.analytical_point_id);
+            return { ...placement, spatial_annotation_id: `annotation-${index}-${placementIndex}`, point_name: point.point_name, point_sample_name: point.sample_name };
+          }),
+        })),
+        warnings: assignments.filter((assignment) => assignment.placements.length === 0).map((assignment) => ({ code: "UNPLACED_MEDIA", message: `${assignment.source_path} has no placed Analytical Points.` })),
+      } };
+    }),
+    applyMediaImportPlan: vi.fn().mockImplementation(async () => {
+      uiState.mediaImported = true;
+      return { result: { created_media_asset_count: 3, reused_media_asset_count: 0, spatial_annotation_count: uiState.mediaPlacementCount } };
+    }),
     stageImportFile: vi.fn().mockImplementation(async (path) => ({ local_path: `C:/PetroLab/staging/${path.split("/").pop()}`, original_path: path })),
     clearImportStaging: vi.fn().mockResolvedValue(undefined),
     inspectImportSource: vi.fn().mockImplementation(async () => ({ result: uiState.mode === "clean"
@@ -242,17 +317,193 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { applyImportPlan, pickImportFile, createImportPlan } from "../src/desktopApi";
+import { applyImportPlan, pickImportFile, pickMediaFiles, pickMediaFolder, inspectMediaSources, createMediaImportPlan, createImportPlan } from "../src/desktopApi";
 import { App } from "../src/App";
 
 afterEach(() => {
   uiState.imported = false;
+  uiState.mediaImported = false;
+  uiState.mediaPlacementCount = 0;
   uiState.mode = "clean";
   uiState.detailsEnabled = true;
   uiState.unitApplied = false;
   uiState.duplicatesReviewed = false;
   vi.clearAllMocks();
   cleanup();
+});
+
+test("user confirms an image batch, places same- and cross-sample points, reviews and imports", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  expect(screen.getAllByText("KIV-2_A_BSE_01.tif").length).toBeGreaterThan(1);
+  expect(screen.getByText("0 готово")).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  expect(await screen.findByText("3 готово")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+
+  await user.click(await screen.findByRole("button", { name: /^2\. KIV-2_A_PPL_01\.tif/ }));
+  expect(await screen.findByText("2 / 3")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Другой Sample…" }));
+  await user.click(screen.getByRole("button", { name: /P-03 EPMA OTHER/ }));
+  fireEvent.keyDown(screen.getByRole("application"), { key: "Enter" });
+  const crossSampleSave = await screen.findByRole("button", { name: "Сохранить привязку" });
+  expect(crossSampleSave.disabled).toBe(true);
+  await user.selectOptions(screen.getByRole("combobox", { name: "Причина межобразцового исключения" }), "image_covers_other_sample");
+  await user.click(crossSampleSave);
+
+  await user.click(screen.getByRole("button", { name: /^1\. KIV-2_A_BSE_01\.tif/ }));
+  expect(await screen.findByText("1 / 3")).toBeTruthy();
+  await user.click(await screen.findByRole("button", { name: /P-07/ }));
+  fireEvent.keyDown(await screen.findByRole("application"), { key: "Enter" });
+  expect(await screen.findByText("Point · 320, 240 px")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Сохранить привязку" }));
+  expect(await screen.findByText("Размещение сохранено в черновике")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Далее: проверка" }));
+  expect(await screen.findByRole("heading", { name: "Проверка импорта изображений" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: /Предпросмотр KIV-2_A_BSE_01\.tif/ })).toBeTruthy();
+  expect(screen.queryByRole("application")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Завершить импорт изображений" }));
+
+  await waitFor(() => expect(uiState.mediaImported).toBe(true));
+  expect(await screen.findByRole("heading", { name: "Добавить изображения" })).toBeTruthy();
+  expect(screen.getByText(/Импортировано изображений: 3/)).toBeTruthy();
+  expect(screen.getByText(/Пространственных точек: 2/)).toBeTruthy();
+});
+
+test("user can add a folder batch, preserve per-file modalities and remove the queue", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать папку" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  expect(pickMediaFolder).toHaveBeenCalledOnce();
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+
+  const sample = screen.getByRole("textbox", { name: "Sample" });
+  const section = screen.getByRole("textbox", { name: "Thin Section" });
+  await user.clear(sample);
+  await user.type(sample, "KIV-9");
+  await user.clear(section);
+  await user.type(section, "KIV-9-A");
+  await user.click(screen.getByRole("button", { name: "Sample и шлиф → выбранным (3)" }));
+
+  const table = screen.getByRole("table", { name: "Назначения импортируемых изображений" });
+  expect(within(table).getAllByText("BSE").length).toBeGreaterThan(0);
+  expect(within(table).getAllByText("PPL").length).toBeGreaterThan(0);
+  expect(within(table).getAllByText("XPL").length).toBeGreaterThan(0);
+  expect(screen.getByRole("button", { name: "Продолжить: точки" }).disabled).toBe(false);
+
+  await user.click(screen.getByRole("button", { name: "Убрать из очереди" }));
+  expect(await screen.findByRole("heading", { name: "Добавить изображения" })).toBeTruthy();
+});
+
+test("image assignments and placements survive navigation, appending and partial removal", async () => {
+  const user = userEvent.setup();
+  const paths = ["BSE", "PPL", "XPL"].map((type) => `C:/fixtures/KIV-2_A_${type}_01.tif`);
+  pickMediaFiles.mockResolvedValueOnce(paths.slice(0, 1));
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await user.click(await screen.findByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  await user.click(await screen.findByRole("button", { name: /P-07/ }));
+  fireEvent.keyDown(await screen.findByRole("application"), { key: "Enter" });
+  await user.click(screen.getByRole("button", { name: "Сохранить привязку" }));
+
+  await user.click(screen.getByRole("button", { name: "Анализы" }));
+  await screen.findByRole("heading", { name: "Анализы" });
+  await user.click(screen.getByRole("button", { name: "Изображения" }));
+  expect(await screen.findByRole("button", { name: "Размещение P-07" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Добавить изображения" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  expect(inspectMediaSources).toHaveBeenLastCalledWith(paths);
+  expect(screen.getByText("1 готово")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать KIV-2_A_BSE_01.tif" }));
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать KIV-2_A_PPL_01.tif" }));
+  await user.click(screen.getByRole("button", { name: "Убрать из очереди" }));
+  await waitFor(() => expect(screen.getByText("2 готово")).toBeTruthy());
+  expect(inspectMediaSources).toHaveBeenLastCalledWith(paths.slice(0, 2));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  await user.click(screen.getByRole("button", { name: "Далее: проверка" }));
+  await screen.findByRole("heading", { name: "Проверка импорта изображений" });
+  const assignments = createMediaImportPlan.mock.lastCall[1];
+  expect(assignments.map((item) => item.source_path)).toEqual(paths.slice(0, 2));
+  expect(assignments[0].placements).toEqual([expect.objectContaining({
+    analytical_point_id: "point-kiv-2-p07", geometry: { kind: "point", x_px: 320, y_px: 240 },
+  })]);
+  expect(assignments[1].placements).toEqual([]);
+  expect(assignments[0]).not.toHaveProperty("_source_fingerprint");
+});
+
+test("changed source resets only its assignment and duplicate removal unblocks the batch", async () => {
+  const user = userEvent.setup();
+  const paths = ["BSE", "PPL", "XPL"].map((type) => `C:/fixtures/KIV-2_A_${type}_01.tif`);
+  const baseline = (await inspectMediaSources(paths)).result;
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await user.click(await screen.findByRole("button", { name: "Подтвердить предложения" }));
+  inspectMediaSources.mockResolvedValueOnce({ result: {
+    ...baseline,
+    items: baseline.items.map((item, index) => index === 0 ? { ...item, source_fingerprint: "changed" } : item),
+    duplicate_groups: [paths.slice(0, 2)],
+  } });
+  await user.click(screen.getByRole("button", { name: "Добавить папку" }));
+  await waitFor(() => expect(screen.getByText("2 готово")).toBeTruthy());
+  expect(screen.getByRole("status").textContent).toContain("Исходные файлы изменились: KIV-2_A_BSE_01.tif");
+  expect(screen.getByRole("button", { name: "Продолжить: точки" }).disabled).toBe(true);
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  expect(screen.getByRole("button", { name: "Продолжить: точки" }).disabled).toBe(true);
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать KIV-2_A_PPL_01.tif" }));
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать KIV-2_A_XPL_01.tif" }));
+  await user.click(screen.getByRole("button", { name: "Убрать из очереди" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Продолжить: точки" }).disabled).toBe(false));
+  expect(screen.queryByText(/В очереди есть одинаковые/)).toBeNull();
+});
+
+test("custom image type survives appending while bulk Sample leaves storage modes unchanged", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await user.click(await screen.findByRole("button", { name: "Подтвердить предложения" }));
+  await user.selectOptions(screen.getByRole("combobox", { name: "Тип изображения" }), "__custom__");
+  await user.type(screen.getByRole("textbox", { name: "Название типа" }), "CL");
+  await user.selectOptions(screen.getByRole("combobox", { name: "Хранение" }), "linked_external");
+  await user.click(screen.getByRole("button", { name: "Подтвердить это изображение" }));
+  await user.click(screen.getByRole("button", { name: "Sample и шлиф → выбранным (3)" }));
+  await user.click(screen.getByRole("button", { name: "Добавить файлы" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Продолжить: точки" }).disabled).toBe(false));
+  expect(screen.getByRole("textbox", { name: "Название типа" }).value).toBe("CL");
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  await user.click(screen.getByRole("button", { name: "Далее: проверка" }));
+  await screen.findByRole("heading", { name: "Проверка импорта изображений" });
+  const assignments = createMediaImportPlan.mock.lastCall[1];
+  expect(assignments.map((item) => item.media_type)).toEqual(["CL", "PPL", "XPL"]);
+  expect(assignments.map((item) => item.ownership_mode)).toEqual(["linked_external", "managed_copy", "managed_copy"]);
+});
+
+test("cancelled and empty folder choices preserve reviewed images", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await user.click(await screen.findByRole("button", { name: "Подтвердить предложения" }));
+  pickMediaFolder.mockResolvedValueOnce(null);
+  await user.click(screen.getByRole("button", { name: "Добавить папку" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Продолжить: точки" }).disabled).toBe(false));
+  pickMediaFolder.mockResolvedValueOnce([]);
+  await user.click(screen.getByRole("button", { name: "Добавить папку" }));
+  expect(await screen.findByText("В выбранной папке и вложенных папках нет PNG, JPEG, TIFF или BMP.")).toBeTruthy();
+  expect(screen.getByText("3 готово")).toBeTruthy();
+  expect(inspectMediaSources).toHaveBeenCalledTimes(1);
 });
 
 test("user clicks through Clean Table import and sees the saved Analysis", async () => {

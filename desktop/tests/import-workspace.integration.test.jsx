@@ -11,7 +11,9 @@ import { join, resolve } from "node:path";
 const bridge = vi.hoisted(() => ({ invoke: null }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args) => bridge.invoke(...args) }));
 import { App } from "../src/App";
-configure({ asyncUtilTimeout: 5000 });
+// A cold Windows runner can need more than five seconds to start the real
+// Python sidecar and inspect the first workbook. Assertions remain unchanged.
+configure({ asyncUtilTimeout: 10000 });
 
 let child, folder, first, second, queue, original, pending, lines, requests;
 beforeEach(async () => {
