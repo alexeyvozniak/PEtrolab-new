@@ -8,8 +8,20 @@ from .mineral_reference import MINERALS
 from .alkaline_mineral_reference import ALKALINE_MINERALS
 from .mineral_recognition_extended import recognize_mineral_extended, EXTENDED_RULESET_VERSION
 
-INPUT_GATE_VERSION = 'import-wt-percent-complete-core-1'
+INPUT_GATE_VERSION = 'import-wt-percent-complete-core-2'
+LABEL_VERSION = 'mineral-labels-2026-09-11'
 REQUIRED_CORE = {'SiO2', 'Al2O3', 'MgO', 'CaO', 'Na2O', 'K2O'}
+CONTROLLED_LABELS = {m.name.casefold(): m.name for m in (*MINERALS, *ALKALINE_MINERALS)}
+CONTROLLED_LABELS.update({m.chemical_target.casefold(): m.chemical_target for m in (*MINERALS, *ALKALINE_MINERALS)})
+LABEL_ALIASES = {
+    'флогопит': 'phlogopite', 'phl': 'phlogopite', 'биотит': 'biotite', 'bt': 'biotite',
+    'диопсид': 'diopside', 'cpx': 'clinopyroxene', 'клинопироксен': 'clinopyroxene',
+    'opx': 'orthopyroxene', 'ортопироксен': 'orthopyroxene', 'оливин': 'olivine',
+    'ol': 'olivine', 'гранат': 'garnet', 'grt': 'garnet', 'андрадит': 'andradite',
+    'апатит': 'apatite', 'ap': 'apatite', 'нефелин': 'nepheline', 'ne': 'nepheline',
+    'перовскит': 'perovskite', 'кварц': 'quartz', 'qtz': 'quartz',
+    'форстерит': 'forsterite', 'аннит': 'annite', 'мусковит': 'muscovite',
+}
 REPORTED_TARGETS = {m.name.casefold(): m.chemical_target for m in (*MINERALS, *ALKALINE_MINERALS)}
 REPORTED_TARGETS.update({m.chemical_target.casefold(): m.chemical_target for m in (*MINERALS, *ALKALINE_MINERALS)})
 
@@ -27,8 +39,18 @@ def _reported_text(reported):
 
 def reported_target(reported):
     """Resolve reported text to a controlled target without changing the text."""
-    text = _reported_text(reported)
+    text = controlled_label(reported)
     return REPORTED_TARGETS.get(text.casefold()) if text else None
+
+
+def controlled_label(value):
+    text = _reported_text(value)
+    key = text.casefold() if text else ''
+    return CONTROLLED_LABELS.get(LABEL_ALIASES.get(key, key).casefold())
+
+
+def mineral_options():
+    return sorted(set(CONTROLLED_LABELS.values()))
 
 
 def fingerprint(value):
@@ -54,7 +76,7 @@ def _decision_input(record):
                 'value_status', 'reported_fe_form', 'fe_handling',
             )
         })
-    return [evidence, _reported_text(record.get('reported_mineral')), EXTENDED_RULESET_VERSION, INPUT_GATE_VERSION]
+    return [evidence, _reported_text(record.get('reported_mineral')), EXTENDED_RULESET_VERSION, INPUT_GATE_VERSION, LABEL_VERSION]
 
 
 def verify_record(record, accepted=None):
@@ -63,6 +85,8 @@ def verify_record(record, accepted=None):
         accepted = record.get('mineral_assignment')
     inputs = {}
     problems = []
+    unavailable_volatiles = []
+    seen_fields = set()
     for measurement in evidence:
         field = measurement.get('field') if isinstance(measurement, dict) else None
         if not isinstance(field, str) or not field.strip():
@@ -70,11 +94,15 @@ def verify_record(record, accepted=None):
             continue
         if measurement.get('unit') != 'wt.%':
             continue
-        if field in inputs:
+        if field in seen_fields:
             problems.append('duplicate_component')
+        seen_fields.add(field)
         if measurement.get('reported_fe_form') == 'unresolved':
             problems.append('unresolved_iron_form')
         if measurement.get('value_status') != 'numeric':
+            if field in {'F', 'Cl'} and measurement.get('value_status') in {'missing', 'below_detection_limit'}:
+                unavailable_volatiles.append(field)
+                continue
             problems.append('missing_or_censored_input')
             continue
         try:
@@ -97,9 +125,18 @@ def verify_record(record, accepted=None):
               'prediction': None, 'confidence': 'unresolved', 'candidates': [],
               'input_fingerprint': input_hash, 'ruleset_version': EXTENDED_RULESET_VERSION,
               'input_gate_version': INPUT_GATE_VERSION, 'accepted': None,
+              'label_version': LABEL_VERSION,
+              'missing_components': sorted(REQUIRED_CORE - inputs.keys()) + ([] if {'FeO', 'FeOt', 'Fe2O3', 'Fe2O3t'} & inputs.keys() else ['FeO / FeOt / Fe2O3 / Fe2O3t']),
+              'excluded_inputs': sorted(set(unavailable_volatiles)),
               'issues': sorted(set(problems)), 'status': 'insufficient_input'}
     if not problems:
         prediction = recognize_mineral_extended(inputs)
+        if unavailable_volatiles and prediction.target != 'olivine':
+            result['issues'].append('missing_or_censored_input')
+            prediction = None
+    else:
+        prediction = None
+    if prediction is not None:
         result.update(prediction=prediction.target or None, confidence=prediction.confidence,
                       candidates=[asdict(candidate) for candidate in prediction.candidates],
                       reasons=list(prediction.reasons), reference_version=prediction.reference_version,
@@ -115,12 +152,24 @@ def verify_record(record, accepted=None):
             result['status'] = 'conflict'
         else:
             result['status'] = 'unrecognized_reported'
-    if accepted:
+    if accepted and accepted.get('origin') == 'user_assigned':
+        # Range annotations are explicit interpretations, not classifier runs.
+        # Keep the stored annotation unchanged and expose its controlled label.
+        result['manual_assignment'] = accepted
+        label = controlled_label(accepted)
+        if label:
+            result['accepted'] = {**accepted, 'target': label}
+            result['status'] = 'manually_assigned'
+        else:
+            result['status'] = 'manual_unresolved'
+            result['issues'].append('manual_label_unrecognized')
+    elif accepted:
         if accepted.get('input_fingerprint') == input_hash and accepted.get('ruleset_version') == EXTENDED_RULESET_VERSION:
             result['accepted'] = accepted
             result['status'] = 'verified'
         else:
             result['issues'].append('accepted_assignment_stale')
+            result['status'] = 'stale_assignment'
     result['reported_target'] = reported_target(reported)
     return result
 
@@ -128,7 +177,9 @@ def verify_record(record, accepted=None):
 def add_verification(records, recipe):
     accepted = recipe['global_decisions'].get('mineral_acceptances', {})
     for record in records:
-        verification = verify_record(record, accepted.get(record['preview_id']))
+        manual = record.get('mineral_assignment')
+        decision = manual if manual and manual.get('origin') == 'user_assigned' else accepted.get(record['preview_id'])
+        verification = verify_record(record, decision)
         record['mineral_verification'] = verification
         if verification.get('accepted'):
             record['mineral_assignment'] = verification['accepted']

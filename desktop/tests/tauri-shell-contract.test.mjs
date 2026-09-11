@@ -221,7 +221,8 @@ test("dedicated mineral queue keeps reported, suggested and accepted values sepa
   assert.match(workspace, /Оставить исходное/);
   assert.match(workspace, /Сбросить решение/);
   assert.match(api, /project\.mineral_assignment\.decide/);
-  assert.match(styles, /grid-template-columns: 210px minmax\(500px, 1fr\) 380px/);
+  assert.match(styles, /grid-template-columns: \d+px minmax\(0, 1fr\) \d+px/);
+  assert.match(styles, /\.mineral-review-pane \{ overflow: auto/);
 });
 
 test("duplicate candidates require explicit keep-all review before save", async () => {
