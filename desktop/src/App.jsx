@@ -501,6 +501,7 @@ export function App() {
 
         {screen === "Минералы" && (
           <MineralsWorkspace
+            databasePath={databasePath}
             project={project}
             busy={busy}
             onRefresh={() => refreshAnalyses().catch((caught) => setError(caught.message))}

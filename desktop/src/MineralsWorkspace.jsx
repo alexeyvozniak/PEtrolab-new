@@ -15,6 +15,7 @@ import {
   reportedMineral,
 } from "./mineralUi";
 import "./mineralsWorkspace.css";
+import { FormulaPanel } from './FormulaPanel';
 
 const ATTENTION_STATUSES = new Set([
   "conflict",
@@ -41,7 +42,7 @@ function originLabel(analysis) {
   return `${analysis.source_name} · ${analysis.sheet_name} · ${position}`;
 }
 
-function ReviewPane({ analysis, busy, onDecide, options }) {
+function ReviewPane({ analysis, busy, onDecide, options, databasePath }) {
   const [manualTarget, setManualTarget] = useState('');
   const [reason, setReason] = useState('');
   if (!analysis) {
@@ -74,6 +75,11 @@ function ReviewPane({ analysis, busy, onDecide, options }) {
       </dl>
       <p className="mineral-scope-note">Совпадение химической группы не определяет минеральный вид. Ручное назначение не подтверждает качество состава.</p>
     </section>
+
+    <details className="mineral-formula-section">
+      <summary>Формула · оливин, 4 O</summary>
+      <FormulaPanel key={JSON.stringify([analysis.analysis_id, verification.input_fingerprint, verification.accepted])} analysis={analysis} databasePath={databasePath} />
+    </details>
 
     <section>
       <h3>Кандидаты классификатора</h3>
@@ -114,7 +120,7 @@ function ReviewPane({ analysis, busy, onDecide, options }) {
   </aside>;
 }
 
-export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMore, onAddData }) {
+export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMore, onAddData, databasePath }) {
   const analyses = project.analyses || [];
   const [queue, setQueue] = useState("attention");
   const [query, setQuery] = useState("");
@@ -151,7 +157,7 @@ export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMo
       <div className="mineral-queue-divider">По статусу</div>
       {Object.entries(counts).sort(([left], [right]) => mineralStatusLabel(left).localeCompare(mineralStatusLabel(right), "ru")).map(([status, count]) => <button className={queue === `status:${status}` ? "active" : ""} type="button" key={status} onClick={() => setQueue(`status:${status}`)}><span>{mineralStatusLabel(status)}</span><b>{count}</b></button>)}
       <div className="mineral-queue-note"><ShieldCheck size={18} /><p>Название из файла, предложение правил и принятое решение хранятся раздельно.</p></div>
-      <p className="mineral-scope-note">Пересчёт формул ещё не подключён. Назначение минерала не запускает расчёт.</p>
+      <p className="mineral-scope-note">Доступен первый пересчёт оливина на 4 O. Метод и режим Fe выбираются явно; другие методы ещё не подключены.</p>
     </aside>
 
     <main className="mineral-list-pane">
@@ -177,6 +183,6 @@ export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMo
       {project.has_more && <button className="minerals-load-more" type="button" onClick={onLoadMore} disabled={busy}>Загрузить ещё анализы</button>}
     </main>
 
-    <ReviewPane key={focused?.analysis_id} analysis={focused} busy={busy} onDecide={onDecide} options={project.mineral_options || []} />
+    <ReviewPane key={focused?.analysis_id} analysis={focused} busy={busy} onDecide={onDecide} options={project.mineral_options || []} databasePath={databasePath} />
   </div>;
 }

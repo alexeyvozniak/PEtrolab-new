@@ -449,11 +449,12 @@ def list_project_analyses(
     limit: int = 500,
     offset: int = 0,
     analysis_id: str | None = None,
+    _connection=None,
 ) -> dict[str, Any]:
     """Return active Analysis/Measurement rows plus lossless source metadata."""
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))
-    connection = open_project(database_path)
+    connection = _connection if _connection is not None else open_project(database_path)
     try:
         active_filter = _active_import_filter()
         identity_filter = " AND a.analysis_id = ?" if analysis_id else ""
@@ -527,7 +528,7 @@ def list_project_analyses(
                 source_metadata[key] = metadata["raw_token"]
 
             measurement_rows = connection.execute(
-                """SELECT canonical_field, unit, raw_token, qualifier, detection_limit,
+                """SELECT measurement_id, canonical_field, unit, raw_token, qualifier, detection_limit,
                           source_column_name, source_column_index, measurement_set, method, source_cell,
                           value_status, reported_fe_form, fe_handling
                    FROM measurement WHERE analysis_id = ? ORDER BY source_column_index, rowid""",
@@ -535,6 +536,7 @@ def list_project_analyses(
             ).fetchall()
             measurement_list = [
                 {
+                    "measurement_id": measurement["measurement_id"],
                     "field": measurement["canonical_field"],
                     "raw_token": measurement["raw_token"],
                     "unit": measurement["unit"],
@@ -632,7 +634,8 @@ def list_project_analyses(
             "analyses": result,
         }
     finally:
-        connection.close()
+        if _connection is None:
+            connection.close()
 
 
 def list_project_mineral_identifications(database_path: str | Path, limit: int = 500, offset: int = 0) -> dict[str, Any]:

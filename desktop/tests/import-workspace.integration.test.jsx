@@ -6,14 +6,14 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 
 const bridge = vi.hoisted(() => ({ invoke: null }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args) => bridge.invoke(...args) }));
 import { App } from "../src/App";
-configure({ asyncUtilTimeout: 5000 });
+configure({ asyncUtilTimeout: 15000 });
 
-let child, folder, first, second, queue, original, pending, lines, requests;
+let child, folder, first, second, queue, original, pending, lines, requests, stopService;
 beforeEach(async () => {
   folder = await mkdtemp(join(tmpdir(), "petrolab-workspace-ui-"));
   first = join(folder, "first.csv"); second = join(folder, "second.csv");
@@ -23,15 +23,28 @@ beforeEach(async () => {
   queue = [first, second]; pending = new Map(); requests = [];
   child = spawn("python", ["-m", "petrolab.ndjson_service"], {
     cwd: resolve(process.cwd(), ".."), windowsHide: true,
-    env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+    env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8",
+      PYTHONPATH: [resolve(process.cwd(), "../src"), process.env.PYTHONPATH].filter(Boolean).join(delimiter) },
   });
+  const service = child;
+  const callbacks = pending;
+  let closingService = false;
+  let stderr = '';
+  service.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); });
+  const rejectPending = error => {
+    for (const callback of callbacks.values()) callback.reject(error);
+    callbacks.clear();
+  };
+  service.on('error', rejectPending);
+  service.stdin.on('error', rejectPending);
+  service.on('exit', code => rejectPending(new Error(`Python service exited (${code}): ${stderr}`)));
+  stopService = () => { closingService = true; service.stdin.end(); };
   lines = createInterface({ input: child.stdout });
   lines.on("line", (line) => {
     const response = JSON.parse(line);
-    const callback = pending.get(response.request_id);
-    if (callback) { pending.delete(response.request_id); callback(response); }
+    const callback = callbacks.get(response.request_id);
+    if (callback) { callbacks.delete(response.request_id); callback.resolve(response); }
   });
-  child.on("error", (error) => { throw error; });
   bridge.invoke = async (command, args) => {
     if (command === "project_database_path") return join(folder, "project.sqlite");
     if (command === "pick_import_file") return queue.shift() || null;
@@ -39,17 +52,23 @@ beforeEach(async () => {
     if (command === "clear_import_staging") return;
     if (command !== "petrolab_command") throw new Error(command);
     requests.push(args.envelope);
-    return new Promise((resolve) => {
-      pending.set(args.envelope.request_id, resolve);
-      child.stdin.write(JSON.stringify(args.envelope) + "\n");
+    if (closingService || service.exitCode !== null) throw new Error('Python service is closed');
+    return new Promise((resolve, reject) => {
+      callbacks.set(args.envelope.request_id, { resolve, reject });
+      service.stdin.write(JSON.stringify(args.envelope) + "\n", error => {
+        if (error) { callbacks.delete(args.envelope.request_id); reject(error); }
+      });
     });
   };
   window.__TAURI_INTERNALS__ = { invoke: () => {} };
-});
+  // Wait for scientific imports/startup before timing user interactions on Windows.
+  await bridge.invoke('petrolab_command', { envelope: { protocol_version: '1.0',
+    request_id: crypto.randomUUID(), command: 'formula.methods.list', payload: {} } });
+}, 60000);
 
 afterEach(async () => {
   cleanup();
-  child.stdin.end();
+  stopService();
   await new Promise((resolve) => { if (child.exitCode !== null) resolve(); else child.once("exit", resolve); });
   lines.close();
   delete window.__TAURI_INTERNALS__;
@@ -163,3 +182,45 @@ test("real Python mineral review separates conflicts and persists only explicit 
   expect(screen.getAllByText("garnet").length).toBeGreaterThan(0);
   expect(await readFile(second, "utf8")).toBe(raw);
 }, 20000);
+
+test('real formula path saves APFU, reopens history and invalidates a changed Fe preview', async () => {
+  await writeFile(second, 'Analysis,Mineral,SiO2 (wt.%),Al2O3 (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%),FeO (wt.%)\nB1,olivine,40,0,50,0,0,0,10\n');
+  const raw = await readFile(second, 'utf8');
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+  await user.click(await enabledButton('2 · Проверить минералы'));
+  await user.click(await enabledButton('Принять группу совпадений'));
+  await user.click(await enabledButton('Сохранить импорт в проект'));
+  await screen.findByRole('heading', { name: 'Анализы' });
+  await user.click(await enabledButton('Минералы'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  await user.click(screen.getByText('Формула · оливин, 4 O'));
+  const fe = await screen.findByRole('combobox', { name: 'Режим железа' });
+  await waitFor(() => expect(fe.disabled).toBe(false));
+  expect(screen.getByRole('button', { name: 'Рассчитать этот анализ' }).disabled).toBe(true);
+  await user.selectOptions(fe, 'all_fe2');
+  await user.click(await enabledButton('Рассчитать этот анализ'));
+  const calculated = await screen.findByRole('table', { name: 'Рассчитанные значения' });
+  expect(within(calculated).getByText('Fo')).toBeTruthy();
+  await user.click(await enabledButton('Сохранить результат формулы'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  await user.click(await enabledButton('Анализы'));
+  await user.click(await enabledButton('Минералы'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  await user.click(screen.getByText('Формула · оливин, 4 O'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  const restoredFe = await screen.findByRole('combobox', { name: 'Режим железа' });
+  await waitFor(() => expect(restoredFe.disabled).toBe(false));
+  await user.selectOptions(restoredFe, 'all_fe2');
+  await user.click(await enabledButton('Рассчитать этот анализ'));
+  await enabledButton('Сохранить результат формулы');
+  await user.selectOptions(restoredFe, 'reported_split');
+  expect(screen.queryByRole('button', { name: 'Сохранить результат формулы' })).toBeNull();
+  await user.click(await enabledButton('Рассчитать этот анализ'));
+  await screen.findByText(/Fe2O3: нет пригодного/);
+  expect(screen.getByRole('button', { name: 'Сохранить результат формулы' }).disabled).toBe(true);
+  expect(requests.filter(r => r.command === 'formula.save')).toHaveLength(1);
+  expect(await readFile(second, 'utf8')).toBe(raw);
+}, 60000);
