@@ -2,8 +2,36 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MineralsWorkspace } from '../src/MineralsWorkspace';
 
 const uiState = vi.hoisted(() => ({ imported: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false }));
+
+test('automatic matches remain pending and manual decisions require a catalog label and reason', async () => {
+  const onDecide = vi.fn();
+  const user = userEvent.setup();
+  const analysis = {analysis_id: 'manual-1', identity: {Analysis: 'A1'}, source_name: 'test.csv', sheet_name: 'Data', source_row_number: 2,
+    reported_mineral: {value: 'olivine'}, mineral_verification: {status: 'consistent', prediction: 'olivine', confidence: 'high', issues: [], candidates: []}};
+  render(<MineralsWorkspace project={{total: 1, analyses: [analysis], mineral_options: ['olivine', 'forsterite']}} busy={false} onDecide={onDecide} />);
+  expect(screen.getByRole('button', {name: 'Требуют решения 1'})).toBeTruthy();
+  expect(screen.getByRole('button', {name: 'Приняты пользователем 0'})).toBeTruthy();
+  await user.click(screen.getByText('Назначить другой минерал'));
+  await user.type(screen.getByLabelText('Минерал из справочника'), 'forsterite');
+  expect(screen.getByRole('button', {name: 'Сохранить ручное назначение'}).disabled).toBe(true);
+  await user.type(screen.getByLabelText('Основание назначения'), 'Проверено по независимым данным');
+  await user.click(screen.getByRole('button', {name: 'Сохранить ручное назначение'}));
+  expect(onDecide).toHaveBeenCalledWith(analysis, 'forsterite', 'Проверено по независимым данным');
+  await user.click(screen.getByRole('button', {name: 'Приняты пользователем 0'}));
+  expect(screen.queryByRole('option')).toBeNull();
+});
+
+test('stale decisions and missing inputs are visible even when rule reasons exist', () => {
+  render(<MineralsWorkspace project={{total: 1, analyses: [{analysis_id: 'stale-1', identity: {Analysis: 'A2'},
+    mineral_verification: {status: 'stale_assignment', prediction: 'olivine', confidence: 'high',
+      issues: ['accepted_assignment_stale'], reasons: ['core_oxides_available'], missing_components: ['K2O'], excluded_inputs: ['F']}}]}} />);
+  expect(screen.getByText(/Ранее принятое решение устарело/)).toBeTruthy();
+  expect(screen.getByText(/не хватает: K2O/)).toBeTruthy();
+  expect(screen.getByRole('button', {name: 'Сбросить решение'})).toBeTruthy();
+});
 
 vi.mock("../src/desktopApi", () => {
   const recipe = {

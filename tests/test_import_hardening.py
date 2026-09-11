@@ -32,7 +32,7 @@ class ImportHardeningTests(unittest.TestCase):
                     connection.execute('INSERT INTO sample (sample_id, sample_name, created_at) VALUES (?, ?, ?)', ('old-sample', 'Keep original label', '2026-09-01T00:00:00Z'))
                     connection.commit()
             with closing(open_project(database)) as connection:
-                self.assertEqual(connection.execute('SELECT project_schema_version FROM project_meta').fetchone()[0], 11)
+                self.assertEqual(connection.execute('SELECT project_schema_version FROM project_meta').fetchone()[0], 12)
                 self.assertEqual(connection.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
                 self.assertEqual(connection.execute('SELECT sample_name FROM sample WHERE sample_id = ?', ('old-sample',)).fetchone()[0], 'Keep original label')
             backups = list(folder.glob('old.sqlite.before-v9-*.bak'))
