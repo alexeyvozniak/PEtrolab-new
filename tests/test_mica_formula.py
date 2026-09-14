@@ -48,6 +48,40 @@ class MicaFormulaTests(unittest.TestCase):
         self.assertIn('Li2O', result['unmeasured'])
         self.assertEqual(result['method_status'], 'draft')
 
+    def test_published_mashhad_g1_biotite_mean(self):
+        # Shabani, Masoudi & Tecce (2010), J. Sci. I. R. Iran 21(4),
+        # Table 2, mean of 56 natural G1 biotite analyses. The paper reports
+        # cations on a doubled 22-oxygen basis; published values below are
+        # divided by two to compare with this method's O10W2 formula unit.
+        composition = {
+            'SiO2': 36.22, 'TiO2': 2.88, 'Al2O3': 16.27,
+            'Fe2O3': 5.08, 'FeO': 15.61, 'MnO': 0.59,
+            'MgO': 9.66, 'BaO': 0.26, 'CaO': 0.07,
+            'Na2O': 0.08, 'K2O': 9.34, 'F': 0.76, 'Cl': 0.01,
+        }
+        expected = {
+            'Si_apfu': 5.48 / 2,
+            'Al_apfu': (2.52 + 0.38) / 2,
+            'Ti_apfu': 0.33 / 2,
+            'Fe3_apfu': 0.58 / 2,
+            'Fe2_apfu': 1.97 / 2,
+            'Mn_apfu': 0.08 / 2,
+            'Mg_apfu': 2.18 / 2,
+            'Ba_apfu': 0.02 / 2,
+            'Ca_apfu': 0.01 / 2,
+            'Na_apfu': 0.02 / 2,
+            'K_apfu': 1.80 / 2,
+            'F_apfu': 0.36 / 2,
+            'Cl_apfu': 0.00 / 2,
+        }
+        result = run(composition, 'reported_split')
+        self.assertEqual(result['status'], 'current', result['errors'])
+        for field, published in expected.items():
+            with self.subTest(field=field):
+                # The source table is rounded to 0.01 on its doubled basis.
+                self.assertAlmostEqual(result['values'][field], published, delta=0.006)
+        self.assertNotIn('OH_est_apfu', result['values'])
+
     def test_independent_annite_and_muscovite(self):
         annite = {'SiO2': 3 * 60.083, 'Al2O3': 0.5 * 101.961, 'MgO': 0,
                   'K2O': 0.5 * 94.195, 'FeO': 3 * 71.844}
