@@ -78,6 +78,9 @@ jobs:
           npm run test:sites
           npm run test:tauri-contract
           npm run test:ui
+      - name: Test Tauri shell
+        working-directory: desktop
+        run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Build Windows installer
         working-directory: desktop
         run: npm run tauri build

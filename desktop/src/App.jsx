@@ -5,6 +5,7 @@ import {
   Database,
   File,
   FileArrowUp,
+  FolderOpen,
   GearSix,
   Info,
   MagnifyingGlass,
@@ -14,18 +15,26 @@ import {
 } from "@phosphor-icons/react";
 import {
   createImportWorkspace, addWorkspaceSources, getImportWorkspace, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
+  applyMediaImportPlan,
   applyImportPlan,
   clearImportStaging,
+  createMediaImportPlan,
+  getMediaPreview,
   getProjectDatabasePath,
+  inspectMediaSources,
   isPetrolabDesktop,
   listProjectAnalyses,
+  listAnalyticalPoints,
   listProjectMineralIdentifications,
   pickImportFile,
+  pickMediaFolder,
+  pickMediaFiles,
   retractLastImport,
   stageImportFile,
 } from "./desktopApi";
 import { ImportWorkspace } from "./ImportWorkspace";
 import { AnalysesWorkspace } from "./AnalysesWorkspace";
+import { ImagesWorkspace } from "./ImagesWorkspace";
 import "./styles.css";
 
 const ANALYSES_PAGE_SIZE = 500;
@@ -37,7 +46,7 @@ const navigation = [
   [Columns, "Образцы", false],
   [Columns, "Минералы", false],
   [Columns, "Связи", false],
-  [File, "Изображения", false],
+  [File, "Изображения", true],
   [Columns, "Построение", false],
   [Columns, "Статистика", false],
   [Columns, "Публикации", false],
@@ -104,6 +113,13 @@ export function App() {
   const [activity, setActivity] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [mediaInspection, setMediaInspection] = useState(null);
+  const [mediaPlan, setMediaPlan] = useState(null);
+  const [mediaPoints, setMediaPoints] = useState({ total: 0, sample_names: [], items: [] });
+
+  const loadMediaPreview = useCallback(async (sourcePathValue) => (
+    unwrap(await getMediaPreview(sourcePathValue))
+  ), []);
 
   const refreshAnalyses = useCallback(async (path = databasePath) => {
     if (!path) return;
@@ -330,6 +346,132 @@ export function App() {
     }
   };
 
+  const inspectImageBatch = async (newPaths) => {
+    const existingPaths = (mediaInspection?.items || []).map((item) => item.source_path);
+    const paths = [...new Set([...existingPaths, ...newPaths])];
+    setActivity("Проверяю форматы, размеры и отпечатки изображений…");
+    const [result, pointProjection] = await Promise.all([
+      inspectMediaSources(paths).then(unwrap),
+      listAnalyticalPoints(databasePath).then(unwrap),
+    ]);
+    setMediaInspection(result);
+    setMediaPoints(pointProjection);
+    setMediaPlan(null);
+    setScreen("Изображения");
+  };
+
+  const chooseImages = async () => {
+    if (busy || !desktopRuntimeAvailable) return;
+    setBusy(true);
+    setActivity("Выберите изображения…");
+    setError("");
+    setSuccess("");
+    try {
+      const paths = await pickMediaFiles();
+      if (!paths?.length) return;
+      await inspectImageBatch(paths);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const chooseImageFolder = async () => {
+    if (busy || !desktopRuntimeAvailable) return;
+    setBusy(true);
+    setActivity("Выберите папку с изображениями…");
+    setError("");
+    setSuccess("");
+    try {
+      const paths = await pickMediaFolder();
+      if (!paths) return;
+      if (!paths.length) {
+        throw new Error("В выбранной папке и вложенных папках нет PNG, JPEG, TIFF или BMP.");
+      }
+      await inspectImageBatch(paths);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const removeImagesFromBatch = async (sourcePaths) => {
+    if (busy || !sourcePaths?.length) return;
+    const removed = new Set(sourcePaths);
+    const remaining = (mediaInspection?.items || [])
+      .map((item) => item.source_path)
+      .filter((path) => !removed.has(path));
+    setMediaPlan(null);
+    if (!remaining.length) {
+      setMediaInspection(null);
+      return;
+    }
+    setBusy(true);
+    setActivity("Обновляю очередь изображений…");
+    setError("");
+    try {
+      const result = unwrap(await inspectMediaSources(remaining));
+      setMediaInspection(result);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const planImages = async (assignments) => {
+    if (busy || !databasePath) return;
+    setBusy(true);
+    setActivity("Проверяю назначения изображений…");
+    setError("");
+    setSuccess("");
+    try {
+      const result = unwrap(await createMediaImportPlan(databasePath, assignments));
+      setMediaPlan(result);
+      const placementCount = result.items.reduce((count, item) => count + item.placements.length, 0);
+      setSuccess(`План проверен: ${result.items.length} изображений, ${placementCount} пространственных связей.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const importImages = async (reviewedPlan) => {
+    if (busy || !databasePath || !reviewedPlan) return;
+    setBusy(true);
+    setActivity("Повторно проверяю файлы и сохраняю изображения…");
+    setError("");
+    setSuccess("");
+    try {
+      const result = unwrap(await applyMediaImportPlan(databasePath, reviewedPlan));
+      setMediaInspection(null);
+      setMediaPlan(null);
+      setMediaPoints({ total: 0, sample_names: [], items: [] });
+      setSuccess(`Импортировано изображений: ${result.created_media_asset_count + result.reused_media_asset_count}. Пространственных точек: ${result.spatial_annotation_count}.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const cancelImageImport = () => {
+    if (busy) return;
+    setMediaInspection(null);
+    setMediaPlan(null);
+    setMediaPoints({ total: 0, sample_names: [], items: [] });
+    setError("");
+    setSuccess("");
+  };
+
 
   const startNewImport = () => {
     if (busy) return;
@@ -379,7 +521,7 @@ export function App() {
             </button>
           ))}
         </nav>
-        <div className="side-footer"><Info size={18} /><span>Сейчас оживлены: импорт и анализы</span></div>
+        <div className="side-footer"><Info size={18} /><span>Оживлены: таблицы, анализы и изображения</span></div>
       </aside>
 
       <section className="workspace">
@@ -389,7 +531,8 @@ export function App() {
             <p>Источников: <b>{project.source_count}</b> · импортов: <b>{project.import_batch_count}</b> · анализов: <b>{project.total}</b></p>
           </div>
           <div className="top-actions">
-            <button className="outline-button" onClick={startNewImport} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> Добавить данные</button>
+            {screen === "Изображения" && <button className="outline-button" onClick={chooseImageFolder} disabled={busy || !desktopRuntimeAvailable} title="Добавить изображения из папки и вложенных папок"><FolderOpen size={18} /> Папка</button>}
+            <button className="outline-button" onClick={screen === "Изображения" ? chooseImages : startNewImport} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> {screen === "Изображения" ? "Добавить изображения" : "Добавить данные"}</button>
             <button className="icon-button" disabled title="Настройки будут подключены позже"><GearSix size={21} /></button>
           </div>
         </header>
@@ -469,6 +612,23 @@ export function App() {
             onLoadMore={loadMoreAnalyses}
           />
         )}
+
+        {(screen === "Изображения" || mediaInspection) && <div hidden={screen !== "Изображения"} className="image-workspace-container">
+          <ImagesWorkspace
+            inspection={mediaInspection}
+            plan={mediaPlan}
+            points={mediaPoints}
+            busy={busy}
+            onChooseFiles={chooseImages}
+            onChooseFolder={chooseImageFolder}
+            onRemove={removeImagesFromBatch}
+            onPreview={loadMediaPreview}
+            onPlan={planImages}
+            onApply={importImages}
+            onCancel={cancelImageImport}
+            onInvalidatePlan={() => setMediaPlan(null)}
+          />
+        </div>}
       </section>
     </main>
   );

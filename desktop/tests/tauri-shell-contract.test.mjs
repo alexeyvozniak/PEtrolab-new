@@ -59,6 +59,47 @@ test("desktop stages selected files locally before the scientific service reads 
   assert.match(workspace, /Отменить/);
 });
 
+test("desktop image import selects a batch with only supported raster extensions", async () => {
+  const shell = await read("src-tauri/src/lib.rs");
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/ImagesWorkspace.jsx");
+  assert.match(shell, /fn pick_media_files/);
+  assert.match(shell, /SUPPORTED_MEDIA_EXTENSIONS[^=]*= \["png", "jpg", "jpeg", "tif", "tiff", "bmp"\]/);
+  assert.match(shell, /\.pick_files\(\)/);
+  assert.match(api, /pick_media_files/);
+  assert.match(app, /inspectMediaSources\(paths\)/);
+  assert.match(api, /analytical_point\.list/);
+  assert.match(api, /media\.preview/);
+  assert.match(app, /listAnalyticalPoints\(databasePath\)/);
+  assert.match(workspace, /Подтвердить предложения/);
+  assert.match(workspace, /Пространственные точки создаются на следующем шаге/);
+  assert.match(workspace, /Point ·/);
+  assert.match(workspace, /Rectangle/);
+  assert.match(workspace, /Square/);
+  assert.match(workspace, /Причина межобразцового исключения/);
+  assert.match(workspace, /Завершить импорт изображений/);
+  assert.match(workspace, /Исходные файлы не изменяются/);
+});
+
+test("desktop image import can collect a folder recursively without following links or accepting batch scripts", async () => {
+  const shell = await read("src-tauri/src/lib.rs");
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/ImagesWorkspace.jsx");
+  assert.match(shell, /async fn pick_media_folder/);
+  assert.match(shell, /fn collect_media_folder/);
+  assert.match(shell, /file_type\.is_symlink\(\)/);
+  assert.match(shell, /pending\.push\(entry\.path\(\)\)/);
+  assert.match(shell, /MAX_MEDIA_BATCH_FILES/);
+  assert.match(shell, /supported_media_path/);
+  assert.doesNotMatch(shell.match(/SUPPORTED_MEDIA_EXTENSIONS[^;]+/)?.[0] || "", /bat/i);
+  assert.match(api, /pick_media_folder/);
+  assert.match(app, /pickMediaFolder\(\)/);
+  assert.match(workspace, /Выбрать папку/);
+  assert.match(workspace, /вложенными папками/);
+});
+
 test("adding import is transactional and keeps the existing queue on failure", async () => {
   const app = await read("src/App.jsx");
   assert.match(app, /newlyStaged && !accepted/);
@@ -262,6 +303,8 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(workflow, /Install and launch packaged Windows app/);
   assert.match(workflow, /smoke_windows_installer\.ps1/);
   assert.match(workflow, /npm run test:ui/);
+  assert.match(workflow, /Test Tauri shell/);
+  assert.match(workflow, /cargo test --manifest-path src-tauri\/Cargo\.toml/);
   assert.match(smoke, /msiexec\.exe/);
   assert.match(smoke, /MainWindowHandle/);
   assert.match(smoke, /petrolab-service/);
