@@ -103,7 +103,7 @@ function SourcePane({ items, assignments, activePath, setActivePath, phase }) {
         const placementCount = assignment?.placements?.length || 0;
         return <button className={focused ? "focused" : ""} type="button" key={item.source_path} onClick={() => setActivePath(item.source_path)}>
           <span className="image-source-icon"><FileImage size={24} weight="duotone" /></span>
-          <span><b>{index + 1}. {item.display_name}</b><small>{item.width_px} × {item.height_px} px · {(item.format || item.mime_type?.split("/").pop() || "image").toUpperCase()}</small><em>{phase === "assignment" ? (assignmentReady(assignment) ? "назначено" : "нужно подтвердить") : {placementCount > 0 ? `${placementCount} размещено` : "Без точек"}</em></span>
+          <span><b>{index + 1}. {item.display_name}</b><small>{item.width_px} × {item.height_px} px · {(item.format || item.mime_type?.split("/").pop() || "image").toUpperCase()}</small><em>{phase === "assignment" ? (assignmentReady(assignment) ? "назначено" : "нужно подтвердить") : (placementCount > 0 ? `${placementCount} размещено` : "Без точек")}</em></span>
         </button>;
       })}
     </div>
