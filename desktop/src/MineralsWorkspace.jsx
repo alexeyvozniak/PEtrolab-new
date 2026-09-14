@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ArrowCounterClockwise,
   CheckCircle,
@@ -124,6 +124,7 @@ export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMo
   const [queue, setQueue] = useState("attention");
   const [query, setQuery] = useState("");
   const [focusedId, setFocusedId] = useState("");
+  const optionRefs = useRef(new Map());
   const counts = useMemo(() => analyses.reduce((result, analysis) => {
     const status = mineralStatus(analysis);
     result[status] = (result[status] || 0) + 1;
@@ -142,6 +143,23 @@ export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMo
     });
   }, [analyses, query, queue]);
   const focused = analyses.find((item) => item.analysis_id === focusedId && filtered.includes(item)) || filtered[0] || null;
+  const moveListFocus = (event, index) => {
+    const isVertical = event.key === "ArrowDown" || event.key === "ArrowUp";
+    const targetIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? filtered.length - 1
+        : index + (event.key === "ArrowDown" ? 1 : -1);
+    if (!isVertical && event.key !== "Home" && event.key !== "End") return;
+    if (targetIndex < 0 || targetIndex >= filtered.length || targetIndex === index) {
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    const target = filtered[targetIndex];
+    setFocusedId(target.analysis_id);
+    optionRefs.current.get(target.analysis_id)?.focus();
+  };
 
   if (project.total === 0) {
     return <div className="minerals-empty"><Flask size={48} weight="duotone" /><h2>Сначала добавь анализы</h2><p>Проверка минералов использует импортированные составы и никогда не меняет исходную таблицу.</p><button className="primary-button" type="button" onClick={onAddData}>Добавить данные</button></div>;
@@ -167,10 +185,23 @@ export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMo
       </div>
       <div className="mineral-list-head"><span>Анализ</span><span>В источнике</span><span>Назначение / предложение</span><span>Статус</span></div>
       <div className="mineral-list" role="listbox" aria-label="Очередь проверки минералов">
-        {filtered.map((analysis) => {
+        {filtered.map((analysis, index) => {
           const verification = analysis.mineral_verification || {};
           const isFocused = focused?.analysis_id === analysis.analysis_id;
-          return <button type="button" role="option" aria-selected={isFocused} className={isFocused ? "focused" : ""} key={analysis.analysis_id} onClick={() => setFocusedId(analysis.analysis_id)}>
+          return <button
+            type="button"
+            role="option"
+            aria-selected={isFocused}
+            tabIndex={isFocused ? 0 : -1}
+            ref={(node) => {
+              if (node) optionRefs.current.set(analysis.analysis_id, node);
+              else optionRefs.current.delete(analysis.analysis_id);
+            }}
+            onKeyDown={(event) => moveListFocus(event, index)}
+            className={isFocused ? "focused" : ""}
+            key={analysis.analysis_id}
+            onClick={() => setFocusedId(analysis.analysis_id)}
+          >
             <span><b>{mainIdentity(analysis)}</b><small>{analysis.identity?.Sample || originLabel(analysis)}</small></span>
             <span>{reportedMineral(analysis) || "—"}</span>
             <span><b>{verification.accepted?.target || verification.prediction || "—"}</b><small>{verification.accepted ? 'принято пользователем' : `предложение · ${mineralConfidenceLabel(verification.confidence)}`}</small></span>
