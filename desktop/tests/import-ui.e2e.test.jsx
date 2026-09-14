@@ -24,6 +24,28 @@ test('automatic matches remain pending and manual decisions require a catalog la
   expect(screen.queryByRole('option')).toBeNull();
 });
 
+test('mineral queue supports roving keyboard focus', async () => {
+  const user = userEvent.setup();
+  const analyses = ['A1', 'A2', 'A3'].map((name) => ({
+    analysis_id: name,
+    identity: { Analysis: name },
+    mineral_verification: { status: 'conflict', prediction: null, confidence: 'unresolved', issues: [], reasons: [] },
+  }));
+
+  render(<MineralsWorkspace project={{total: 3, analyses, mineral_options: []}} busy={false} onDecide={vi.fn()} />);
+  const options = screen.getAllByRole('option');
+
+  await user.click(options[0]);
+  await user.keyboard('{ArrowDown}');
+  expect(document.activeElement).toBe(screen.getAllByRole('option')[1]);
+
+  await user.keyboard('{End}');
+  expect(document.activeElement).toBe(screen.getAllByRole('option')[2]);
+
+  await user.keyboard('{Home}');
+  expect(document.activeElement).toBe(screen.getAllByRole('option')[0]);
+});
+
 test('stale decisions and missing inputs are visible even when rule reasons exist', () => {
   render(<MineralsWorkspace project={{total: 1, analyses: [{analysis_id: 'stale-1', identity: {Analysis: 'A2'},
     mineral_verification: {status: 'stale_assignment', prediction: 'olivine', confidence: 'high',
