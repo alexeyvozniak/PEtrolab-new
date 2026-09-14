@@ -4,11 +4,10 @@ import platform
 from contextlib import closing
 
 from .desktop_workflow import list_project_analyses
-from .formula_methods import METHOD_ID, METHOD_VERSION, fingerprint, method_definition
+from .formula_methods import executable_method, fingerprint, method_definition
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
 from .mineral_verification import reported_target, verify_record
-from .olivine_formula import FE_MODES, calculate_olivine
 
 
 def _inputs(connection, database_path, ids):
@@ -35,26 +34,34 @@ def _validate(ids, method_id, version, parameters):
     if (not isinstance(ids, list) or not 1 <= len(ids) <= 100
             or any(not isinstance(i, str) or not i for i in ids) or len(set(ids)) != len(ids)):
         raise ImportCommandError('FORMULA_SCOPE_INVALID', 'Выберите 1–100 различных Analysis ID.')
-    if method_id != METHOD_ID or version != METHOD_VERSION:
+    try:
+        registration = executable_method(method_id, version)
+    except KeyError:
         raise ImportCommandError('FORMULA_METHOD_UNAVAILABLE', 'Метод или версия недоступны; обновите список методов.')
-    if (not isinstance(parameters, dict) or set(parameters) != {'fe_mode'}
-            or not isinstance(parameters['fe_mode'], str) or parameters['fe_mode'] not in FE_MODES):
-        raise ImportCommandError('FORMULA_PARAMETERS_INVALID', 'Явно выберите режим железа.')
+    choices = registration['parameter_choices']
+    if (not isinstance(parameters, dict) or set(parameters) != set(choices)
+            or any(not isinstance(parameters[name], str) or parameters[name] not in allowed
+                   for name, allowed in choices.items())):
+        raise ImportCommandError('FORMULA_PARAMETERS_INVALID',
+                                 'Перед расчётом явно выберите все параметры установленного метода.')
+    return registration
 
 
 def _preview(connection, database_path, ids, method_id, version, parameters):
-    _validate(ids, method_id, version, parameters)
-    definition = method_definition()
+    registration = _validate(ids, method_id, version, parameters)
+    definition = registration['definition']
     snapshots = _inputs(connection, database_path, ids)
     results = []
     for record in snapshots:
         assignment = record.get('assignment') or {}
         if record.get('unavailable'):
             result = {'status': 'failed', 'errors': ['Анализ отсутствует или импорт отозван.'], 'values': {}}
-        elif reported_target(assignment.get('target')) != 'olivine':
-            result = {'status': 'failed', 'errors': ['Сначала явно примите назначение оливина.'], 'values': {}}
+        elif reported_target(assignment.get('target')) not in registration['accepted_targets']:
+            result = {'status': 'failed',
+                      'errors': [f'Сначала явно примите назначение {registration["target_label"]}.'],
+                      'values': {}}
         else:
-            result = calculate_olivine(record['measurements'], parameters['fe_mode'])
+            result = registration['calculate'](record['measurements'], parameters)
         results.append({'analysis_id': record['analysis_id'], **result})
     input_hash = fingerprint({'inputs': snapshots, 'method': definition['definition_fingerprint'],
                               'parameters': parameters})
@@ -93,18 +100,23 @@ def save_formula(database_path, analysis_ids, method_id, method_version, paramet
                    'input_measurement_ids': measurement_ids, 'input_fingerprint': preview_fingerprint,
                    'parameters': parameters, 'excluded': [], 'result_manifest': preview,
                    'status': 'current', 'stale_reasons': [], 'created_at': timestamp,
-                   'software_versions': {'python': platform.python_version(), 'petrolab_formula': METHOD_VERSION}}
+                   'software_versions': {'python': platform.python_version(),
+                                         'petrolab_formula': method_version}}
             connection.execute('INSERT INTO formula_run VALUES (?, ?, ?, ?)',
                                (run_id, preview_fingerprint, json.dumps(run, ensure_ascii=False), timestamp))
             for result in preview['results']:
                 used_ids = [m['measurement_id'] for m in result['used']]
                 for field, value in result['values'].items():
                     unit = 'mol.%' if field in {'Fo', 'Fa'} else 'wt.%' if field == 'oxide_total' else 'apfu'
+                    assumptions = list(result['assumptions'])
+                    if field == 'OH_est_apfu' and result.get('OH_est_basis'):
+                        assumptions.append('OH_est_basis: ' + json.dumps(result['OH_est_basis'],
+                                                                          sort_keys=True, ensure_ascii=False))
                     derived = {'id': _id(), 'analysis_id': result['analysis_id'], 'field': field, 'value': value,
                                'unit': unit, 'method_id': method_id, 'method_version': method_version,
                                'method_definition_fingerprint': method['definition_fingerprint'],
                                'input_measurement_ids': used_ids, 'input_fingerprint': preview_fingerprint,
-                               'assumptions': result['assumptions'], 'status': 'current',
+                               'assumptions': assumptions, 'status': 'current',
                                'stale_reasons': [], 'created_at': timestamp}
                     connection.execute('INSERT INTO formula_derived_value VALUES (?, ?, ?, ?)',
                                        (derived['id'], run_id, result['analysis_id'], json.dumps(derived, ensure_ascii=False)))
@@ -121,7 +133,13 @@ def list_formula_runs(database_path, analysis_id):
         for row in rows:
             run = json.loads(row[0])
             reasons = []
-            if run['method_definition_fingerprint'] != method_definition()['definition_fingerprint']:
+            try:
+                current_definition = method_definition(run['method_id'], run['method_version'])
+            except KeyError:
+                current_definition = None
+                reasons.append('Метод или версия больше не установлены.')
+            if (current_definition is not None and
+                    run['method_definition_fingerprint'] != current_definition['definition_fingerprint']):
                 reasons.append('Определение или реализация метода изменились.')
             snapshots = _inputs(connection, database_path, run['input']['analysis_ids'])
             expected = fingerprint({'inputs': snapshots, 'method': run['method_definition_fingerprint'],

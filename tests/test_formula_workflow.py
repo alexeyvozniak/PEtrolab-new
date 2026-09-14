@@ -15,8 +15,10 @@ from petrolab.import_apply import apply_import_plan, open_project
 from petrolab.import_workspace import ImportWorkspaceStore
 from petrolab.import_preview import ImportCommandError
 from petrolab.desktop_workflow import list_project_mineral_identifications, decide_project_mineral_assignment
-from petrolab.formula_methods import METHOD_ID, METHOD_VERSION, IMPLEMENTATION_SHA256, method_definition
+from petrolab.formula_methods import (IMPLEMENTATION_SHA256, METHOD_ID, METHOD_VERSION,
+                                      MICA_IMPLEMENTATION_SHA256, list_methods, method_definition)
 from petrolab.formula_workflow import preview_formula, save_formula, list_formula_runs
+from petrolab.mica_formula import METHOD_ID as MICA_METHOD_ID, METHOD_VERSION as MICA_METHOD_VERSION
 from petrolab.olivine_formula import calculate_olivine
 from petrolab.ndjson_service import handle_request
 
@@ -196,3 +198,155 @@ class FormulaPersistenceTests(unittest.TestCase):
             self.assertEqual(c.execute('SELECT COUNT(*) FROM formula_run').fetchone()[0], 0)
             self.assertEqual(c.execute('SELECT project_schema_version FROM project_meta').fetchone()[0], 13)
         self.assertEqual(len(list(self.folder.glob('old.sqlite.before-v13-*.bak'))), 1)
+
+
+class MicaFormulaPersistenceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.folder = Path(self.temp.name); self.database = self.folder / 'mica.sqlite'
+        self.source = self.folder / 'mica.csv'
+        # Ideal phlogopite oxide proportions on a common mass basis. H2O is deliberately absent.
+        formula_mass = 417.254
+        composition = {'SiO2': 3*60.083/formula_mass*100,
+                       'Al2O3': .5*101.961/formula_mass*100,
+                       'MgO': 3*40.304/formula_mass*100, 'CaO': 0, 'Na2O': 0,
+                       'K2O': .5*94.195/formula_mass*100, 'FeO': 0, 'F': 0, 'Cl': 0}
+        columns = ','.join(f'{field} (wt.%)' for field in composition)
+        values = ','.join(str(value) for value in composition.values())
+        self.source.write_text(f'Analysis,Mineral,{columns}\nPhl-1,phlogopite,{values}\n', encoding='utf-8')
+        self.original = self.source.read_bytes()
+        store = ImportWorkspaceStore()
+        recipe = store.command('create', {'sources': [{'staged_path': str(self.source)}]})['active']['recipe']
+        apply_import_plan(self.database, self.source, recipe)
+        item = list_project_mineral_identifications(self.database)['identifications'][0]
+        self.analysis_id = item['analysis_id']
+        decide_project_mineral_assignment(self.database, self.analysis_id, 'phlogopite',
+            item['input_fingerprint'], item['ruleset_version'], 'Проверено как слюда')
+        self.parameters = {'fe_mode': 'all_fe2', 'anion_basis': 'ideal_O10_W2',
+                           'oh_mode': 'ideal_2_minus_f_cl'}
+        self.args = (self.database, [self.analysis_id], MICA_METHOD_ID,
+                     MICA_METHOD_VERSION, self.parameters)
+
+    def test_registry_definitions_validate_and_olivine_identity_is_unchanged(self):
+        catalog = list_methods()['methods']
+        self.assertEqual([(m['method_id'], m['version']) for m in catalog],
+                         [(METHOD_ID, METHOD_VERSION), (MICA_METHOD_ID, MICA_METHOD_VERSION)])
+        self.assertEqual(method_definition()['definition_fingerprint'],
+                         '872567da3c7195d75c64790f14aa979fcf8ba6677a910a0a742eb9f2dcd0ed87')
+        root = Path(__file__).parents[1] / 'schemas'
+        schema = json.loads((root / 'scientific-method-definition.schema.json').read_text())
+        from scripts.validate_contracts import _validate
+        for definition in catalog:
+            serializable = {key: value for key, value in definition.items()
+                            if key not in {'parameter_choices', 'fe_modes', 'anion_bases',
+                                           'oh_modes', 'atomic_masses'}}
+            _validate(serializable, schema, schema, {}, 'scientific-method-definition')
+        path = Path(__file__).parents[1] / 'src/petrolab/mica_formula.py'
+        self.assertEqual(hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest(),
+                         MICA_IMPLEMENTATION_SHA256)
+
+    def test_preview_save_retry_reopen_and_oh_provenance(self):
+        with closing(open_project(self.database)) as connection:
+            before = [tuple(row) for row in connection.execute('SELECT * FROM measurement')]
+        preview = preview_formula(*self.args)
+        self.assertTrue(preview['can_save'], preview)
+        result = preview['results'][0]
+        self.assertAlmostEqual(result['values']['Si_apfu'], 3, places=12)
+        self.assertAlmostEqual(result['values']['Mg_apfu'], 3, places=12)
+        self.assertAlmostEqual(result['values']['OH_est_apfu'], 2, places=12)
+        used_ids = {row['measurement_id'] for row in result['used']}
+        self.assertEqual(set(result['OH_est_basis']['input_measurement_ids']), used_ids)
+        saved = save_formula(*self.args, preview['input_fingerprint'])
+        retry = save_formula(*self.args, preview['input_fingerprint'])
+        self.assertTrue(retry['reused']); self.assertEqual(retry['run']['id'], saved['run']['id'])
+        history = list_formula_runs(self.database, self.analysis_id)['runs']
+        self.assertEqual(len(history), 1); self.assertEqual(history[0]['run']['status'], 'current')
+        self.assertEqual(history[0]['run']['method_id'], MICA_METHOD_ID)
+        manifest_result = history[0]['run']['result_manifest']['results'][0]
+        self.assertEqual(manifest_result['OH_est_basis'], result['OH_est_basis'])
+        oh = next(value for value in history[0]['derived_values'] if value['field'] == 'OH_est_apfu')
+        self.assertEqual(set(oh['input_measurement_ids']), used_ids)
+        self.assertTrue(any(value.startswith('OH_est_basis: ') for value in oh['assumptions']))
+        with closing(open_project(self.database)) as connection:
+            self.assertEqual(before, [tuple(row) for row in connection.execute('SELECT * FROM measurement')])
+        self.assertEqual(self.source.read_bytes(), self.original)
+
+    def test_group_parameters_and_missing_halogen_are_rejected_without_partial_save(self):
+        mica_preview = preview_formula(*self.args)
+        olivine_args = (self.database, [self.analysis_id], METHOD_ID, METHOD_VERSION,
+                        {'fe_mode': 'all_fe2'})
+        self.assertFalse(preview_formula(*olivine_args)['can_save'])
+        for parameters in [
+                {'fe_mode': 'all_fe2', 'anion_basis': '22_plus_z',
+                 'oh_mode': 'ideal_2_minus_f_cl'},
+                {'fe_mode': 'all_fe2', 'anion_basis': 'ideal_O10_W2'},
+                {**self.parameters, 'extra': 'value'}]:
+            with self.subTest(parameters=parameters), self.assertRaises(ImportCommandError) as caught:
+                preview_formula(self.database, [self.analysis_id], MICA_METHOD_ID,
+                                MICA_METHOD_VERSION, parameters)
+            self.assertEqual(caught.exception.code, 'FORMULA_PARAMETERS_INVALID')
+        changed = {**self.parameters, 'oh_mode': 'not_calculated'}
+        self.assertNotEqual(mica_preview['input_fingerprint'], preview_formula(
+            self.database, [self.analysis_id], MICA_METHOD_ID, MICA_METHOD_VERSION,
+            changed)['input_fingerprint'])
+        split = {**self.parameters, 'fe_mode': 'reported_split'}
+        self.assertNotEqual(mica_preview['input_fingerprint'], preview_formula(
+            self.database, [self.analysis_id], MICA_METHOD_ID, MICA_METHOD_VERSION,
+            split)['input_fingerprint'])
+        with closing(open_project(self.database)) as connection:
+            connection.execute("UPDATE measurement SET raw_token=NULL, value_status='missing' WHERE canonical_field='Cl'")
+            connection.commit()
+        invalid = preview_formula(*self.args)
+        self.assertFalse(invalid['can_save'])
+        with self.assertRaises(ImportCommandError):
+            save_formula(*self.args, invalid['input_fingerprint'])
+        with closing(open_project(self.database)) as connection:
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM formula_run').fetchone()[0], 0)
+
+    def test_ndjson_lists_previews_saves_and_reopens_mica(self):
+        def send(command, payload):
+            return handle_request({'protocol_version': '1.0', 'request_id': str(uuid.uuid4()),
+                                   'command': command, 'payload': payload})
+
+        catalog = send('formula.methods.list', {})['result']['methods']
+        self.assertIn(MICA_METHOD_ID, [method['method_id'] for method in catalog])
+        payload = {'project_database_path': str(self.database), 'analysis_ids': [self.analysis_id],
+                   'method_id': MICA_METHOD_ID, 'method_version': MICA_METHOD_VERSION,
+                   'parameters': self.parameters}
+        preview = send('formula.preview', payload)['result']
+        self.assertTrue(preview['can_save'])
+        saved = send('formula.save', {**payload,
+                     'preview_fingerprint': preview['input_fingerprint']})['result']
+        history = send('formula.runs.list', {'project_database_path': str(self.database),
+                       'analysis_id': self.analysis_id})['result']['runs']
+        self.assertEqual(history[0]['run']['id'], saved['run']['id'])
+        self.assertEqual(history[0]['run']['status'], 'current')
+
+    def test_method_specific_history_stale_checks_preserve_other_methods(self):
+        preview = preview_formula(*self.args); save_formula(*self.args, preview['input_fingerprint'])
+        installed = method_definition
+
+        def changed_mica(method_id=METHOD_ID, version=None):
+            definition = installed(method_id, version)
+            if method_id == MICA_METHOD_ID:
+                definition['definition_fingerprint'] = '0' * 64
+            return definition
+
+        with patch('petrolab.formula_workflow.method_definition', side_effect=changed_mica):
+            history = list_formula_runs(self.database, self.analysis_id)['runs']
+            self.assertEqual(history[0]['run']['status'], 'stale')
+            self.assertTrue(any('реализация' in reason for reason in history[0]['run']['stale_reasons']))
+        with patch('petrolab.formula_workflow.method_definition', side_effect=KeyError):
+            history = list_formula_runs(self.database, self.analysis_id)['runs']
+            self.assertEqual(history[0]['run']['status'], 'stale')
+            self.assertTrue(any('не установлены' in reason for reason in history[0]['run']['stale_reasons']))
+
+    def test_input_change_marks_mica_history_stale(self):
+        preview = preview_formula(*self.args); save_formula(*self.args, preview['input_fingerprint'])
+        with closing(open_project(self.database)) as connection:
+            connection.execute("UPDATE measurement SET raw_token='37' WHERE canonical_field='SiO2'")
+            connection.commit()
+        with self.assertRaises(ImportCommandError) as caught:
+            save_formula(*self.args, preview['input_fingerprint'])
+        self.assertEqual(caught.exception.code, 'FORMULA_PREVIEW_STALE')
+        self.assertEqual(list_formula_runs(self.database, self.analysis_id)['runs'][0]['run']['status'], 'stale')

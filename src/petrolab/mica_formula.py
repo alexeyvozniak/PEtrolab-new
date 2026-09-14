@@ -17,8 +17,11 @@ OXIDES = {'SiO2': ('Si', 1, 2, 4, 'Si'), 'Al2O3': ('Al', 2, 3, 3, 'Al'),
           'CaO': ('Ca', 1, 1, 2, 'Ca'), 'Na2O': ('Na', 2, 1, 1, 'Na'),
           'K2O': ('K', 2, 1, 1, 'K'), 'Li2O': ('Li', 2, 1, 1, 'Li'),
           'BaO': ('Ba', 1, 1, 2, 'Ba')}
-FE_MODES = {'all_fe2', 'reported_split'}
-OH_MODES = {'not_calculated', 'ideal_2_minus_f_cl'}
+FE_MODES = {'all_fe2': 'Всё железо как Fe²⁺ (FeO или FeOt)',
+            'reported_split': 'Раздельные FeO и Fe₂O₃ из измерений'}
+ANION_BASES = {'ideal_O10_W2': 'Идеальная группа O₁₀W₂; нормировка на 22 положительных заряда'}
+OH_MODES = {'not_calculated': 'Не рассчитывать OH',
+            'ideal_2_minus_f_cl': 'Оценить OH = 2 − F − Cl по измеренным F и Cl'}
 
 
 def calculate_mica(measurements, fe_mode, *, anion_basis, oh_mode):
