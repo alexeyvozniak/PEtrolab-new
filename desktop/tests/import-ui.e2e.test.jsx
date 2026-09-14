@@ -460,7 +460,7 @@ test("saved point placement survives returning from image review", async () => {
   expect((await screen.findByRole("status")).textContent).toContain("Размещение сохранено в черновике");
 
   await user.click(screen.getByRole("button", { name: "Далее: проверка" }));
-  await user.click(screen.getByRole("button", { name: "К размещению" }));
+  await user.click(await screen.findByRole("button", { name: "К размещению" }));
 
   expect((await screen.findByRole("status")).textContent).toContain("Размещение сохранено в черновике");
   expect(screen.getByText("Point · 320, 240 px")).toBeTruthy();
