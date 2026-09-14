@@ -317,7 +317,7 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { applyImportPlan, pickImportFile, pickMediaFiles, pickMediaFolder, inspectMediaSources, createMediaImportPlan, createImportPlan } from "../src/desktopApi";
+import { applyImportPlan, applyMediaImportPlan, pickImportFile, pickMediaFiles, pickMediaFolder, inspectMediaSources, createMediaImportPlan, createImportPlan } from "../src/desktopApi";
 import { App } from "../src/App";
 
 afterEach(() => {
@@ -330,6 +330,69 @@ afterEach(() => {
   uiState.duplicatesReviewed = false;
   vi.clearAllMocks();
   cleanup();
+});
+
+
+test("image review marks point-free files and supports arrow navigation", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  await user.click(screen.getByRole("button", { name: "Далее: проверка" }));
+
+  const reviewTable = await screen.findByRole("table", { name: "Проверка импорта изображений" });
+  expect(within(reviewTable).getAllByText("Без точек").length).toBeGreaterThan(0);
+  const rows = within(reviewTable).getAllByRole("row");
+  expect(rows[1]).toHaveAttribute("aria-current", "true");
+  fireEvent.keyDown(rows[1], { key: "ArrowDown" });
+  await waitFor(() => expect(rows[2]).toHaveAttribute("aria-current", "true"));
+});
+
+test("removing a placement after review preserves the same point on another image", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+
+  for (const file of [/^1\. KIV-2_A_BSE_01\.tif/, /^2\. KIV-2_A_PPL_01\.tif/]) {
+    await user.click(screen.getByRole("button", { name: file }));
+    await user.click(screen.getByRole("button", { name: /P-07 EPMA/ }));
+    fireEvent.keyDown(await screen.findByRole("application"), { key: "Enter" });
+    await user.click(screen.getByRole("button", { name: "Сохранить привязку" }));
+  }
+
+  let finishPlan;
+  const planImplementation = createMediaImportPlan.getMockImplementation();
+  createMediaImportPlan.mockImplementationOnce((...args) => new Promise((resolve) => {
+    finishPlan = async () => resolve(await planImplementation(...args));
+  }));
+  await user.click(screen.getByRole("button", { name: "Далее: проверка" }));
+  const remove = screen.getByRole("button", { name: "Снять только связь" });
+  expect(remove.disabled).toBe(true);
+  await user.click(remove);
+  expect(screen.getByText("2 размещено")).toBeTruthy();
+  await finishPlan();
+  await user.click(await screen.findByRole("button", { name: "К размещению" }));
+  await user.click(screen.getByRole("button", { name: "Снять только связь" }));
+  expect(screen.queryByRole("button", { name: "Размещение P-07" })).toBeNull();
+  expect(screen.getByText("1 размещено")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: /^1\. KIV-2_A_BSE_01\.tif/ }));
+  expect(await screen.findByRole("button", { name: "Размещение P-07" })).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Далее: проверка" }));
+  await user.click(await screen.findByRole("button", { name: "Завершить импорт изображений" }));
+  const appliedPlan = applyMediaImportPlan.mock.calls[0][1];
+  expect(appliedPlan.items).toHaveLength(3);
+  expect(appliedPlan.items.map((item) => item.placements.length)).toEqual([1, 0, 0]);
+  expect(appliedPlan.items[0].placements[0]).toMatchObject({
+    analytical_point_id: "point-kiv-2-p07",
+    geometry: { kind: "point", x_px: 320, y_px: 240 },
+  });
 });
 
 test("user confirms an image batch, places same- and cross-sample points, reviews and imports", async () => {

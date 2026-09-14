@@ -103,7 +103,7 @@ function SourcePane({ items, assignments, activePath, setActivePath, phase }) {
         const placementCount = assignment?.placements?.length || 0;
         return <button className={focused ? "focused" : ""} type="button" key={item.source_path} onClick={() => setActivePath(item.source_path)}>
           <span className="image-source-icon"><FileImage size={24} weight="duotone" /></span>
-          <span><b>{index + 1}. {item.display_name}</b><small>{item.width_px} × {item.height_px} px · {(item.format || item.mime_type?.split("/").pop() || "image").toUpperCase()}</small><em>{phase === "assignment" ? (assignmentReady(assignment) ? "назначено" : "нужно подтвердить") : `${placementCount} размещено`}</em></span>
+          <span><b>{index + 1}. {item.display_name}</b><small>{item.width_px} × {item.height_px} px · {(item.format || item.mime_type?.split("/").pop() || "image").toUpperCase()}</small><em>{phase === "assignment" ? (assignmentReady(assignment) ? "назначено" : "нужно подтвердить") : {placementCount > 0 ? `${placementCount} размещено` : "Без точек"}</em></span>
         </button>;
       })}
     </div>
@@ -340,7 +340,7 @@ function ImageCanvas({ item, assignment, preview, previewLoading, previewError, 
   </div>;
 }
 
-function PlacementStep({ items, assignments, setAssignments, points, activeItem, activeAssignment, activePath, setActivePath, busy, previews, previewLoading, previewError, onInvalidatePlan, onBack, onPreview, onPlan }) {
+function PlacementStep({ items, assignments, setAssignments, points, activeItem, activeAssignment, activePath, setActivePath, busy, previews, previewLoading, previewError, onInvalidatePlan, onBack, onPreview, onPlan, restoreSelectedPlacement = false, onRestoredPlacement = () => {} }) {
   const [pointScope, setPointScope] = useState("same_sample");
   const [pointSearch, setPointSearch] = useState("");
   const [selectedPointId, setSelectedPointId] = useState("");
@@ -368,6 +368,11 @@ function PlacementStep({ items, assignments, setAssignments, points, activeItem,
     setDraft(null); setReasonCode(""); setReasonComment(""); setZoom(100);
   }, [activePath]);
   useEffect(() => { onPreview(activeItem); }, [activeItem, onPreview]);
+  useEffect(() => {
+    if (!restoreSelectedPlacement) return;
+    setSelectedPointId(currentPlacements[0]?.analytical_point_id || "");
+    onRestoredPlacement();
+  }, [restoreSelectedPlacement, currentPlacements, onRestoredPlacement]);
 
   const choosePoint = (point) => {
     setSelectedPointId(point.analytical_point_id);
@@ -387,6 +392,7 @@ function PlacementStep({ items, assignments, setAssignments, points, activeItem,
     setDraft(null); setReasonCode(""); setReasonComment("");
   };
   const removePlacement = (pointId) => {
+    if (busy) return;
     onInvalidatePlan();
     setAssignments((current) => ({ ...current, [activePath]: { ...current[activePath], placements: current[activePath].placements.filter((item) => item.analytical_point_id !== pointId) } }));
     setDraft(null);
@@ -445,7 +451,7 @@ function PlacementStep({ items, assignments, setAssignments, points, activeItem,
           {crossSample && <section className="cross-sample-warning"><Warning size={19} weight="fill" /><div><b>Точка другого Sample</b><span>Изображение: {activeAssignment.sample_name}<br />Точка: {selectedPoint.sample_name}</span></div></section>}
           {draft && <section className="placement-draft"><h3>Предпросмотр размещения</h3><p>{geometryLabel(draft.geometry)}</p>{crossSample && <><label>Причина исключения<select aria-label="Причина межобразцового исключения" value={reasonCode} onChange={(event) => setReasonCode(event.target.value)}><option value="">Выбери причину</option>{Object.entries(CROSS_SAMPLE_REASONS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Комментарий<textarea value={reasonComment} onChange={(event) => setReasonComment(event.target.value)} maxLength={500} placeholder="Дополнительное обоснование (необязательно)" /></label></>}<button className="primary-button inspector-action" type="button" onClick={saveDraft} disabled={busy || (crossSample && !reasonCode)}>Сохранить привязку</button></section>}
           {!draft && !selectedPlacement && <section className="point-instruction"><Info size={18} /><p>Выбери Point, Rectangle или Square и укажи место на изображении. Положение останется preview до сохранения.</p></section>}
-          {selectedPlacement && !draft && <section className="saved-placement"><CheckCircle size={19} weight="fill" /><div><b>Размещение сохранено в черновике</b><span>{geometryLabel(selectedPlacement.geometry)}</span>{selectedPlacement.cross_sample_exception_reason && <em>{selectedPlacement.cross_sample_exception_reason}</em>}</div><button className="danger-outline" type="button" onClick={() => removePlacement(selectedPointId)}><Trash size={16} /> Снять только связь</button></section>}
+          {selectedPlacement && !draft && <section className="saved-placement" role="status"><CheckCircle size={19} weight="fill" /><div><b>Размещение сохранено в черновике</b><span>{geometryLabel(selectedPlacement.geometry)}</span>{selectedPlacement.cross_sample_exception_reason && <em>{selectedPlacement.cross_sample_exception_reason}</em>}</div><button className="danger-outline" type="button" disabled={busy} onClick={() => removePlacement(selectedPointId)}><Trash size={16} /> Снять только связь</button></section>}
         </> : <div className="point-inspector-empty"><MapPin size={34} /><p>Выбери точку слева. Фокус не меняет Selection и ничего не записывает.</p></div>}
       </aside>
     </section>
@@ -465,15 +471,32 @@ function ReviewStep({ plan, assignments, activePath, setActivePath, previews, pr
   const exceptionCount = items.reduce((count, item) => count + item.placements.filter((placement) => placement.cross_sample_exception_reason).length, 0);
   const unplacedMediaCount = items.filter((item) => item.placements.length === 0).length;
   useEffect(() => { onPreview(activeItem); }, [activeItem, onPreview]);
+  const moveReviewSelection = (event, index) => {
+    if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = Math.max(0, Math.min(items.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+    if (nextIndex !== index) setActivePath(items[nextIndex].source_path);
+  };
   return <>
     <SourcePane items={items} assignments={assignments} activePath={activeItem?.source_path} setActivePath={setActivePath} phase="review" />
     <main className="image-review-pane">
       <header><div><h2>Проверка импорта изображений</h2><p>Проверь назначения, размещения и исключения до единой транзакции.</p></div></header>
       <div className="image-review-table" role="table" aria-label="Проверка импорта изображений">
         <div className="image-review-head" role="row"><span>Файл</span><span>Sample</span><span>Шлиф</span><span>Тип</span><span>Точки</span><span>Исключения</span><span>Статус</span></div>
-        {items.map((item) => {
+        {items.map((item, index) => {
           const exceptions = item.placements.filter((placement) => placement.cross_sample_exception_reason).length;
-          return <button type="button" role="row" className={item.source_path === activeItem.source_path ? "active" : ""} key={item.source_path} onClick={() => setActivePath(item.source_path)}><span>{item.display_name}</span><span>{item.sample_name}</span><span>{item.thin_section_name}</span><span className={`image-type type-${item.media_type}`}>{item.media_type}</span><span>{item.placements.length}</span><span className={exceptions ? "review-question" : ""}>{exceptions}</span><span className="image-ready"><CheckCircle size={15} weight="fill" /> Готово</span></button>;
+          return <button
+            type="button"
+            role="row"
+            aria-current={item.source_path === activeItem.source_path ? "true" : undefined}
+            tabIndex={item.source_path === activeItem.source_path ? 0 : -1}
+            className={item.source_path === activeItem.source_path ? "active" : ""}
+            key={item.source_path}
+            onClick={() => setActivePath(item.source_path)}
+            onKeyDown={(event) => moveReviewSelection(event, index)}
+          >
+            <span>{item.display_name}</span><span>{item.sample_name}</span><span>{item.thin_section_name}</span><span className={`image-type type-${item.media_type}`}>{item.media_type}</span><span>{item.placements.length}</span><span className={exceptions ? "review-question" : ""}>{exceptions}</span><span className={item.placements.length ? "image-ready" : "review-question"}>{item.placements.length ? <><CheckCircle size={15} weight="fill" /> Готово</> : "Без точек"}</span>
+          </button>;
         })}
       </div>
       <div className="image-review-legend"><span><i className="ready"></i>Готово</span><span><i className="question"></i>Подтверждённое исключение</span><span><i></i>Без пространственной точки</span></div>
@@ -497,6 +520,8 @@ function ReviewStep({ plan, assignments, activePath, setActivePath, previews, pr
 export function ImagesWorkspace({ inspection, plan, points = { items: [] }, busy, onChooseFiles, onChooseFolder, onRemove, onPreview = async () => null, onPlan, onApply, onCancel, onInvalidatePlan = () => {} }) {
   const items = inspection?.items || [];
   const [phase, setPhase] = useState("assignment");
+  const [restoreSelectedPlacement, setRestoreSelectedPlacement] = useState(false);
+  const onRestoredPlacement = useCallback(() => setRestoreSelectedPlacement(false), []);
   const [assignments, setAssignments] = useState({});
   const [selected, setSelected] = useState(new Set());
   const [activePath, setActivePath] = useState("");
@@ -554,11 +579,11 @@ export function ImagesWorkspace({ inspection, plan, points = { items: [] }, busy
   if (items.length === 0) {
     return <section className="images-empty"><Images size={52} weight="duotone" /><h1>Добавить изображения</h1><p>Выбери серию BSE, PPL, XPL, обычные фотографии или папку с вложенными папками. PetroLab проверит форматы и предложит назначения из имён файлов.</p><div className="images-empty-actions"><button className="primary-button large" type="button" onClick={onChooseFiles} disabled={busy}><Plus size={20} /> Выбрать файлы</button><button className="outline-button large" type="button" onClick={onChooseFolder} disabled={busy}><FolderOpen size={20} /> Выбрать папку</button></div><small>PNG, JPEG, TIFF и BMP. Исходные файлы не переименовываются и не изменяются.</small></section>;
   }
-  if (visiblePhase === "review" && plan) return <section className="images-workspace image-review-workspace"><ReviewStep plan={plan} assignments={assignments} activePath={activePath} setActivePath={setActivePath} previews={previews} previewLoading={previewLoading} previewError={previewError} onPreview={loadPreview} busy={busy} onBack={() => { onInvalidatePlan(); setPhase("points"); }} onApply={onApply} /></section>;
+  if (visiblePhase === "review" && plan) return <section className="images-workspace image-review-workspace"><ReviewStep plan={plan} assignments={assignments} activePath={activePath} setActivePath={setActivePath} previews={previews} previewLoading={previewLoading} previewError={previewError} onPreview={loadPreview} busy={busy} onBack={() => { onInvalidatePlan(); setRestoreSelectedPlacement(true); setPhase("points"); }} onApply={onApply} /></section>;
   return <section className={`images-workspace${visiblePhase === "points" ? " image-placement-workspace" : ""}`}>
     {visiblePhase === "assignment" && <SourcePane items={items} assignments={assignments} activePath={activeItem?.source_path} setActivePath={setActivePath} phase="assignment" />}
     {visiblePhase === "assignment"
       ? <AssignmentStep items={items} inspection={inspection} changedSources={changedSources} assignments={assignments} setAssignments={setAssignments} selected={selected} setSelected={setSelected} activeItem={activeItem} activeAssignment={activeAssignment} setActivePath={setActivePath} busy={busy} onChooseFiles={onChooseFiles} onChooseFolder={onChooseFolder} onRemove={onRemove} onCancel={onCancel} onInvalidatePlan={onInvalidatePlan} onContinue={() => setPhase("points")} />
-      : <PlacementStep items={items} assignments={assignments} setAssignments={setAssignments} points={points} activeItem={activeItem} activeAssignment={activeAssignment} activePath={activePath} setActivePath={setActivePath} busy={busy} previews={previews} previewLoading={previewLoading} previewError={previewError} onInvalidatePlan={onInvalidatePlan} onBack={() => setPhase("assignment")} onPreview={loadPreview} onPlan={onPlan} />}
+      : <PlacementStep items={items} assignments={assignments} setAssignments={setAssignments} points={points} activeItem={activeItem} activeAssignment={activeAssignment} activePath={activePath} setActivePath={setActivePath} busy={busy} previews={previews} previewLoading={previewLoading} previewError={previewError} onInvalidatePlan={onInvalidatePlan} onBack={() => setPhase("assignment")} onPreview={loadPreview} onPlan={onPlan} restoreSelectedPlacement={restoreSelectedPlacement} onRestoredPlacement={onRestoredPlacement} />}
   </section>;
 }
