@@ -297,6 +297,14 @@ def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": apply_media_import_plan(_project_database_path(params), _object(params, "plan"))}
 
 
+def _dispatch_formula_methods(params: Mapping[str, Any]) -> dict[str, Any]:
+    accepted = params.get('accepted_assignment')
+    if accepted is not None and (not isinstance(accepted, str) or not accepted.strip()):
+        raise ImportCommandError('FORMULA_ASSIGNMENT_INVALID',
+                                 'Принятое назначение минерала должно быть непустой строкой.')
+    return {'result': list_methods(accepted)}
+
+
 COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.inspect_source": _dispatch_import_inspect,
     "import.clean_table.classify": _dispatch_import_clean_table_classify,
@@ -316,7 +324,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "project.analyses.list": _dispatch_project_analyses_list,
     "project.mineral_identification.list": _dispatch_project_mineral_identification_list,
     "project.mineral_assignment.decide": _dispatch_project_mineral_assignment_decide,
-    "formula.methods.list": lambda params: {'result': list_methods()},
+    "formula.methods.list": _dispatch_formula_methods,
     "formula.preview": _dispatch_formula,
     "formula.save": lambda params: _dispatch_formula(params, save=True),
     "formula.runs.list": lambda params: {'result': list_formula_runs(_project_database_path(params), _string(params, 'analysis_id'))},

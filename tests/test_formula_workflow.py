@@ -245,6 +245,17 @@ class MicaFormulaPersistenceTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest(),
                          MICA_IMPLEMENTATION_SHA256)
 
+    def test_catalog_filters_by_controlled_accepted_assignment(self):
+        self.assertEqual([m['method_id'] for m in list_methods('olivine')['methods']], [METHOD_ID])
+        for label in ('phlogopite', 'muscovite', 'lepidolite'):
+            with self.subTest(label=label):
+                self.assertEqual([m['method_id'] for m in list_methods(label)['methods']], [MICA_METHOD_ID])
+        self.assertEqual(list_methods('quartz')['methods'], [])
+        response = handle_request({'protocol_version': '1.0', 'request_id': str(uuid.uuid4()),
+                                   'command': 'formula.methods.list',
+                                   'payload': {'accepted_assignment': 'phlogopite'}})
+        self.assertEqual([m['method_id'] for m in response['result']['methods']], [MICA_METHOD_ID])
+
     def test_preview_save_retry_reopen_and_oh_provenance(self):
         with closing(open_project(self.database)) as connection:
             before = [tuple(row) for row in connection.execute('SELECT * FROM measurement')]

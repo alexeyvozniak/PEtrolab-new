@@ -2,119 +2,44 @@
   "catalog": {
     "methods": [
       {
-        "method_id": "olivine.oxygen4",
-        "version": "1.0.0",
-        "name": "Оливин · 4 O · APFU и бинарные Fo–Fa",
-        "kind": "formula",
+        "method_id": "mica.charge22",
+        "version": "0.1.0",
+        "name": "Слюды · 22 заряда · bulk APFU",
         "status": "draft",
-        "input_domain": {
-          "semantic_domain": "oxide_wt_percent",
-          "required_fields": [
-            "SiO2",
-            "MgO"
-          ],
-          "allowed_units": [
-            "wt.%"
-          ],
-          "missing_policy": "reject_row",
-          "censored_policy": "reject_row",
-          "compositional_domain_policy": "explicit_subcomposition_required",
-          "nonpositive_policy": "not_applicable",
-          "mixed_unit_policy": "reject"
-        },
         "parameters": [
           {
             "name": "fe_mode",
             "value_type": "choice",
             "scientifically_significant": true
+          },
+          {
+            "name": "anion_basis",
+            "value_type": "choice",
+            "scientifically_significant": true
+          },
+          {
+            "name": "oh_mode",
+            "value_type": "choice",
+            "scientifically_significant": true
           }
         ],
-        "output_fields": [
-          {
-            "field": "Al_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
+        "parameter_choices": {
+          "fe_mode": {
+            "all_fe2": "Всё железо как Fe²⁺ (FeO или FeOt)",
+            "reported_split": "Раздельные FeO и Fe₂O₃ из измерений"
           },
-          {
-            "field": "Ca_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
+          "anion_basis": {
+            "ideal_O10_W2": "Идеальная группа O₁₀W₂; нормировка на 22 положительных заряда"
           },
-          {
-            "field": "Cr_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
-          },
-          {
-            "field": "Fe2_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
-          },
-          {
-            "field": "Fe3_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
-          },
-          {
-            "field": "K_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
-          },
-          {
-            "field": "Mg_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
-          },
-          {
-            "field": "Mn_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
-          },
-          {
-            "field": "Na_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
-          },
-          {
-            "field": "Ni_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
-          },
-          {
-            "field": "Si_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
-          },
-          {
-            "field": "Ti_apfu",
-            "semantic_role": "derived_value",
-            "unit": "apfu"
-          },
-          {
-            "field": "Fo",
-            "semantic_role": "derived_value",
-            "unit": "mol.%"
-          },
-          {
-            "field": "Fa",
-            "semantic_role": "derived_value",
-            "unit": "mol.%"
-          },
-          {
-            "field": "cation_sum",
-            "semantic_role": "diagnostic",
-            "unit": "apfu"
-          },
-          {
-            "field": "oxide_total",
-            "semantic_role": "diagnostic",
-            "unit": "wt.%"
+          "oh_mode": {
+            "not_calculated": "Не рассчитывать OH",
+            "ideal_2_minus_f_cl": "Оценить OH = 2 − F − Cl по измеренным F и Cl"
           }
-        ],
+        },
         "citations": [
           {
-            "title": "Brady & Perkins (2007), Mineral Formulae Recalculation",
-            "url": "https://serc.carleton.edu/research_education/equilibria/mineralformulaerecalculation.html"
+            "title": "Rieder et al. (1998), Nomenclature of the Micas",
+            "url": "https://minsocam.org/msa/ima/ima98%2810%29.pdf"
           },
           {
             "title": "CIAAW Abridged Standard Atomic Weights 2024",
@@ -122,946 +47,172 @@
           }
         ],
         "assumptions": [
-          "4 O; без нормировки суммы wt.% к 100%.",
-          "Fo = 100 Mg/(Mg+Fe2), Fa = 100 Fe2/(Mg+Fe2); Mn/Ca/Ni отдельно.",
-          "Нули допустимы; SiO2 и Mg+Fe2 должны быть положительны.",
-          "Fe: ровно один FeO/FeOt для all_fe2; FeO и Fe2O3 для reported_split.",
-          "Fe3+, OH, позиции и неопределённость не оцениваются."
+          "Идеальная анионная группа O10W2; нормировка на 22 положительных заряда.",
+          "OH_est = 2 - F - Cl только по пригодным измеренным F и Cl и явному выбору.",
+          "Без нормировки суммы wt.% к 100%, распределения по позициям и номенклатуры.",
+          "Fe3+, Li, вакансии и неопределённость не оцениваются автоматически."
         ],
         "applicability": [
-          "Только явно принятый оливин/форстерит/фаялит.",
+          "Только явно принятая слюда из trioctahedral, dioctahedral или Li-mica target.",
+          "Варианты с измеренным H2O и окисленный базис 22+z не поддерживаются.",
           "Пригодность состава проверяется независимо от назначения.",
-          "Неизмеренные дополнительные оксиды перечисляются, не заменяются нулями.",
-          "Первый метод: внешняя проверка на природных анализах ещё требуется."
-        ],
-        "benchmark_ids": [
-          "ol-fo100",
-          "ol-fa100",
-          "ol-fo50",
-          "ol-mn-ca-ni",
-          "ol-split-fe"
-        ],
-        "implementation": {
-          "algorithm_id": "olivine.oxygen4",
-          "algorithm_version": "1.0.0",
-          "implementation_sha256": "0d1313ebe3ab47cca45f8e6c5364be51ed8d113c44677f95890bdeeedadc16ee"
-        },
-        "created_at": "2026-09-11T00:00:00Z",
-        "definition_fingerprint": "872567da3c7195d75c64790f14aa979fcf8ba6677a910a0a742eb9f2dcd0ed87",
-        "fe_modes": {
-          "all_fe2": "Всё железо как Fe²⁺ (FeO или FeOt)",
-          "reported_split": "Раздельные FeO и Fe₂O₃ из измерений"
-        },
-        "atomic_masses": {
-          "O": 15.999,
-          "Si": 28.085,
-          "Ti": 47.867,
-          "Al": 26.982,
-          "Cr": 51.996,
-          "Fe": 55.845,
-          "Mn": 54.938,
-          "Mg": 24.305,
-          "Ni": 58.693,
-          "Ca": 40.078,
-          "Na": 22.99,
-          "K": 39.098
-        }
+          "Метод draft: внешняя проверка на природных составах ещё требуется."
+        ]
       }
     ]
   },
   "preview": {
-    "method": {
-      "method_id": "olivine.oxygen4",
-      "version": "1.0.0",
-      "name": "Оливин · 4 O · APFU и бинарные Fo–Fa",
-      "kind": "formula",
-      "status": "draft",
-      "input_domain": {
-        "semantic_domain": "oxide_wt_percent",
-        "required_fields": [
-          "SiO2",
-          "MgO"
-        ],
-        "allowed_units": [
-          "wt.%"
-        ],
-        "missing_policy": "reject_row",
-        "censored_policy": "reject_row",
-        "compositional_domain_policy": "explicit_subcomposition_required",
-        "nonpositive_policy": "not_applicable",
-        "mixed_unit_policy": "reject"
-      },
-      "parameters": [
-        {
-          "name": "fe_mode",
-          "value_type": "choice",
-          "scientifically_significant": true
-        }
-      ],
-      "output_fields": [
-        {
-          "field": "Al_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Ca_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Cr_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Fe2_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Fe3_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "K_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Mg_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Mn_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Na_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Ni_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Si_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Ti_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Fo",
-          "semantic_role": "derived_value",
-          "unit": "mol.%"
-        },
-        {
-          "field": "Fa",
-          "semantic_role": "derived_value",
-          "unit": "mol.%"
-        },
-        {
-          "field": "cation_sum",
-          "semantic_role": "diagnostic",
-          "unit": "apfu"
-        },
-        {
-          "field": "oxide_total",
-          "semantic_role": "diagnostic",
-          "unit": "wt.%"
-        }
-      ],
-      "citations": [
-        {
-          "title": "Brady & Perkins (2007), Mineral Formulae Recalculation",
-          "url": "https://serc.carleton.edu/research_education/equilibria/mineralformulaerecalculation.html"
-        },
-        {
-          "title": "CIAAW Abridged Standard Atomic Weights 2024",
-          "url": "https://ciaaw.org/abridged-atomic-weights.htm"
-        }
-      ],
-      "assumptions": [
-        "4 O; без нормировки суммы wt.% к 100%.",
-        "Fo = 100 Mg/(Mg+Fe2), Fa = 100 Fe2/(Mg+Fe2); Mn/Ca/Ni отдельно.",
-        "Нули допустимы; SiO2 и Mg+Fe2 должны быть положительны.",
-        "Fe: ровно один FeO/FeOt для all_fe2; FeO и Fe2O3 для reported_split.",
-        "Fe3+, OH, позиции и неопределённость не оцениваются."
-      ],
-      "applicability": [
-        "Только явно принятый оливин/форстерит/фаялит.",
-        "Пригодность состава проверяется независимо от назначения.",
-        "Неизмеренные дополнительные оксиды перечисляются, не заменяются нулями.",
-        "Первый метод: внешняя проверка на природных анализах ещё требуется."
-      ],
-      "benchmark_ids": [
-        "ol-fo100",
-        "ol-fa100",
-        "ol-fo50",
-        "ol-mn-ca-ni",
-        "ol-split-fe"
-      ],
-      "implementation": {
-        "algorithm_id": "olivine.oxygen4",
-        "algorithm_version": "1.0.0",
-        "implementation_sha256": "0d1313ebe3ab47cca45f8e6c5364be51ed8d113c44677f95890bdeeedadc16ee"
-      },
-      "created_at": "2026-09-11T00:00:00Z",
-      "definition_fingerprint": "872567da3c7195d75c64790f14aa979fcf8ba6677a910a0a742eb9f2dcd0ed87"
-    },
     "parameters": {
-      "fe_mode": "all_fe2"
+      "fe_mode": "all_fe2",
+      "anion_basis": "ideal_O10_W2",
+      "oh_mode": "ideal_2_minus_f_cl"
     },
-    "analysis_ids": [
-      "4dd91a55-f55c-4a34-8ed0-b83e27db1693"
-    ],
-    "input_fingerprint": "95bfd683b598937b3b3ab0739db294c0fa567fdcab593132b1b4f6bd3871f245",
-    "input_snapshots": [
-      {
-        "analysis_id": "4dd91a55-f55c-4a34-8ed0-b83e27db1693",
-        "identity": {
-          "Analysis": "Fo50"
-        },
-        "source_id": "769a7311-fe01-41e3-bc42-fbeb8dbd8db5",
-        "source_name": "olivine.csv",
-        "measurements": [
-          {
-            "measurement_id": "bdb40420-2343-4967-9bbe-6adaf9f7c621",
-            "field": "SiO2",
-            "raw_token": "34.88512520974737",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": null,
-            "fe_handling": null,
-            "source_header": "SiO2 (wt.%)",
-            "source_index": 2,
-            "source_cell": "C2",
-            "measurement_set": null,
-            "method": null
-          },
-          {
-            "measurement_id": "970c3fc5-9c99-4065-9ed9-95f708046401",
-            "field": "MgO",
-            "raw_token": "23.401129877896548",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": null,
-            "fe_handling": null,
-            "source_header": "MgO (wt.%)",
-            "source_index": 3,
-            "source_cell": "D2",
-            "measurement_set": null,
-            "method": null
-          },
-          {
-            "measurement_id": "cc275882-6fb1-447e-9f95-5763d0a445b8",
-            "field": "FeO",
-            "raw_token": "41.71374491235608",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": "FeO",
-            "fe_handling": "strictly_as_reported_no_conversion",
-            "source_header": "FeO (wt.%)",
-            "source_index": 4,
-            "source_cell": "E2",
-            "measurement_set": null,
-            "method": null
-          }
-        ],
-        "assignment": {
-          "decision_id": "41131c74-1937-4df4-9c7e-ca40339a58d7",
-          "target": "olivine",
-          "origin": "user_accepted_after_import",
-          "decision_kind": "keep_reported",
-          "decided_at": "2026-09-11T18:48:56Z",
-          "input_fingerprint": "d46551ddef50a44370a1ec1ebd44070f1ae8ecae178e7e539db20752f8492873",
-          "ruleset_version": "2026.08.5+alkaline-2026.08.1",
-          "reason": "Независимая проверка минерала"
-        },
-        "assignment_status": "verified"
-      }
-    ],
+    "input_fingerprint": "5b5140a746ff805a1259e97c6722ed702fbe6083f226d937bf51cf6c26780365",
     "results": [
       {
-        "analysis_id": "4dd91a55-f55c-4a34-8ed0-b83e27db1693",
+        "analysis_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+        "method_id": "mica.charge22",
+        "method_version": "0.1.0",
+        "method_status": "draft",
         "status": "current",
         "errors": [],
         "warnings": [
-          "Неизмеренные дополнительные оксиды не включены; APFU относится к доступному составу."
+          "Неизмеренные дополнительные компоненты перечислены отдельно; APFU относится к доступному составу.",
+          "Li не измерен; Li-содержащие слюды могут иметь неполную формулу.",
+          "Метод draft: независимая проверка на природных составах ещё не выполнена."
         ],
         "values": {
-          "Si_apfu": 0.9999999999999998,
-          "Mg_apfu": 1.0,
-          "Fe2_apfu": 1.0,
-          "Fo": 50.0,
-          "Fa": 50.0,
-          "cation_sum": 3.0,
-          "oxide_total": 100.0
+          "Si_apfu": 3.0000000000000004,
+          "Al_apfu": 1.0,
+          "Mg_apfu": 3.0,
+          "Ca_apfu": 0.0,
+          "Na_apfu": 0.0,
+          "K_apfu": 1.0,
+          "Fe2_apfu": 0.0,
+          "F_apfu": 0.0,
+          "Cl_apfu": 0.0,
+          "OH_est_apfu": 2.0,
+          "cation_sum": 8.0,
+          "oxide_total": 95.68248596777981
         },
         "used": [
           {
-            "measurement_id": "bdb40420-2343-4967-9bbe-6adaf9f7c621",
+            "measurement_id": "2a7e78cb-322f-44f5-b437-66f15327fd04",
             "field": "SiO2",
-            "raw_token": "34.88512520974737",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": null,
-            "fe_handling": null,
-            "source_header": "SiO2 (wt.%)",
-            "source_index": 2,
-            "source_cell": "C2",
-            "measurement_set": null,
-            "method": null
+            "raw_token": "43.19886687724983"
           },
           {
-            "measurement_id": "970c3fc5-9c99-4065-9ed9-95f708046401",
+            "measurement_id": "cc2e4e95-709e-4114-beb9-91343ac8ad55",
+            "field": "Al2O3",
+            "raw_token": "12.218097369947321"
+          },
+          {
+            "measurement_id": "2729eef8-9c06-4259-86c5-dd7b76ac2f4a",
             "field": "MgO",
-            "raw_token": "23.401129877896548",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": null,
-            "fe_handling": null,
-            "source_header": "MgO (wt.%)",
-            "source_index": 3,
-            "source_cell": "D2",
-            "measurement_set": null,
-            "method": null
+            "raw_token": "28.97803256529596"
           },
           {
-            "measurement_id": "cc275882-6fb1-447e-9f95-5763d0a445b8",
+            "measurement_id": "fc4bde69-4b2e-4be0-9bc6-5cf6281f8963",
+            "field": "CaO",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "529a359d-5bfb-418e-b526-6f59d60af07c",
+            "field": "Na2O",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "857076ab-a98c-4883-bf29-b5523a9d8252",
+            "field": "K2O",
+            "raw_token": "11.287489155286707"
+          },
+          {
+            "measurement_id": "5daccb77-4c0f-43ce-a4ab-23112d127481",
             "field": "FeO",
-            "raw_token": "41.71374491235608",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": "FeO",
-            "fe_handling": "strictly_as_reported_no_conversion",
-            "source_header": "FeO (wt.%)",
-            "source_index": 4,
-            "source_cell": "E2",
-            "measurement_set": null,
-            "method": null
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "8e48cb3d-59e1-47e2-8438-f8f4d8c4517a",
+            "field": "F",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "08cc82a4-5d4a-4606-b608-ee386891b337",
+            "field": "Cl",
+            "raw_token": "0"
           }
         ],
         "excluded": [],
         "unmeasured": [
-          "Al2O3",
-          "CaO",
+          "BaO",
           "Cr2O3",
-          "K2O",
+          "Li2O",
           "MnO",
-          "Na2O",
           "NiO",
           "TiO2"
         ],
         "assumptions": [
-          "Нормировка на 4 O; сумма wt.% не приводилась к 100%.",
-          "Fo–Fa: только Mg и Fe²⁺; Mn/Ca/Ni не входят в знаменатель.",
-          "Без распределения по позициям, оценки OH и неопределённости.",
-          "Всё исходное железо принято двухвалентным; Fe³⁺ не измерен этим расчётом."
-        ]
+          "Идеальная анионная группа O₁₀W₂, W = OH/F/Cl; 22 положительных заряда.",
+          "Сумма wt.% не нормировалась к 100%; F/Cl не входят в сумму катионных зарядов.",
+          "Без распределения по позициям, оценки вакансий, Li, номенклатуры и неопределённости.",
+          "Всё железо принято Fe²⁺; Fe³⁺ не определён.",
+          "OH оценён по идеальной группе, не измерен."
+        ],
+        "parameters": {
+          "fe_mode": "all_fe2",
+          "anion_basis": "ideal_O10_W2",
+          "oh_mode": "ideal_2_minus_f_cl"
+        },
+        "OH_est_basis": {
+          "formula": "2 - F_apfu - Cl_apfu",
+          "anion_basis": "ideal_O10_W2",
+          "normalization": "22 positive charges",
+          "input_measurement_ids": [
+            "2a7e78cb-322f-44f5-b437-66f15327fd04",
+            "cc2e4e95-709e-4114-beb9-91343ac8ad55",
+            "2729eef8-9c06-4259-86c5-dd7b76ac2f4a",
+            "fc4bde69-4b2e-4be0-9bc6-5cf6281f8963",
+            "529a359d-5bfb-418e-b526-6f59d60af07c",
+            "857076ab-a98c-4883-bf29-b5523a9d8252",
+            "5daccb77-4c0f-43ce-a4ab-23112d127481",
+            "8e48cb3d-59e1-47e2-8438-f8f4d8c4517a",
+            "08cc82a4-5d4a-4606-b608-ee386891b337"
+          ]
+        }
       }
     ],
     "can_save": true
   },
   "saved": {
+    "reused": false,
     "run": {
-      "id": "c702d823-ca90-4767-842f-a556497f0323",
-      "project_id": "446ea06b-29e9-4474-8a8f-1d7c989ca03a",
-      "method_id": "olivine.oxygen4",
-      "method_version": "1.0.0",
-      "method_definition_fingerprint": "872567da3c7195d75c64790f14aa979fcf8ba6677a910a0a742eb9f2dcd0ed87",
-      "input": {
-        "kind": "analysis_snapshot",
-        "analysis_ids": [
-          "4dd91a55-f55c-4a34-8ed0-b83e27db1693"
-        ]
-      },
-      "input_measurement_ids": [
-        "bdb40420-2343-4967-9bbe-6adaf9f7c621",
-        "970c3fc5-9c99-4065-9ed9-95f708046401",
-        "cc275882-6fb1-447e-9f95-5763d0a445b8"
-      ],
-      "input_fingerprint": "95bfd683b598937b3b3ab0739db294c0fa567fdcab593132b1b4f6bd3871f245",
+      "id": "35efdc66-4f6b-499f-bc67-cf1f5f9be9ad",
+      "method_id": "mica.charge22",
+      "method_version": "0.1.0",
       "parameters": {
-        "fe_mode": "all_fe2"
-      },
-      "excluded": [],
-      "result_manifest": {
-        "method": {
-          "method_id": "olivine.oxygen4",
-          "version": "1.0.0",
-          "name": "Оливин · 4 O · APFU и бинарные Fo–Fa",
-          "kind": "formula",
-          "status": "draft",
-          "input_domain": {
-            "semantic_domain": "oxide_wt_percent",
-            "required_fields": [
-              "SiO2",
-              "MgO"
-            ],
-            "allowed_units": [
-              "wt.%"
-            ],
-            "missing_policy": "reject_row",
-            "censored_policy": "reject_row",
-            "compositional_domain_policy": "explicit_subcomposition_required",
-            "nonpositive_policy": "not_applicable",
-            "mixed_unit_policy": "reject"
-          },
-          "parameters": [
-            {
-              "name": "fe_mode",
-              "value_type": "choice",
-              "scientifically_significant": true
-            }
-          ],
-          "output_fields": [
-            {
-              "field": "Al_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "Ca_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "Cr_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "Fe2_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "Fe3_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "K_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "Mg_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "Mn_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "Na_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "Ni_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "Si_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "Ti_apfu",
-              "semantic_role": "derived_value",
-              "unit": "apfu"
-            },
-            {
-              "field": "Fo",
-              "semantic_role": "derived_value",
-              "unit": "mol.%"
-            },
-            {
-              "field": "Fa",
-              "semantic_role": "derived_value",
-              "unit": "mol.%"
-            },
-            {
-              "field": "cation_sum",
-              "semantic_role": "diagnostic",
-              "unit": "apfu"
-            },
-            {
-              "field": "oxide_total",
-              "semantic_role": "diagnostic",
-              "unit": "wt.%"
-            }
-          ],
-          "citations": [
-            {
-              "title": "Brady & Perkins (2007), Mineral Formulae Recalculation",
-              "url": "https://serc.carleton.edu/research_education/equilibria/mineralformulaerecalculation.html"
-            },
-            {
-              "title": "CIAAW Abridged Standard Atomic Weights 2024",
-              "url": "https://ciaaw.org/abridged-atomic-weights.htm"
-            }
-          ],
-          "assumptions": [
-            "4 O; без нормировки суммы wt.% к 100%.",
-            "Fo = 100 Mg/(Mg+Fe2), Fa = 100 Fe2/(Mg+Fe2); Mn/Ca/Ni отдельно.",
-            "Нули допустимы; SiO2 и Mg+Fe2 должны быть положительны.",
-            "Fe: ровно один FeO/FeOt для all_fe2; FeO и Fe2O3 для reported_split.",
-            "Fe3+, OH, позиции и неопределённость не оцениваются."
-          ],
-          "applicability": [
-            "Только явно принятый оливин/форстерит/фаялит.",
-            "Пригодность состава проверяется независимо от назначения.",
-            "Неизмеренные дополнительные оксиды перечисляются, не заменяются нулями.",
-            "Первый метод: внешняя проверка на природных анализах ещё требуется."
-          ],
-          "benchmark_ids": [
-            "ol-fo100",
-            "ol-fa100",
-            "ol-fo50",
-            "ol-mn-ca-ni",
-            "ol-split-fe"
-          ],
-          "implementation": {
-            "algorithm_id": "olivine.oxygen4",
-            "algorithm_version": "1.0.0",
-            "implementation_sha256": "0d1313ebe3ab47cca45f8e6c5364be51ed8d113c44677f95890bdeeedadc16ee"
-          },
-          "created_at": "2026-09-11T00:00:00Z",
-          "definition_fingerprint": "872567da3c7195d75c64790f14aa979fcf8ba6677a910a0a742eb9f2dcd0ed87"
-        },
-        "parameters": {
-          "fe_mode": "all_fe2"
-        },
-        "analysis_ids": [
-          "4dd91a55-f55c-4a34-8ed0-b83e27db1693"
-        ],
-        "input_fingerprint": "95bfd683b598937b3b3ab0739db294c0fa567fdcab593132b1b4f6bd3871f245",
-        "input_snapshots": [
-          {
-            "analysis_id": "4dd91a55-f55c-4a34-8ed0-b83e27db1693",
-            "identity": {
-              "Analysis": "Fo50"
-            },
-            "source_id": "769a7311-fe01-41e3-bc42-fbeb8dbd8db5",
-            "source_name": "olivine.csv",
-            "measurements": [
-              {
-                "measurement_id": "bdb40420-2343-4967-9bbe-6adaf9f7c621",
-                "field": "SiO2",
-                "raw_token": "34.88512520974737",
-                "unit": "wt.%",
-                "qualifier": null,
-                "detection_limit": null,
-                "value_status": "numeric",
-                "reported_fe_form": null,
-                "fe_handling": null,
-                "source_header": "SiO2 (wt.%)",
-                "source_index": 2,
-                "source_cell": "C2",
-                "measurement_set": null,
-                "method": null
-              },
-              {
-                "measurement_id": "970c3fc5-9c99-4065-9ed9-95f708046401",
-                "field": "MgO",
-                "raw_token": "23.401129877896548",
-                "unit": "wt.%",
-                "qualifier": null,
-                "detection_limit": null,
-                "value_status": "numeric",
-                "reported_fe_form": null,
-                "fe_handling": null,
-                "source_header": "MgO (wt.%)",
-                "source_index": 3,
-                "source_cell": "D2",
-                "measurement_set": null,
-                "method": null
-              },
-              {
-                "measurement_id": "cc275882-6fb1-447e-9f95-5763d0a445b8",
-                "field": "FeO",
-                "raw_token": "41.71374491235608",
-                "unit": "wt.%",
-                "qualifier": null,
-                "detection_limit": null,
-                "value_status": "numeric",
-                "reported_fe_form": "FeO",
-                "fe_handling": "strictly_as_reported_no_conversion",
-                "source_header": "FeO (wt.%)",
-                "source_index": 4,
-                "source_cell": "E2",
-                "measurement_set": null,
-                "method": null
-              }
-            ],
-            "assignment": {
-              "decision_id": "41131c74-1937-4df4-9c7e-ca40339a58d7",
-              "target": "olivine",
-              "origin": "user_accepted_after_import",
-              "decision_kind": "keep_reported",
-              "decided_at": "2026-09-11T18:48:56Z",
-              "input_fingerprint": "d46551ddef50a44370a1ec1ebd44070f1ae8ecae178e7e539db20752f8492873",
-              "ruleset_version": "2026.08.5+alkaline-2026.08.1",
-              "reason": "Независимая проверка минерала"
-            },
-            "assignment_status": "verified"
-          }
-        ],
-        "results": [
-          {
-            "analysis_id": "4dd91a55-f55c-4a34-8ed0-b83e27db1693",
-            "status": "current",
-            "errors": [],
-            "warnings": [
-              "Неизмеренные дополнительные оксиды не включены; APFU относится к доступному составу."
-            ],
-            "values": {
-              "Si_apfu": 0.9999999999999998,
-              "Mg_apfu": 1.0,
-              "Fe2_apfu": 1.0,
-              "Fo": 50.0,
-              "Fa": 50.0,
-              "cation_sum": 3.0,
-              "oxide_total": 100.0
-            },
-            "used": [
-              {
-                "measurement_id": "bdb40420-2343-4967-9bbe-6adaf9f7c621",
-                "field": "SiO2",
-                "raw_token": "34.88512520974737",
-                "unit": "wt.%",
-                "qualifier": null,
-                "detection_limit": null,
-                "value_status": "numeric",
-                "reported_fe_form": null,
-                "fe_handling": null,
-                "source_header": "SiO2 (wt.%)",
-                "source_index": 2,
-                "source_cell": "C2",
-                "measurement_set": null,
-                "method": null
-              },
-              {
-                "measurement_id": "970c3fc5-9c99-4065-9ed9-95f708046401",
-                "field": "MgO",
-                "raw_token": "23.401129877896548",
-                "unit": "wt.%",
-                "qualifier": null,
-                "detection_limit": null,
-                "value_status": "numeric",
-                "reported_fe_form": null,
-                "fe_handling": null,
-                "source_header": "MgO (wt.%)",
-                "source_index": 3,
-                "source_cell": "D2",
-                "measurement_set": null,
-                "method": null
-              },
-              {
-                "measurement_id": "cc275882-6fb1-447e-9f95-5763d0a445b8",
-                "field": "FeO",
-                "raw_token": "41.71374491235608",
-                "unit": "wt.%",
-                "qualifier": null,
-                "detection_limit": null,
-                "value_status": "numeric",
-                "reported_fe_form": "FeO",
-                "fe_handling": "strictly_as_reported_no_conversion",
-                "source_header": "FeO (wt.%)",
-                "source_index": 4,
-                "source_cell": "E2",
-                "measurement_set": null,
-                "method": null
-              }
-            ],
-            "excluded": [],
-            "unmeasured": [
-              "Al2O3",
-              "CaO",
-              "Cr2O3",
-              "K2O",
-              "MnO",
-              "Na2O",
-              "NiO",
-              "TiO2"
-            ],
-            "assumptions": [
-              "Нормировка на 4 O; сумма wt.% не приводилась к 100%.",
-              "Fo–Fa: только Mg и Fe²⁺; Mn/Ca/Ni не входят в знаменатель.",
-              "Без распределения по позициям, оценки OH и неопределённости.",
-              "Всё исходное железо принято двухвалентным; Fe³⁺ не измерен этим расчётом."
-            ]
-          }
-        ],
-        "can_save": true
+        "fe_mode": "all_fe2",
+        "anion_basis": "ideal_O10_W2",
+        "oh_mode": "ideal_2_minus_f_cl"
       },
       "status": "current",
       "stale_reasons": [],
-      "created_at": "2026-09-11T18:48:56Z",
-      "software_versions": {
-        "python": "3.12.14",
-        "petrolab_formula": "1.0.0"
-      }
-    },
-    "reused": false
+      "created_at": "2026-09-14T09:58:14Z",
+      "input_fingerprint": "5b5140a746ff805a1259e97c6722ed702fbe6083f226d937bf51cf6c26780365"
+    }
   },
   "invalid": {
-    "method": {
-      "method_id": "olivine.oxygen4",
-      "version": "1.0.0",
-      "name": "Оливин · 4 O · APFU и бинарные Fo–Fa",
-      "kind": "formula",
-      "status": "draft",
-      "input_domain": {
-        "semantic_domain": "oxide_wt_percent",
-        "required_fields": [
-          "SiO2",
-          "MgO"
-        ],
-        "allowed_units": [
-          "wt.%"
-        ],
-        "missing_policy": "reject_row",
-        "censored_policy": "reject_row",
-        "compositional_domain_policy": "explicit_subcomposition_required",
-        "nonpositive_policy": "not_applicable",
-        "mixed_unit_policy": "reject"
-      },
-      "parameters": [
-        {
-          "name": "fe_mode",
-          "value_type": "choice",
-          "scientifically_significant": true
-        }
-      ],
-      "output_fields": [
-        {
-          "field": "Al_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Ca_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Cr_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Fe2_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Fe3_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "K_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Mg_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Mn_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Na_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Ni_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Si_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Ti_apfu",
-          "semantic_role": "derived_value",
-          "unit": "apfu"
-        },
-        {
-          "field": "Fo",
-          "semantic_role": "derived_value",
-          "unit": "mol.%"
-        },
-        {
-          "field": "Fa",
-          "semantic_role": "derived_value",
-          "unit": "mol.%"
-        },
-        {
-          "field": "cation_sum",
-          "semantic_role": "diagnostic",
-          "unit": "apfu"
-        },
-        {
-          "field": "oxide_total",
-          "semantic_role": "diagnostic",
-          "unit": "wt.%"
-        }
-      ],
-      "citations": [
-        {
-          "title": "Brady & Perkins (2007), Mineral Formulae Recalculation",
-          "url": "https://serc.carleton.edu/research_education/equilibria/mineralformulaerecalculation.html"
-        },
-        {
-          "title": "CIAAW Abridged Standard Atomic Weights 2024",
-          "url": "https://ciaaw.org/abridged-atomic-weights.htm"
-        }
-      ],
-      "assumptions": [
-        "4 O; без нормировки суммы wt.% к 100%.",
-        "Fo = 100 Mg/(Mg+Fe2), Fa = 100 Fe2/(Mg+Fe2); Mn/Ca/Ni отдельно.",
-        "Нули допустимы; SiO2 и Mg+Fe2 должны быть положительны.",
-        "Fe: ровно один FeO/FeOt для all_fe2; FeO и Fe2O3 для reported_split.",
-        "Fe3+, OH, позиции и неопределённость не оцениваются."
-      ],
-      "applicability": [
-        "Только явно принятый оливин/форстерит/фаялит.",
-        "Пригодность состава проверяется независимо от назначения.",
-        "Неизмеренные дополнительные оксиды перечисляются, не заменяются нулями.",
-        "Первый метод: внешняя проверка на природных анализах ещё требуется."
-      ],
-      "benchmark_ids": [
-        "ol-fo100",
-        "ol-fa100",
-        "ol-fo50",
-        "ol-mn-ca-ni",
-        "ol-split-fe"
-      ],
-      "implementation": {
-        "algorithm_id": "olivine.oxygen4",
-        "algorithm_version": "1.0.0",
-        "implementation_sha256": "0d1313ebe3ab47cca45f8e6c5364be51ed8d113c44677f95890bdeeedadc16ee"
-      },
-      "created_at": "2026-09-11T00:00:00Z",
-      "definition_fingerprint": "872567da3c7195d75c64790f14aa979fcf8ba6677a910a0a742eb9f2dcd0ed87"
-    },
     "parameters": {
-      "fe_mode": "reported_split"
+      "fe_mode": "reported_split",
+      "anion_basis": "ideal_O10_W2",
+      "oh_mode": "ideal_2_minus_f_cl"
     },
-    "analysis_ids": [
-      "4dd91a55-f55c-4a34-8ed0-b83e27db1693"
-    ],
-    "input_fingerprint": "f7f2092f91e00ceb7f981848408420b9f390b1606a766027b63a91bad5b3440c",
-    "input_snapshots": [
-      {
-        "analysis_id": "4dd91a55-f55c-4a34-8ed0-b83e27db1693",
-        "identity": {
-          "Analysis": "Fo50"
-        },
-        "source_id": "769a7311-fe01-41e3-bc42-fbeb8dbd8db5",
-        "source_name": "olivine.csv",
-        "measurements": [
-          {
-            "measurement_id": "bdb40420-2343-4967-9bbe-6adaf9f7c621",
-            "field": "SiO2",
-            "raw_token": "34.88512520974737",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": null,
-            "fe_handling": null,
-            "source_header": "SiO2 (wt.%)",
-            "source_index": 2,
-            "source_cell": "C2",
-            "measurement_set": null,
-            "method": null
-          },
-          {
-            "measurement_id": "970c3fc5-9c99-4065-9ed9-95f708046401",
-            "field": "MgO",
-            "raw_token": "23.401129877896548",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": null,
-            "fe_handling": null,
-            "source_header": "MgO (wt.%)",
-            "source_index": 3,
-            "source_cell": "D2",
-            "measurement_set": null,
-            "method": null
-          },
-          {
-            "measurement_id": "cc275882-6fb1-447e-9f95-5763d0a445b8",
-            "field": "FeO",
-            "raw_token": "41.71374491235608",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": "FeO",
-            "fe_handling": "strictly_as_reported_no_conversion",
-            "source_header": "FeO (wt.%)",
-            "source_index": 4,
-            "source_cell": "E2",
-            "measurement_set": null,
-            "method": null
-          }
-        ],
-        "assignment": {
-          "decision_id": "41131c74-1937-4df4-9c7e-ca40339a58d7",
-          "target": "olivine",
-          "origin": "user_accepted_after_import",
-          "decision_kind": "keep_reported",
-          "decided_at": "2026-09-11T18:48:56Z",
-          "input_fingerprint": "d46551ddef50a44370a1ec1ebd44070f1ae8ecae178e7e539db20752f8492873",
-          "ruleset_version": "2026.08.5+alkaline-2026.08.1",
-          "reason": "Независимая проверка минерала"
-        },
-        "assignment_status": "verified"
-      }
-    ],
+    "input_fingerprint": "e7101d5deb89fdafcf9583e3e418b077348b53a0935cca48b3bd8e193d134eff",
     "results": [
       {
-        "analysis_id": "4dd91a55-f55c-4a34-8ed0-b83e27db1693",
+        "analysis_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+        "method_id": "mica.charge22",
+        "method_version": "0.1.0",
+        "method_status": "draft",
         "status": "failed",
         "errors": [
           "Fe2O3: нет пригодного обязательного измерения (явный ноль допустим)."
@@ -1070,261 +221,250 @@
         "values": {},
         "used": [
           {
-            "measurement_id": "bdb40420-2343-4967-9bbe-6adaf9f7c621",
+            "measurement_id": "2a7e78cb-322f-44f5-b437-66f15327fd04",
             "field": "SiO2",
-            "raw_token": "34.88512520974737",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": null,
-            "fe_handling": null,
-            "source_header": "SiO2 (wt.%)",
-            "source_index": 2,
-            "source_cell": "C2",
-            "measurement_set": null,
-            "method": null
+            "raw_token": "43.19886687724983"
           },
           {
-            "measurement_id": "970c3fc5-9c99-4065-9ed9-95f708046401",
+            "measurement_id": "cc2e4e95-709e-4114-beb9-91343ac8ad55",
+            "field": "Al2O3",
+            "raw_token": "12.218097369947321"
+          },
+          {
+            "measurement_id": "2729eef8-9c06-4259-86c5-dd7b76ac2f4a",
             "field": "MgO",
-            "raw_token": "23.401129877896548",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": null,
-            "fe_handling": null,
-            "source_header": "MgO (wt.%)",
-            "source_index": 3,
-            "source_cell": "D2",
-            "measurement_set": null,
-            "method": null
+            "raw_token": "28.97803256529596"
           },
           {
-            "measurement_id": "cc275882-6fb1-447e-9f95-5763d0a445b8",
+            "measurement_id": "fc4bde69-4b2e-4be0-9bc6-5cf6281f8963",
+            "field": "CaO",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "529a359d-5bfb-418e-b526-6f59d60af07c",
+            "field": "Na2O",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "857076ab-a98c-4883-bf29-b5523a9d8252",
+            "field": "K2O",
+            "raw_token": "11.287489155286707"
+          },
+          {
+            "measurement_id": "5daccb77-4c0f-43ce-a4ab-23112d127481",
             "field": "FeO",
-            "raw_token": "41.71374491235608",
-            "unit": "wt.%",
-            "qualifier": null,
-            "detection_limit": null,
-            "value_status": "numeric",
-            "reported_fe_form": "FeO",
-            "fe_handling": "strictly_as_reported_no_conversion",
-            "source_header": "FeO (wt.%)",
-            "source_index": 4,
-            "source_cell": "E2",
-            "measurement_set": null,
-            "method": null
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "8e48cb3d-59e1-47e2-8438-f8f4d8c4517a",
+            "field": "F",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "08cc82a4-5d4a-4606-b608-ee386891b337",
+            "field": "Cl",
+            "raw_token": "0"
           }
         ],
         "excluded": [],
         "unmeasured": [
-          "Al2O3",
-          "CaO",
+          "BaO",
           "Cr2O3",
-          "K2O",
+          "Li2O",
           "MnO",
-          "Na2O",
           "NiO",
           "TiO2"
-        ]
+        ],
+        "assumptions": [],
+        "parameters": {
+          "fe_mode": "reported_split",
+          "anion_basis": "ideal_O10_W2",
+          "oh_mode": "ideal_2_minus_f_cl"
+        }
       }
     ],
     "can_save": false
   },
-  "analysis": {
-    "sample_association": {
-      "candidates": [],
-      "reported": null,
-      "reported_fields": {},
-      "sample_id": null,
-      "status": "unresolved"
+  "no_oh": {
+    "parameters": {
+      "fe_mode": "all_fe2",
+      "anion_basis": "ideal_O10_W2",
+      "oh_mode": "not_calculated"
     },
+    "input_fingerprint": "b160be17e8316ffa311aa158bdeb9821980bcb6ddd51f9eed1b736f2f9a1c7c2",
+    "results": [
+      {
+        "analysis_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+        "method_id": "mica.charge22",
+        "method_version": "0.1.0",
+        "method_status": "draft",
+        "status": "current",
+        "errors": [],
+        "warnings": [
+          "Неизмеренные дополнительные компоненты перечислены отдельно; APFU относится к доступному составу.",
+          "Li не измерен; Li-содержащие слюды могут иметь неполную формулу.",
+          "Метод draft: независимая проверка на природных составах ещё не выполнена."
+        ],
+        "values": {
+          "Si_apfu": 3.0000000000000004,
+          "Al_apfu": 1.0,
+          "Mg_apfu": 3.0,
+          "Ca_apfu": 0.0,
+          "Na_apfu": 0.0,
+          "K_apfu": 1.0,
+          "Fe2_apfu": 0.0,
+          "F_apfu": 0.0,
+          "Cl_apfu": 0.0,
+          "cation_sum": 8.0,
+          "oxide_total": 95.68248596777981
+        },
+        "used": [
+          {
+            "measurement_id": "2a7e78cb-322f-44f5-b437-66f15327fd04",
+            "field": "SiO2",
+            "raw_token": "43.19886687724983"
+          },
+          {
+            "measurement_id": "cc2e4e95-709e-4114-beb9-91343ac8ad55",
+            "field": "Al2O3",
+            "raw_token": "12.218097369947321"
+          },
+          {
+            "measurement_id": "2729eef8-9c06-4259-86c5-dd7b76ac2f4a",
+            "field": "MgO",
+            "raw_token": "28.97803256529596"
+          },
+          {
+            "measurement_id": "fc4bde69-4b2e-4be0-9bc6-5cf6281f8963",
+            "field": "CaO",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "529a359d-5bfb-418e-b526-6f59d60af07c",
+            "field": "Na2O",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "857076ab-a98c-4883-bf29-b5523a9d8252",
+            "field": "K2O",
+            "raw_token": "11.287489155286707"
+          },
+          {
+            "measurement_id": "5daccb77-4c0f-43ce-a4ab-23112d127481",
+            "field": "FeO",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "8e48cb3d-59e1-47e2-8438-f8f4d8c4517a",
+            "field": "F",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "08cc82a4-5d4a-4606-b608-ee386891b337",
+            "field": "Cl",
+            "raw_token": "0"
+          }
+        ],
+        "excluded": [],
+        "unmeasured": [
+          "BaO",
+          "Cr2O3",
+          "Li2O",
+          "MnO",
+          "NiO",
+          "TiO2"
+        ],
+        "assumptions": [
+          "Идеальная анионная группа O₁₀W₂, W = OH/F/Cl; 22 положительных заряда.",
+          "Сумма wt.% не нормировалась к 100%; F/Cl не входят в сумму катионных зарядов.",
+          "Без распределения по позициям, оценки вакансий, Li, номенклатуры и неопределённости.",
+          "Всё железо принято Fe²⁺; Fe³⁺ не определён.",
+          "OH не рассчитывался; неизвестные F/Cl не заменялись нулём."
+        ],
+        "parameters": {
+          "fe_mode": "all_fe2",
+          "anion_basis": "ideal_O10_W2",
+          "oh_mode": "not_calculated"
+        }
+      }
+    ],
+    "can_save": true
+  },
+  "analysis": {
     "reported_mineral": {
       "column": 1,
       "confidence": "explicit_column",
       "origin": "explicitly_reported",
       "raw_header": "Mineral",
-      "raw_token": "olivine",
+      "raw_token": "phlogopite",
       "row": 2,
-      "sheet_name": "olivine",
-      "source_fingerprint": "7d38346750ad47f84a138f343b5387f7ffdc98fa4014baa2b5168c0dd71ad2e8",
-      "value": "olivine"
+      "sheet_name": "mica",
+      "source_fingerprint": "92659976e1bb805c7c417d64376513d6b5290d2bb120a77d2c10b8cab4f47a26",
+      "value": "phlogopite"
     },
     "mineral_assignment": {
-      "decision_id": "41131c74-1937-4df4-9c7e-ca40339a58d7",
-      "target": "olivine",
+      "decision_id": "f28ad587-2736-43ea-9339-5c85e0306ac1",
+      "target": "phlogopite",
       "origin": "user_accepted_after_import",
-      "decision_kind": "keep_reported",
-      "decided_at": "2026-09-11T18:48:56Z",
-      "input_fingerprint": "d46551ddef50a44370a1ec1ebd44070f1ae8ecae178e7e539db20752f8492873",
+      "decision_kind": "manual_assignment",
+      "decided_at": "2026-09-14T09:58:14Z",
+      "input_fingerprint": "830492b1a99f514cf591fbe8f282421af6f2744ff6913faf948d38501e32d5f8",
       "ruleset_version": "2026.08.5+alkaline-2026.08.1",
-      "reason": "Независимая проверка минерала"
+      "reason": "Независимая проверка слюды"
     },
     "mineral_verification": {
-      "analysis_id": "4dd91a55-f55c-4a34-8ed0-b83e27db1693",
-      "source_id": "769a7311-fe01-41e3-bc42-fbeb8dbd8db5",
-      "source_name": "olivine.csv",
-      "sheet_name": "olivine",
+      "analysis_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+      "source_id": "db15f1b8-f295-4f86-a400-5b4d0ed8526c",
+      "source_name": "mica.csv",
+      "sheet_name": "mica",
       "source_row_number": 2,
       "source_column_number": null,
-      "preview_id": "4dd91a55-f55c-4a34-8ed0-b83e27db1693",
-      "reported_mineral": "olivine",
-      "prediction": null,
-      "confidence": "unresolved",
-      "candidates": [],
-      "input_fingerprint": "d46551ddef50a44370a1ec1ebd44070f1ae8ecae178e7e539db20752f8492873",
+      "preview_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+      "reported_mineral": "phlogopite",
+      "prediction": "trioctahedral mica",
+      "confidence": "high",
+      "candidates": [
+        {
+          "target": "trioctahedral mica",
+          "score": 9.0,
+          "reasons": [
+            "K-dominant Mg-Fe mica chemistry"
+          ]
+        }
+      ],
+      "input_fingerprint": "830492b1a99f514cf591fbe8f282421af6f2744ff6913faf948d38501e32d5f8",
       "ruleset_version": "2026.08.5+alkaline-2026.08.1",
       "input_gate_version": "import-wt-percent-complete-core-2",
       "accepted": {
-        "decision_id": "41131c74-1937-4df4-9c7e-ca40339a58d7",
-        "target": "olivine",
+        "decision_id": "f28ad587-2736-43ea-9339-5c85e0306ac1",
+        "target": "phlogopite",
         "origin": "user_accepted_after_import",
-        "decision_kind": "keep_reported",
-        "decided_at": "2026-09-11T18:48:56Z",
-        "input_fingerprint": "d46551ddef50a44370a1ec1ebd44070f1ae8ecae178e7e539db20752f8492873",
+        "decision_kind": "manual_assignment",
+        "decided_at": "2026-09-14T09:58:14Z",
+        "input_fingerprint": "830492b1a99f514cf591fbe8f282421af6f2744ff6913faf948d38501e32d5f8",
         "ruleset_version": "2026.08.5+alkaline-2026.08.1",
-        "reason": "Независимая проверка минерала"
+        "reason": "Независимая проверка слюды"
       },
       "label_version": "mineral-labels-2026-09-11",
-      "missing_components": [
-        "Al2O3",
-        "CaO",
-        "K2O",
-        "Na2O"
-      ],
+      "missing_components": [],
       "excluded_inputs": [],
-      "issues": [
-        "incomplete_major_element_input"
-      ],
+      "issues": [],
       "status": "verified",
-      "reported_target": "olivine"
+      "reasons": [
+        "K-dominant Mg-Fe mica chemistry"
+      ],
+      "reference_version": "2026.08.2",
+      "catalog_hash": "7250afe9e91316cb42bdb27abf0c3e73f6b42254fcc62b535487618012cbdcf8",
+      "reported_target": "trioctahedral mica"
     },
-    "analytical_method": null,
-    "analysis_id": "4dd91a55-f55c-4a34-8ed0-b83e27db1693",
-    "source_id": "769a7311-fe01-41e3-bc42-fbeb8dbd8db5",
-    "source_name": "olivine.csv",
-    "sheet_name": "olivine",
+    "analysis_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+    "source_name": "mica.csv",
+    "sheet_name": "mica",
     "source_row_number": 2,
     "source_column_number": null,
     "source_orientation": "rows_are_analyses",
     "identity": {
-      "Analysis": "Fo50"
-    },
-    "source_metadata": {
-      "Mineral": "olivine"
-    },
-    "source_metadata_list": [
-      {
-        "field": "Mineral",
-        "raw_token": "olivine",
-        "source_header": "Mineral",
-        "source_row_number": 2,
-        "source_column_index": 1,
-        "source_cell": "B2"
-      }
-    ],
-    "measurements": {
-      "SiO2": {
-        "measurement_id": "bdb40420-2343-4967-9bbe-6adaf9f7c621",
-        "field": "SiO2",
-        "raw_token": "34.88512520974737",
-        "unit": "wt.%",
-        "qualifier": null,
-        "detection_limit": null,
-        "value_status": "numeric",
-        "reported_fe_form": null,
-        "fe_handling": null,
-        "source_header": "SiO2 (wt.%)",
-        "source_index": 2,
-        "source_cell": "C2",
-        "measurement_set": null,
-        "method": null
-      },
-      "MgO": {
-        "measurement_id": "970c3fc5-9c99-4065-9ed9-95f708046401",
-        "field": "MgO",
-        "raw_token": "23.401129877896548",
-        "unit": "wt.%",
-        "qualifier": null,
-        "detection_limit": null,
-        "value_status": "numeric",
-        "reported_fe_form": null,
-        "fe_handling": null,
-        "source_header": "MgO (wt.%)",
-        "source_index": 3,
-        "source_cell": "D2",
-        "measurement_set": null,
-        "method": null
-      },
-      "FeO": {
-        "measurement_id": "cc275882-6fb1-447e-9f95-5763d0a445b8",
-        "field": "FeO",
-        "raw_token": "41.71374491235608",
-        "unit": "wt.%",
-        "qualifier": null,
-        "detection_limit": null,
-        "value_status": "numeric",
-        "reported_fe_form": "FeO",
-        "fe_handling": "strictly_as_reported_no_conversion",
-        "source_header": "FeO (wt.%)",
-        "source_index": 4,
-        "source_cell": "E2",
-        "measurement_set": null,
-        "method": null
-      }
-    },
-    "measurement_list": [
-      {
-        "measurement_id": "bdb40420-2343-4967-9bbe-6adaf9f7c621",
-        "field": "SiO2",
-        "raw_token": "34.88512520974737",
-        "unit": "wt.%",
-        "qualifier": null,
-        "detection_limit": null,
-        "value_status": "numeric",
-        "reported_fe_form": null,
-        "fe_handling": null,
-        "source_header": "SiO2 (wt.%)",
-        "source_index": 2,
-        "source_cell": "C2",
-        "measurement_set": null,
-        "method": null
-      },
-      {
-        "measurement_id": "970c3fc5-9c99-4065-9ed9-95f708046401",
-        "field": "MgO",
-        "raw_token": "23.401129877896548",
-        "unit": "wt.%",
-        "qualifier": null,
-        "detection_limit": null,
-        "value_status": "numeric",
-        "reported_fe_form": null,
-        "fe_handling": null,
-        "source_header": "MgO (wt.%)",
-        "source_index": 3,
-        "source_cell": "D2",
-        "measurement_set": null,
-        "method": null
-      },
-      {
-        "measurement_id": "cc275882-6fb1-447e-9f95-5763d0a445b8",
-        "field": "FeO",
-        "raw_token": "41.71374491235608",
-        "unit": "wt.%",
-        "qualifier": null,
-        "detection_limit": null,
-        "value_status": "numeric",
-        "reported_fe_form": "FeO",
-        "fe_handling": "strictly_as_reported_no_conversion",
-        "source_header": "FeO (wt.%)",
-        "source_index": 4,
-        "source_cell": "E2",
-        "measurement_set": null,
-        "method": null
-      }
-    ],
-    "created_at": "2026-09-11T18:48:56Z"
+      "Analysis": "Phl-1"
+    }
   }
 }

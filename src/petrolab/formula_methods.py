@@ -10,6 +10,7 @@ from .mica_formula import (ANION_BASES as MICA_ANION_BASES, ATOMIC_MASSES as MIC
 from .olivine_formula import (ATOMIC_MASSES as OLIVINE_ATOMIC_MASSES,
                               FE_MODES as OLIVINE_FE_MODES, OXIDES as OLIVINE_OXIDES,
                               calculate_olivine)
+from .mineral_verification import reported_target
 
 METHOD_ID = 'olivine.oxygen4'
 METHOD_VERSION = '1.0.0'
@@ -133,11 +134,15 @@ def executable_method(method_id, version):
                 anion_basis=p['anion_basis'], oh_mode=p['oh_mode'])}
 
 
-def list_methods():
+def list_methods(accepted_assignment=None):
+    """List installed methods, optionally narrowed to one accepted mineral label."""
+    accepted_target = reported_target(accepted_assignment) if accepted_assignment is not None else None
     methods = []
     for method_id, version, masses in ((METHOD_ID, METHOD_VERSION, OLIVINE_ATOMIC_MASSES),
                                        (MICA_METHOD_ID, MICA_METHOD_VERSION, MICA_ATOMIC_MASSES)):
         registration = executable_method(method_id, version)
+        if accepted_assignment is not None and accepted_target not in registration['accepted_targets']:
+            continue
         choices = registration['parameter_choices']
         item = {**registration['definition'], 'parameter_choices': copy.deepcopy(choices),
                 'fe_modes': copy.deepcopy(choices['fe_mode']),

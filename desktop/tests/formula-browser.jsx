@@ -7,20 +7,27 @@ import '../src/styles.css';
 
 let runs = [];
 let requestCounter = 0;
+const manifest = value => ({ ...value, method: data.catalog.methods[0], analysis_ids: [data.analysis.analysis_id] });
 // HTTP-only browser QA lacks secure-context randomUUID; production Tauri has it.
 if (!crypto.randomUUID) crypto.randomUUID = () => `00000000-0000-4000-8000-${(++requestCounter).toString(16).padStart(12, '0')}`;
 window.__TAURI_INTERNALS__ = { invoke: async (command, { envelope }) => {
   if (command !== 'petrolab_command') throw new Error(command);
   const { command: operation, payload } = envelope;
   if (operation === 'formula.methods.list') return { result: data.catalog };
-  if (operation === 'formula.preview') return { result: payload.parameters.fe_mode === 'all_fe2' ? data.preview : data.invalid };
-  if (operation === 'formula.save') { runs = [{ run: data.saved.run }]; return { result: data.saved }; }
+  if (operation === 'formula.preview') {
+    if (payload.parameters.fe_mode !== 'all_fe2') return { result: manifest(data.invalid) };
+    return { result: manifest(payload.parameters.oh_mode === 'ideal_2_minus_f_cl' ? data.preview : data.no_oh) };
+  }
+  if (operation === 'formula.save') {
+    const saved = { ...data.saved, run: { ...data.saved.run, result_manifest: manifest(data.preview) } };
+    runs = [{ run: saved.run }]; return { result: saved };
+  }
   if (operation === 'formula.runs.list') return { result: { runs } };
   throw new Error(operation);
 } };
 
 createRoot(document.getElementById('root')).render(<>
   <header style={{ padding: 12 }}>PetroLab · Формулы · синтетическая UI-проверка, без записи в проект</header>
-  <MineralsWorkspace project={{ total: 1, analyses: [data.analysis], mineral_options: ['olivine'] }} databasePath="synthetic-qa"
+  <MineralsWorkspace project={{ total: 1, analyses: [data.analysis], mineral_options: ['phlogopite'] }} databasePath="synthetic-qa"
     onRefresh={() => {}} onDecide={() => {}} onAddData={() => {}} />
 </>);

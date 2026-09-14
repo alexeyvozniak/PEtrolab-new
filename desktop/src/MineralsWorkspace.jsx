@@ -77,7 +77,7 @@ function ReviewPane({ analysis, busy, onDecide, options, databasePath }) {
     </section>
 
     <details className="mineral-formula-section">
-      <summary>Формула · оливин, 4 O</summary>
+      <summary>Формула минерала</summary>
       <FormulaPanel key={JSON.stringify([analysis.analysis_id, verification.input_fingerprint, verification.accepted])} analysis={analysis} databasePath={databasePath} />
     </details>
 

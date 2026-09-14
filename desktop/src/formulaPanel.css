@@ -12,6 +12,16 @@
 .formula-panel summary { cursor: pointer; font-weight: 650; padding: 8px 0; }
 .formula-panel .formula-error { background: #fce9e5; color: #832d28; padding: 10px; border-radius: 6px; }
 .formula-panel .formula-warning { background: #fff1d7; color: #6e4a11; padding: 10px; border-radius: 6px; }
+.formula-panel .formula-empty, .formula-panel .formula-scope { background: #edf4ee; color: #31543c; padding: 10px; border-radius: 6px; }
+.formula-parameter-grid { display: grid; gap: 2px; }
+.formula-basis { margin: 12px 0; padding: 10px; border-left: 4px solid #397447; background: #f2f7f3; }
+.formula-basis p { margin: 5px 0; }
+.formula-basis code { white-space: normal; overflow-wrap: anywhere; }
+.formula-estimate-badge { display: inline-block; margin-left: 6px; padding: 1px 5px; border-radius: 999px; background: #e5efe7; color: #31543c; font-size: 11px; font-weight: 700; }
+.formula-parameters { margin: 8px 0; }
+.formula-parameters div { display: grid; grid-template-columns: minmax(90px, .45fr) minmax(0, 1fr); gap: 8px; padding: 5px 0; border-bottom: 1px solid #e4ebe6; }
+.formula-parameters dt { font-weight: 700; }
+.formula-parameters dd { margin: 0; overflow-wrap: anywhere; }
 .formula-panel small { display: block; overflow-wrap: anywhere; font-size: 12px; }
 .formula-panel :focus-visible { outline: 3px solid #397447; outline-offset: 3px; }
 .formula-history { border-top: 1px solid #c9d7cc; }
