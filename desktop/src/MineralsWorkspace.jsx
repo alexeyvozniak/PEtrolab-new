@@ -181,7 +181,7 @@ export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMo
       </div>
       <div className="mineral-list-head"><span>Анализ</span><span>В источнике</span><span>Назначение / предложение</span><span>Статус</span></div>
       <div className="mineral-list" role="listbox" aria-label="Очередь проверки минералов">
-        {filtered.map((analysis) => {
+        {filtered.map((analysis, index) => {
           const verification = analysis.mineral_verification || {};
           const isFocused = focused?.analysis_id === analysis.analysis_id;
           return <button
