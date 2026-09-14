@@ -47,6 +47,27 @@ class MineralVerificationTests(unittest.TestCase):
         self.assertEqual(reported_target('Cpx'), 'clinopyroxene')
         self.assertIsNone(controlled_label('unknown label'))
 
+    def test_core_russian_aliases_resolve_to_canonical_names(self) -> None:
+        aliases = {
+            "Фаялит": "fayalite",
+            "Авгит": "augite",
+            "Эгирин": "aegirine",
+            "Альмандин": "almandine",
+            "Пироп": "pyrope",
+            "Ильменит": "ilmenite",
+            "Рутил": "rutile",
+            "Фторапатит": "fluorapatite",
+            "Кальцит": "calcite",
+            "Доломит": "dolomite",
+        }
+
+        for value, target in aliases.items():
+            with self.subTest(value=value):
+                self.assertEqual(controlled_label(value), target)
+
+        self.assertEqual(reported_target("Авгит"), "clinopyroxene")
+        self.assertEqual(reported_target("Ильменит"), "Fe-Ti oxide")
+
     def test_unrecognized_manual_annotation_is_visible_not_stale(self):
         record = complete_silica_record('silica')
         record['mineral_assignment'] = {'value': 'unknown label', 'origin': 'user_assigned'}
