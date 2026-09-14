@@ -23,9 +23,16 @@ beforeEach(async () => {
   await writeFile(first, original);
   await writeFile(second, "Analysis,SiO2 [wt.%]\nB1,40\nB2,41\n");
   queue = [first, second]; pending = new Map(); requests = [];
+  const pythonPath = resolve(process.cwd(), "../src");
+  const pathSeparator = process.platform === "win32" ? ";" : ":";
   child = spawn("python", ["-m", "petrolab.ndjson_service"], {
     cwd: resolve(process.cwd(), ".."), windowsHide: true,
-    env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+    env: {
+      ...process.env,
+      PYTHONUTF8: "1",
+      PYTHONIOENCODING: "utf-8",
+      PYTHONPATH: [pythonPath, process.env.PYTHONPATH].filter(Boolean).join(pathSeparator),
+    },
   });
   lines = createInterface({ input: child.stdout });
   lines.on("line", (line) => {
