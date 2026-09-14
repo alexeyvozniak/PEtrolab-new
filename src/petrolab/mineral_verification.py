@@ -9,7 +9,7 @@ from .alkaline_mineral_reference import ALKALINE_MINERALS
 from .mineral_recognition_extended import recognize_mineral_extended, EXTENDED_RULESET_VERSION
 
 INPUT_GATE_VERSION = 'import-wt-percent-complete-core-2'
-LABEL_VERSION = 'mineral-labels-2026-09-11'
+LABEL_VERSION = 'mineral-labels-2026-09-14-core-ru-1'
 REQUIRED_CORE = {'SiO2', 'Al2O3', 'MgO', 'CaO', 'Na2O', 'K2O'}
 CONTROLLED_LABELS = {m.name.casefold(): m.name for m in (*MINERALS, *ALKALINE_MINERALS)}
 CONTROLLED_LABELS.update({m.chemical_target.casefold(): m.chemical_target for m in (*MINERALS, *ALKALINE_MINERALS)})
@@ -21,6 +21,15 @@ LABEL_ALIASES = {
     'апатит': 'apatite', 'ap': 'apatite', 'нефелин': 'nepheline', 'ne': 'nepheline',
     'перовскит': 'perovskite', 'кварц': 'quartz', 'qtz': 'quartz',
     'форстерит': 'forsterite', 'аннит': 'annite', 'мусковит': 'muscovite',
+    'фаялит': 'fayalite', 'тэфроит': 'tephroite',
+    'энстатит': 'enstatite', 'ферросилит': 'ferrosilite', 'авгит': 'augite',
+    'эгирин': 'aegirine', 'жадеит': 'jadeite', 'омфацит': 'omphacite',
+    'тремолит': 'tremolite', 'актинолит': 'actinolite', 'паргасит': 'pargasite',
+    'пироп': 'pyrope', 'альмандин': 'almandine', 'спессартин': 'spessartine',
+    'гроссуляр': 'grossular', 'ильменит': 'ilmenite', 'рутил': 'rutile',
+    'магнетит': 'magnetite', 'шпинель': 'spinel', 'титанит': 'titanite',
+    'фторапатит': 'fluorapatite', 'кальцит': 'calcite', 'доломит': 'dolomite',
+    'барит': 'barite',
 }
 REPORTED_TARGETS = {m.name.casefold(): m.chemical_target for m in (*MINERALS, *ALKALINE_MINERALS)}
 REPORTED_TARGETS.update({m.chemical_target.casefold(): m.chemical_target for m in (*MINERALS, *ALKALINE_MINERALS)})

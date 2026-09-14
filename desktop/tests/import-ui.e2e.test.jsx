@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MineralsWorkspace } from '../src/MineralsWorkspace';
 
-const uiState = vi.hoisted(() => ({ imported: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false }));
+const uiState = vi.hoisted(() => ({ imported: false, mediaImported: false, mediaPlacementCount: 0, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false, mediaDuplicates: false, mediaPreviewFailures: 0 }));
 
 test('automatic matches remain pending and manual decisions require a catalog label and reason', async () => {
   const onDecide = vi.fn();
@@ -22,6 +22,28 @@ test('automatic matches remain pending and manual decisions require a catalog la
   expect(onDecide).toHaveBeenCalledWith(analysis, 'forsterite', 'Проверено по независимым данным');
   await user.click(screen.getByRole('button', {name: 'Приняты пользователем 0'}));
   expect(screen.queryByRole('option')).toBeNull();
+});
+
+test('mineral queue supports roving keyboard focus', async () => {
+  const user = userEvent.setup();
+  const analyses = ['A1', 'A2', 'A3'].map((name) => ({
+    analysis_id: name,
+    identity: { Analysis: name },
+    mineral_verification: { status: 'conflict', prediction: null, confidence: 'unresolved', issues: [], reasons: [] },
+  }));
+
+  render(<MineralsWorkspace project={{total: 3, analyses, mineral_options: []}} busy={false} onDecide={vi.fn()} />);
+  const options = screen.getAllByRole('option');
+
+  await user.click(options[0]);
+  await user.keyboard('{ArrowDown}');
+  expect(document.activeElement).toBe(screen.getAllByRole('option')[1]);
+
+  await user.keyboard('{End}');
+  expect(document.activeElement).toBe(screen.getAllByRole('option')[2]);
+
+  await user.keyboard('{Home}');
+  expect(document.activeElement).toBe(screen.getAllByRole('option')[0]);
 });
 
 test('stale decisions and missing inputs are visible even when rule reasons exist', () => {
@@ -153,6 +175,43 @@ vi.mock("../src/desktopApi", () => {
       measurements: { SiO2: { raw_token: "39.8", unit: "wt.%", source_cell: "C3" } },
     }],
   };
+  const mediaInspection = {
+    items: ["BSE", "PPL", "XPL"].map((type) => ({
+      source_path: `C:/fixtures/KIV-2_A_${type}_01.tif`,
+      display_name: `KIV-2_A_${type}_01.tif`,
+      source_fingerprint: `fingerprint-${type}`,
+      mime_type: "image/tiff",
+      format: "tiff",
+      width_px: 640,
+      height_px: 480,
+      suggested_media_type: type,
+      suggested_sample_name: "KIV-2",
+      suggested_thin_section_name: "KIV-2-A",
+      suggestion_basis: ["filename_modality_token", "filename_prefix", "filename_section_prefix"],
+    })),
+    duplicate_groups: [],
+  };
+  const analyticalPoints = {
+    total: 2,
+    sample_names: ["KIV-2", "OTHER"],
+    items: [{
+      analytical_point_id: "point-kiv-2-p07",
+      point_name: "P-07",
+      sample_id: "sample-kiv-2",
+      sample_name: "KIV-2",
+      analysis_ids: ["analysis-ui-1", "analysis-la-87"],
+      methods: ["EPMA", "LA-ICP-MS"],
+      placement_count: 0,
+    }, {
+      analytical_point_id: "point-other-p03",
+      point_name: "P-03",
+      sample_id: "sample-other",
+      sample_name: "OTHER",
+      analysis_ids: ["analysis-other-3"],
+      methods: ["EPMA"],
+      placement_count: 0,
+    }],
+  };
   const api = {
     isPetrolabDesktop: () => true,
     getProjectDatabasePath: vi.fn().mockResolvedValue("C:/PetroLab/project.sqlite"),
@@ -189,6 +248,53 @@ vi.mock("../src/desktopApi", () => {
       return { result: { analysis_id: analysisId, decision: target ? { target } : null, verification } };
     }),
     pickImportFile: vi.fn().mockImplementation(async () => uiState.mode === "clean" ? "C:/fixtures/ui-clean-table.csv" : "C:/fixtures/complex-workbook.xlsx"),
+    pickMediaFiles: vi.fn().mockResolvedValue(mediaInspection.items.map((item) => item.source_path)),
+    pickMediaFolder: vi.fn().mockResolvedValue(mediaInspection.items.map((item) => item.source_path)),
+    inspectMediaSources: vi.fn().mockImplementation(async () => ({ result: {
+      ...mediaInspection,
+      duplicate_groups: uiState.mediaDuplicates ? [[
+        "C:/fixtures/KIV-2_A_BSE_01.tif",
+        "C:/fixtures/KIV-2_A_PPL_01.tif",
+      ]] : [],
+    } })),
+    listAnalyticalPoints: vi.fn().mockResolvedValue({ result: analyticalPoints }),
+    getMediaPreview: vi.fn().mockImplementation(async (sourcePath) => {
+      if (uiState.mediaPreviewFailures > 0) {
+        uiState.mediaPreviewFailures -= 1;
+        throw new Error("Временный сбой preview.");
+      }
+      return { result: {
+        source_path: sourcePath,
+        source_fingerprint: mediaInspection.items.find((item) => item.source_path === sourcePath).source_fingerprint,
+        source_width_px: 640,
+        source_height_px: 480,
+        preview_width_px: 640,
+        preview_height_px: 480,
+        preview_data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+      } };
+    }),
+    createMediaImportPlan: vi.fn().mockImplementation(async (_path, assignments) => {
+      uiState.mediaPlacementCount = assignments.reduce((count, assignment) => count + assignment.placements.length, 0);
+      return { result: {
+        schema_version: 1,
+        semantic_fingerprint: "media-plan",
+        items: assignments.map((assignment, index) => ({
+          ...mediaInspection.items[index],
+          ...assignment,
+          media_asset_id: `asset-${index}`,
+          existing_media_asset_id: null,
+          placements: assignment.placements.map((placement, placementIndex) => {
+            const point = analyticalPoints.items.find((item) => item.analytical_point_id === placement.analytical_point_id);
+            return { ...placement, spatial_annotation_id: `annotation-${index}-${placementIndex}`, point_name: point.point_name, point_sample_name: point.sample_name };
+          }),
+        })),
+        warnings: assignments.filter((assignment) => assignment.placements.length === 0).map((assignment) => ({ code: "UNPLACED_MEDIA", message: `${assignment.source_path} has no placed Analytical Points.` })),
+      } };
+    }),
+    applyMediaImportPlan: vi.fn().mockImplementation(async () => {
+      uiState.mediaImported = true;
+      return { result: { created_media_asset_count: 3, reused_media_asset_count: 0, spatial_annotation_count: uiState.mediaPlacementCount } };
+    }),
     stageImportFile: vi.fn().mockImplementation(async (path) => ({ local_path: `C:/PetroLab/staging/${path.split("/").pop()}`, original_path: path })),
     clearImportStaging: vi.fn().mockResolvedValue(undefined),
     inspectImportSource: vi.fn().mockImplementation(async () => ({ result: uiState.mode === "clean"
@@ -277,18 +383,457 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { applyImportPlan, pickImportFile, createImportPlan } from "../src/desktopApi";
+import { applyImportPlan, applyMediaImportPlan, createMediaImportPlan, createImportPlan, getMediaPreview, pickImportFile, pickMediaFolder } from "../src/desktopApi";
 import { App } from "../src/App";
+import { ImagesWorkspace } from "../src/ImagesWorkspace";
 
 afterEach(() => {
   uiState.imported = false;
+  uiState.mediaImported = false;
+  uiState.mediaPlacementCount = 0;
   uiState.mode = "clean";
   uiState.detailsEnabled = true;
   uiState.unitApplied = false;
   uiState.duplicatesReviewed = false;
   uiState.mineralAccepted = false;
+  uiState.mediaDuplicates = false;
+  uiState.mediaPreviewFailures = 0;
   vi.clearAllMocks();
   cleanup();
+});
+
+test("user confirms an image batch, places same- and cross-sample points, reviews and imports", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  expect(screen.getAllByText("KIV-2_A_BSE_01.tif").length).toBeGreaterThan(1);
+  expect(screen.getByText("0 готово")).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  expect(await screen.findByText("3 готово")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+
+  await user.click(await screen.findByRole("button", { name: /^2\. KIV-2_A_PPL_01\.tif/ }));
+  expect(await screen.findByText("2 / 3")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Другой Sample…" }));
+  await user.click(screen.getByRole("button", { name: /P-03 EPMA OTHER/ }));
+  fireEvent.keyDown(screen.getByRole("application"), { key: "Enter" });
+  const crossSampleSave = await screen.findByRole("button", { name: "Сохранить привязку" });
+  expect(crossSampleSave.disabled).toBe(true);
+  await user.selectOptions(screen.getByRole("combobox", { name: "Причина межобразцового исключения" }), "image_covers_other_sample");
+  await user.click(crossSampleSave);
+
+  await user.click(screen.getByRole("button", { name: /^1\. KIV-2_A_BSE_01\.tif/ }));
+  expect(await screen.findByText("1 / 3")).toBeTruthy();
+  await user.click(await screen.findByRole("button", { name: /P-07/ }));
+  fireEvent.keyDown(await screen.findByRole("application"), { key: "Enter" });
+  expect(await screen.findByText("Point · 320, 240 px")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Сохранить привязку" }));
+  expect(await screen.findByText("Размещение сохранено в черновике")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Далее: проверка" }));
+  expect(await screen.findByRole("heading", { name: "Проверка импорта изображений" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: /Предпросмотр KIV-2_A_BSE_01\.tif/ })).toBeTruthy();
+  expect(screen.queryByRole("application")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Завершить импорт изображений" }));
+
+  await waitFor(() => expect(uiState.mediaImported).toBe(true));
+  expect(await screen.findByRole("heading", { name: "Добавить изображения" })).toBeTruthy();
+  expect(screen.getByText(/Импортировано изображений: 3/)).toBeTruthy();
+  expect(screen.getByText(/Пространственных точек: 2/)).toBeTruthy();
+});
+
+test("saved point placement survives returning from image review", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  await user.click(await screen.findByRole("button", { name: /P-07/ }));
+  fireEvent.keyDown(await screen.findByRole("application"), { key: "Enter" });
+  await user.click(screen.getByRole("button", { name: "Сохранить привязку" }));
+  expect((await screen.findByRole("status")).textContent).toContain("Размещение сохранено в черновике");
+
+  await user.click(screen.getByRole("button", { name: "Далее: проверка" }));
+  await user.click(screen.getByRole("button", { name: "К размещению" }));
+
+  expect((await screen.findByRole("status")).textContent).toContain("Размещение сохранено в черновике");
+  expect(screen.getByText("Point · 320, 240 px")).toBeTruthy();
+  expect(screen.getByText("1 размещено")).toBeTruthy();
+});
+
+test("removing a placement after review preserves the same point on another image", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+
+  for (const file of [/^1\. KIV-2_A_BSE_01\.tif/, /^2\. KIV-2_A_PPL_01\.tif/]) {
+    await user.click(screen.getByRole("button", { name: file }));
+    await user.click(screen.getByRole("button", { name: /P-07 EPMA/ }));
+    fireEvent.keyDown(await screen.findByRole("application"), { key: "Enter" });
+    await user.click(screen.getByRole("button", { name: "Сохранить привязку" }));
+  }
+
+  let finishPlan;
+  const planImplementation = createMediaImportPlan.getMockImplementation();
+  createMediaImportPlan.mockImplementationOnce((...args) => new Promise((resolve) => {
+    finishPlan = async () => resolve(await planImplementation(...args));
+  }));
+  await user.click(screen.getByRole("button", { name: "Далее: проверка" }));
+  const remove = screen.getByRole("button", { name: "Снять только связь" });
+  expect(remove.disabled).toBe(true);
+  await user.click(remove);
+  expect(screen.getByText("2 размещено")).toBeTruthy();
+  await finishPlan();
+  await user.click(await screen.findByRole("button", { name: "К размещению" }));
+  await user.click(screen.getByRole("button", { name: "Снять только связь" }));
+  expect(screen.queryByRole("button", { name: "Размещение P-07" })).toBeNull();
+  expect(screen.getByText("1 размещено")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: /^1\. KIV-2_A_BSE_01\.tif/ }));
+  expect(await screen.findByRole("button", { name: "Размещение P-07" })).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Далее: проверка" }));
+  await user.click(await screen.findByRole("button", { name: "Завершить импорт изображений" }));
+  const appliedPlan = applyMediaImportPlan.mock.calls[0][1];
+  expect(appliedPlan.items).toHaveLength(3);
+  expect(appliedPlan.items.map((item) => item.placements.length)).toEqual([1, 0, 0]);
+  expect(appliedPlan.items[0].placements[0]).toMatchObject({
+    analytical_point_id: "point-kiv-2-p07",
+    geometry: { kind: "point", x_px: 320, y_px: 240 },
+  });
+});
+
+test("image file list supports arrow navigation without losing focus", async () => {
+  render(<App />);
+
+  await screen.findByRole("button", { name: "Изображения" }).then((button) => fireEvent.click(button));
+  fireEvent.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+
+  const first = screen.getByText(/1\. KIV-2_A_BSE_01\.tif/).closest("button");
+  const second = screen.getByText(/2\. KIV-2_A_PPL_01\.tif/).closest("button");
+  first.focus();
+  fireEvent.keyDown(first, { key: "ArrowDown" });
+  expect(second.getAttribute("aria-current")).toBe("true");
+  expect(document.activeElement).toBe(second);
+  fireEvent.keyDown(second, { key: "Home" });
+  expect(first.getAttribute("aria-current")).toBe("true");
+  expect(document.activeElement).toBe(first);
+
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  fireEvent.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  const placementFiles = screen.getByRole("navigation", { name: "Изображения для размещения точек" });
+  const placementButtons = placementFiles.querySelectorAll("button");
+  placementButtons[0].focus();
+  fireEvent.keyDown(placementButtons[0], { key: "ArrowDown" });
+  expect(placementButtons[1].getAttribute("aria-current")).toBe("true");
+  expect(document.activeElement).toBe(placementButtons[1]);
+});
+
+test("final image review calls out images without spatial points", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  await user.click(await screen.findByRole("button", { name: "Далее: проверка" }));
+
+  expect((await screen.findByRole("status")).textContent).toContain("изображений без пространственных точек");
+  expect(screen.getAllByRole("row").filter((row) => row.textContent.includes("Без точек"))).toHaveLength(3);
+  const sourcePane = screen.getByText("Импортируемые изображения").closest("aside");
+  expect(within(sourcePane).getAllByText("Без точек")).toHaveLength(3);
+  const reviewRows = screen.getAllByRole("row").filter((row) => row.tagName === "BUTTON");
+  expect(reviewRows[0].getAttribute("aria-current")).toBe("true");
+  reviewRows[0].focus();
+  fireEvent.keyDown(reviewRows[0], { key: "ArrowDown" });
+  expect(document.activeElement).toBe(reviewRows[1]);
+  expect(reviewRows[1].className).toContain("active");
+  expect(reviewRows[1].getAttribute("aria-current")).toBe("true");
+  expect(screen.getByRole("button", { name: "Завершить импорт изображений" }).disabled).toBe(false);
+});
+
+test("selecting a point focuses the canvas and Enter creates a centered square draft", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  await user.click(screen.getByRole("button", { name: "Square" }));
+  await user.click(await screen.findByRole("button", { name: /P-07/ }));
+
+  const canvas = await screen.findByRole("application");
+  await waitFor(() => expect(document.activeElement).toBe(canvas));
+  await user.keyboard("{Enter}");
+  expect(await screen.findByText("Square · 291, 211 px · 58 × 58 px")).toBeTruthy();
+});
+
+test("dragging the canvas preserves rectangle and square geometry in source pixels", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  await user.click(screen.getByRole("button", { name: "Rectangle" }));
+  await user.click(await screen.findByRole("button", { name: /P-07/ }));
+
+  const canvas = await screen.findByRole("application");
+  const boundsSpy = vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 640, height: 480, right: 640, bottom: 480 });
+  const fireCanvasPointer = (type, pointerId, clientX, clientY) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX, clientY });
+    Object.defineProperty(event, "pointerId", { value: pointerId });
+    fireEvent(canvas, event);
+  };
+  fireCanvasPointer("pointerdown", 0, 20, 20);
+  fireCanvasPointer("pointermove", 0, 120, 100);
+  expect(await screen.findByText("Rectangle · 20, 20 px · 100 × 80 px")).toBeTruthy();
+  fireCanvasPointer("pointercancel", 0, 20, 20);
+  fireCanvasPointer("pointerup", 0, 300, 220);
+  expect(screen.queryByText(/Rectangle ·/)).toBeNull();
+  fireCanvasPointer("pointerdown", 1, 100, 100);
+  fireCanvasPointer("pointermove", 1, 300, 220);
+  expect(boundsSpy).toHaveBeenCalledTimes(4);
+  fireCanvasPointer("pointerup", 1, 300, 220);
+  expect(boundsSpy).toHaveBeenCalledTimes(5);
+  expect(await screen.findByText("Rectangle · 100, 100 px · 200 × 120 px")).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Сохранить привязку" }));
+  await user.click(screen.getByRole("button", { name: "Square" }));
+  const pointButton = screen.getAllByText("P-07").find((element) => element.closest(".point-candidate-list"))?.closest("button");
+  await user.click(pointButton);
+  fireCanvasPointer("pointerdown", 2, 100, 100);
+  fireCanvasPointer("pointerup", 2, 300, 220);
+  expect(await screen.findByText("Square · 100, 100 px · 120 × 120 px")).toBeTruthy();
+});
+
+test("user opens a recursively collected image folder as one batch", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать папку" }));
+
+  expect(pickMediaFolder).toHaveBeenCalledOnce();
+  expect(await screen.findByRole("heading", { name: "Назначь Sample и шлиф" })).toBeTruthy();
+  expect(screen.getAllByText("KIV-2_A_BSE_01.tif").length).toBeGreaterThan(1);
+  expect(screen.getByText("Выбрано: 3 из 3")).toBeTruthy();
+});
+
+test("an image folder without supported files explains why no batch opened", async () => {
+  pickMediaFolder.mockResolvedValueOnce([]);
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать папку" }));
+
+  expect(await screen.findByText("В выбранной папке и её вложенных папках нет PNG, JPEG, TIFF или BMP.")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Добавить изображения" })).toBeTruthy();
+});
+
+test("duplicate image rows can be excluded from the transient batch without touching source files", async () => {
+  uiState.mediaDuplicates = true;
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+
+  const summary = screen.getByLabelText("Сводка пакета изображений");
+  expect(within(summary).getByText("2")).toBeTruthy();
+  expect(within(summary).getByText("дубликатов")).toBeTruthy();
+  const excludeButton = screen.getByRole("button", { name: "Исключить выбранные дубликаты (2)" });
+  expect(excludeButton.disabled).toBe(false);
+
+  await user.click(excludeButton);
+  expect(screen.queryByRole("button", { name: "Исключить выбранные дубликаты (2)" })).toBeNull();
+  expect(screen.getByText("Выбрано: 1 из 1")).toBeTruthy();
+  expect(screen.getByText("0 готово")).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Вернуть в пакет" }));
+  expect(screen.getByText("Выбрано: 1 из 3")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Исключить выбранные дубликаты (0)" }).disabled).toBe(true);
+  await user.click(screen.getByRole("checkbox", { name: "Выбрано: 1 из 3" }));
+  await user.click(screen.getByRole("button", { name: "Исключить выбранные дубликаты (2)" }));
+
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  expect(await screen.findByText("1 / 1")).toBeTruthy();
+});
+
+test("a failed image preview can be retried without reimporting the batch", async () => {
+  uiState.mediaPreviewFailures = 1;
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+
+  expect(await screen.findByText("Временный сбой preview.")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Повторить preview" }));
+  expect(await screen.findByRole("application")).toBeTruthy();
+});
+
+test("switching images keeps an unfinished preview request visible for the active image", async () => {
+  let resolveFirstPreview;
+  const firstPreview = new Promise((resolve) => { resolveFirstPreview = resolve; });
+  getMediaPreview.mockImplementationOnce(() => firstPreview);
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  expect(await screen.findByText("Готовлю безопасный preview…")).toBeTruthy();
+
+  await user.click(await screen.findByRole("button", { name: /^2\. KIV-2_A_PPL_01\.tif/ }));
+  expect(await screen.findByRole("application")).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: /^1\. KIV-2_A_BSE_01\.tif/ }));
+  expect(screen.getByText("Готовлю безопасный preview…")).toBeTruthy();
+  resolveFirstPreview({ result: {
+    source_path: "C:/fixtures/KIV-2_A_BSE_01.tif",
+    source_fingerprint: "fingerprint-BSE",
+    source_width_px: 640,
+    source_height_px: 480,
+    preview_width_px: 640,
+    preview_height_px: 480,
+    preview_data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+  } });
+  expect(await screen.findByRole("application")).toBeTruthy();
+});
+
+test("a preview response from a replaced batch cannot overwrite the current batch", async () => {
+  const sourcePath = "C:/fixtures/reused-name.tif";
+  const oldInspection = { items: [{
+    source_path: sourcePath,
+    display_name: "reused-name.tif",
+    source_fingerprint: "old-fingerprint",
+    mime_type: "image/tiff",
+    format: "tiff",
+    width_px: 640,
+    height_px: 480,
+    suggested_media_type: "BSE",
+    suggested_sample_name: "KIV-2",
+    suggested_thin_section_name: "KIV-2-A",
+  }], duplicate_groups: [] };
+  const newInspection = { items: [{
+    ...oldInspection.items[0],
+    source_fingerprint: "new-fingerprint",
+    suggested_sample_name: "KIV-3",
+    suggested_thin_section_name: "KIV-3-A",
+  }], duplicate_groups: [] };
+  const oldPreviewData = "data:image/png;base64,old-preview";
+  const newPreviewData = "data:image/png;base64,new-preview";
+  let resolveOldPreview;
+  const oldPreview = new Promise((resolve) => {
+    resolveOldPreview = () => resolve({
+      source_path: sourcePath,
+      source_fingerprint: "old-fingerprint",
+      source_width_px: 640,
+      source_height_px: 480,
+      preview_width_px: 640,
+      preview_height_px: 480,
+      preview_data_url: oldPreviewData,
+    });
+  });
+  const onPreview = vi.fn()
+    .mockImplementationOnce(() => oldPreview)
+    .mockResolvedValueOnce({
+      source_path: sourcePath,
+      source_fingerprint: "new-fingerprint",
+      source_width_px: 640,
+      source_height_px: 480,
+      preview_width_px: 640,
+      preview_height_px: 480,
+      preview_data_url: newPreviewData,
+    });
+  const noop = vi.fn();
+  const user = userEvent.setup();
+  const props = {
+    points: { items: [] },
+    busy: false,
+    onChoose: noop,
+    onChooseFolder: noop,
+    onPreview,
+    onPlan: noop,
+    onApply: noop,
+    onCancel: noop,
+  };
+  const { rerender } = render(<ImagesWorkspace {...props} inspection={oldInspection} />);
+  await user.click(await screen.findByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  expect(await screen.findByText("Готовлю безопасный preview…")).toBeTruthy();
+
+  rerender(<ImagesWorkspace {...props} inspection={newInspection} />);
+  await user.click(await screen.findByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  expect(await screen.findByRole("application")).toBeTruthy();
+  expect(screen.getByRole("img", { name: "BSE KIV-3" }).getAttribute("src")).toBe(newPreviewData);
+
+  resolveOldPreview();
+  await waitFor(() => expect(screen.getByRole("img", { name: "BSE KIV-3" }).getAttribute("src")).toBe(newPreviewData));
+});
+
+test("image assignment accepts a user-defined media type and applies it in bulk", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+
+  const mediaType = screen.getByLabelText("Тип изображения");
+  await user.clear(mediaType);
+  await user.type(mediaType, "Cathodoluminescence");
+  await user.click(screen.getByRole("button", { name: "Применить к выбранным (3)" }));
+
+  expect(screen.getAllByText("Cathodoluminescence").length).toBeGreaterThan(0);
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  expect(await screen.findByText("KIV-2_A_BSE_01.tif (Cathodoluminescence)")).toBeTruthy();
+});
+
+test("switching images clears a point focus and returns to same-Sample scope", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+
+  await user.click(screen.getByRole("button", { name: "Другой Sample…" }));
+  await user.click(screen.getByRole("button", { name: /P-03 EPMA OTHER/ }));
+  expect(screen.getByText("Точка другого Sample")).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: /^2\. KIV-2_A_PPL_01\.tif/ }));
+  expect(screen.queryByText("Точка другого Sample")).toBeNull();
+  expect(screen.getByRole("button", { name: "Другой Sample…" }).className).not.toContain("active");
+  expect(screen.getByRole("button", { name: "Этот Sample" }).className).toContain("active");
 });
 
 test("user clicks through Clean Table import and sees the saved Analysis", async () => {
