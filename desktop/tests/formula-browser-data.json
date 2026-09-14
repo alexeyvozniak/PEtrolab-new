@@ -57,6 +57,18 @@
           "Варианты с измеренным H2O и окисленный базис 22+z не поддерживаются.",
           "Пригодность состава проверяется независимо от назначения.",
           "Метод draft: внешняя проверка на природных составах ещё требуется."
+        ],
+        "quick_presets": [
+          {
+            "id": "all_fe2_no_oh",
+            "label": "Рассчитать формулу",
+            "description": "Всё железо принимается как Fe²⁺; базис O₁₀W₂; OH не рассчитывается.",
+            "parameters": {
+              "fe_mode": "all_fe2",
+              "anion_basis": "ideal_O10_W2",
+              "oh_mode": "not_calculated"
+            }
+          }
         ]
       }
     ]
@@ -83,16 +95,16 @@
         ],
         "values": {
           "Si_apfu": 3.0000000000000004,
-          "Al_apfu": 1.0,
-          "Mg_apfu": 3.0,
-          "Ca_apfu": 0.0,
-          "Na_apfu": 0.0,
-          "K_apfu": 1.0,
-          "Fe2_apfu": 0.0,
-          "F_apfu": 0.0,
-          "Cl_apfu": 0.0,
-          "OH_est_apfu": 2.0,
-          "cation_sum": 8.0,
+          "Al_apfu": 1,
+          "Mg_apfu": 3,
+          "Ca_apfu": 0,
+          "Na_apfu": 0,
+          "K_apfu": 1,
+          "Fe2_apfu": 0,
+          "F_apfu": 0,
+          "Cl_apfu": 0,
+          "OH_est_apfu": 2,
+          "cation_sum": 8,
           "oxide_total": 95.68248596777981
         },
         "used": [
@@ -307,15 +319,15 @@
         ],
         "values": {
           "Si_apfu": 3.0000000000000004,
-          "Al_apfu": 1.0,
-          "Mg_apfu": 3.0,
-          "Ca_apfu": 0.0,
-          "Na_apfu": 0.0,
-          "K_apfu": 1.0,
-          "Fe2_apfu": 0.0,
-          "F_apfu": 0.0,
-          "Cl_apfu": 0.0,
-          "cation_sum": 8.0,
+          "Al_apfu": 1,
+          "Mg_apfu": 3,
+          "Ca_apfu": 0,
+          "Na_apfu": 0,
+          "K_apfu": 1,
+          "Fe2_apfu": 0,
+          "F_apfu": 0,
+          "Cl_apfu": 0,
+          "cation_sum": 8,
           "oxide_total": 95.68248596777981
         },
         "used": [
@@ -426,7 +438,7 @@
       "candidates": [
         {
           "target": "trioctahedral mica",
-          "score": 9.0,
+          "score": 9,
           "reasons": [
             "K-dominant Mg-Fe mica chemistry"
           ]

@@ -238,18 +238,24 @@ class MicaFormulaPersistenceTests(unittest.TestCase):
         from scripts.validate_contracts import _validate
         for definition in catalog:
             serializable = {key: value for key, value in definition.items()
-                            if key not in {'parameter_choices', 'fe_modes', 'anion_bases',
-                                           'oh_modes', 'atomic_masses'}}
+                            if key not in {'parameter_choices', 'quick_presets', 'fe_modes',
+                                           'anion_bases', 'oh_modes', 'atomic_masses'}}
             _validate(serializable, schema, schema, {}, 'scientific-method-definition')
         path = Path(__file__).parents[1] / 'src/petrolab/mica_formula.py'
         self.assertEqual(hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest(),
                          MICA_IMPLEMENTATION_SHA256)
 
     def test_catalog_filters_by_controlled_accepted_assignment(self):
-        self.assertEqual([m['method_id'] for m in list_methods('olivine')['methods']], [METHOD_ID])
+        olivine = list_methods('olivine')['methods']
+        self.assertEqual([m['method_id'] for m in olivine], [METHOD_ID])
+        self.assertEqual(olivine[0]['quick_presets'][0]['parameters'], {'fe_mode': 'all_fe2'})
         for label in ('phlogopite', 'muscovite', 'lepidolite'):
             with self.subTest(label=label):
-                self.assertEqual([m['method_id'] for m in list_methods(label)['methods']], [MICA_METHOD_ID])
+                mica = list_methods(label)['methods']
+                self.assertEqual([m['method_id'] for m in mica], [MICA_METHOD_ID])
+                self.assertEqual(mica[0]['quick_presets'][0]['parameters'],
+                                 {'fe_mode': 'all_fe2', 'anion_basis': 'ideal_O10_W2',
+                                  'oh_mode': 'not_calculated'})
         self.assertEqual(list_methods('quartz')['methods'], [])
         response = handle_request({'protocol_version': '1.0', 'request_id': str(uuid.uuid4()),
                                    'command': 'formula.methods.list',

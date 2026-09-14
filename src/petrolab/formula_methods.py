@@ -124,12 +124,21 @@ def executable_method(method_id, version):
     if method_id == METHOD_ID:
         return {'definition': definition, 'accepted_targets': {'olivine'}, 'target_label': 'оливина',
                 'parameter_choices': {'fe_mode': OLIVINE_FE_MODES},
+                'quick_presets': [{'id': 'all_fe2', 'label': 'Рассчитать формулу',
+                                   'description': 'Всё железо принимается как Fe²⁺.',
+                                   'parameters': {'fe_mode': 'all_fe2'}}],
                 'calculate': lambda rows, p: calculate_olivine(rows, p['fe_mode'])}
     return {'definition': definition,
             'accepted_targets': {'trioctahedral mica', 'dioctahedral mica', 'Li-mica'},
             'target_label': 'слюды',
             'parameter_choices': {'fe_mode': MICA_FE_MODES, 'anion_basis': MICA_ANION_BASES,
                                   'oh_mode': MICA_OH_MODES},
+            'quick_presets': [{'id': 'all_fe2_no_oh', 'label': 'Рассчитать формулу',
+                               'description': ('Всё железо принимается как Fe²⁺; базис O₁₀W₂; '
+                                               'OH не рассчитывается.'),
+                               'parameters': {'fe_mode': 'all_fe2',
+                                              'anion_basis': 'ideal_O10_W2',
+                                              'oh_mode': 'not_calculated'}}],
             'calculate': lambda rows, p: calculate_mica(rows, p['fe_mode'],
                 anion_basis=p['anion_basis'], oh_mode=p['oh_mode'])}
 
@@ -145,6 +154,7 @@ def list_methods(accepted_assignment=None):
             continue
         choices = registration['parameter_choices']
         item = {**registration['definition'], 'parameter_choices': copy.deepcopy(choices),
+                'quick_presets': copy.deepcopy(registration['quick_presets']),
                 'fe_modes': copy.deepcopy(choices['fe_mode']),
                 'atomic_masses': copy.deepcopy(masses)}
         if method_id == MICA_METHOD_ID:

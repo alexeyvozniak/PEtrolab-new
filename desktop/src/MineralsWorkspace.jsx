@@ -76,10 +76,9 @@ function ReviewPane({ analysis, busy, onDecide, options, databasePath }) {
       <p className="mineral-scope-note">Совпадение химической группы не определяет минеральный вид. Ручное назначение не подтверждает качество состава.</p>
     </section>
 
-    <details className="mineral-formula-section">
-      <summary>Формула минерала</summary>
+    <section className="mineral-formula-section">
       <FormulaPanel key={JSON.stringify([analysis.analysis_id, verification.input_fingerprint, verification.accepted])} analysis={analysis} databasePath={databasePath} />
-    </details>
+    </section>
 
     <section>
       <h3>Кандидаты классификатора</h3>

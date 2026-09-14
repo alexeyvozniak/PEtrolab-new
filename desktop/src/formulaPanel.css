@@ -26,4 +26,8 @@
 .formula-panel :focus-visible { outline: 3px solid #397447; outline-offset: 3px; }
 .formula-history { border-top: 1px solid #c9d7cc; }
 .mineral-formula-section { padding: 14px 16px; border-bottom: 1px solid #dce5de; }
-.mineral-formula-section > summary { font-size: 14px; font-weight: 700; cursor: pointer; color: #245b39; }
+
+.formula-analysis { color: #607067; }
+.formula-quick-action { font-size: 15px; font-weight: 750; }
+.formula-settings, .formula-method-info, .formula-result-notes { border-top: 1px solid #dce5de; }
+.formula-method-info > summary, .formula-result-notes > summary { color: #52645a; font-weight: 600; }
