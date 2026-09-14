@@ -642,7 +642,7 @@ def list_project_mineral_identifications(database_path: str | Path, limit: int =
     lossless Measurement rows and never silently become accepted assignments.
     """
     projection = list_project_analyses(database_path, limit, offset)
-    from .mineral_verification import verify_record
+    from .mineral_verification import mineral_options, verify_record
 
     identifications: list[dict[str, Any]] = []
     for analysis in projection["analyses"]:
@@ -673,6 +673,7 @@ def list_project_mineral_identifications(database_path: str | Path, limit: int =
         "offset": projection["offset"],
         "has_more": projection["has_more"],
         "identifications": identifications,
+        "mineral_options": mineral_options(),
         "status_counts": dict(sorted(counts.items())),
     }
 
@@ -687,7 +688,7 @@ def decide_project_mineral_assignment(
 ) -> dict[str, Any]:
     """Append an explicit, stale-safe interpretation for one imported analysis."""
     from .import_apply import _id, _now
-    from .mineral_verification import reported_target, verify_record
+    from .mineral_verification import controlled_label, reported_target, verify_record
 
     projection = list_project_analyses(database_path, limit=1, analysis_id=analysis_id)
     if not projection["analyses"]:
@@ -718,10 +719,13 @@ def decide_project_mineral_assignment(
         decision_kind = "accept_suggestion"
     elif target == reported_target(reported):
         decision_kind = "keep_reported"
+    elif controlled_label(target):
+        target = controlled_label(target)
+        decision_kind = "manual_assignment"
     else:
         raise ImportCommandError(
             "MINERAL_TARGET_UNAVAILABLE",
-            "Выбранный минерал не соответствует текущему предложению или распознанному исходному названию.",
+            "Выберите минерал из справочника. Неизвестное название не может стать подтверждённым назначением.",
         )
 
     decision_id = _id()

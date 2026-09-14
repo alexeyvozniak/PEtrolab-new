@@ -8,6 +8,9 @@ export const MINERAL_STATUS_LABELS = {
   unrecognized_reported: "нужно проверить",
   not_checked: "не проверен",
   reported_only: "только исходное название",
+  manually_assigned: "назначено вручную",
+  manual_unresolved: "проверьте ручное название",
+  stale_assignment: "решение устарело",
 };
 
 export const MINERAL_CONFIDENCE_LABELS = {
@@ -19,6 +22,7 @@ export const MINERAL_CONFIDENCE_LABELS = {
 };
 
 const REASON_LABELS = {
+  manual_label_unrecognized: "Ручное название сохранено, но не найдено в справочнике. Уточните назначение.",
   accepted_assignment_stale: "Ранее принятое решение устарело после изменения состава или версии правил.",
   duplicate_component: "Один компонент присутствует в составе несколько раз.",
   incomplete_major_element_input: "Не хватает обязательных основных компонентов или формы железа.",
