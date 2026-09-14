@@ -33,6 +33,6 @@ export function MineralVerificationPanel({ records, scopes, busy, onAccept, onRe
     })}
     {visible.length > visibleCount && <button type="button" onClick={() => setVisibleCount((count) => count + 100)}>Показать ещё · осталось {visible.length - visibleCount}</button>}
     {visible.length === 0 && <p className="mineral-show-all">Нет отдельных конфликтов для просмотра.</p>}
-    <p className="mineral-show-all">Пересчёт формул ещё не подключён. Здесь сохраняется только назначение минерала.</p>
+    <p className="mineral-show-all">Здесь сохраняется назначение минерала. После сохранения импорта пересчёт оливина доступен на экране «Минералы».</p>
   </div>;
 }

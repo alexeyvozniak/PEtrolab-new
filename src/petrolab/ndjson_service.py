@@ -28,9 +28,17 @@ from .import_preview import (
 )
 from .manual_mapping import review_duplicate_candidates, revise_import_mapping, revise_import_mappings, revise_import_sections
 from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
+from .formula_methods import list_methods
+from .formula_workflow import preview_formula, save_formula, list_formula_runs
 
 
 PROTOCOL_VERSION = "1.0"
+
+
+def _dispatch_formula(params, save=False):
+    args = (_project_database_path(params), params.get('analysis_ids'),
+            _string(params, 'method_id'), _string(params, 'method_version'), params.get('parameters'))
+    return {'result': save_formula(*args, _string(params, 'preview_fingerprint')) if save else preview_formula(*args)}
 
 
 def _error(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -289,6 +297,14 @@ def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": apply_media_import_plan(_project_database_path(params), _object(params, "plan"))}
 
 
+def _dispatch_formula_methods(params: Mapping[str, Any]) -> dict[str, Any]:
+    accepted = params.get('accepted_assignment')
+    if accepted is not None and (not isinstance(accepted, str) or not accepted.strip()):
+        raise ImportCommandError('FORMULA_ASSIGNMENT_INVALID',
+                                 'Принятое назначение минерала должно быть непустой строкой.')
+    return {'result': list_methods(accepted)}
+
+
 COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.inspect_source": _dispatch_import_inspect,
     "import.clean_table.classify": _dispatch_import_clean_table_classify,
@@ -308,6 +324,10 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "project.analyses.list": _dispatch_project_analyses_list,
     "project.mineral_identification.list": _dispatch_project_mineral_identification_list,
     "project.mineral_assignment.decide": _dispatch_project_mineral_assignment_decide,
+    "formula.methods.list": _dispatch_formula_methods,
+    "formula.preview": _dispatch_formula,
+    "formula.save": lambda params: _dispatch_formula(params, save=True),
+    "formula.runs.list": lambda params: {'result': list_formula_runs(_project_database_path(params), _string(params, 'analysis_id'))},
     "project.last_import.retract": _dispatch_project_last_import_retract,
     "source.check_linked": _dispatch_linked_source_check,
     "import.batch.rollback": _dispatch_batch_rollback,
