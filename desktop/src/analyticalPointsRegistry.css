@@ -1,0 +1,71 @@
+.point-registry { position: relative; min-width: 0; height: calc(100vh - 76px); min-height: 0; display: grid; grid-template-columns: 178px minmax(0, 1fr) 258px; background: #fff; overflow: hidden; }
+.point-registry-filters { border-right: 1px solid #dde3de; padding: 13px 11px; overflow: auto; background: #fafcfb; }
+.point-registry-pane-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; color: #405047; font-size: 10px; font-weight: 750; text-transform: uppercase; }
+.point-registry-pane-title b { min-width: 24px; padding: 3px 6px; border-radius: 999px; background: #e9f1eb; color: #315d45; text-align: center; }
+.point-registry-filters label { display: grid; gap: 5px; margin: 0 0 12px; color: #69766e; font-size: 9px; font-weight: 700; }
+.point-registry-filters select { width: 100%; min-height: 36px; border: 1px solid #d1dad3; border-radius: 8px; padding: 0 8px; background: #fff; color: #34423a; font-size: 10px; }
+.point-registry-note { display: flex; align-items: flex-start; gap: 7px; margin-top: 18px; padding: 10px; border: 1px solid #dfe7e1; border-radius: 8px; background: #f4f8f5; color: #657269; font-size: 9px; line-height: 1.45; }
+.point-registry-note svg { flex: 0 0 auto; color: #47735a; }
+.point-registry-main { min-width: 0; display: grid; grid-template-rows: auto minmax(220px, 1fr) minmax(145px, .42fr); overflow: hidden; }
+.point-registry-toolbar { min-height: 57px; display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-bottom: 1px solid #e1e7e2; }
+.point-registry-toolbar > span { color: #738078; font-size: 9px; white-space: nowrap; }
+.point-registry-toolbar .outline-button { min-height: 36px; padding: 0 10px; font-size: 9px; white-space: nowrap; }
+.point-registry-search { min-width: 150px; flex: 1; display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 10px; border: 1px solid #d1dad3; border-radius: 8px; background: #fff; color: #77837b; }
+.point-registry-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: #34423a; font-size: 10px; }
+.point-registry-table-scroll { min-width: 0; overflow: auto; border-bottom: 1px solid #e1e7e2; }
+.point-registry-table { min-width: 970px; width: 100%; border-collapse: collapse; color: #34423a; font-size: 9px; }
+.point-registry-table th { position: sticky; top: 0; z-index: 2; height: 36px; padding: 6px 8px; border-right: 1px solid #e5eae6; border-bottom: 1px solid #d9e0da; background: #f7f9f7; color: #5f6d64; text-align: left; white-space: nowrap; }
+.point-registry-table th:first-child,
+.point-registry-table td:first-child { width: 34px; text-align: center; }
+.point-registry-table td { height: 48px; padding: 6px 8px; border-right: 1px solid #edf0ed; border-bottom: 1px solid #e8ece9; vertical-align: middle; }
+.point-registry-table tbody tr { cursor: pointer; outline: 0; }
+.point-registry-table tbody tr:hover,
+.point-registry-table tbody tr:focus { background: #f5f9f6; }
+.point-registry-table tbody tr.focused { box-shadow: inset 3px 0 #4a7a60; }
+.point-registry-table tbody tr.selected { background: #edf6ef; }
+.point-registry-table b,
+.point-registry-table code { display: block; }
+.point-registry-table code { max-width: 135px; margin-top: 3px; overflow: hidden; color: #7a867e; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.point-status { display: inline-flex; padding: 3px 6px; border-radius: 999px; background: #f3f0e7; color: #826426; white-space: nowrap; }
+.point-status.placed { background: #e8f4eb; color: #277048; }
+.point-registry-empty { min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #7a867e; font-size: 10px; text-align: center; }
+.point-registry-empty b { color: #415048; }
+.point-registry-analyses { min-height: 0; overflow: auto; padding: 11px 12px 14px; background: #fbfcfb; }
+.point-registry-analyses > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.point-registry-analyses > header span { color: #78847c; font-size: 8px; font-weight: 750; text-transform: uppercase; }
+.point-registry-analyses h3 { margin: 2px 0 0; color: #33423a; font-size: 12px; }
+.point-registry-analyses > header b { min-width: 24px; padding: 3px 7px; border-radius: 999px; background: #e8f1ea; color: #315d45; font-size: 9px; text-align: center; }
+.point-registry-analyses > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(205px, 1fr)); gap: 7px; }
+.point-registry-analyses article { min-width: 0; display: grid; gap: 3px; padding: 8px 9px; border: 1px solid #dde5df; border-radius: 8px; background: #fff; }
+.point-registry-analyses article strong { color: #304138; font-size: 10px; }
+.point-registry-analyses article span { color: #376b4e; font-size: 9px; font-weight: 700; }
+.point-registry-analyses article small { overflow: hidden; color: #748078; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.point-registry-analyses article code { overflow: hidden; color: #88928c; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.point-registry-inspector { border-left: 1px solid #dde3de; overflow: auto; background: #fff; }
+.point-registry-inspector > header { padding: 16px; border-bottom: 1px solid #e2e7e3; background: #fafbfa; }
+.point-registry-inspector > header span { color: #758078; font-size: 9px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.point-registry-inspector > header h2 { margin: 5px 0 3px; color: #2e3d34; font-size: 18px; }
+.point-registry-inspector > header p { margin: 0; color: #6f7b73; font-size: 10px; }
+.point-registry-inspector section { padding: 13px 15px; border-bottom: 1px solid #e8ece9; }
+.point-registry-inspector h3 { margin: 0 0 9px; color: #56635b; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+.point-registry-inspector dl { margin: 0; }
+.point-registry-inspector dl > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; padding: 5px 0; border-bottom: 1px solid #f0f2f0; }
+.point-registry-inspector dt { color: #7b867f; font-size: 9px; }
+.point-registry-inspector dd { margin: 0; color: #334139; font-size: 9px; text-align: right; overflow-wrap: anywhere; }
+.point-registry-inspector section > code { display: block; overflow-wrap: anywhere; color: #4a5a50; font-size: 8px; }
+.point-registry-inspector section > small { display: block; margin-top: 8px; color: #89928c; font-size: 8px; }
+.point-inspector-status { display: flex; align-items: center; gap: 7px; margin: 0; color: #8a6a2a; font-size: 10px; }
+.point-inspector-status.placed { color: #28704a; }
+.point-registry-inspector-empty { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: #77827b; font-size: 10px; line-height: 1.5; text-align: center; }
+.point-registry-selection { position: absolute; z-index: 5; right: 270px; bottom: 10px; left: 190px; min-height: 54px; display: grid; grid-template-columns: minmax(220px, auto) minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid #cbd8ce; border-radius: 10px; background: rgba(255, 255, 255, .97); box-shadow: 0 8px 24px rgba(34, 53, 42, .13); }
+.point-registry-selection > div:first-child { min-width: 0; display: grid; grid-template-columns: auto auto; align-items: center; justify-content: start; gap: 2px 6px; color: #315d45; }
+.point-registry-selection > div:first-child span { grid-column: 2; color: #758078; font-size: 8px; }
+.point-registry-selection > div:nth-child(2) { min-width: 0; display: flex; gap: 5px; overflow: hidden; }
+.point-registry-selection > div:nth-child(2) button { min-height: 29px; display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid #d4ddd6; border-radius: 7px; background: #f5f8f5; color: #314038; font-size: 8px; white-space: nowrap; }
+.point-registry-selection > .primary-button { min-height: 36px; padding: 0 11px; font-size: 9px; white-space: nowrap; }
+
+@media (max-width: 1050px) {
+  .point-registry { grid-template-columns: 155px minmax(0, 1fr) 220px; }
+  .point-registry-selection { right: 232px; left: 167px; grid-template-columns: minmax(200px, 1fr) auto; }
+  .point-registry-selection > div:nth-child(2) { display: none; }
+}

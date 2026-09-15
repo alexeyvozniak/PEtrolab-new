@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { AnalysesWorkspace } from '../src/AnalysesWorkspace';
 import { MineralsWorkspace } from '../src/MineralsWorkspace';
 
-const uiState = vi.hoisted(() => ({ imported: false, mediaImported: false, mediaPlacementCount: 0, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false, mediaDuplicates: false, mediaPreviewFailures: 0 }));
+const uiState = vi.hoisted(() => ({ imported: false, mediaImported: false, mediaPlacementCount: 0, pointCreated: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false, mediaDuplicates: false, mediaPreviewFailures: 0 }));
 
 test('selected Analyses require explicit semantics before creating an Analytical Point', async () => {
   const user = userEvent.setup();
@@ -48,6 +48,39 @@ test('selected Analyses require explicit semantics before creating an Analytical
     linkType: 'same_point',
   }));
   expect(screen.queryByRole('dialog', { name: 'Создать Analytical Point' })).toBeNull();
+});
+
+test('Analytical Point registry exposes provenance and returns source Analyses to Selection', async () => {
+  const user = userEvent.setup();
+  const analyses = [{
+    analysis_id: 'epma-p01', source_name: 'KIV-2_EPMA.xlsx', sheet_name: 'Data', source_row_number: 9,
+    identity: { Analysis: 'P-01-EPMA', Sample: 'KIV-2' }, measurement_list: [{ method: 'EPMA' }], measurements: {},
+  }, {
+    analysis_id: 'la-p01', source_name: 'KIV-2_LA.xlsx', sheet_name: 'Trace', source_row_number: 11,
+    identity: { Analysis: 'P-01-LA', Sample: 'KIV-2' }, measurement_list: [{ method: 'LA-ICP-MS' }], measurements: {},
+  }];
+  const analyticalPoints = { total: 1, sample_names: ['KIV-2'], items: [{
+    analytical_point_id: 'point-stable-p01', point_name: 'P-01', sample_name: 'KIV-2',
+    analysis_ids: ['epma-p01', 'la-p01'], methods: ['EPMA', 'LA-ICP-MS'], link_types: ['same_point'],
+    placement_count: 1, created_at: '2026-09-15T10:24:00Z',
+  }] };
+
+  render(<AnalysesWorkspace project={{ total: 2, source_count: 2, analyses }} analyticalPoints={analyticalPoints} busy={false} onRefreshAnalyticalPoints={vi.fn()} />);
+  await user.click(screen.getByRole('button', { name: /Analytical Points 1/ }));
+
+  expect(screen.getAllByText('Та же аналитическая точка').length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/Размещена/).length).toBeGreaterThan(0);
+  expect(screen.getByTitle('point-stable-p01')).toBeTruthy();
+  expect(screen.getByText('KIV-2_EPMA.xlsx · лист Data · строка 9')).toBeTruthy();
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Фильтр метода Analytical Points' }), 'LA-ICP-MS');
+  expect(screen.getByText('1 из 1')).toBeTruthy();
+
+  await user.click(screen.getByRole('checkbox', { name: 'Выбрать Analytical Point P-01' }));
+  expect(screen.getByText('1 Analytical Points / 2 Analyses')).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Показать исходные Analyses' }));
+
+  expect(screen.getByRole('checkbox', { name: 'Выбрать P-01-EPMA' }).checked).toBe(true);
+  expect(screen.getByRole('checkbox', { name: 'Выбрать P-01-LA' }).checked).toBe(true);
 });
 
 test('automatic matches remain pending and manual decisions require a catalog label and reason', async () => {
@@ -245,7 +278,9 @@ vi.mock("../src/desktopApi", () => {
       sample_name: "KIV-2",
       analysis_ids: ["analysis-ui-1", "analysis-la-87"],
       methods: ["EPMA", "LA-ICP-MS"],
+      link_types: ["same_point"],
       placement_count: 0,
+      created_at: "2026-09-15T10:24:00Z",
     }, {
       analytical_point_id: "point-other-p03",
       point_name: "P-03",
@@ -253,7 +288,9 @@ vi.mock("../src/desktopApi", () => {
       sample_name: "OTHER",
       analysis_ids: ["analysis-other-3"],
       methods: ["EPMA"],
+      link_types: ["same_zone"],
       placement_count: 0,
+      created_at: "2026-09-15T10:25:00Z",
     }],
   };
   const api = {
@@ -301,15 +338,26 @@ vi.mock("../src/desktopApi", () => {
         "C:/fixtures/KIV-2_A_PPL_01.tif",
       ]] : [],
     } })),
-    listAnalyticalPoints: vi.fn().mockResolvedValue({ result: analyticalPoints }),
-    createAnalyticalPoint: vi.fn().mockImplementation(async (_path, sampleName, pointName, analysisIds, linkType) => ({ result: {
-      analytical_point_id: 'point-created',
-      sample_id: 'sample-created',
-      sample_name: sampleName,
-      point_name: pointName,
-      analysis_ids: analysisIds,
-      link_type: linkType,
-    } })),
+    listAnalyticalPoints: vi.fn().mockImplementation(async () => ({ result: uiState.pointCreated ? {
+      ...analyticalPoints,
+      total: analyticalPoints.total + 1,
+      items: [...analyticalPoints.items, {
+        analytical_point_id: 'point-created', sample_id: 'sample-created', sample_name: 'KIV-2', point_name: 'P-01',
+        analysis_ids: ['analysis-ui-1', 'analysis-ui-2'], methods: ['EPMA'], link_types: ['same_zone'], placement_count: 0,
+        created_at: '2026-09-15T10:26:00Z',
+      }],
+    } : analyticalPoints })),
+    createAnalyticalPoint: vi.fn().mockImplementation(async (_path, sampleName, pointName, analysisIds, linkType) => {
+      uiState.pointCreated = true;
+      return { result: {
+        analytical_point_id: 'point-created',
+        sample_id: 'sample-created',
+        sample_name: sampleName,
+        point_name: pointName,
+        analysis_ids: analysisIds,
+        link_type: linkType,
+      } };
+    }),
     getMediaPreview: vi.fn().mockImplementation(async (sourcePath) => {
       if (uiState.mediaPreviewFailures > 0) {
         uiState.mediaPreviewFailures -= 1;
@@ -443,6 +491,7 @@ afterEach(() => {
   uiState.imported = false;
   uiState.mediaImported = false;
   uiState.mediaPlacementCount = 0;
+  uiState.pointCreated = false;
   uiState.mode = "clean";
   uiState.detailsEnabled = true;
   uiState.unitApplied = false;
@@ -483,7 +532,7 @@ test('App persists an explicitly confirmed Analytical Point and refreshes its pr
 
 test('App does not invite a duplicate create when the point projection refresh fails', async () => {
   uiState.imported = true;
-  listAnalyticalPoints.mockRejectedValueOnce(new Error('Временный сбой списка.'));
+  listAnalyticalPoints.mockResolvedValueOnce({ result: { total: 2, sample_names: ['KIV-2', 'OTHER'], items: [] } }).mockRejectedValueOnce(new Error('Временный сбой списка.'));
   const user = userEvent.setup();
   render(<App />);
 

@@ -272,8 +272,9 @@ def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
     connection = _read_connection(database_path)
     try:
         rows = connection.execute(
-            """SELECT ap.analytical_point_id, ap.point_name, s.sample_id, s.sample_name,
-                      apa.analysis_id, ais.analytical_method_json
+            """SELECT ap.analytical_point_id, ap.point_name, ap.created_at,
+                      s.sample_id, s.sample_name, apa.analysis_id, apa.link_type,
+                      ais.analytical_method_json
                FROM analytical_point ap
                JOIN sample s ON s.sample_id = ap.sample_id
                LEFT JOIN analytical_point_analysis apa ON apa.analytical_point_id = ap.analytical_point_id
@@ -296,14 +297,20 @@ def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
                 "sample_name": row["sample_name"],
                 "analysis_ids": [],
                 "methods": [],
+                "link_types": [],
                 "placement_count": placement_counts.get(row["analytical_point_id"], 0),
+                "created_at": row["created_at"],
             })
             if row["analysis_id"] is not None:
                 item["analysis_ids"].append(row["analysis_id"])
+            if row["link_type"] and row["link_type"] not in item["link_types"]:
+                item["link_types"].append(row["link_type"])
             method = _method_label(row["analytical_method_json"])
             if method and method not in item["methods"]:
                 item["methods"].append(method)
         items = list(by_id.values())
+        for item in items:
+            item["link_types"].sort()
         return {
             "total": len(items),
             "sample_names": sorted({item["sample_name"] for item in items}, key=str.casefold),

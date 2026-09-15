@@ -13,8 +13,12 @@ const items = ["BSE", "PPL", "XPL"].map((type, index) => ({
   suggested_thin_section_name: "KIV-2-A",
 }));
 const points = [
-  { analytical_point_id: "point-1", point_name: "P-07", sample_name: "KIV-2", analysis_ids: ["synthetic-epma", "synthetic-la"], methods: ["EPMA", "LA-ICP-MS"], placement_count: 0 },
-  { analytical_point_id: "point-2", point_name: "P-03", sample_name: "OTHER", analysis_ids: ["synthetic-other"], methods: ["EPMA"], placement_count: 0 },
+  { analytical_point_id: "point-1", point_name: "P-07", sample_name: "KIV-2", analysis_ids: ["synthetic-epma", "synthetic-la"], methods: ["EPMA", "LA-ICP-MS"], link_types: ["same_point"], placement_count: 1, created_at: "2026-09-15T10:24:00Z" },
+  { analytical_point_id: "point-2", point_name: "P-03", sample_name: "OTHER", analysis_ids: ["synthetic-other"], methods: ["EPMA"], link_types: ["same_zone"], placement_count: 0, created_at: "2026-09-15T10:25:00Z" },
+];
+const analyses = [
+  { analysis_id: "synthetic-epma", source_name: "KIV-2_EPMA.xlsx", sheet_name: "Data", source_row_number: 9, source_orientation: "rows_are_analyses", identity: { Analysis: "P-07-EPMA", Sample: "KIV-2", Point: "P-07" }, source_metadata: {}, measurements: { SiO2: { raw_token: "48.2", unit: "wt.%", method: "EPMA" } }, measurement_list: [{ field: "SiO2", raw_token: "48.2", unit: "wt.%", method: "EPMA" }] },
+  { analysis_id: "synthetic-la", source_name: "KIV-2_LA-ICP-MS.xlsx", sheet_name: "Trace", source_row_number: 11, source_orientation: "rows_are_analyses", identity: { Analysis: "P-07-LA", Sample: "KIV-2", Point: "P-07" }, source_metadata: {}, measurements: { Rb: { raw_token: "12.4", unit: "ppm", method: "LA-ICP-MS" } }, measurement_list: [{ field: "Rb", raw_token: "12.4", unit: "ppm", method: "LA-ICP-MS" }] },
 ];
 const canvas = document.createElement("canvas");
 canvas.width = 640; canvas.height = 480;
@@ -37,8 +41,8 @@ window.__TAURI_INTERNALS__ = {
     const response = (result) => ({ protocol_version: "1.0", request_id: request.request_id, result });
     const payload = request.payload;
     switch (request.command) {
-      case "project.analyses.list": return response({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
-      case "project.mineral_identification.list": return response({ total: 0, identifications: [], status_counts: {} });
+      case "project.analyses.list": return response({ total: analyses.length, returned: analyses.length, offset: 0, has_more: false, source_count: 2, import_batch_count: 1, latest_import: null, analyses });
+      case "project.mineral_identification.list": return response({ total: analyses.length, identifications: [], status_counts: {} });
       case "media.inspect_sources": return response({ items: items.filter((item) => payload.source_paths.includes(item.source_path)), duplicate_groups: [] });
       case "analytical_point.list": return response({ total: 2, sample_names: ["KIV-2", "OTHER"], items: points });
       case "media.preview": {
@@ -63,3 +67,27 @@ window.__TAURI_INTERNALS__ = {
 };
 
 createRoot(document.getElementById("root")).render(<App />);
+
+// Deterministic screenshot route for the read-only registry QA state.
+if (new URLSearchParams(window.location.search).get("qa") === "registry") {
+  const clickWhenReady = (find, next) => {
+    const started = Date.now();
+    const timer = window.setInterval(() => {
+      const target = find();
+      if (target) {
+        window.clearInterval(timer);
+        target.click();
+        if (next) window.setTimeout(next, 120);
+      } else if (Date.now() - started > 4000) {
+        window.clearInterval(timer);
+      }
+    }, 50);
+  };
+  clickWhenReady(
+    () => [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Анализы"),
+    () => clickWhenReady(
+      () => [...document.querySelectorAll("button")].find((button) => button.textContent.includes("Analytical Points")),
+      () => clickWhenReady(() => document.querySelector('input[aria-label="Выбрать Analytical Point P-07"]')),
+    ),
+  );
+}

@@ -131,6 +131,16 @@ export function App() {
     setProject(await attachMineralIdentifications(path, listed));
   }, [databasePath]);
 
+  const refreshAnalyticalPoints = useCallback(async (path = databasePath) => {
+    if (!path) return;
+    try {
+      const pointProjection = unwrap(await listAnalyticalPoints(path));
+      setMediaPoints(pointProjection);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, [databasePath]);
+
   const loadMoreAnalyses = useCallback(async () => {
     if (!databasePath || busy || !project.has_more) return;
     setBusy(true);
@@ -164,6 +174,12 @@ export function App() {
         const result = unwrap(await listProjectAnalyses(path, ANALYSES_PAGE_SIZE, 0));
         const enriched = await attachMineralIdentifications(path, result);
         if (!cancelled) setProject(enriched);
+        try {
+          const pointProjection = unwrap(await listAnalyticalPoints(path));
+          if (!cancelled) setMediaPoints(pointProjection);
+        } catch (caught) {
+          if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
+        }
       } catch (caught) {
         if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
       }
@@ -409,7 +425,7 @@ export function App() {
       }
       setSuccess(`Analytical Point «${created.point_name}» создана из ${created.analysis_ids.length} Analyses. Исходные измерения не изменены.`);
       if (mediaInspection && projectionRefreshed) setScreen("Изображения");
-      return created;
+      return { ...created, projection_refreshed: projectionRefreshed };
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       throw caught;
@@ -512,7 +528,7 @@ export function App() {
       const result = unwrap(await applyMediaImportPlan(databasePath, reviewedPlan));
       setMediaInspection(null);
       setMediaPlan(null);
-      setMediaPoints({ total: 0, sample_names: [], items: [] });
+      await refreshAnalyticalPoints(databasePath);
       setSuccess(`Импортировано изображений: ${result.created_media_asset_count + result.reused_media_asset_count}. Пространственных точек: ${result.spatial_annotation_count}.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -526,7 +542,6 @@ export function App() {
     if (busy) return;
     setMediaInspection(null);
     setMediaPlan(null);
-    setMediaPoints({ total: 0, sample_names: [], items: [] });
     setError("");
     setSuccess("");
   };
@@ -663,8 +678,10 @@ export function App() {
         {screen === "Анализы" && (
           <AnalysesWorkspace
             project={project}
+            analyticalPoints={mediaPoints}
             busy={busy}
             onRefresh={() => refreshAnalyses().catch((caught) => setError(caught.message))}
+            onRefreshAnalyticalPoints={() => refreshAnalyticalPoints()}
             onRetract={retractLatest}
             onAddData={startNewImport}
             onLoadMore={loadMoreAnalyses}

@@ -134,6 +134,8 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(result["sample_names"], ["KIV-2", "OTHER"])
             self.assertEqual(by_id[first["analytical_point_id"]]["point_name"], "P-07")
             self.assertEqual(len(by_id[first["analytical_point_id"]]["analysis_ids"]), 2)
+            self.assertEqual(by_id[first["analytical_point_id"]]["link_types"], ["same_point"])
+            self.assertTrue(by_id[first["analytical_point_id"]]["created_at"])
             self.assertEqual(by_id[second["analytical_point_id"]]["sample_name"], "OTHER")
             self.assertEqual(by_id[first["analytical_point_id"]]["placement_count"], 0)
 

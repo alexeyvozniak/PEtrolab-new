@@ -19,6 +19,7 @@ import {
   mineralStatus,
   reportedMineral,
 } from "./mineralUi";
+import { AnalyticalPointsRegistry } from "./AnalyticalPointsRegistry";
 import "./analysesWorkspace.css";
 
 function originLabel(analysis) {
@@ -272,7 +273,7 @@ function AnalysisDetail({ analysis }) {
   );
 }
 
-export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddData, onLoadMore, onCreateAnalyticalPoint }) {
+export function AnalysesWorkspace({ project, analyticalPoints = { total: 0, items: [] }, busy, onRefresh, onRefreshAnalyticalPoints, onRetract, onAddData, onLoadMore, onCreateAnalyticalPoint }) {
   const analyses = project.analyses || [];
   const mineralStatusCounts = project.mineral_status_counts || {};
   const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
@@ -313,6 +314,8 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
   const [focusedId, setFocusedId] = useState("");
   const [sort, setSort] = useState({ id: "source", direction: "asc" });
   const [pointDialogOpen, setPointDialogOpen] = useState(false);
+  const [viewMode, setViewMode] = useState("analyses");
+  const [registryFocusId, setRegistryFocusId] = useState("");
 
   useEffect(() => {
     setVisibleColumnIds((current) => {
@@ -382,6 +385,21 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
 
   if (project.total === 0) return <EmptyAnalyses onAddData={onAddData} />;
 
+  if (viewMode === "points") return <AnalyticalPointsRegistry
+    projection={analyticalPoints}
+    analyses={analyses}
+    busy={busy}
+    initialPointId={registryFocusId}
+    onBack={() => setViewMode("analyses")}
+    onRefresh={onRefreshAnalyticalPoints}
+    onShowAnalyses={(analysisIds) => {
+      const availableIds = analysisIds.filter((id) => analyses.some((analysis) => analysis.analysis_id === id));
+      setSelectedIds(availableIds);
+      setFocusedId(availableIds[0] || "");
+      setViewMode("analyses");
+    }}
+  />;
+
   return (
     <div className="analyses-workspace">
       <aside className="analyses-sources">
@@ -402,6 +420,7 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
 
       <main className="analyses-table-pane">
         <div className="analyses-toolbar">
+          <button className="outline-button analysis-points-registry-button" type="button" onClick={() => { setRegistryFocusId(""); setViewMode("points"); }}><LinkSimple size={17} /> Analytical Points <span>{analyticalPoints.total || 0}</span></button>
           <div className="analysis-search"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sample, Mineral, Generation, значение…" aria-label="Поиск анализов" /></div>
           <span className="analyses-result-count">{ordered.length} из {project.total}</span>
           <span className={`analysis-mineral-health ${mineralReviewedCount === 0 || mineralAttentionCount ? "attention" : "ok"}`} title={`Проверено для ${mineralReviewedCount} загруженных анализов`}>
@@ -487,7 +506,14 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
         </div>
       )}
 
-      {pointDialogOpen && <AnalyticalPointDialog analyses={selectedAnalyses} busy={busy} onCancel={() => setPointDialogOpen(false)} onCreate={onCreateAnalyticalPoint} />}
+      {pointDialogOpen && <AnalyticalPointDialog analyses={selectedAnalyses} busy={busy} onCancel={() => setPointDialogOpen(false)} onCreate={async (payload) => {
+        const created = await onCreateAnalyticalPoint(payload);
+        if (created?.analytical_point_id && created.projection_refreshed !== false) {
+          setRegistryFocusId(created.analytical_point_id);
+          setViewMode("points");
+        }
+        return created;
+      }} />}
 
       {project.latest_import && <button className="analysis-retract-link" type="button" onClick={onRetract} disabled={busy}>Отменить последний импорт</button>}
     </div>

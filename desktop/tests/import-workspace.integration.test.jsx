@@ -83,7 +83,9 @@ afterEach(async () => {
 
 async function enabledButton(name) {
   const button = await screen.findByRole("button", { name });
-  await waitFor(() => expect(button.disabled).toBe(false));
+  // The integration bridge starts a real Python process. On a busy Windows
+  // runner its valid response can exceed Testing Library's 1 s default.
+  await waitFor(() => expect(button.disabled).toBe(false), { timeout: 10000 });
   return button;
 }
 

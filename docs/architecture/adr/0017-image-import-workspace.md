@@ -1,6 +1,6 @@
 # ADR 0017 — Image import workspace boundary
 
-Status: accepted and implemented through manual placement on 2026-09-08.
+Status: accepted and implemented through explicit point creation and the read-only registry on 2026-09-15.
 
 ## Context
 
@@ -52,6 +52,13 @@ bounded PNG preview on demand. The preview preserves source-pixel axes and does
 not apply EXIF rotation, so viewport clicks can be converted to the exact image
 coordinates validated by `media.import.plan`. The full-resolution source never
 crosses into React.
+
+The same `analytical_point.list` projection feeds the registry in Analyses; no
+second client-side point store or inferred join is introduced. It includes the
+stored link types and creation time alongside stable Point/Analysis IDs,
+methods and placement count. Registry filters are view-only. Moving selected
+points back to the Analyses table expands only their exact persisted Analysis
+IDs and does not create an aggregated Measurement row.
 
 Point, Rectangle and Square placement remains a UI draft until the user presses
 the explicit save action. Same-Sample filtering is the default. Choosing a Point
