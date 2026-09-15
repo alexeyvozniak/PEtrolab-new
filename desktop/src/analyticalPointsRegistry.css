@@ -28,6 +28,8 @@
 .point-registry-table code { max-width: 135px; margin-top: 3px; overflow: hidden; color: #7a867e; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .point-status { display: inline-flex; padding: 3px 6px; border-radius: 999px; background: #f3f0e7; color: #826426; white-space: nowrap; }
 .point-status.placed { background: #e8f4eb; color: #277048; }
+.point-spatial-summary { display: grid; gap: 4px; }
+.point-spatial-summary small { max-width: 180px; overflow: hidden; color: #76827a; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .point-registry-empty { min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #7a867e; font-size: 10px; text-align: center; }
 .point-registry-empty b { color: #415048; }
 .point-registry-analyses { min-height: 0; overflow: auto; padding: 11px 12px 14px; background: #fbfcfb; }
@@ -56,6 +58,16 @@
 .point-registry-inspector section > small { display: block; margin-top: 8px; color: #89928c; font-size: 8px; }
 .point-inspector-status { display: flex; align-items: center; gap: 7px; margin: 0; color: #8a6a2a; font-size: 10px; }
 .point-inspector-status.placed { color: #28704a; }
+.point-placement-card { display: grid; gap: 5px; margin-top: 10px; padding: 9px; border: 1px solid #dce5de; border-radius: 8px; background: #fafcfb; }
+.point-placement-card > header { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+.point-placement-card > header b { min-width: 0; overflow: hidden; color: #334239; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.point-placement-card > header span { padding: 2px 5px; border-radius: 999px; background: #e8f1ea; color: #315d45; font-size: 8px; font-weight: 750; }
+.point-placement-card > p { margin: 0; color: #68756d; font-size: 8px; }
+.point-placement-card > strong { color: #315d45; font-size: 9px; }
+.point-placement-card > small { color: #849088; font-size: 8px; }
+.point-placement-card dl > div { grid-template-columns: 88px minmax(0, 1fr); padding: 3px 0; }
+.point-placement-card dd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.point-placement-card em { padding: 6px; border-radius: 6px; background: #fff4dc; color: #76541e; font-size: 8px; font-style: normal; line-height: 1.4; }
 .point-registry-inspector-empty { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: #77827b; font-size: 10px; line-height: 1.5; text-align: center; }
 .point-registry-selection { position: absolute; z-index: 5; right: 270px; bottom: 10px; left: 190px; min-height: 54px; display: grid; grid-template-columns: minmax(220px, auto) minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid #cbd8ce; border-radius: 10px; background: rgba(255, 255, 255, .97); box-shadow: 0 8px 24px rgba(34, 53, 42, .13); }
 .point-registry-selection > div:first-child { min-width: 0; display: grid; grid-template-columns: auto auto; align-items: center; justify-content: start; gap: 2px 6px; color: #315d45; }

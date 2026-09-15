@@ -299,6 +299,7 @@ def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
                 "methods": [],
                 "link_types": [],
                 "placement_count": placement_counts.get(row["analytical_point_id"], 0),
+                "placements": [],
                 "created_at": row["created_at"],
             })
             if row["analysis_id"] is not None:
@@ -311,6 +312,44 @@ def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
         items = list(by_id.values())
         for item in items:
             item["link_types"].sort()
+        for row in connection.execute(
+            """SELECT apa.analytical_point_id, apa.spatial_annotation_id,
+                      apa.cross_sample_exception, apa.exception_reason,
+                      apa.created_at AS linked_at,
+                      sa.media_asset_id, sa.geometry_kind, sa.x_px, sa.y_px,
+                      sa.width_px, sa.height_px, sa.image_width_px,
+                      sa.image_height_px, ma.display_name, ma.media_type,
+                      ts.thin_section_id, ts.thin_section_name
+               FROM analytical_point_annotation apa
+               JOIN spatial_annotation sa ON sa.spatial_annotation_id = apa.spatial_annotation_id
+               JOIN media_asset ma ON ma.media_asset_id = sa.media_asset_id
+               JOIN thin_section ts ON ts.thin_section_id = sa.thin_section_id
+               ORDER BY lower(ma.display_name), apa.spatial_annotation_id"""
+        ):
+            point = by_id.get(row["analytical_point_id"])
+            if point is None:
+                continue
+            geometry = {
+                "kind": row["geometry_kind"],
+                "x_px": row["x_px"],
+                "y_px": row["y_px"],
+            }
+            if row["geometry_kind"] != "point":
+                geometry.update({"width_px": row["width_px"], "height_px": row["height_px"]})
+            point["placements"].append({
+                "spatial_annotation_id": row["spatial_annotation_id"],
+                "media_asset_id": row["media_asset_id"],
+                "media_display_name": row["display_name"],
+                "media_type": row["media_type"],
+                "thin_section_id": row["thin_section_id"],
+                "thin_section_name": row["thin_section_name"],
+                "geometry": geometry,
+                "image_width_px": row["image_width_px"],
+                "image_height_px": row["image_height_px"],
+                "cross_sample_exception": bool(row["cross_sample_exception"]),
+                "exception_reason": row["exception_reason"],
+                "linked_at": row["linked_at"],
+            })
         return {
             "total": len(items),
             "sample_names": sorted({item["sample_name"] for item in items}, key=str.casefold),

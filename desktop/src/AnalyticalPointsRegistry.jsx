@@ -18,6 +18,18 @@ function pointStatus(point) {
   return Number(point.placement_count || 0) > 0 ? "Размещена" : "Без изображения";
 }
 
+function coordinate(value) {
+  return Number.isInteger(Number(value)) ? String(Number(value)) : Number(value).toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function geometryLabel(placement) {
+  const geometry = placement?.geometry;
+  if (!geometry) return "Геометрия недоступна";
+  const kind = { point: "Point", rectangle: "Rectangle", square: "Square" }[geometry.kind] || geometry.kind;
+  const size = geometry.kind === "point" ? "" : ` · ${coordinate(geometry.width_px)} × ${coordinate(geometry.height_px)} px`;
+  return `${kind} · X ${coordinate(geometry.x_px)} · Y ${coordinate(geometry.y_px)} px${size}`;
+}
+
 function analysisName(analysis, fallback) {
   const identity = analysis?.identity || {};
   return identity.Analysis || identity.Point || fallback;
@@ -112,9 +124,10 @@ export function AnalyticalPointsRegistry({ projection = { total: 0, items: [] },
           <tbody>{ordered.map((point) => {
             const selected = selectedPointIds.includes(point.analytical_point_id);
             const focused = focusedPoint?.analytical_point_id === point.analytical_point_id;
+            const firstPlacement = point.placements?.[0];
             return <tr className={`${selected ? "selected " : ""}${focused ? "focused" : ""}`} key={point.analytical_point_id} onClick={() => setFocusedPointId(point.analytical_point_id)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") setFocusedPointId(point.analytical_point_id); }}>
               <td><input type="checkbox" checked={selected} onChange={() => togglePoint(point.analytical_point_id)} onClick={(event) => event.stopPropagation()} aria-label={`Выбрать Analytical Point ${point.point_name}`} /></td>
-              <td>{point.sample_name}</td><td><b>{point.point_name}</b><code title={point.analytical_point_id}>{point.analytical_point_id}</code></td><td>{pointLinkLabel(point)}</td><td>{(point.methods || []).join(", ") || "—"}</td><td>{(point.analysis_ids || []).length}</td><td><span className={Number(point.placement_count || 0) ? "point-status placed" : "point-status"}>{pointStatus(point)}{Number(point.placement_count || 0) ? ` · ${point.placement_count}` : ""}</span></td><td>{createdLabel(point.created_at)}</td>
+              <td>{point.sample_name}</td><td><b>{point.point_name}</b><code title={point.analytical_point_id}>{point.analytical_point_id}</code></td><td>{pointLinkLabel(point)}</td><td>{(point.methods || []).join(", ") || "—"}</td><td>{(point.analysis_ids || []).length}</td><td><div className="point-spatial-summary"><span className={Number(point.placement_count || 0) ? "point-status placed" : "point-status"}>{pointStatus(point)}{Number(point.placement_count || 0) ? ` · ${point.placement_count}` : ""}</span>{firstPlacement && <small title={`${firstPlacement.media_display_name} · ${geometryLabel(firstPlacement)}`}>{firstPlacement.media_display_name} · {geometryLabel(firstPlacement)}</small>}</div></td><td>{createdLabel(point.created_at)}</td>
             </tr>;
           })}</tbody>
         </table>
@@ -131,7 +144,16 @@ export function AnalyticalPointsRegistry({ projection = { total: 0, items: [] },
       {focusedPoint ? <>
         <header><span>Точка</span><h2>{focusedPoint.point_name}</h2><p>{focusedPoint.sample_name}</p></header>
         <section><h3>Связь</h3><dl><div><dt>Тип</dt><dd>{pointLinkLabel(focusedPoint)}</dd></div><div><dt>Методы</dt><dd>{(focusedPoint.methods || []).join(", ") || "—"}</dd></div><div><dt>Analyses</dt><dd>{(focusedPoint.analysis_ids || []).length}</dd></div></dl></section>
-        <section><h3>Пространственная привязка</h3><p className={Number(focusedPoint.placement_count || 0) ? "point-inspector-status placed" : "point-inspector-status"}><MapPin size={18} /> {pointStatus(focusedPoint)}{Number(focusedPoint.placement_count || 0) ? ` (${focusedPoint.placement_count})` : ""}</p></section>
+        <section><h3>Пространственная привязка</h3><p className={Number(focusedPoint.placement_count || 0) ? "point-inspector-status placed" : "point-inspector-status"}><MapPin size={18} /> {pointStatus(focusedPoint)}{Number(focusedPoint.placement_count || 0) ? ` (${focusedPoint.placement_count})` : ""}</p>
+          {(focusedPoint.placements || []).map((placement) => <article className="point-placement-card" key={placement.spatial_annotation_id}>
+            <header><b>{placement.media_display_name}</b><span>{placement.media_type}</span></header>
+            <p>{placement.thin_section_name}</p>
+            <strong>{geometryLabel(placement)}</strong>
+            <small>Изображение: {placement.image_width_px} × {placement.image_height_px} px</small>
+            <dl><div><dt>Spatial Annotation</dt><dd title={placement.spatial_annotation_id}>{placement.spatial_annotation_id}</dd></div><div><dt>Media Asset</dt><dd title={placement.media_asset_id}>{placement.media_asset_id}</dd></div></dl>
+            {placement.cross_sample_exception && <em>Межобразцовое исключение: {placement.exception_reason}</em>}
+          </article>)}
+        </section>
         <section><h3>Устойчивый ID</h3><code>{focusedPoint.analytical_point_id}</code><small>Создано: {createdLabel(focusedPoint.created_at)}</small></section>
       </> : <div className="point-registry-inspector-empty"><LinkSimple size={25} /><span>Выбери строку реестра, чтобы проверить состав связи.</span></div>}
     </aside>

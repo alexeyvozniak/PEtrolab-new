@@ -168,6 +168,19 @@ class MediaImportTests(unittest.TestCase):
                 self.assertEqual(row, ("point", 5.25, 3.5, 12, 8))
                 self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 13)
             self.assertEqual(result["spatial_annotation_count"], 1)
+            projected = list_analytical_points(database)
+            saved = next(item for item in projected["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            self.assertEqual(saved["placement_count"], 1)
+            self.assertEqual(len(saved["placements"]), 1)
+            placement = saved["placements"][0]
+            self.assertEqual(placement["spatial_annotation_id"], plan["items"][0]["placements"][0]["spatial_annotation_id"])
+            self.assertEqual(placement["media_asset_id"], plan["items"][0]["media_asset_id"])
+            self.assertEqual(placement["media_display_name"], "KIV-2_BSE.png")
+            self.assertEqual(placement["thin_section_name"], "KIV-2-TS1")
+            self.assertEqual(placement["geometry"], {"kind": "point", "x_px": 5.25, "y_px": 3.5})
+            self.assertEqual((placement["image_width_px"], placement["image_height_px"]), (12, 8))
+            self.assertFalse(placement["cross_sample_exception"])
+            self.assertIsNone(placement["exception_reason"])
 
     def test_cross_sample_placement_requires_and_preserves_reason(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
@@ -181,6 +194,10 @@ class MediaImportTests(unittest.TestCase):
             assignment = self._assignment(image, other_point["analytical_point_id"], reason="Legacy label verified in lab notebook")
             result = apply_media_import_plan(database, create_media_import_plan(database, [assignment]))
             self.assertEqual(result["spatial_annotation_count"], 1)
+            projected = list_analytical_points(database)
+            placement = next(item for item in projected["items"] if item["analytical_point_id"] == other_point["analytical_point_id"])["placements"][0]
+            self.assertTrue(placement["cross_sample_exception"])
+            self.assertEqual(placement["exception_reason"], "Legacy label verified in lab notebook")
             with closing(sqlite3.connect(database)) as connection:
                 self.assertEqual(
                     connection.execute("SELECT cross_sample_exception, exception_reason FROM analytical_point_annotation").fetchone(),

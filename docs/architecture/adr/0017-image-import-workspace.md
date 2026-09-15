@@ -56,7 +56,10 @@ crosses into React.
 The same `analytical_point.list` projection feeds the registry in Analyses; no
 second client-side point store or inferred join is introduced. It includes the
 stored link types and creation time alongside stable Point/Analysis IDs,
-methods and placement count. Registry filters are view-only. Moving selected
+methods and placement count. Saved placement summaries expose stable Spatial
+Annotation/Media Asset IDs, Thin Section, source-pixel geometry and any stored
+cross-Sample exception; they do not expose or decode full-resolution pixels.
+Registry filters are view-only. Moving selected
 points back to the Analyses table expands only their exact persisted Analysis
 IDs and does not create an aggregated Measurement row.
 

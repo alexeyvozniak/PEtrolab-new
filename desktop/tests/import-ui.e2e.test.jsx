@@ -59,21 +59,45 @@ test('Analytical Point registry exposes provenance and returns source Analyses t
     analysis_id: 'la-p01', source_name: 'KIV-2_LA.xlsx', sheet_name: 'Trace', source_row_number: 11,
     identity: { Analysis: 'P-01-LA', Sample: 'KIV-2' }, measurement_list: [{ method: 'LA-ICP-MS' }], measurements: {},
   }];
-  const analyticalPoints = { total: 1, sample_names: ['KIV-2'], items: [{
+  const analyticalPoints = { total: 2, sample_names: ['KIV-2', 'OTHER'], items: [{
     analytical_point_id: 'point-stable-p01', point_name: 'P-01', sample_name: 'KIV-2',
     analysis_ids: ['epma-p01', 'la-p01'], methods: ['EPMA', 'LA-ICP-MS'], link_types: ['same_point'],
-    placement_count: 1, created_at: '2026-09-15T10:24:00Z',
+    placement_count: 1, created_at: '2026-09-15T10:24:00Z', placements: [{
+      spatial_annotation_id: 'annotation-stable-p01', media_asset_id: 'media-stable-bse',
+      media_display_name: 'KIV-2_A_BSE_01.tif', media_type: 'BSE', thin_section_id: 'section-kiv-2-a',
+      thin_section_name: 'KIV-2-A', geometry: { kind: 'point', x_px: 5710, y_px: 4876 },
+      image_width_px: 8192, image_height_px: 6144, cross_sample_exception: false, exception_reason: null,
+      linked_at: '2026-09-15T10:30:00Z',
+    }],
+  }, {
+    analytical_point_id: 'point-stable-p02', point_name: 'P-02', sample_name: 'OTHER',
+    analysis_ids: ['epma-p01', 'la-p01'], methods: ['EPMA'], link_types: ['same_zone'],
+    placement_count: 1, created_at: '2026-09-15T10:25:00Z', placements: [{
+      spatial_annotation_id: 'annotation-cross-p02', media_asset_id: 'media-kiv-2-ppl',
+      media_display_name: 'KIV-2_A_PPL_01.tif', media_type: 'PPL', thin_section_id: 'section-kiv-2-a',
+      thin_section_name: 'KIV-2-A', geometry: { kind: 'square', x_px: 120, y_px: 240, width_px: 30, height_px: 30 },
+      image_width_px: 2048, image_height_px: 1536, cross_sample_exception: true,
+      exception_reason: 'Проверено по журналу шлифа', linked_at: '2026-09-15T10:31:00Z',
+    }],
   }] };
 
   render(<AnalysesWorkspace project={{ total: 2, source_count: 2, analyses }} analyticalPoints={analyticalPoints} busy={false} onRefreshAnalyticalPoints={vi.fn()} />);
-  await user.click(screen.getByRole('button', { name: /Analytical Points 1/ }));
+  await user.click(screen.getByRole('button', { name: /Analytical Points 2/ }));
 
   expect(screen.getAllByText('Та же аналитическая точка').length).toBeGreaterThan(0);
   expect(screen.getAllByText(/Размещена/).length).toBeGreaterThan(0);
   expect(screen.getByTitle('point-stable-p01')).toBeTruthy();
   expect(screen.getByText('KIV-2_EPMA.xlsx · лист Data · строка 9')).toBeTruthy();
+  expect(screen.getAllByText('Point · X 5710 · Y 4876 px').length).toBeGreaterThan(0);
+  expect(screen.getByText('Изображение: 8192 × 6144 px')).toBeTruthy();
+  expect(screen.getByTitle('annotation-stable-p01')).toBeTruthy();
+  expect(screen.getByTitle('media-stable-bse')).toBeTruthy();
+  await user.click(screen.getByText('P-02'));
+  expect(screen.getByText('Межобразцовое исключение: Проверено по журналу шлифа')).toBeTruthy();
+  expect(screen.getAllByText('Square · X 120 · Y 240 px · 30 × 30 px').length).toBeGreaterThan(0);
+  await user.click(screen.getByText('P-01'));
   await user.selectOptions(screen.getByRole('combobox', { name: 'Фильтр метода Analytical Points' }), 'LA-ICP-MS');
-  expect(screen.getByText('1 из 1')).toBeTruthy();
+  expect(screen.getByText('1 из 2')).toBeTruthy();
 
   await user.click(screen.getByRole('checkbox', { name: 'Выбрать Analytical Point P-01' }));
   expect(screen.getByText('1 Analytical Points / 2 Analyses')).toBeTruthy();
