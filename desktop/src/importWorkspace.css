@@ -1,6 +1,10 @@
-.import-live-page {
-  height: calc(100vh - 76px);
-  min-height: 690px;
+.workspace:has(.import-live-page) { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.workspace:has(.import-live-page) > .topbar,
+.workspace:has(.import-live-page) > .global-message { flex: 0 0 auto; }
+.live-page.import-live-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
   padding: 0;
   gap: 0;
   overflow: hidden;
@@ -8,9 +12,10 @@
 
 .import-workspace {
   height: 100%;
+  min-height: 0;
   min-width: 0;
   display: grid;
-  grid-template-rows: 62px minmax(0, 1fr) 72px;
+  grid-template-rows: 62px minmax(0, 1fr) auto;
   background: #fff;
 }
 
@@ -69,7 +74,20 @@
   display: flex;
   flex-direction: column;
   border-right: 1px solid #e0e4e0;
+  overflow-y: auto;
 }
+
+.workspace-source-queue { flex: 0 0 auto; border-bottom: 1px solid #dfe4df; }
+.queue-source { padding: 8px; border-left: 3px solid transparent; }
+.queue-source.active { background: #edf4ee; border-left-color: #3a6b4e; }
+.queue-source > button { display: flex; gap: 8px; width: 100%; text-align: left; background: transparent; border: 0; padding: 5px; color: #2c3631; }
+.queue-source span { min-width: 0; }
+.queue-source b { display: block; font-size: 12px; overflow-wrap: anywhere; }
+.queue-source small { display: block; font-size: 11px; color: #68716c; margin-top: 4px; }
+.queue-source .queue-source-inclusion, .queue-source .queue-sheet { font-size: 11px; padding-left: 29px; }
+.queue-source .queue-source-inclusion { text-decoration: underline; }
+.workspace-commit-note { grid-column: 1 / -1; color: #87571e; font-size: 12px; padding-top: 6px; border-top: 1px solid #ece5d8; }
+.import-workspace button:focus-visible { outline: 2px solid #3a6b4e; outline-offset: 2px; }
 
 .import-table-pane {
   overflow: hidden;
@@ -204,7 +222,7 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .import-bulk-scope small { display: block; }
 .import-bulk-scope b { color: #365945; font-size: 10px; }
 .import-bulk-scope small { margin: 3px 0 7px; color: #6e786f; font-size: 9px; line-height: 1.35; }
-.import-bulk-scope > div { display: flex; gap: 6px; }
+.import-bulk-scope > div { display: flex; flex-wrap: wrap; gap: 6px; }
 .import-bulk-scope select { min-width: 94px; }
 .import-bulk-scope.ignore-scope { background: #fffbf5; }
 .import-bulk-scope.ignore-scope b { color: #765138; }
@@ -227,7 +245,7 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .import-inspector-pane .sheet-unit-control {
   margin-top: 8px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(90px, 1fr);
   gap: 6px;
 }
 .import-inspector-pane .sheet-unit-control label { grid-column: 1 / -1; }
@@ -273,7 +291,7 @@ button.import-sheet-row:hover { background: #f4f7f4; }
   display: grid;
   grid-template-columns: minmax(360px, 1fr) auto auto;
   align-items: center;
-  gap: 14px;
+  gap: 6px 14px;
   padding: 9px 16px;
   border-top: 1px solid #dce2dd;
   background: #fff;
@@ -314,4 +332,19 @@ button.import-sheet-row:hover { background: #f4f7f4; }
   .import-footer-metrics { gap: 11px; }
   .import-footer-actions .outline-button { display: none; }
   .import-issue-list { max-height: 190px; }
+}
+.import-stage-tabs { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid #dce5dd; }
+.import-stage-tabs button, .mineral-review-item button { border: 1px solid #cbd9ce; border-radius: 5px; color: #30543c; background: #f4f8f4; padding: 7px; font-size: 11px; }
+.mineral-verification-panel { min-height: 0; overflow-y: auto; font-size: 11px; }
+.mineral-review-item { display: grid; gap: 7px; border-bottom: 1px solid #e1e7e2; padding: 12px; }
+.mineral-review-item dl { display: grid; grid-template-columns: 85px 1fr; gap: 5px; margin: 0; }
+.mineral-review-item dd { margin: 0; }
+.mineral-review-item dt, .mineral-review-item p { color: #65736a; }
+.mineral-review-item .mineral-origin { text-align: left; background: transparent; border: 0; padding: 0; text-decoration: underline; }
+.mineral-show-all { display: block; padding: 10px 12px; }
+
+@media (max-height: 850px) {
+  .workspace:has(.import-live-page) > .global-message { margin: 4px 12px; padding: 6px 10px; }
+  .import-workspace { grid-template-rows: 50px minmax(0, 1fr) auto; }
+  .import-workspace-head { padding: 5px 12px; }
 }

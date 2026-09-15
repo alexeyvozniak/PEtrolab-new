@@ -30,6 +30,8 @@
 .analyses-source-note { display: flex; align-items: flex-start; gap: 7px; margin: 0 12px; padding: 12px 0; border-top: 1px solid #e7ebe7; color: #748078; font-size: 10px; line-height: 1.45; }
 
 .analyses-toolbar { min-width: 0; min-height: 58px; display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-bottom: 1px solid #dde3de; background: #fff; }
+.analysis-points-registry-button { min-height: 38px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; font-size: 9px; white-space: nowrap; }
+.analysis-points-registry-button span { min-width: 20px; padding: 2px 5px; border-radius: 999px; background: #e8f1ea; color: #315d45; text-align: center; }
 .analysis-search { flex: 1; min-width: 220px; min-height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #cfd7d1; border-radius: 8px; background: #f9faf9; }
 .analysis-search:focus-within { border-color: #5e876d; box-shadow: 0 0 0 2px #e0ece3; }
 .analysis-search input { width: 100%; border: 0; outline: 0; background: transparent; }
@@ -97,6 +99,37 @@
 .analysis-selection-chips { min-width: 0; display: flex; gap: 5px; overflow: hidden; }
 .analysis-selection-chips button { min-height: 31px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid #d4ddd6; border-radius: 7px; background: #f5f8f5; color: #314038; font-size: 9px; white-space: nowrap; }
 .analysis-selection-chips > span { align-self: center; color: #657168; font-size: 9px; }
+.analysis-selection-actions { display: flex; align-items: center; gap: 7px; }
+.analysis-selection-actions .primary-button,
+.analysis-selection-actions .outline-button { min-height: 34px; padding: 0 10px; font-size: 9px; white-space: nowrap; }
+.analysis-point-dialog-backdrop { position: fixed; z-index: 80; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(22, 31, 26, .48); backdrop-filter: blur(2px); }
+.analysis-point-dialog { width: min(720px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; border: 1px solid #cfd9d1; border-radius: 14px; background: #fff; box-shadow: 0 24px 70px rgba(20, 35, 26, .26); }
+.analysis-point-dialog > header { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 16px; border-bottom: 1px solid #e2e8e3; background: #fafcfb; }
+.analysis-point-dialog > header span { color: #718078; font-size: 9px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.analysis-point-dialog > header h2 { margin: 4px 0 0; color: #26362d; font-size: 18px; }
+.analysis-point-dialog-intro { margin: 0; padding: 14px 16px 8px; color: #56655d; font-size: 11px; line-height: 1.5; }
+.analysis-point-dialog-warning { display: flex; align-items: flex-start; gap: 8px; margin: 4px 16px 10px; padding: 10px; border: 1px solid #edd29a; border-radius: 8px; background: #fff8e8; color: #76541e; font-size: 10px; line-height: 1.45; }
+.analysis-point-evidence { max-height: 190px; overflow: auto; margin: 6px 16px 14px; border: 1px solid #e0e6e1; border-radius: 9px; }
+.analysis-point-evidence > div { min-height: 48px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 7px 10px; border-bottom: 1px solid #edf0ee; }
+.analysis-point-evidence > div:last-child { border-bottom: 0; }
+.analysis-point-evidence svg { color: #417257; }
+.analysis-point-evidence span,
+.analysis-point-evidence b,
+.analysis-point-evidence small { display: block; min-width: 0; }
+.analysis-point-evidence b { color: #304138; font-size: 10px; }
+.analysis-point-evidence small { margin-top: 2px; overflow: hidden; color: #79857e; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-point-evidence code { max-width: 190px; overflow: hidden; color: #68776e; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-point-dialog form { display: grid; gap: 12px; padding: 0 16px 16px; }
+.analysis-point-dialog form > label,
+.analysis-point-fields label { display: grid; gap: 5px; color: #5a675f; font-size: 10px; font-weight: 700; }
+.analysis-point-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.analysis-point-dialog input[type="text"],
+.analysis-point-dialog input:not([type]),
+.analysis-point-dialog select { width: 100%; min-height: 39px; border: 1px solid #cdd7cf; border-radius: 8px; padding: 0 10px; background: #fff; color: #2f3d35; font: inherit; font-weight: 500; }
+.analysis-point-confirmation { grid-template-columns: auto 1fr !important; align-items: flex-start; padding: 11px; border: 1px solid #dbe4dd; border-radius: 9px; background: #f7faf7; font-weight: 500 !important; line-height: 1.45; }
+.analysis-point-confirmation input { margin-top: 2px; accent-color: #315d45; }
+.analysis-point-dialog-error { margin: 0; color: #a23e36; font-size: 10px; }
+.analysis-point-dialog form > footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
 .analysis-retract-link { position: absolute; left: 14px; bottom: 12px; border: 0; background: transparent; color: #8a4842; font-size: 9px; text-decoration: underline; }
 
 .analyses-empty { min-height: calc(100vh - 76px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px; background: #fff; color: #405047; text-align: center; }
@@ -108,3 +141,45 @@
   .analysis-selection-tray { left: 192px; right: 293px; }
   .analyses-toolbar .outline-button { display: none; }
 }
+
+@media (max-width: 900px) {
+  .analysis-selection-tray { grid-template-columns: auto minmax(0, 1fr); }
+  .analysis-selection-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .analysis-point-fields { grid-template-columns: 1fr; }
+}
+
+
+.analysis-status-filter { display: flex; align-items: center; gap: 6px; color: #68736c; font-size: 10px; white-space: nowrap; }
+.analysis-status-filter select { min-height: 35px; max-width: 145px; border: 1px solid #cfd7d1; border-radius: 8px; background: #fff; color: #36423b; padding: 0 7px; font-size: 10px; }
+.analysis-mineral-review { background: #fbfdfb; }
+.analysis-mineral-review > .analysis-detail-section-head { margin-bottom: 8px; }
+.analysis-mineral-review > p { margin: 0; color: #6f7b73; font-size: 10px; line-height: 1.45; }
+.analysis-mineral-facts { margin: 0; }
+.analysis-mineral-facts > div { display: grid; grid-template-columns: minmax(90px, .8fr) minmax(0, 1.2fr); gap: 10px; padding: 4px 0; }
+.analysis-mineral-facts dt { color: #748078; font-size: 9px; }
+.analysis-mineral-facts dd { margin: 0; color: #2f3a34; font-size: 10px; text-align: right; overflow-wrap: anywhere; }
+.analysis-mineral-candidates { margin-top: 9px; padding-top: 8px; border-top: 1px solid #e7ece8; }
+.analysis-mineral-candidates > b { display: block; margin-bottom: 4px; color: #657168; font-size: 9px; text-transform: uppercase; }
+.analysis-mineral-candidates > div { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; color: #354239; font-size: 10px; }
+.analysis-mineral-candidates small { color: #758078; }
+.analysis-mineral-review details { margin-top: 8px; color: #69756d; font-size: 9px; }
+.analysis-mineral-review details p { margin: 5px 0 0; line-height: 1.35; }
+.analysis-mineral-version { display: block; margin-top: 8px; color: #929b95; font-size: 8px; }
+@media (max-width: 1280px) {
+  .analysis-status-filter { display: none; }
+}
+
+.analysis-mineral-health { min-height: 25px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 9px; font-weight: 700; white-space: nowrap; }
+.analysis-mineral-health.ok { background: #e9f3ea; color: #356348; }
+.analysis-mineral-health.attention { background: #fff2da; color: #8b621f; }
+
+
+.analysis-composition-summary { background: #f8fbf8; }
+.analysis-composition-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.analysis-composition-grid > div { padding: 7px 6px; border: 1px solid #e2eae3; border-radius: 7px; background: #fff; text-align: center; }
+.analysis-composition-grid b,
+.analysis-composition-grid small { display: block; }
+.analysis-composition-grid b { color: #315d45; font-size: 14px; }
+.analysis-composition-grid small { margin-top: 2px; color: #78847c; font-size: 8px; }
+.analysis-composition-summary > p { margin: 8px 0 0; color: #758078; font-size: 9px; line-height: 1.4; }
+.analysis-composition-summary > p b { color: #40584a; }

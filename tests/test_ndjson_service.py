@@ -121,6 +121,11 @@ class NdjsonServiceTests(unittest.TestCase):
                 "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.create",
                 "payload": {"project_database_path": database, "sample_name": "KIV-2", "point_name": "P-07", "analysis_ids": analysis_ids, "link_type": "same_point"},
             })["result"]
+            points = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.list",
+                "payload": {"project_database_path": database},
+            })["result"]
+            self.assertEqual(points["items"][0]["analytical_point_id"], point["analytical_point_id"])
             image = directory / "KIV-2_BSE.png"
             write_png(image)
             inspection = handle_request({
@@ -128,6 +133,11 @@ class NdjsonServiceTests(unittest.TestCase):
                 "payload": {"source_paths": [str(image)]},
             })["result"]
             self.assertEqual(inspection["items"][0]["width_px"], 12)
+            preview = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "media.preview",
+                "payload": {"source_path": str(image), "max_width_px": 400, "max_height_px": 400},
+            })["result"]
+            self.assertTrue(preview["preview_data_url"].startswith("data:image/png;base64,"))
             assignments = [{
                 "source_path": str(image), "ownership_mode": "managed_copy", "media_type": "BSE",
                 "sample_name": "KIV-2", "thin_section_name": "KIV-2-TS1",
@@ -141,6 +151,7 @@ class NdjsonServiceTests(unittest.TestCase):
                 "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "media.import.plan",
                 "payload": {"project_database_path": database, "assignments": assignments},
             })["result"]
+            self.assertEqual(plan["items"][0]["placements"][0]["point_name"], "P-07")
             applied = handle_request({
                 "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "media.import.apply",
                 "payload": {"project_database_path": database, "plan": plan},

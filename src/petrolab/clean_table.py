@@ -301,6 +301,10 @@ def classify_clean_table(inspection: SourceInspection) -> dict[str, Any]:
     }
     recipe["semantic_fingerprint"] = semantic_fingerprint(recipe)
     plan = create_import_plan(inspection, recipe)
+    scientific_issues = plan.get("issues", []) + [item for item in plan["warnings"] if item.get("code") == "FE_STRICTLY_REPORTED"]
+    if scientific_issues:
+        return {"mode": "raw_review", **common, "reasons": scientific_issues,
+                "sections": [_section_summary(section) for section in sections], "recipe": None}
     if plan["summary"].get("duplicate_candidate_groups", 0):
         return {
             "mode": "raw_review",

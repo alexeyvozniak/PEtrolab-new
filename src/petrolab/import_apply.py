@@ -7,6 +7,7 @@ import json
 import sqlite3
 import shutil
 import uuid
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -135,6 +136,7 @@ def _section_for_record(recipe: dict[str, Any], record: dict[str, Any]) -> dict[
 
 def _source_metadata_for_record(inspection: Any, recipe: dict[str, Any], record: dict[str, Any]) -> list[dict[str, Any]]:
     """Read source metadata losslessly without promoting it to controlled entities."""
+    from .semantic_import import cell_ignored
     section = _section_for_record(recipe, record)
     sheet = next((item for item in inspection.sheets if item.name == record["sheet_name"]), None)
     if sheet is None:
@@ -148,6 +150,8 @@ def _source_metadata_for_record(inspection: Any, recipe: dict[str, Any], record:
         for mapping in mappings:
             column_index = mapping.get("source_column_index")
             if not isinstance(column_index, int) or column_index < 0:
+                continue
+            if cell_ignored(recipe, record['block_id'], row_number, column_index):
                 continue
             result.append({
                 "canonical_field": mapping.get("canonical_field") or mapping.get("source_header") or "Metadata",
@@ -168,6 +172,8 @@ def _source_metadata_for_record(inspection: Any, recipe: dict[str, Any], record:
         if not isinstance(row_index, int) or row_index < 0 or row_index >= len(sheet.rows):
             continue
         row_number = row_index + 1
+        if cell_ignored(recipe, record['block_id'], row_number, column_index):
+            continue
         result.append({
             "canonical_field": mapping.get("canonical_field") or mapping.get("source_header") or "Metadata",
             "raw_token": _cell_value(sheet.rows[row_index], column_index),
@@ -186,6 +192,11 @@ def open_project(database_path: str | Path) -> sqlite3.Connection:
     connection.execute("CREATE TABLE IF NOT EXISTS schema_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migration")}
     migrations = sorted(MIGRATIONS.glob("*.sql"))
+    pending = [item for item in migrations if int(item.name.split("_", 1)[0]) not in applied]
+    if applied and pending:
+        backup_path = Path(str(database_path) + f".before-v{int(pending[0].name.split('_', 1)[0])}-{_id()}.bak")
+        with closing(sqlite3.connect(backup_path)) as backup:
+            connection.backup(backup)
     for migration in migrations:
         version = int(migration.name.split("_", 1)[0])
         if version in applied:
@@ -288,6 +299,9 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
     """Apply a fresh plan atomically; this function never writes the source file."""
     inspection = inspect_source(source_path)
     plan = create_import_plan(inspection, recipe)
+    blockers = [issue for issue in plan.get("issues", []) if issue.get("blocking")]
+    if blockers:
+        raise ImportCommandError(blockers[0]["code"], blockers[0]["message"], {"issues": blockers})
     _require_non_empty_plan(plan)
     _require_mapping_review(recipe)
     _require_duplicate_review(plan, recipe)
@@ -335,6 +349,13 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
                         record.get("source_column_number"), orientation,
                     ),
                 )
+                connection.execute(
+                    '''INSERT INTO analysis_import_semantics
+                       (analysis_id, sample_association_json, reported_mineral_json, mineral_assignment_json,
+                        mineral_verification_json, analytical_method_json) VALUES (?, ?, ?, ?, ?, ?)''',
+                    (analysis_id, *(json.dumps(record.get(key), ensure_ascii=False, sort_keys=True) for key in
+                     ('sample_association', 'reported_mineral', 'mineral_assignment', 'mineral_verification', 'analytical_method'))),
+                )
                 for metadata in _source_metadata_for_record(inspection, recipe, record):
                     connection.execute(
                         """INSERT INTO analysis_source_metadata
@@ -353,36 +374,39 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
                         """INSERT INTO measurement
                         (measurement_id, analysis_id, canonical_field, unit, raw_token, qualifier, detection_limit,
                          source_column_name, source_column_index, created_at, source_row_number,
-                         physical_source_column_index, source_cell, measurement_set, method)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                         physical_source_column_index, source_cell, measurement_set, method,
+                         value_status, reported_fe_form, fe_handling)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
                             _id(), analysis_id, measurement["field"], measurement["unit"], measurement["raw_token"],
                             measurement["qualifier"], measurement["detection_limit"], measurement["source_header"],
                             measurement["source_column_index"], timestamp, measurement["physical_source_row_number"],
                             measurement["physical_source_column_index"], measurement["source_cell"],
                             measurement.get("measurement_set"), measurement.get("method"),
+                            measurement["value_status"], measurement["reported_fe_form"], measurement["fe_handling"],
                         ),
                     )
                     if orientation == "rows_are_analyses":
                         connection.execute(
                             """INSERT INTO source_row_provenance
                             (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token,
-                             normalized_token, qualifier, analysis_id)
-                            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)""",
+                             normalized_token, qualifier, analysis_id, value_status)
+                            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)""",
                             (
                                 _id(), batch_id, record["sheet_name"], measurement["physical_source_row_number"],
-                                measurement["source_header"], measurement["raw_token"], measurement["qualifier"], analysis_id,
+                                measurement["source_header"], measurement["raw_token"], measurement["qualifier"], analysis_id, measurement["value_status"],
                             ),
                         )
                     connection.execute(
                         """INSERT INTO source_cell_provenance
                         (provenance_id, import_batch_id, analysis_id, sheet_name, source_row_number,
-                         source_column_index, source_cell, source_header, raw_token, qualifier)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                         source_column_index, source_cell, source_header, raw_token, qualifier, value_status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
                             _id(), batch_id, analysis_id, record["sheet_name"], measurement["physical_source_row_number"],
                             measurement["physical_source_column_index"], measurement["source_cell"],
                             measurement["source_header"], measurement["raw_token"], measurement["qualifier"],
+                            measurement["value_status"],
                         ),
                     )
             connection.execute("UPDATE import_batch SET status = 'applied', applied_at = ? WHERE import_batch_id = ?", (timestamp, batch_id))
