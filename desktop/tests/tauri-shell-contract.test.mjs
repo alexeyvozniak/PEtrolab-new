@@ -349,6 +349,8 @@ test("Tauri config keeps the approved desktop minimum window size and version al
   assert.equal(config.app.windows[0].minHeight, 800);
   assert.deepEqual(config.bundle.resources, ["binaries/petrolab-service.exe"]);
   assert.deepEqual(config.bundle.icon, ["icons/icon.ico"]);
+  assert.match(config.build.beforeDevCommand, /generate_tauri_icon\.py/);
+  assert.match(config.build.beforeDevCommand, /npm run dev:tauri/);
   assert.match(config.build.beforeBuildCommand, /generate_tauri_icon\.py/);
 });
 
