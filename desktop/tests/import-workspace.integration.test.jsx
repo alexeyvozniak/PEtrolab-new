@@ -144,8 +144,18 @@ test("unit suggestions are not dirty edits and one valid mapping can be applied 
   const unit = await screen.findByRole('combobox', { name: 'Единица SiO2' });
   await waitFor(() => expect(unit.disabled).toBe(false));
   await user.selectOptions(unit, 'wt.%');
+  expect(screen.getByRole('combobox', { name: 'Единица SiO2' }).value).toBe('wt.%');
+  expect(screen.getByText(/Изменения ещё не применены/)).toBeTruthy();
+  await user.selectOptions(unit, 'ppm');
+  expect(screen.getByRole('combobox', { name: 'Единица SiO2' }).value).toBe('ppm');
+  await user.click(await enabledButton('Сбросить изменения'));
+  expect(screen.getByRole('combobox', { name: 'Единица SiO2' }).value).toBe('');
+  expect(screen.queryByText(/Изменения ещё не применены/)).toBeNull();
+  await enabledButton('Нужно решить 2');
+  await user.selectOptions(unit, 'wt.%');
   await user.click(await enabledButton(/Применить сопоставление/));
   await enabledButton('Нужно решить 1');
+  expect(screen.queryByRole('combobox', { name: 'Единица SiO2' })).toBeNull();
   expect(screen.getByRole('button', { name: 'Импортировать после проверки' }).disabled).toBe(true);
 }, 20000);
 

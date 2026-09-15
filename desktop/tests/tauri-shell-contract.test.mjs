@@ -167,9 +167,16 @@ test("raw block review precedes field mapping and supports transposed orientatio
   assert.match(review, /invalidState/);
 });
 
+test("Windows CI prepares icons before direct Cargo tests", async () => {
+  const workflow = await read("../.github/workflows/windows-test-build.yml");
+  const step = workflow.split("- name: Test Tauri shell")[1]?.split("- name:")[0];
+  assert.ok(step, "Cargo test step must exist");
+  assert.match(step, /python \.\.\/scripts\/generate_tauri_icon\.py[\s\S]*cargo test/);
+});
+
 test("mapping review exposes physical fields including blank headers", async () => {
   const editor = await read("src/ImportMappingEditor.jsx");
-  assert.match(editor, /Здесь показаны все физические поля выбранного блока/);
+  assert.match(editor, /showAll \? section\.mappings/);
   assert.match(editor, /Без заголовка/);
   assert.match(editor, /columnLetters/);
   assert.match(editor, /колонка \$\{index \+ 1\}/);

@@ -70,6 +70,12 @@
 }
 .compact-button:hover:not(:disabled) { background: #eef4ef; }
 .mapping-actions { display: flex; justify-content: flex-end; gap: 9px; padding-top: 2px; }
+.mapping-actions { flex-wrap: wrap; }
+.mapping-actions > p { flex-basis: 100%; margin: 0; color: #53675b; font-size: 11px; line-height: 1.5; }
+.mapping-bulk-options { width: 100%; min-width: 0; }
+.mapping-bulk-options summary { cursor: pointer; color: #53675b; font-size: 11px; }
+.mapping-bulk-options .sheet-unit-control { flex-wrap: wrap; margin-top: 8px; }
+.mapping-measurement-controls { grid-template-columns: minmax(0, 1fr); }
 
 .mapping-review-list { display: grid; }
 .mapping-review-item { display: grid; gap: 9px; padding: 11px 12px; border-bottom: 1px solid #e8ece8; background: #fff; }

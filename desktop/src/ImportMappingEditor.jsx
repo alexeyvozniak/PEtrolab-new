@@ -3,6 +3,7 @@ import "./importMapping.css";
 
 const TARGETS = ["Ignore", "Analysis", "Sample", "Sample name", "Point", "Mineral", "Method", "Generation", "Rock", "Source", "Comment", "Position", "Photo number", "Size (µm)", "Measurement"];
 const UNITS = ["wt.%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon", "permil"];
+const UNIT_LABELS = { "wt.%": "wt.% · массовые %", "at.%": "at.% · атомные %", "mol%": "mol% · мольные %", apfu: "apfu · атомы на формулу", ratio: "ratio · отношение", permil: "permil · ‰" };
 
 function mappingAxis(mapping) {
   return mapping.source_axis || (Number.isInteger(mapping.source_column_index) ? "column" : "row");
@@ -137,7 +138,7 @@ function MappingRow({ mapping, value, busy, onChange }) {
             <span>Единица</span>
             <select aria-label={`Единица ${sourceTitle(mapping)}`} value={value.unit} onChange={(event) => onChange({ ...value, unit: event.target.value, reviewDecision: event.target.value ? "assigned" : "unresolved" })} disabled={busy}>
               <option value="">Выбрать…</option>
-              {UNITS.map((item) => <option key={item} value={item}>{item}</option>)}
+              {UNITS.map((item) => <option key={item} value={item}>{UNIT_LABELS[item] || item}</option>)}
             </select>
           </label>
           <details className="mapping-advanced">
@@ -238,8 +239,8 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
     <div className="mapping-editor">
       <div className="mapping-explainer">
         <div>
-          <b>Здесь показаны все физические поля выбранного блока.</b>
-          <span>Нераспознанные и колонки без заголовка не исчезают: они остаются видимыми как «Не импортировать», пока ты сам не назначишь им роль.</span>
+          <b>Уточните поля, которые требуют решения.</b>
+          <span>Выберите назначение и единицу из исходной таблицы, затем примените изменения. Остальные поля доступны в разделе «Все».</span>
         </div>
         <div className="mapping-summary">
           <span>Изменений: <b>{dirtyKeys.length}</b></span>
@@ -257,7 +258,8 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
             }).length;
             const shownMappings = showAll ? section.mappings : section.mappings.filter((mapping) => {
               const value = draft[keyForMapping(section.block_id, mapping)] || appliedState(mapping);
-              return (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore")
+              return dirtyKeys.includes(keyForMapping(section.block_id, mapping))
+                || (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore")
                 || (value.target === "Measurement" && (!value.field.trim() || !value.unit));
             });
             return (
@@ -271,8 +273,10 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
                 <button type="button" className={!showAll ? "active" : ""} onClick={() => setShowAll(false)}>Нужно решить {unresolvedCount}</button>
                 <button type="button" className={showAll ? "active" : ""} onClick={() => setShowAll(true)}>Все {section.mappings.length}</button>
               </div>
+              <details className="mapping-bulk-options">
+              <summary>Настроить несколько полей сразу</summary>
               <div className="sheet-unit-control">
-                <label>Одна единица для нерешённых Measurement</label>
+                <label>Одна единица для полей без единицы</label>
                 <select value={blockUnits[section.block_id] || ""} onChange={(event) => setBlockUnits((current) => ({ ...current, [section.block_id]: event.target.value }))} disabled={busy}>
                   <option value="">Выбрать…</option>
                   {UNITS.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -282,6 +286,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
                 </button>
               </div>
               {section.mappings.some((mapping) => { const value = draft[keyForMapping(section.block_id, mapping)]; return value?.target === 'Ignore' && value.reviewDecision !== 'explicit_ignore'; }) && <button className="mapping-ignore-all" onClick={() => explicitlyIgnoreUnresolved(section)} disabled={busy}>Не импортировать нераспознанные поля</button>}
+              </details>
             </div>
             <div className="mapping-review-list">
               {shownMappings.length ? shownMappings.map((mapping) => (
@@ -301,6 +306,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
       ))}
 
       <div className="mapping-actions">
+        {dirtyKeys.length > 0 && <p role="status">Изменения ещё не применены. Проверьте выбранные значения и нажмите «Применить сопоставление».</p>}
         <button className="outline-button" onClick={resetDraft} disabled={busy || dirtyKeys.length === 0}>Сбросить изменения</button>
         <button className="primary-button" onClick={submit} disabled={busy || dirtyKeys.length === 0 || dirtyKeys.some((key) => draft[key].target === 'Measurement' && (!draft[key].field.trim() || !draft[key].unit))}>
           Применить сопоставление ({dirtyKeys.length})
