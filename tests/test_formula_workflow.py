@@ -238,7 +238,7 @@ class MicaFormulaPersistenceTests(unittest.TestCase):
         from scripts.validate_contracts import _validate
         for definition in catalog:
             serializable = {key: value for key, value in definition.items()
-                            if key not in {'parameter_choices', 'quick_presets', 'fe_modes',
+                            if key not in {'parameter_choices', 'parameter_choice_labels', 'quick_presets', 'fe_modes',
                                            'anion_bases', 'oh_modes', 'atomic_masses'}}
             _validate(serializable, schema, schema, {}, 'scientific-method-definition')
         path = Path(__file__).parents[1] / 'src/petrolab/mica_formula.py'
@@ -256,6 +256,13 @@ class MicaFormulaPersistenceTests(unittest.TestCase):
                 self.assertEqual(mica[0]['quick_presets'][0]['parameters'],
                                  {'fe_mode': 'all_fe2', 'anion_basis': 'ideal_O10_W2',
                                   'oh_mode': 'not_calculated'})
+                self.assertEqual(mica[0]['parameter_choice_labels']['anion_basis']['ideal_O10_W2'],
+                                 'O₁₀W₂ · 22 положительных заряда')
+                self.assertEqual(mica[0]['parameter_choice_labels']['oh_mode']['ideal_2_minus_f_cl'],
+                                 'OH = 2 − F − Cl · оценка')
+                self.assertTrue(all(len(choice) <= 34
+                                    for choices in mica[0]['parameter_choice_labels'].values()
+                                    for choice in choices.values()))
         self.assertEqual(list_methods('quartz')['methods'], [])
         response = handle_request({'protocol_version': '1.0', 'request_id': str(uuid.uuid4()),
                                    'command': 'formula.methods.list',

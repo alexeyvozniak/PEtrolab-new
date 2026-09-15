@@ -252,6 +252,11 @@ test('real mica formula requires three choices, saves OH provenance and preserve
   expect(fe.value).toBe('all_fe2');
   expect(basis.value).toBe('ideal_O10_W2');
   expect(oh.value).toBe('not_calculated');
+  expect(fe.selectedOptions[0].textContent).toBe('Всё Fe как Fe²⁺ · FeO/FeOt');
+  expect(basis.selectedOptions[0].textContent).toBe('O₁₀W₂ · 22 положительных заряда');
+  expect(oh.selectedOptions[0].textContent).toBe('OH не рассчитывать');
+  expect(fe.title).toBe('Всё железо как Fe²⁺ (FeO или FeOt)');
+  expect(screen.getByText('Идеальная группа O₁₀W₂; нормировка на 22 положительных заряда', { selector: '.formula-parameter-help' })).toBeTruthy();
   await user.selectOptions(oh, 'ideal_2_minus_f_cl');
   await user.click(await enabledButton('Рассчитать с этими настройками'));
   await screen.findByText('OH (оценка)');

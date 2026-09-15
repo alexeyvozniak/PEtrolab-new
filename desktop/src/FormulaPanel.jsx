@@ -9,6 +9,27 @@ const fieldLabel = field => ({
 }[field] || field.replace('_apfu', ''));
 const parameterLabel = name => ({ fe_mode: 'Режим железа', anion_basis: 'Анионный базис', oh_mode: 'Расчёт OH' }[name] || name);
 
+function FormulaParameter({ parameter, method, value, busy, onChange }) {
+  const choices = method.parameter_choices?.[parameter.name] || {};
+  const compactLabels = method.parameter_choice_labels?.[parameter.name] || {};
+  const explanation = choices[value] || '';
+  const helpId = `formula-${parameter.name}-help`;
+  return <label>{parameterLabel(parameter.name)}
+    <select
+      aria-label={parameterLabel(parameter.name)}
+      aria-describedby={explanation ? helpId : undefined}
+      title={explanation}
+      value={value || ''}
+      disabled={busy}
+      onChange={event => onChange(parameter.name, event.target.value)}
+    >
+      <option value="">Выберите явно</option>
+      {Object.entries(choices).map(([key, text]) => <option key={key} value={key}>{compactLabels[key] || text}</option>)}
+    </select>
+    {explanation && <small className="formula-parameter-help" id={helpId}>{explanation}</small>}
+  </label>;
+}
+
 function Result({ result }) {
   if (!result) return null;
   const halogens = (result.used || []).filter(item => ['F', 'Cl'].includes(item.field));
@@ -117,9 +138,14 @@ export function FormulaPanel({ analysis, databasePath }) {
       }}>{quickPreset.label}</button>}
       <details className="formula-settings"><summary>Настроить расчёт</summary>
         {methods.length > 1 && <label>Метод<select aria-label="Метод формулы" value={method.method_id} disabled={busy} onChange={event => selectMethod(methods.find(item => item.method_id === event.target.value))}>{methods.map(item => <option key={item.method_id} value={item.method_id}>{item.name} · v{item.version}</option>)}</select></label>}
-        <div className="formula-parameter-grid">{(method.parameters || []).map(parameter => <label key={parameter.name}>{parameterLabel(parameter.name)}<select aria-label={parameterLabel(parameter.name)} value={parameters[parameter.name] || ''} disabled={busy} onChange={event => setParameter(parameter.name, event.target.value)}>
-          <option value="">Выберите явно</option>{Object.entries(method.parameter_choices?.[parameter.name] || {}).map(([key, text]) => <option key={key} value={key}>{text}</option>)}
-        </select></label>)}</div>
+        <div className="formula-parameter-grid">{(method.parameters || []).map(parameter => <FormulaParameter
+          key={parameter.name}
+          parameter={parameter}
+          method={method}
+          value={parameters[parameter.name]}
+          busy={busy}
+          onChange={setParameter}
+        />)}</div>
         {missingParameters.length > 0 && <p>Выберите: {missingParameters.map(parameter => parameterLabel(parameter.name)).join(', ')}.</p>}
         <button type="button" className="outline-button" disabled={busy || missingParameters.length > 0} onClick={() => calculate()}>Рассчитать с этими настройками</button>
       </details>

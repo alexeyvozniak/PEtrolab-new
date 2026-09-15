@@ -16,6 +16,18 @@ METHOD_ID = 'olivine.oxygen4'
 METHOD_VERSION = '1.0.0'
 IMPLEMENTATION_SHA256 = '0d1313ebe3ab47cca45f8e6c5364be51ed8d113c44677f95890bdeeedadc16ee'
 MICA_IMPLEMENTATION_SHA256 = '95821d9252d7577ad1d7bf95e64e6fb62a4ea536086c3c8d0c0c7742afc1442a'
+COMPACT_FE_MODE_LABELS = {
+    'all_fe2': 'Всё Fe как Fe²⁺ · FeO/FeOt',
+    'reported_split': 'Раздельные FeO + Fe₂O₃',
+}
+MICA_COMPACT_PARAMETER_LABELS = {
+    'fe_mode': COMPACT_FE_MODE_LABELS,
+    'anion_basis': {'ideal_O10_W2': 'O₁₀W₂ · 22 положительных заряда'},
+    'oh_mode': {
+        'not_calculated': 'OH не рассчитывать',
+        'ideal_2_minus_f_cl': 'OH = 2 − F − Cl · оценка',
+    },
+}
 
 
 def fingerprint(value):
@@ -124,6 +136,7 @@ def executable_method(method_id, version):
     if method_id == METHOD_ID:
         return {'definition': definition, 'accepted_targets': {'olivine'}, 'target_label': 'оливина',
                 'parameter_choices': {'fe_mode': OLIVINE_FE_MODES},
+                'parameter_choice_labels': {'fe_mode': COMPACT_FE_MODE_LABELS},
                 'quick_presets': [{'id': 'all_fe2', 'label': 'Рассчитать формулу',
                                    'description': 'Всё железо принимается как Fe²⁺.',
                                    'parameters': {'fe_mode': 'all_fe2'}}],
@@ -133,6 +146,7 @@ def executable_method(method_id, version):
             'target_label': 'слюды',
             'parameter_choices': {'fe_mode': MICA_FE_MODES, 'anion_basis': MICA_ANION_BASES,
                                   'oh_mode': MICA_OH_MODES},
+            'parameter_choice_labels': MICA_COMPACT_PARAMETER_LABELS,
             'quick_presets': [{'id': 'all_fe2_no_oh', 'label': 'Рассчитать формулу',
                                'description': ('Всё железо принимается как Fe²⁺; базис O₁₀W₂; '
                                                'OH не рассчитывается.'),
@@ -154,6 +168,7 @@ def list_methods(accepted_assignment=None):
             continue
         choices = registration['parameter_choices']
         item = {**registration['definition'], 'parameter_choices': copy.deepcopy(choices),
+                'parameter_choice_labels': copy.deepcopy(registration.get('parameter_choice_labels', {})),
                 'quick_presets': copy.deepcopy(registration['quick_presets']),
                 'fe_modes': copy.deepcopy(choices['fe_mode']),
                 'atomic_masses': copy.deepcopy(masses)}

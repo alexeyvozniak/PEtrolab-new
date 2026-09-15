@@ -39,6 +39,10 @@ excluded. Numerical sum/stoichiometry checks are warnings, not a QC assignment.
 Python owns a small versioned method registry and pure calculation. React sends
 commands over the existing NDJSON transport; Tauri remains unchanged.
 Commands: `formula.methods.list`, `formula.preview`, `formula.save`, `formula.runs.list`.
+`formula.methods.list` may expose `parameter_choice_labels` as compact,
+presentation-only labels for narrow controls. `parameter_choices` remains the
+authoritative full description shown beside the control and retained in history;
+neither label changes the submitted parameter key or scientific behaviour.
 Preview/save use explicit unique analysis_ids (1–100), method_id/version and
 parameters {fe_mode}. Save additionally requires the full preview fingerprint.
 Invalid rows remain in the response and prevent saving the entire requested run.
