@@ -2,9 +2,53 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { AnalysesWorkspace } from '../src/AnalysesWorkspace';
 import { MineralsWorkspace } from '../src/MineralsWorkspace';
 
 const uiState = vi.hoisted(() => ({ imported: false, mediaImported: false, mediaPlacementCount: 0, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false, mediaDuplicates: false, mediaPreviewFailures: 0 }));
+
+test('selected Analyses require explicit semantics before creating an Analytical Point', async () => {
+  const user = userEvent.setup();
+  const onCreate = vi.fn().mockResolvedValue({ analytical_point_id: 'point-created-p01' });
+  const analyses = ['epma-p01', 'la-p01'].map((analysisId, index) => ({
+    analysis_id: analysisId,
+    source_name: index === 0 ? 'KIV-2_EPMA.xlsx' : 'KIV-2_LA.xlsx',
+    sheet_name: 'Data',
+    source_row_number: index + 2,
+    identity: { Analysis: `P-01-${index + 1}`, Sample: 'KIV-2', Point: 'P-01' },
+    measurement_list: [{ field: index === 0 ? 'SiO2' : 'Rb', raw_token: '1', unit: index === 0 ? 'wt.%' : 'ppm', method: index === 0 ? 'EPMA' : 'LA-ICP-MS' }],
+    measurements: {},
+  }));
+
+  render(<AnalysesWorkspace project={{ total: 2, source_count: 2, analyses }} busy={false} onCreateAnalyticalPoint={onCreate} />);
+  const rowSelections = screen.getAllByRole('checkbox', { name: /Выбрать P-01-/ });
+  await user.click(rowSelections[0]);
+  expect(screen.getByRole('button', { name: 'Создать Analytical Point' }).disabled).toBe(true);
+  await user.click(rowSelections[1]);
+  await user.click(screen.getByRole('button', { name: 'Создать Analytical Point' }));
+
+  expect(screen.getByRole('dialog', { name: 'Создать Analytical Point' })).toBeTruthy();
+  expect(screen.getByRole('textbox', { name: 'Sample новой Analytical Point' }).value).toBe('KIV-2');
+  expect(screen.getByRole('textbox', { name: 'Имя новой Analytical Point' }).value).toBe('P-01');
+  await user.click(screen.getByRole('button', { name: 'Отмена' }));
+  expect(onCreate).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole('button', { name: 'Создать Analytical Point' }));
+  const submit = screen.getAllByRole('button', { name: 'Создать точку' })[0];
+  expect(submit.disabled).toBe(true);
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Тип связи Analyses' }), 'same_point');
+  await user.click(screen.getByRole('checkbox', { name: /Подтверждаю, что эти 2 Analyses/ }));
+  expect(submit.disabled).toBe(false);
+  await user.click(submit);
+
+  await waitFor(() => expect(onCreate).toHaveBeenCalledWith({
+    sampleName: 'KIV-2',
+    pointName: 'P-01',
+    analysisIds: ['epma-p01', 'la-p01'],
+    linkType: 'same_point',
+  }));
+  expect(screen.queryByRole('dialog', { name: 'Создать Analytical Point' })).toBeNull();
+});
 
 test('automatic matches remain pending and manual decisions require a catalog label and reason', async () => {
   const onDecide = vi.fn();
@@ -258,6 +302,14 @@ vi.mock("../src/desktopApi", () => {
       ]] : [],
     } })),
     listAnalyticalPoints: vi.fn().mockResolvedValue({ result: analyticalPoints }),
+    createAnalyticalPoint: vi.fn().mockImplementation(async (_path, sampleName, pointName, analysisIds, linkType) => ({ result: {
+      analytical_point_id: 'point-created',
+      sample_id: 'sample-created',
+      sample_name: sampleName,
+      point_name: pointName,
+      analysis_ids: analysisIds,
+      link_type: linkType,
+    } })),
     getMediaPreview: vi.fn().mockImplementation(async (sourcePath) => {
       if (uiState.mediaPreviewFailures > 0) {
         uiState.mediaPreviewFailures -= 1;
@@ -383,7 +435,7 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { applyImportPlan, applyMediaImportPlan, createMediaImportPlan, createImportPlan, getMediaPreview, pickImportFile, pickMediaFolder } from "../src/desktopApi";
+import { applyImportPlan, applyMediaImportPlan, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, pickImportFile, pickMediaFolder } from "../src/desktopApi";
 import { App } from "../src/App";
 import { ImagesWorkspace } from "../src/ImagesWorkspace";
 
@@ -400,6 +452,55 @@ afterEach(() => {
   uiState.mediaPreviewFailures = 0;
   vi.clearAllMocks();
   cleanup();
+});
+
+test('App persists an explicitly confirmed Analytical Point and refreshes its projection', async () => {
+  uiState.imported = true;
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole('button', { name: 'Анализы' }));
+  await user.click(await screen.findByRole('checkbox', { name: 'Выбрать UI-1' }));
+  await user.click(screen.getByRole('checkbox', { name: 'Выбрать UI-2' }));
+  await user.click(screen.getByRole('button', { name: 'Создать Analytical Point' }));
+  expect(screen.getByText(/В исходных данных указаны разные Sample: KIV-2, KIV-3/)).toBeTruthy();
+  await user.type(screen.getByRole('textbox', { name: 'Sample новой Analytical Point' }), 'KIV-2');
+  await user.type(screen.getByRole('textbox', { name: 'Имя новой Analytical Point' }), 'P-01');
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Тип связи Analyses' }), 'same_zone');
+  await user.click(screen.getByRole('checkbox', { name: /Подтверждаю, что эти 2 Analyses/ }));
+  await user.click(screen.getByRole('button', { name: 'Создать точку' }));
+
+  await waitFor(() => expect(createAnalyticalPoint).toHaveBeenCalledWith(
+    'C:/PetroLab/project.sqlite',
+    'KIV-2',
+    'P-01',
+    ['analysis-ui-1', 'analysis-ui-2'],
+    'same_zone',
+  ));
+  await waitFor(() => expect(listAnalyticalPoints).toHaveBeenCalledWith('C:/PetroLab/project.sqlite'));
+  expect(await screen.findByText(/Analytical Point «P-01» создана из 2 Analyses/)).toBeTruthy();
+});
+
+test('App does not invite a duplicate create when the point projection refresh fails', async () => {
+  uiState.imported = true;
+  listAnalyticalPoints.mockRejectedValueOnce(new Error('Временный сбой списка.'));
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole('button', { name: 'Анализы' }));
+  await user.click(await screen.findByRole('checkbox', { name: 'Выбрать UI-1' }));
+  await user.click(screen.getByRole('checkbox', { name: 'Выбрать UI-2' }));
+  await user.click(screen.getByRole('button', { name: 'Создать Analytical Point' }));
+  await user.type(screen.getByRole('textbox', { name: 'Sample новой Analytical Point' }), 'KIV-2');
+  await user.type(screen.getByRole('textbox', { name: 'Имя новой Analytical Point' }), 'P-01');
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Тип связи Analyses' }), 'same_zone');
+  await user.click(screen.getByRole('checkbox', { name: /Подтверждаю, что эти 2 Analyses/ }));
+  await user.click(screen.getByRole('button', { name: 'Создать точку' }));
+
+  expect(await screen.findByText(/Analytical Point «P-01» создана из 2 Analyses/)).toBeTruthy();
+  expect(screen.getByText(/создана, но обновить список точек не удалось: Временный сбой списка/)).toBeTruthy();
+  expect(screen.queryByRole('dialog', { name: 'Создать Analytical Point' })).toBeNull();
+  expect(createAnalyticalPoint).toHaveBeenCalledTimes(1);
 });
 
 test("user confirms an image batch, places same- and cross-sample points, reviews and imports", async () => {

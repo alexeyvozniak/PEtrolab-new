@@ -15,6 +15,7 @@ import {
 } from "@phosphor-icons/react";
 import {
   createImportWorkspace, addWorkspaceSources, getImportWorkspace, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
+  createAnalyticalPoint,
   applyMediaImportPlan,
   applyImportPlan,
   clearImportStaging,
@@ -389,6 +390,35 @@ export function App() {
     setScreen("Изображения");
   };
 
+  const createPointFromAnalyses = async ({ sampleName, pointName, analysisIds, linkType }) => {
+    if (busy || !databasePath) return null;
+    setBusy(true);
+    setActivity("Создаю Analytical Point и сохраняю явные связи…");
+    setError("");
+    setSuccess("");
+    try {
+      const created = unwrap(await createAnalyticalPoint(databasePath, sampleName, pointName, analysisIds, linkType));
+      let projectionRefreshed = true;
+      try {
+        const pointProjection = unwrap(await listAnalyticalPoints(databasePath));
+        setMediaPoints(pointProjection);
+      } catch (caught) {
+        projectionRefreshed = false;
+        const detail = caught instanceof Error ? caught.message : String(caught);
+        setError(`Analytical Point создана, но обновить список точек не удалось: ${detail}`);
+      }
+      setSuccess(`Analytical Point «${created.point_name}» создана из ${created.analysis_ids.length} Analyses. Исходные измерения не изменены.`);
+      if (mediaInspection && projectionRefreshed) setScreen("Изображения");
+      return created;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      throw caught;
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
   const chooseImages = async () => {
     if (busy || !desktopRuntimeAvailable) return;
     setBusy(true);
@@ -638,6 +668,7 @@ export function App() {
             onRetract={retractLatest}
             onAddData={startNewImport}
             onLoadMore={loadMoreAnalyses}
+            onCreateAnalyticalPoint={createPointFromAnalyses}
           />
         )}
 
@@ -667,6 +698,7 @@ export function App() {
             onApply={importImages}
             onCancel={cancelImageImport}
             onInvalidatePlan={() => setMediaPlan(null)}
+            onOpenAnalyses={() => setScreen("Анализы")}
           />
         </div>}
       </section>

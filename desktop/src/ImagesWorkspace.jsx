@@ -335,7 +335,7 @@ function ImageCanvas({ item, assignment, preview, previewLoading, previewError, 
   </div>;
 }
 
-function PlacementStep({ items, assignments, setAssignments, points, activeItem, activeAssignment, activePath, setActivePath, busy, previews, previewLoading, previewError, onInvalidatePlan, onBack, onPreview, onPlan }) {
+function PlacementStep({ items, assignments, setAssignments, points, activeItem, activeAssignment, activePath, setActivePath, busy, previews, previewLoading, previewError, onInvalidatePlan, onBack, onPreview, onPlan, onOpenAnalyses }) {
   const [pointScope, setPointScope] = useState("same_sample");
   const [pointSearch, setPointSearch] = useState("");
   const [selectedPointId, setSelectedPointId] = useState("");
@@ -436,7 +436,7 @@ function PlacementStep({ items, assignments, setAssignments, points, activeItem,
               <strong className={placed ? "placed" : ""}>{placed ? "размещена" : "не размещена"}</strong>
             </button>;
           })}
-          {visiblePoints.length === 0 && <div className="point-list-empty"><MapPin size={28} /><b>Точек в этой группе нет</b><span>Можно выбрать другой Sample или завершить импорт без точек.</span></div>}
+          {visiblePoints.length === 0 && <div className="point-list-empty"><MapPin size={28} /><b>Точек в этой группе нет</b><span>Создай Analytical Point из двух или более выбранных Analyses либо заверши импорт без точек.</span>{onOpenAnalyses && <button className="outline-button" type="button" onClick={onOpenAnalyses} disabled={busy}>Выбрать Analyses</button>}</div>}
         </div>
       </aside>
 
@@ -514,7 +514,7 @@ function ReviewStep({ plan, assignments, activePath, setActivePath, previews, pr
   </>;
 }
 
-export function ImagesWorkspace({ inspection, plan, points = { items: [] }, busy, onChoose, onChooseFolder, onPreview = async () => null, onPlan, onApply, onCancel, onInvalidatePlan = () => {} }) {
+export function ImagesWorkspace({ inspection, plan, points = { items: [] }, busy, onChoose, onChooseFolder, onPreview = async () => null, onPlan, onApply, onCancel, onInvalidatePlan = () => {}, onOpenAnalyses }) {
   const inspectedItems = inspection?.items || [];
   const [phase, setPhase] = useState("assignment");
   const [assignments, setAssignments] = useState({});
@@ -604,6 +604,6 @@ export function ImagesWorkspace({ inspection, plan, points = { items: [] }, busy
     {phase === "assignment" && <SourcePane items={items} assignments={assignments} activePath={activeItem?.source_path} setActivePath={setActivePath} phase="assignment" />}
     {phase === "assignment"
       ? <AssignmentStep items={items} inspection={inspection} assignments={assignments} setAssignments={setAssignments} selected={selected} setSelected={setSelected} activeItem={activeItem} activeAssignment={activeAssignment} setActivePath={setActivePath} busy={busy} lastExcludedCount={lastExcludedPaths.length} onChoose={onChoose} onChooseFolder={onChooseFolder} onExcludeSelected={excludeSelected} onRestoreExcluded={restoreLastExcluded} onCancel={onCancel} onInvalidatePlan={onInvalidatePlan} onContinue={() => setPhase("points")} />
-      : <PlacementStep items={items} assignments={assignments} setAssignments={setAssignments} points={points} activeItem={activeItem} activeAssignment={activeAssignment} activePath={activePath} setActivePath={setActivePath} busy={busy} previews={previews} previewLoading={previewLoading} previewError={previewError} onInvalidatePlan={onInvalidatePlan} onBack={() => setPhase("assignment")} onPreview={loadPreview} onPlan={onPlan} />}
+      : <PlacementStep items={items} assignments={assignments} setAssignments={setAssignments} points={points} activeItem={activeItem} activeAssignment={activeAssignment} activePath={activePath} setActivePath={setActivePath} busy={busy} previews={previews} previewLoading={previewLoading} previewError={previewError} onInvalidatePlan={onInvalidatePlan} onBack={() => setPhase("assignment")} onPreview={loadPreview} onPlan={onPlan} onOpenAnalyses={onOpenAnalyses} />}
   </section>;
 }

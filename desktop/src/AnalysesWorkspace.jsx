@@ -5,7 +5,9 @@ import {
   CheckSquare,
   Database,
   Funnel,
+  LinkSimple,
   MagnifyingGlass,
+  MapPin,
   Plus,
   SquaresFour,
   X,
@@ -59,6 +61,89 @@ function valueFor(analysis, column) {
 function mainIdentity(analysis) {
   const identity = analysis?.identity || {};
   return identity.Analysis || identity.Point || identity.Sample || Object.values(identity).find(Boolean) || "Analysis без имени";
+}
+
+const POINT_LINK_TYPES = [
+  ["same_point", "Та же аналитическая точка"],
+  ["same_grain", "То же зерно"],
+  ["same_zone", "Та же зона"],
+  ["repeat_measurement", "Повторное измерение"],
+];
+
+function exactIdentity(analysis, field) {
+  const match = Object.entries(analysis?.identity || {}).find(([name]) => name.toLocaleLowerCase() === field.toLocaleLowerCase());
+  return String(match?.[1] || "").trim();
+}
+
+function commonIdentity(analyses, field) {
+  const values = [...new Set(analyses.map((analysis) => exactIdentity(analysis, field)).filter(Boolean))];
+  return values.length === 1 ? values[0] : "";
+}
+
+function analysisMethodLabel(analysis) {
+  const methods = [...new Set((analysis?.measurement_list || []).map((item) => item.method).filter(Boolean))];
+  return methods.length ? methods.join(", ") : "метод не указан";
+}
+
+function AnalyticalPointDialog({ analyses, busy, onCancel, onCreate }) {
+  const suggestedSample = useMemo(() => commonIdentity(analyses, "Sample"), [analyses]);
+  const suggestedPoint = useMemo(() => commonIdentity(analyses, "Point"), [analyses]);
+  const sourceSamples = useMemo(() => [...new Set(analyses.map((analysis) => exactIdentity(analysis, "Sample")).filter(Boolean))], [analyses]);
+  const [sampleName, setSampleName] = useState(suggestedSample);
+  const [pointName, setPointName] = useState(suggestedPoint);
+  const [linkType, setLinkType] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const canCreate = analyses.length >= 2 && sampleName.trim() && pointName.trim() && linkType && confirmed && !busy;
+
+  useEffect(() => {
+    const closeOnEscape = (event) => { if (event.key === "Escape" && !busy) onCancel(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [busy, onCancel]);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!canCreate) return;
+    setLocalError("");
+    try {
+      await onCreate({
+        sampleName: sampleName.trim(),
+        pointName: pointName.trim(),
+        analysisIds: analyses.map((analysis) => analysis.analysis_id),
+        linkType,
+      });
+      onCancel();
+    } catch (caught) {
+      setLocalError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  return <div className="analysis-point-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
+    <section className="analysis-point-dialog" role="dialog" aria-modal="true" aria-labelledby="analysis-point-dialog-title">
+      <header>
+        <div><span>Явная научная связь</span><h2 id="analysis-point-dialog-title">Создать Analytical Point</h2></div>
+        <button className="icon-button" type="button" onClick={onCancel} disabled={busy} aria-label="Закрыть создание Analytical Point"><X size={19} /></button>
+      </header>
+      <p className="analysis-point-dialog-intro">Новая точка свяжет выбранные Analyses, но не объединит и не изменит их Measurements.</p>
+      {sourceSamples.length > 1 && <div className="analysis-point-dialog-warning"><Funnel size={17} /><span>В исходных данных указаны разные Sample: {sourceSamples.join(", ")}. Проверь принадлежность новой точки особенно внимательно.</span></div>}
+      <div className="analysis-point-evidence" aria-label="Выбранные анализы">
+        {analyses.map((analysis) => <div key={analysis.analysis_id}>
+          <MapPin size={16} /><span><b>{mainIdentity(analysis)}</b><small>{analysisMethodLabel(analysis)} · {analysis.source_name} · {originLabel(analysis)}</small></span><code title={analysis.analysis_id}>{analysis.analysis_id}</code>
+        </div>)}
+      </div>
+      <form onSubmit={submit}>
+        <div className="analysis-point-fields">
+          <label>Sample<input aria-label="Sample новой Analytical Point" value={sampleName} onChange={(event) => { setSampleName(event.target.value); setConfirmed(false); }} placeholder="Например, KIV-2" autoFocus /></label>
+          <label>Имя точки<input aria-label="Имя новой Analytical Point" value={pointName} onChange={(event) => { setPointName(event.target.value); setConfirmed(false); }} placeholder="Например, P-01" /></label>
+        </div>
+        <label>Тип связи<select aria-label="Тип связи Analyses" value={linkType} onChange={(event) => { setLinkType(event.target.value); setConfirmed(false); }}><option value="">Выбери семантику связи</option>{POINT_LINK_TYPES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        <label className="analysis-point-confirmation"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>Подтверждаю, что эти {analyses.length} Analyses относятся к выбранной физической сущности. Совпадение имени само по себе не является доказательством.</span></label>
+        {localError && <p className="analysis-point-dialog-error" role="alert">{localError}</p>}
+        <footer><button className="outline-button" type="button" onClick={onCancel} disabled={busy}>Отмена</button><button className="primary-button" type="submit" disabled={!canCreate}><LinkSimple size={18} /> Создать точку</button></footer>
+      </form>
+    </section>
+  </div>;
 }
 
 function measurementContext(measurement) {
@@ -187,7 +272,7 @@ function AnalysisDetail({ analysis }) {
   );
 }
 
-export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
+export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddData, onLoadMore, onCreateAnalyticalPoint }) {
   const analyses = project.analyses || [];
   const mineralStatusCounts = project.mineral_status_counts || {};
   const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
@@ -227,6 +312,7 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
   const [selectedIds, setSelectedIds] = useState([]);
   const [focusedId, setFocusedId] = useState("");
   const [sort, setSort] = useState({ id: "source", direction: "asc" });
+  const [pointDialogOpen, setPointDialogOpen] = useState(false);
 
   useEffect(() => {
     setVisibleColumnIds((current) => {
@@ -278,6 +364,7 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
   }, [availableColumns, filtered, selectedIds, sort]);
 
   const focused = analyses.find((analysis) => analysis.analysis_id === focusedId) || ordered[0] || null;
+  const selectedAnalyses = selectedIds.map((id) => analyses.find((analysis) => analysis.analysis_id === id)).filter(Boolean);
   const filteredIds = ordered.map((analysis) => analysis.analysis_id);
   const allVisibleSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedIds.includes(id));
 
@@ -393,9 +480,14 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
             })}
             {selectedIds.length > 5 && <span>+{selectedIds.length - 5}</span>}
           </div>
-          <button className="outline-button" type="button" onClick={() => setSelectedIds([])}>Очистить выбор</button>
+          <div className="analysis-selection-actions">
+            {onCreateAnalyticalPoint && <button className="primary-button" type="button" disabled={busy || selectedAnalyses.length < 2} title={selectedAnalyses.length < 2 ? "Выберите минимум два Analysis" : "Создать явную связь выбранных Analyses"} onClick={() => setPointDialogOpen(true)}><LinkSimple size={17} /> Создать Analytical Point</button>}
+            <button className="outline-button" type="button" onClick={() => setSelectedIds([])}>Очистить выбор</button>
+          </div>
         </div>
       )}
+
+      {pointDialogOpen && <AnalyticalPointDialog analyses={selectedAnalyses} busy={busy} onCancel={() => setPointDialogOpen(false)} onCreate={onCreateAnalyticalPoint} />}
 
       {project.latest_import && <button className="analysis-retract-link" type="button" onClick={onRetract} disabled={busy}>Отменить последний импорт</button>}
     </div>
