@@ -31,6 +31,7 @@ KNOWN_HEADER_TOKENS = {
     "li", "rb", "ba", "sr", "la", "ce", "nd", "u", "th",
 }
 IRON_FIELDS = {"feo", "feot", "fe2o3", "fe2o3t", "fetotal"}
+EXPLICIT_REPORTED_FE_FORMS = {"FeO", "FeOt", "Fe2O3", "Fe2O3t"}
 VALID_UNITS = {"wt.%", "mass%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon", "permil"}
 VALID_ORIENTATIONS = {"rows_are_analyses", "columns_are_analyses"}
 OLE_COMPOUND_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
@@ -670,6 +671,17 @@ def reported_fe_form(header: str | None) -> str | None:
     return "unresolved"
 
 
+def mapping_reported_fe_form(mapping: dict[str, Any]) -> str | None:
+    """Resolve source evidence plus one explicit user mapping, without conversion."""
+    source_form = reported_fe_form(mapping.get("source_header"))
+    if source_form != "unresolved":
+        return source_form
+    selected_form = mapping.get("canonical_field")
+    if mapping.get("review_decision") == "assigned" and selected_form in EXPLICIT_REPORTED_FE_FORMS:
+        return str(selected_form)
+    return "unresolved"
+
+
 def _preview_id(fingerprint: str, sheet_name: str, primary: int, block_id: str, orientation: str) -> str:
     raw = f"{fingerprint}:{sheet_name}:{orientation}:{primary}:{block_id}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:24]
@@ -687,7 +699,7 @@ def _is_repeated_header(sheet: SheetInspection, section: dict[str, Any], row_num
 
 def _measurement(mapping: dict[str, Any], token: str | None, physical_row: int, physical_column: int) -> dict[str, Any]:
     qualifier, detection_limit = _qualifier(token)
-    fe_form = reported_fe_form(mapping.get("source_header"))
+    fe_form = mapping_reported_fe_form(mapping)
     if fe_form is None and _header_token(mapping.get("canonical_field")) in IRON_FIELDS | {"fe"}:
         fe_form = "unresolved"
     return {
@@ -832,15 +844,22 @@ def create_import_plan(inspection: SourceInspection, recipe: dict[str, Any]) -> 
         for mapping in section["mappings"]:
             if mapping["target_role"] != "measurement":
                 continue
-            form = reported_fe_form(mapping.get("source_header"))
+            form = mapping_reported_fe_form(mapping)
             if form == "unresolved" or (form is None and _header_token(mapping.get("canonical_field")) in IRON_FIELDS | {"fe"}):
+                explicitly_preserved = mapping.get("review_decision") == "assigned"
                 warnings.append({
-                    "code": "FE_STRICTLY_REPORTED", "severity": "warning", "blocking": False,
+                    "code": "FE_STRICTLY_REPORTED",
+                    "severity": "warning" if explicitly_preserved else "error",
+                    "blocking": not explicitly_preserved,
                     "sheet_name": section["sheet_name"], "block_id": section["block_id"],
                     "source_header": mapping.get("source_header"), "source_axis": _mapping_axis(mapping),
+                    "canonical_field": mapping.get("canonical_field"), "unit": mapping.get("unit"),
                     "source_column_index": _mapping_index(mapping) if _mapping_axis(mapping) == "column" else int(section.get("header_column", 1)) - 1,
                     "row_number": int(section["header_row"]) if _mapping_axis(mapping) == "column" else _mapping_index(mapping) + 1,
-                    "message": "Форма Fe не определена. Сохранение только как сообщено источником; без пересчёта и без подтверждённой валентности.",
+                    "message": ("Форма Fe явно оставлена неизвестной. Значения сохраняются как сообщено источником, "
+                                "без пересчёта и без подтверждённой валентности."
+                                if explicitly_preserved else
+                                "Укажите, в какой форме источник сообщает Fe. Значения не будут пересчитываться."),
                 })
     if duplicates:
         warnings.append({"code": "DUPLICATE_CANDIDATES", "preview_ids": duplicates, "policy": recipe["global_decisions"]["duplicate_policy"]})

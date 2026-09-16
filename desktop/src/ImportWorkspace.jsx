@@ -33,7 +33,7 @@ function warningLabel(item) {
     DUPLICATE_REVIEW_REQUIRED: "Проверьте возможные совпадения Analysis",
     IMPORT_PLAN_EMPTY: "Нет записей для импорта — проверьте блок и сопоставления",
     SOURCE_FINGERPRINT_MISMATCH: "Рабочая копия файла изменилась — добавьте исходник заново",
-    FE_STRICTLY_REPORTED: "Форма Fe не определена — только исходная запись, без пересчёта",
+    FE_STRICTLY_REPORTED: item.blocking ? "Что означает колонка Fe?" : "Fe сохранится в неизвестной форме, без пересчёта",
     EMBEDDED_DRAWINGS_NOT_PREVIEWED: "Изображения листа не показаны в табличном просмотре",
     CLEAN_TABLE_NO_DATA_ROWS: "На листе нет строк данных",
     CLEAN_TABLE_BLANK_HEADER: "Колонка с данными не имеет заголовка",
@@ -308,12 +308,12 @@ export function ImportWorkspace({
   const selectedIssue = selectedGroup?.item || null;
   const activeSection = sections.find((item) => item.block_id === activeBlockId) || sections[0];
   const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview;
-  const blockingCount = workspace ? workspace.issues.filter((item) => item.blocking).length + Number(blockDraftDirty) + Number(mappingDraftDirty) : (blockDraftDirty ? 1 : 0)
+  const blockingCount = workspace ? workspace.issues.filter((item) => item.blocking).length : (blockDraftDirty ? 1 : 0)
     + (plan.issues || []).filter((item) => item.blocking).length
-    + (mappingDraftDirty ? 1 : 0)
     + (duplicateReviewRequired ? 1 : 0)
     + (unresolvedReviewCount > 0 ? 1 : 0)
     + (plannedMeasurementCount === 0 ? 1 : 0);
+  const unappliedChanges = blockDraftDirty || mappingDraftDirty;
 
   const selectIssue = (entry) => {
     setMineralFocus(null);
@@ -369,7 +369,7 @@ export function ImportWorkspace({
               const name = source.original_display_path.split(/[\\/]/).pop();
               return <div key={source.source_id} className={source.source_id === workspace.active_source_id ? "queue-source active" : "queue-source"}>
                 <button type="button" aria-label={`Открыть источник ${name}`} aria-pressed={source.source_id === workspace.active_source_id} onClick={() => onSelectSource(source.source_id)} disabled={busy || blockDraftDirty || mappingDraftDirty}>
-                  <File size={17} /><span><b>{name}</b><small>{!source.included ? source.exclusion_reason : count ? `${count} обязательных вопросов` : "Нет обязательных вопросов"}</small></span>
+                  <File size={17} /><span><b>{name}</b><small>{!source.included ? source.exclusion_reason : count === 1 ? "1 обязательный вопрос" : count ? `${count} обязательных вопросов` : "Нет обязательных вопросов"}</small></span>
                 </button>
                 <button className="queue-source-inclusion" type="button" onClick={() => onToggleSource(source)} disabled={busy || blockDraftDirty || mappingDraftDirty} aria-label={`${source.included ? "Пропустить" : "Включить"} источник ${name}`}>{source.included ? "Пропустить" : "Включить"}</button>
                 {source.source_id !== workspace.active_source_id && source.sheets.map((sheet) => <button className="queue-sheet" type="button" key={sheet.sheet_key} disabled={busy || blockDraftDirty || mappingDraftDirty || !sheet.blocks.length} onClick={() => onSelectSource(source.source_id, sheet.blocks[0]?.block_id)}>{sheet.physical_sheet_name} · {sheet.included ? `${sheet.blocks.length} табл.` : sheet.exclusion_reason}</button>)}
@@ -467,18 +467,18 @@ export function ImportWorkspace({
         <aside className="import-inspector-pane">
           {onVerifyMinerals && <div className="import-stage-tabs"><button type="button" onClick={() => setMineralReview(false)} disabled={busy}>1 · Структура</button><button type="button" disabled={busy || blockDraftDirty || mappingDraftDirty || plan.ready_to_commit === false} onClick={() => recipe.global_decisions.mineral_verification_enabled ? setMineralReview(true) : onVerifyMinerals()}>2 · Проверить минералы</button></div>}
           {mineralReview ? <MineralVerificationPanel records={plan.planned_records || []} scopes={semanticTools.mineralScopes || []} busy={busy} onAccept={onAcceptMineral} onReveal={(record) => { setMineralFocus({ ...record, source_column_index: (record.source_column_number || 1) - 1 }); selectBlock(record.block_id); }} /> : <>
-          <div className="import-pane-label">Вопросы · {issueGroups.length} типов · {issues.length} мест</div>
+          <div className="import-pane-label">Проверка · {issueGroups.length} типов · {issues.length} мест</div>
           {issueGroups.length > 0 ? (
             <div className="import-issue-list">
               {issueGroups.map((entry) => (
                 <button
-                  className={`import-issue-row${selectedGroup === entry ? " active" : ""}`}
+                  className={`import-issue-row${entry.item.blocking ? " blocking" : " advisory"}${selectedGroup === entry ? " active" : ""}`}
                   type="button"
                   key={entry.key}
                   onClick={() => selectIssue(entry)}
                   disabled={busy || blockDraftDirty || mappingDraftDirty}
                 >
-                  <Warning size={16} weight="fill" />
+                  {entry.item.blocking ? <Warning size={16} weight="fill" /> : <Info size={16} weight="fill" />}
                   <span><b>{warningLabel(entry.item)}{entry.items.length > 1 ? ` · ${entry.items.length} мест` : ""}</b><small>{workspace?.sources.find((s) => s.source_id === entry.item.source_id)?.original_display_path.split(/[\\/]/).pop()} · {issueDetail(entry.item) || "Открыть контекст источника"}</small></span>
                 </button>
               ))}
@@ -547,7 +547,7 @@ export function ImportWorkspace({
           <span><b>{inspection.sheets.length}</b> листов</span>
           <span><b>{plan.summary.planned_analysis_count}</b> Analysis</span>
           <span><b>{plannedMeasurementCount}</b> Measurement</span>
-          <span className={blockingCount ? "footer-warning" : ""}><b>{blockingCount}</b> обязательных решений{unresolvedReviewCount ? ` · ${unresolvedReviewCount} полей` : ""}</span>
+          <span className={blockingCount || unappliedChanges ? "footer-warning" : ""}><b>{blockingCount}</b> {blockingCount === 1 ? "обязательное решение" : "обязательных решений"}{unresolvedReviewCount ? ` · ${unresolvedReviewCount} полей` : ""}{unappliedChanges ? " · правки не применены" : ""}</span>
         </div>
         <div className="import-footer-safety"><Info size={15} /><span>Исходный файл не изменится</span></div>
         <div className="import-footer-actions">

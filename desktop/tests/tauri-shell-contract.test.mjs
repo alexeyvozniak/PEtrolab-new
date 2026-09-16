@@ -131,7 +131,7 @@ test("approved import workspace keeps source list, physical table, issue inspect
   const styles = await read("src/importWorkspace.css");
   assert.match(app, /<ImportWorkspace/);
   assert.match(workspace, /Файл и листы/);
-  assert.match(workspace, /Вопросы · \{issueGroups\.length\} типов/);
+  assert.match(workspace, /Проверка · \{issueGroups\.length\} типов/);
   assert.match(workspace, /Исходный файл не изменится/);
   assert.match(workspace, /activeBlockId/);
   assert.match(workspace, /focusedIssue=\{mineralFocus \|\| selectedIssue\}/);
@@ -198,6 +198,9 @@ test("mapping edits are applied once in bulk per logical block", async () => {
   assert.match(editor, /source_index/);
   assert.match(editor, /at\.%/);
   assert.match(editor, /UNIT_REQUIRES_REVIEW/);
+  assert.match(editor, /FE_STRICTLY_REPORTED/);
+  assert.match(editor, /Форма железа/);
+  assert.match(editor, /исходные значения без пересчёта/);
   assert.match(editor, /Mineral/);
   assert.match(editor, /Generation/);
   assert.match(editor, /measurement_set/);

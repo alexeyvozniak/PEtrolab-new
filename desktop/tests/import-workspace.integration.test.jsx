@@ -96,7 +96,7 @@ test("real Python workspace retains two sources and mapping, identity repair and
   await enabledButton("Добавить файл");
   expect(screen.getByText("Исходная таблица")).toBeTruthy();
   expect(within(await screen.findByRole("table")).getByText("<DL")).toBeTruthy();
-  expect(screen.getAllByText(/Форма Fe не определена/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/Что означает колонка Fe/).length).toBeGreaterThan(0);
   await user.click(await enabledButton("Добавить файл"));
   await user.click(await enabledButton("Открыть источник first.csv"));
   await user.click(await enabledButton("Все 3"));
@@ -157,6 +157,29 @@ test("unit suggestions are not dirty edits and one valid mapping can be applied 
   await enabledButton('Нужно решить 1');
   expect(screen.queryByRole('combobox', { name: 'Единица SiO2' })).toBeNull();
   expect(screen.getByRole('button', { name: 'Импортировать после проверки' }).disabled).toBe(true);
+}, 20000);
+
+test("ambiguous Fe is one guided decision and preserves source numbers", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await enabledButton("Добавить файл");
+  expect(screen.getByRole("button", { name: "Нужно решить 1" })).toBeTruthy();
+  expect(screen.getAllByText(/Что означает колонка Fe/).length).toBeGreaterThan(0);
+  const form = await screen.findByRole("combobox", { name: "Форма железа Fe (wt.%)" });
+  const unit = screen.getByRole("combobox", { name: "Единица Fe (wt.%)" });
+  expect(form.value).toBe("");
+  expect(unit.value).toBe("wt.%");
+  expect(screen.getByText(/Единица описывает числа и уже распознана отдельно/)).toBeTruthy();
+  await user.selectOptions(form, "FeOt");
+  expect(screen.getByRole("combobox", { name: "Форма железа Fe (wt.%)" }).value).toBe("FeOt");
+  expect(screen.getByText(/Изменения ещё не применены/)).toBeTruthy();
+  expect(document.querySelector(".footer-warning")?.textContent).toContain("1 обязательное решение · правки не применены");
+  await user.click(await enabledButton(/Применить сопоставление/));
+  await waitFor(() => expect(screen.queryAllByText(/Что означает колонка Fe/)).toHaveLength(0));
+  expect(requests.some((request) => request.command === "import.workspace.apply_decision"
+    && request.payload.decision?.decisions?.some((decision) => decision.canonical_field === "FeOt"))).toBe(true);
+  expect(await readFile(first, "utf8")).toBe(original);
 }, 20000);
 
 test("real Python semantic range context action, extension confirmation and undo preserve the workbook", async () => {

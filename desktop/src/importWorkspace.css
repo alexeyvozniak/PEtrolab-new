@@ -204,6 +204,10 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .import-issue-row:hover { background: #fffaf1; }
 .import-issue-row.active { border-left-color: #c17a28; background: #fff7e9; }
 .import-issue-row svg { color: #c17a28; margin-top: 1px; }
+.import-issue-row.advisory { color: #476453; }
+.import-issue-row.advisory:hover { background: #f5faf6; }
+.import-issue-row.advisory.active { border-left-color: #4f8063; background: #eff8f2; }
+.import-issue-row.advisory svg { color: #4f8063; }
 .import-issue-row b,
 .import-issue-row small { display: block; }
 .import-issue-row b { color: #4f3e27; font-size: 10px; }
@@ -260,6 +264,7 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .import-inspector-pane .mapping-editor { gap: 0; padding: 0; }
 .import-inspector-pane .mapping-sheet { overflow: visible; }
 .import-inspector-pane .mapping-review-list { max-height: none; overflow: visible; }
+.import-inspector-pane .mapping-fe-note { grid-column: 1 / -1; margin: 0; padding: 8px 9px; border-radius: 6px; background: #fff7e7; color: #76551f; font-size: 9px; line-height: 1.45; }
 .import-inspector-pane .duplicate-review {
   margin: 10px;
   border: 1px solid #ead6ae;
