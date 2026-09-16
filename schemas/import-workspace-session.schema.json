@@ -20,6 +20,7 @@
     "readiness"
   ],
   "properties": {
+    "active_block_id": {"type": ["string", "null"]},
     "$contract": {
       "const": "import-workspace-session.schema.json"
     },
@@ -74,6 +75,8 @@
           "sheets"
         ],
         "properties": {
+          "included": {"type": "boolean"},
+          "exclusion_reason": {"type": ["string", "null"]},
           "source_id": {
             "type": "string",
             "format": "uuid"

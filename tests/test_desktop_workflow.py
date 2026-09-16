@@ -10,7 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from petrolab.desktop_workflow import apply_bulk_unit_scope, bulk_unit_scopes, list_project_analyses, suggest_import_recipe  # noqa: E402
+from petrolab.desktop_workflow import apply_bulk_unit_scope, bulk_unit_scopes, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe  # noqa: E402
 from petrolab.import_apply import apply_import_plan, retract_latest_import  # noqa: E402
 from petrolab.import_preview import ImportCommandError, create_import_plan, inspect_source, validate_recipe  # noqa: E402
 from petrolab.manual_mapping import review_duplicate_candidates  # noqa: E402
@@ -91,6 +91,19 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertTrue(mineral_rows)
         self.assertTrue(all(item["source_cell"] for row in mineral_rows for item in row["source_metadata_list"] if item["field"] == "Mineral"))
         self.assertEqual(len(managed_sources), 1)
+
+    def test_mineral_identification_projection_is_read_only_and_pageable(self) -> None:
+        recipe = reviewed_recipe()
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "petrolab.sqlite"
+            applied = apply_import_plan(database, FIXTURE, recipe)
+            review = list_project_mineral_identifications(database, limit=3, offset=0)
+        self.assertEqual(review["total"], applied["analysis_count"])
+        self.assertEqual(review["returned"], 3)
+        self.assertTrue(review["has_more"])
+        self.assertEqual(sum(review["status_counts"].values()), 3)
+        self.assertTrue(all(item["analysis_id"] for item in review["identifications"]))
+
 
     def test_source_metadata_is_persisted_separately_from_identity_and_measurements(self) -> None:
         recipe = reviewed_recipe()

@@ -139,7 +139,7 @@
 
 .raw-preview-wrap {
   min-width: 0;
-  min-height: 260px;
+  min-height: 180px;
   flex: 1 1 auto;
   overflow: auto;
   background: #fff;
@@ -293,4 +293,36 @@
   .block-controls { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
   .raw-preview-nav { align-items: flex-start; flex-direction: column; }
   .raw-preview-nav-actions { justify-content: flex-start; }
+}
+.semantic-actions { padding: 10px 12px; border-top: 1px solid #d5e0d7; background: #f5f9f5; font-size: 11px; }
+.semantic-tool-panel { flex: 0 1 auto; min-height: 64px; max-height: 30vh; overflow-y: auto; }
+.semantic-selection-head, .semantic-assignment-controls, .semantic-extension, .semantic-bounds { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-bottom: 7px; }
+.semantic-selection-head { justify-content: space-between; }
+.semantic-actions input, .semantic-actions select, .semantic-actions button { min-height: 30px; border: 1px solid #cbd9ce; border-radius: 5px; padding: 4px 7px; background: white; color: #294635; font: inherit; }
+.semantic-actions input[type=checkbox] { min-height: 0; }
+.semantic-bounds label { display: flex; align-items: center; gap: 4px; }
+.semantic-bounds input { width: 56px; }
+.semantic-actions small { color: #65766a; }
+.raw-preview-table td { position: relative; }
+.raw-preview-table th > button { border: 0; background: transparent; color: inherit; width: 100%; font: inherit; padding: 0; }
+.raw-preview-table td.semantic-annotated { background: #eaf4ed; box-shadow: inset 0 -2px #7fab8e; }
+.raw-preview-table td.semantic-selected { background: #d8ecdf; outline: 1px solid #427e58; outline-offset: -1px; }
+.semantic-fill-handle { position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; padding: 0; border: 1px solid white; background: #326746; cursor: crosshair; z-index: 2; }
+.semantic-context-menu { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; border: 1px solid #b4c9bc; background: white; box-shadow: 0 4px 12px #233b3020; }
+.semantic-context-menu button { padding: 7px; background: #f4f8f4; border: 1px solid #dce6de; border-radius: 4px; color: #284b35; }
+.semantic-column-role { display: block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; font-size: 10px; color: #315d45; }
+.semantic-sample-evidence { max-height: 100px; overflow: auto; font-size: 11px; }
+.semantic-sample-evidence summary { cursor: pointer; }
+.raw-drawing-note { display: flex; flex: 0 0 auto; gap: 8px; padding: 8px 10px; background: #fff8e9; color: #765119; font-size: 11px; }
+.raw-drawing-note svg { flex-shrink: 0; }
+
+/* Keep actual data and range actions visible at the supported 800px window height. */
+@media (max-height: 850px) {
+  .block-review-intro { min-height: 30px; padding: 5px 10px; }
+  .block-review-intro > div > span { display: none; }
+  .raw-preview-nav { gap: 4px; padding: 5px 10px; }
+  .raw-preview-nav > div:first-child > span { display: none; }
+  .raw-drawing-note { padding: 5px 10px; font-size: 10px; }
+  .block-card-head { min-height: 36px; padding: 5px 10px; }
+  .semantic-actions { padding: 6px 10px; }
 }

@@ -2,6 +2,21 @@ import { invoke } from "@tauri-apps/api/core";
 
 export const PROTOCOL_VERSION = "1.0";
 
+export const createImportWorkspace = (sources, projectDatabasePath) => invokePetrolab("import.workspace.create", { sources, project_database_path: projectDatabasePath });
+export const previewSemanticExtension = (workspaceId, sourceId, decision) => invokePetrolab("import.workspace.preview_window", { workspace_id: workspaceId, source_id: sourceId, semantic_extension: decision });
+export const addWorkspaceSources = (workspaceId, revision, sources) =>
+  invokePetrolab("import.workspace.add_sources", { workspace_id: workspaceId, expected_revision: revision, sources });
+export const getImportWorkspace = (workspaceId) => invokePetrolab("import.workspace.get", { workspace_id: workspaceId });
+export const applyWorkspaceDecision = (workspaceId, revision, sourceId, decision, bulk = false) =>
+  invokePetrolab(bulk ? "import.workspace.apply_bulk_decision" : "import.workspace.apply_decision", {
+    workspace_id: workspaceId, expected_revision: revision, source_id: sourceId, decision,
+  });
+export const discardImportWorkspace = (workspaceId, revision) =>
+  invokePetrolab("import.workspace.discard", { workspace_id: workspaceId, expected_revision: revision });
+export const previewWorkspaceWindow = (workspaceId, sourceId, sheetName, startRow, rowCount = 30, startColumn = 0, columnCount = 24) =>
+  invokePetrolab("import.workspace.preview_window", { workspace_id: workspaceId, source_id: sourceId,
+    sheet_name: sheetName, start_row: startRow, row_count: rowCount, start_column: startColumn, column_count: columnCount });
+
 function desktopInvoke(command, args) {
   const internals = typeof window === "undefined" ? null : window.__TAURI_INTERNALS__;
   if (!internals || typeof internals.invoke !== "function") {
@@ -25,6 +40,9 @@ export async function invokePetrolab(command, payload) {
 }
 
 export const pickImportFile = () => desktopInvoke("pick_import_file");
+
+export const pickMediaFiles = () => desktopInvoke("pick_media_files");
+export const pickMediaFolder = () => desktopInvoke("pick_media_folder");
 export const stageImportFile = (sourcePath) => desktopInvoke("stage_import_file", { sourcePath });
 export const clearImportStaging = (stagedPath) => desktopInvoke("clear_import_staging", { stagedPath });
 export const getProjectDatabasePath = () => desktopInvoke("project_database_path");
@@ -123,6 +141,23 @@ export const listProjectAnalyses = (projectDatabasePath, limit = 500, offset = 0
     offset,
   });
 
+export const listProjectMineralIdentifications = (projectDatabasePath, limit = 500, offset = 0) =>
+  invokePetrolab("project.mineral_identification.list", {
+    project_database_path: projectDatabasePath,
+    limit,
+    offset,
+  });
+
+export const decideProjectMineralAssignment = (projectDatabasePath, analysisId, verification, target, reason) =>
+  invokePetrolab("project.mineral_assignment.decide", {
+    project_database_path: projectDatabasePath,
+    analysis_id: analysisId,
+    input_fingerprint: verification.input_fingerprint,
+    ruleset_version: verification.ruleset_version,
+    target,
+    reason,
+  });
+
 export const retractLastImport = (projectDatabasePath, reason = "user_retracted") =>
   invokePetrolab("project.last_import.retract", {
     project_database_path: projectDatabasePath,
@@ -131,6 +166,16 @@ export const retractLastImport = (projectDatabasePath, reason = "user_retracted"
 
 export const inspectMediaSources = (sourcePaths) =>
   invokePetrolab("media.inspect_sources", { source_paths: sourcePaths });
+
+export const getMediaPreview = (sourcePath, maxWidthPx = 1600, maxHeightPx = 1200) =>
+  invokePetrolab("media.preview", {
+    source_path: sourcePath,
+    max_width_px: maxWidthPx,
+    max_height_px: maxHeightPx,
+  });
+
+export const listAnalyticalPoints = (projectDatabasePath) =>
+  invokePetrolab("analytical_point.list", { project_database_path: projectDatabasePath });
 
 export const createMediaImportPlan = (projectDatabasePath, assignments) =>
   invokePetrolab("media.import.plan", {

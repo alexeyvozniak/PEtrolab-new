@@ -2,7 +2,7 @@ use std::{
     env,
     fs,
     io::{BufRead, BufReader, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
@@ -12,6 +12,9 @@ use std::{
 use serde_json::{json, Value};
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 use uuid::Uuid;
+
+const SUPPORTED_MEDIA_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "tif", "tiff", "bmp"];
+const MAX_MEDIA_BATCH_FILES: usize = 5_000;
 
 struct PythonService {
     child: Child,
@@ -141,6 +144,74 @@ fn pick_import_file() -> Option<String> {
         .map(|source| source.to_string_lossy().into_owned())
 }
 
+#[tauri::command]
+fn pick_media_files() -> Vec<String> {
+    rfd::FileDialog::new()
+        .add_filter("PetroLab images", &SUPPORTED_MEDIA_EXTENSIONS)
+        .pick_files()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|source| source.to_string_lossy().into_owned())
+        .collect()
+}
+
+fn supported_media_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            SUPPORTED_MEDIA_EXTENSIONS
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
+        })
+}
+
+fn collect_media_folder(root: &Path) -> Result<Vec<String>, String> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut sources = Vec::new();
+
+    while let Some(directory) = pending.pop() {
+        let entries = fs::read_dir(&directory).map_err(|error| {
+            format!("Не удалось прочитать папку {}: {error}", directory.to_string_lossy())
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                format!("Не удалось прочитать содержимое папки {}: {error}", directory.to_string_lossy())
+            })?;
+            let file_type = entry.file_type().map_err(|error| {
+                format!("Не удалось проверить {}: {error}", entry.path().to_string_lossy())
+            })?;
+            // Do not follow links or junction-like entries out of the folder the
+            // user selected. Python still validates every returned image.
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            } else if file_type.is_file() && supported_media_path(&entry.path()) {
+                sources.push(entry.path().to_string_lossy().into_owned());
+                if sources.len() > MAX_MEDIA_BATCH_FILES {
+                    return Err(format!(
+                        "В папке больше {MAX_MEDIA_BATCH_FILES} поддерживаемых изображений. Выберите папку меньшего размера."
+                    ));
+                }
+            }
+        }
+    }
+
+    sources.sort_by_key(|path| path.to_lowercase());
+    Ok(sources)
+}
+
+#[tauri::command]
+async fn pick_media_folder() -> Result<Option<Vec<String>>, String> {
+    let Some(root) = rfd::FileDialog::new().pick_folder() else {
+        return Ok(None);
+    };
+    tauri::async_runtime::spawn_blocking(move || collect_media_folder(&root).map(Some))
+        .await
+        .map_err(|error| format!("Не удалось просканировать папку изображений: {error}"))?
+}
+
 fn stage_import_copy(root: PathBuf, source: PathBuf) -> Result<Value, String> {
     if !source.is_file() {
         return Err(format!("Selected source is no longer available: {}", source.to_string_lossy()));
@@ -215,10 +286,57 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             petrolab_command,
             pick_import_file,
+            pick_media_files,
+            pick_media_folder,
             stage_import_file,
             clear_import_staging,
             project_database_path
         ])
         .run(tauri::generate_context!())
         .expect("Tauri application failed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TemporaryDirectory(PathBuf);
+
+    impl TemporaryDirectory {
+        fn new() -> Self {
+            let path = env::temp_dir().join(format!("petrolab-media-folder-{}", Uuid::new_v4()));
+            fs::create_dir_all(&path).expect("temporary media folder must be created");
+            Self(path)
+        }
+    }
+
+    impl Drop for TemporaryDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn media_folder_is_recursive_sorted_case_insensitive_and_excludes_batch_scripts() {
+        let folder = TemporaryDirectory::new();
+        let nested = folder.0.join("nested");
+        fs::create_dir_all(&nested).expect("nested media folder must be created");
+        fs::write(folder.0.join("A.TIFF"), b"image").expect("TIFF fixture must be written");
+        fs::write(nested.join("b.png"), b"image").expect("PNG fixture must be written");
+        fs::write(nested.join("images.bat"), b"echo unsafe").expect("BAT fixture must be written");
+        fs::write(folder.0.join("notes.txt"), b"not an image").expect("text fixture must be written");
+
+        let sources = collect_media_folder(&folder.0).expect("media folder must be enumerated");
+        let names: Vec<_> = sources
+            .iter()
+            .map(|source| {
+                Path::new(source)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("fixture path must have a UTF-8 file name")
+            })
+            .collect();
+
+        assert_eq!(names, vec!["A.TIFF", "b.png"]);
+    }
 }

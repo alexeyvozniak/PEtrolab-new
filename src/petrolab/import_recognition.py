@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from .analyte_dictionary import recognize_analyte
 
 
 IDENTITY_FIELDS = {
@@ -45,7 +46,11 @@ IDENTITY_FIELDS = {
 }
 
 METADATA_FIELDS = {
+    "samplename": "Sample name",
+    "названиеобразца": "Sample name",
     "mineral": "Mineral",
+    "method": "Method",
+    "метод": "Method",
     "минерал": "Mineral",
     "generation": "Generation",
     "генерация": "Generation",
@@ -86,7 +91,7 @@ DIMENSIONLESS_FIELDS = {
 }
 
 IRON_FIELDS = {"FeO", "FeOt", "Fe2O3", "Fe2O3t", "Fe"}
-VALID_UNITS = {"wt.%", "ppm", "ppb", "apfu", "mol%", "at.%", "ratio", "epsilon"}
+VALID_UNITS = {"wt.%", "ppm", "ppb", "apfu", "mol%", "at.%", "ratio", "epsilon", "permil"}
 
 
 def normalized(value: str | None) -> str:
@@ -147,6 +152,7 @@ def mapping_for_header(
     *,
     source_axis: str = "column",
     context_unit: str | None = None,
+    project_aliases: dict | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     normalized_header = normalized(header)
     token = field_token(header)
@@ -185,9 +191,14 @@ def mapping_for_header(
             "review_decision": "recognized",
         }, None)
 
-    measurement = MEASUREMENT_FIELDS.get(normalized_header) or MEASUREMENT_FIELDS.get(token)
+    recognition = recognize_analyte(header, project_aliases)
+    measurement = recognition['canonical_field'] or MEASUREMENT_FIELDS.get(normalized_header) or MEASUREMENT_FIELDS.get(token)
+    from .import_preview import reported_fe_form
+    form = reported_fe_form(header)
+    if form and form != "unresolved":
+        measurement = form
     if measurement:
-        unit = unit_from_header(header) or context_unit
+        unit = recognition['unit'] or unit_from_header(header) or context_unit
         if unit:
             return ({
                 **base,
@@ -196,10 +207,12 @@ def mapping_for_header(
                 "unit": unit,
                 "measurement_semantics": "measured",
                 "review_decision": "recognized",
+                "recognition": recognition,
             }, None)
         ignored = ignored_mapping(source_index, source_axis=source_axis, source_header=header)
         ignored["suggested_target"] = "measurement"
         ignored["suggested_canonical_field"] = measurement
+        ignored["recognition"] = recognition
         return (ignored, {
             "code": "UNIT_REQUIRES_REVIEW",
             "source_header": header,
