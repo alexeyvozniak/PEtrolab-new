@@ -101,10 +101,32 @@ class ImportWorkspaceTests(unittest.TestCase):
         self.current = self.store.command('create', {'sources': [{'staged_path': str(FIXTURE)}]})
         scopes = self.current['active']['bulk_unit_scopes']
         self.assertTrue(scopes)
+        linked = [item for item in self.current['session']['issues'] if item['code'] == 'UNIT_REQUIRES_REVIEW']
+        self.assertTrue(linked)
+        self.assertEqual({item['bulk_scope_id'] for item in linked}, {scopes[0]['bulk_scope_id']})
         self.call('replan')
         with self.assertRaises(ImportCommandError) as caught:
             self.call('apply_bulk_decision', decision={'kind': 'unit', 'unit': 'wt.%', 'bulk_scope_id': scopes[0]['bulk_scope_id']})
         self.assertEqual(caught.exception.code, 'STALE_BULK_SCOPE')
+
+    def test_bulk_unit_is_one_decision_and_empty_plan_is_only_a_derived_notice(self):
+        source = Path(self.temp.name) / 'units.csv'
+        original = b'Analysis,SiO2,MgO\nA1,40,50\nA2,41,49\n'
+        source.write_bytes(original)
+        self.current = self.store.command('create', {'sources': [{'staged_path': str(source)}]})
+        scope = self.current['active']['bulk_unit_scopes'][0]
+        unit_issues = [item for item in self.current['session']['issues'] if item['code'] == 'UNIT_REQUIRES_REVIEW']
+        self.assertEqual(len(unit_issues), 2)
+        self.assertEqual({item['bulk_scope_id'] for item in unit_issues}, {scope['bulk_scope_id']})
+        empty_plan = next(item for item in self.current['session']['issues'] if item['code'] == 'IMPORT_PLAN_EMPTY')
+        self.assertFalse(empty_plan['blocking'])
+
+        self.call('apply_bulk_decision', decision={
+            'kind': 'unit', 'unit': 'wt.%', 'bulk_scope_id': scope['bulk_scope_id']})
+        self.assertFalse(any(item['code'] in {'UNIT_REQUIRES_REVIEW', 'IMPORT_PLAN_EMPTY'}
+                             for item in self.current['session']['issues']))
+        self.assertTrue(self.current['session']['readiness']['ready_to_commit'])
+        self.assertEqual(source.read_bytes(), original)
 
     def test_ndjson_commands_and_session_schema(self):
         response = handle_request({'protocol_version': '1.0', 'request_id': str(uuid.uuid4()),

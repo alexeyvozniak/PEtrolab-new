@@ -27,11 +27,33 @@ const REPEATABLE_ISSUE_CODES = new Set([
   "MERGED_HEADERS",
 ]);
 
+const UNIT_OPTIONS = [
+  ["wt.%", "wt.% · массовые проценты"],
+  ["at.%", "at.% · атомные проценты"],
+  ["ppm", "ppm · частей на миллион"],
+  ["ppb", "ppb · частей на миллиард"],
+  ["apfu", "apfu · атомы на формулу"],
+  ["mol%", "mol% · мольные проценты"],
+  ["ratio", "ratio · отношение"],
+  ["epsilon", "epsilon"],
+];
+
+function countNoun(count, one, few, many) {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  if (lastTwo >= 11 && lastTwo <= 14) return `${count} ${many}`;
+  if (last === 1) return `${count} ${one}`;
+  if (last >= 2 && last <= 4) return `${count} ${few}`;
+  return `${count} ${many}`;
+}
+
 function warningLabel(item) {
   const labels = {
     ANALYSIS_IDENTITY_REQUIRED: "Нет идентичности Analysis — назначьте заполненное поле",
     DUPLICATE_REVIEW_REQUIRED: "Проверьте возможные совпадения Analysis",
-    IMPORT_PLAN_EMPTY: "Нет записей для импорта — проверьте блок и сопоставления",
+    IMPORT_PLAN_EMPTY: item.blocking
+      ? "Нет записей для импорта — проверьте блок и сопоставления"
+      : "Записи появятся после решения вопросов выше",
     SOURCE_FINGERPRINT_MISMATCH: "Рабочая копия файла изменилась — добавьте исходник заново",
     FE_STRICTLY_REPORTED: item.blocking ? "Что означает колонка Fe?" : "Fe сохранится в неизвестной форме, без пересчёта",
     EMBEDDED_DRAWINGS_NOT_PREVIEWED: "Изображения листа не показаны в табличном просмотре",
@@ -46,7 +68,7 @@ function warningLabel(item) {
     CLEAN_TABLE_NO_VALID_DATA_SHEETS: "Нет однозначного листа данных",
     UNRECOGNIZED_CLEAN_FIELD: "Не определена роль поля",
     HEADER_NOT_DETECTED: "Не распознан заголовок",
-    UNIT_REQUIRES_REVIEW: "Нужно указать единицу",
+    UNIT_REQUIRES_REVIEW: item.bulk_scope_id ? "Какая единица у этих полей?" : "Нужно указать единицу",
     UNMAPPED_FIELD_REQUIRES_REVIEW: "Нужно выбрать роль поля",
     MERGED_HEADERS: "Объединённые ячейки в заголовке",
     HIDDEN_ROWS: "В исходнике есть скрытые строки",
@@ -81,6 +103,7 @@ function issueKey(item, index) {
 }
 
 function issueGroupKey(item) {
+  if (item.bulk_scope_id) return `${item.source_id || ""}::${item.code}::${item.bulk_scope_id}`;
   if (REPEATABLE_ISSUE_CODES.has(item.code)) {
     return `${item.source_id || ""}::${item.code}::${item.block_id || item.sheet_name || "source"}`;
   }
@@ -287,7 +310,7 @@ export function ImportWorkspace({
   }, [activeBlockId, sections]);
 
   const issues = useMemo(() => {
-    if (workspace) return workspace.issues.map((item) => ({ ...item.message_params, source_id: item.source_id, issue_id: item.issue_id, code: item.code, blocking: item.blocking }));
+    if (workspace) return workspace.issues.map((item) => ({ ...item.message_params, source_id: item.source_id, issue_id: item.issue_id, code: item.code, blocking: item.blocking, bulk_scope_id: item.bulk_scope_id }));
     const raw = [
       ...(cleanClassification?.mode === "raw_review" ? cleanClassification.reasons || [] : []),
       ...(recipeWarnings || []),
@@ -307,8 +330,12 @@ export function ImportWorkspace({
   const selectedGroup = issueGroups.find((entry) => entry.key === selectedIssueKey && (!workspace || entry.item.source_id === workspace.active_source_id)) || issueGroups.find((entry) => !workspace || entry.item.source_id === workspace.active_source_id) || null;
   const selectedIssue = selectedGroup?.item || null;
   const activeSection = sections.find((item) => item.block_id === activeBlockId) || sections[0];
+  const activeBulkUnitScopes = useMemo(() => bulkUnitScopes.filter((scope) => (
+    (scope.targets || []).some((target) => target.block_id === activeBlockId)
+  )), [activeBlockId, bulkUnitScopes]);
+  const groupedUnitTargets = useMemo(() => activeBulkUnitScopes.flatMap((scope) => scope.targets || []), [activeBulkUnitScopes]);
   const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview;
-  const blockingCount = workspace ? workspace.issues.filter((item) => item.blocking).length : (blockDraftDirty ? 1 : 0)
+  const blockingCount = workspace ? groupIssues(issues.filter((item) => item.blocking)).length : (blockDraftDirty ? 1 : 0)
     + (plan.issues || []).filter((item) => item.blocking).length
     + (duplicateReviewRequired ? 1 : 0)
     + (unresolvedReviewCount > 0 ? 1 : 0)
@@ -489,19 +516,20 @@ export function ImportWorkspace({
 
           {!cleanFast && activeSection && (
             <div className="import-field-inspector">
-              {(bulkUnitScopes.length > 0 || bulkIgnoreScopes.length > 0) && (
+              {(activeBulkUnitScopes.length > 0 || bulkIgnoreScopes.length > 0) && (
                 <div className="import-bulk-scopes">
-                  <div className="import-inspector-title"><span>Групповые решения</span><small>Только для полей с доказанно одинаковой физической структурой</small></div>
-                  {bulkUnitScopes.map((scope) => (
-                    <div className="import-bulk-scope" key={scope.bulk_scope_id}>
-                      <b>{scope.block_count} {scope.block_count === 1 ? "блок" : "блока"} · {scope.field_count} полей</b>
-                      <small>{scope.fields.slice(0, 6).join(", ")}{scope.fields.length > 6 ? "…" : ""}</small>
-                      <div>
+                  {activeBulkUnitScopes.map((scope) => (
+                    <div className="import-bulk-scope guided-unit" key={scope.bulk_scope_id}>
+                      <span className="bulk-question-kicker">Один вопрос для {scope.field_count} {scope.field_count === 1 ? "поля" : "полей"}</span>
+                      <b>Какая единица у этих измерений?</b>
+                      <small>{scope.fields.slice(0, 8).join(", ")}{scope.fields.length > 8 ? "…" : ""} · {countNoun(scope.block_count, "таблица", "таблицы", "таблиц")}</small>
+                      <p>Ответ будет применён только к этой проверенной группе. Исходные числа не изменятся.</p>
+                      <div className="bulk-question-action">
                         <select aria-label={`Единица для группы ${scope.fields.join(", ")}`} value={bulkUnits[scope.bulk_scope_id] || ""} onChange={(event) => setBulkUnits((current) => ({ ...current, [scope.bulk_scope_id]: event.target.value }))} disabled={busy || blockDraftDirty || mappingDraftDirty}>
-                          <option value="">Единица…</option>
-                          <option value="wt.%">wt.%</option><option value="at.%">at.%</option><option value="ppm">ppm</option><option value="ppb">ppb</option><option value="apfu">apfu</option><option value="mol%">mol%</option><option value="ratio">ratio</option><option value="epsilon">epsilon</option>
+                          <option value="">Выбрать единицу…</option>
+                          {UNIT_OPTIONS.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                         </select>
-                        <button className="compact-button" type="button" onClick={() => onApplyBulkUnit(scope.bulk_scope_id, bulkUnits[scope.bulk_scope_id])} disabled={busy || blockDraftDirty || mappingDraftDirty || !bulkUnits[scope.bulk_scope_id]}>Применить</button>
+                        <button className="compact-button" type="button" onClick={() => onApplyBulkUnit(scope.bulk_scope_id, bulkUnits[scope.bulk_scope_id])} disabled={busy || blockDraftDirty || mappingDraftDirty || !bulkUnits[scope.bulk_scope_id]}>Назначить {scope.field_count} {scope.field_count === 1 ? "полю" : "полям"}</button>
                       </div>
                     </div>
                   ))}
@@ -523,6 +551,7 @@ export function ImportWorkspace({
                 recipe={recipe}
                 warnings={recipeWarnings}
                 activeBlockId={activeBlockId}
+                groupedUnitTargets={groupedUnitTargets}
                 busy={busy || blockDraftDirty}
                 onApplyAll={onApplyMappings}
                 onDirtyChange={onMappingDirtyChange}
@@ -547,7 +576,7 @@ export function ImportWorkspace({
           <span><b>{inspection.sheets.length}</b> листов</span>
           <span><b>{plan.summary.planned_analysis_count}</b> Analysis</span>
           <span><b>{plannedMeasurementCount}</b> Measurement</span>
-          <span className={blockingCount || unappliedChanges ? "footer-warning" : ""}><b>{blockingCount}</b> {blockingCount === 1 ? "обязательное решение" : "обязательных решений"}{unresolvedReviewCount ? ` · ${unresolvedReviewCount} полей` : ""}{unappliedChanges ? " · правки не применены" : ""}</span>
+          <span className={blockingCount || unappliedChanges ? "footer-warning" : ""}><b>{blockingCount}</b> {blockingCount === 1 ? "обязательное решение" : "обязательных решений"}{unresolvedReviewCount ? ` · ${countNoun(unresolvedReviewCount, "поле", "поля", "полей")}` : ""}{unappliedChanges ? " · правки не применены" : ""}</span>
         </div>
         <div className="import-footer-safety"><Info size={15} /><span>Исходный файл не изменится</span></div>
         <div className="import-footer-actions">

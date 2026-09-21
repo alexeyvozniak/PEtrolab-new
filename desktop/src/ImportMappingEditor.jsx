@@ -12,6 +12,15 @@ const FE_FORM_OPTIONS = [
   ["Fe", "Неизвестно · сохранить Fe без расчётов"],
 ];
 
+function countNoun(count, one, few, many) {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  if (lastTwo >= 11 && lastTwo <= 14) return `${count} ${many}`;
+  if (last === 1) return `${count} ${one}`;
+  if (last >= 2 && last <= 4) return `${count} ${few}`;
+  return `${count} ${many}`;
+}
+
 function mappingAxis(mapping) {
   return mapping.source_axis || (Number.isInteger(mapping.source_column_index) ? "column" : "row");
 }
@@ -172,7 +181,7 @@ function MappingRow({ mapping, value, busy, onChange, feFormRequired = false }) 
   );
 }
 
-export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = null, busy, onApplyAll, onDirtyChange }) {
+export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = null, groupedUnitTargets = [], busy, onApplyAll, onDirtyChange }) {
   const [draft, setDraft] = useState(() => buildDraft(recipe, warnings));
   const [blockUnits, setBlockUnits] = useState({});
   const [showAll, setShowAll] = useState(false);
@@ -186,6 +195,9 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
   // Service suggestions are initial display state, not unapplied user edits.
   const applied = useMemo(() => buildDraft(recipe, warnings), [recipe, warnings]);
   const feFormKeys = useMemo(() => new Set(warnings.filter((warning) => warning.code === "FE_STRICTLY_REPORTED").map(warningKey)), [warnings]);
+  const groupedUnitKeys = useMemo(() => new Set(groupedUnitTargets.map((target) => (
+    keyFor(target.block_id, target.source_axis || "column", target.source_index)
+  ))), [groupedUnitTargets]);
 
   const dirtyKeys = useMemo(() => Object.keys(draft).filter((key) => !statesEqual(draft[key], applied[key])), [draft, applied]);
   const invalidCount = useMemo(
@@ -277,7 +289,10 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
                 || (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore")
                 || (value.target === "Measurement" && (!value.field.trim() || !value.unit));
             }).length;
+            const groupedCount = section.mappings.filter((mapping) => groupedUnitKeys.has(keyForMapping(section.block_id, mapping))).length;
+            const individualUnresolvedCount = Math.max(0, unresolvedCount - groupedCount);
             const shownMappings = showAll ? section.mappings : section.mappings.filter((mapping) => {
+              if (groupedUnitKeys.has(keyForMapping(section.block_id, mapping))) return false;
               const value = draft[keyForMapping(section.block_id, mapping)] || appliedState(mapping);
               return dirtyKeys.includes(keyForMapping(section.block_id, mapping))
                 || value.reviewDecision === "unresolved"
@@ -292,7 +307,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
                 <span>{section.orientation === "columns_are_analyses" ? "анализы по столбцам" : `заголовок: строка ${section.header_row}`} · полей: {section.mappings.length}</span>
               </div>
               <div className="mapping-view-toggle" role="group" aria-label="Какие поля показывать">
-                <button type="button" className={!showAll ? "active" : ""} onClick={() => setShowAll(false)}>Нужно решить {unresolvedCount}</button>
+                <button type="button" className={!showAll ? "active" : ""} onClick={() => setShowAll(false)}>{groupedCount ? `Отдельно ${individualUnresolvedCount}` : `Нужно решить ${unresolvedCount}`}</button>
                 <button type="button" className={showAll ? "active" : ""} onClick={() => setShowAll(true)}>Все {section.mappings.length}</button>
               </div>
               <details className="mapping-bulk-options">
@@ -320,7 +335,13 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
                   feFormRequired={feFormKeys.has(keyForMapping(section.block_id, mapping))}
                   onChange={(nextValue) => update(section, mapping, nextValue)}
                 />
-              )) : <div className="mapping-all-resolved"><b>Все поля этого блока разобраны</b><span>Открой «Все», чтобы проверить автоматические сопоставления.</span></div>}
+              )) : groupedCount && !showAll ? (
+                <div className="mapping-group-covered">
+                  <b>{countNoun(groupedCount, "поле", "поля", "полей")} этой таблицы {groupedCount === 1 ? "входит" : "входят"} в один вопрос выше</b>
+                  <span>Выберите общую единицу. Если единицы различаются, настройте поля по одному.</span>
+                  <button type="button" onClick={() => setShowAll(true)}>Настроить поля по одному</button>
+                </div>
+              ) : <div className="mapping-all-resolved"><b>Все поля этого блока разобраны</b><span>Открой «Все», чтобы проверить автоматические сопоставления.</span></div>}
             </div>
           </>
             );

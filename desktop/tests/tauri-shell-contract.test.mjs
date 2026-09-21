@@ -222,10 +222,13 @@ test("raw review groups repetitive issues and gets server-issued bulk unit scope
   assert.match(app, /active.bulk_unit_scopes/);
   assert.match(app, /kind: "unit", bulk_scope_id/);
   assert.match(app, /kind: "ignore", bulk_scope_id/);
-  assert.match(workspace, /Групповые решения/);
+  assert.match(workspace, /item\.bulk_scope_id/);
+  assert.match(workspace, /bulk-question-kicker/);
+  assert.match(workspace, /Один вопрос для \{scope\.field_count\}/);
+  assert.match(workspace, /groupedUnitTargets/);
   assert.match(workspace, /REPEATABLE_ISSUE_CODES/);
   assert.match(workspace, /groupIssues/);
-  assert.match(workspace, /одинаковой физической структурой/);
+  assert.match(workspace, /Исходные числа не изменятся/);
   assert.match(workspace, /Не импортировать все нераспознанные поля/);
 });
 

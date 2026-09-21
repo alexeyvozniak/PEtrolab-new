@@ -516,7 +516,7 @@ vi.mock("../src/desktopApi", () => {
       : { mode: "raw_review", reasons: complexCleanReasons } })),
     suggestImportRecipe: vi.fn().mockImplementation(async () => ({ result: { recipe: currentComplexRecipe(), warnings: complexWarnings } })),
     createImportPlan: vi.fn().mockImplementation(async () => ({ result: uiState.mode === "clean" ? plan : complexPlan() })),
-    getImportBulkUnitScopes: vi.fn().mockImplementation(async () => ({ result: { scopes: uiState.unitApplied ? [] : [{ bulk_scope_id: "summary-unit", block_count: 1, field_count: 1, fields: ["SiO2"], sheet_names: ["Summary"] }] } })),
+    getImportBulkUnitScopes: vi.fn().mockImplementation(async () => ({ result: { scopes: uiState.unitApplied ? [] : [{ bulk_scope_id: "summary-unit", block_count: 1, field_count: 1, fields: ["SiO2"], sheet_names: ["Summary"], targets: [{ block_id: "summary-main", source_axis: "column", source_index: 1 }] }] } })),
     getImportBulkIgnoreScopes: vi.fn().mockImplementation(async () => ({ result: { scopes: uiState.detailsEnabled ? [{ bulk_scope_id: "details-ignore", block_count: 2, field_count: 2, fields: ["Sigma"], sheet_names: ["Details"] }] : [] } })),
     applyImportBulkIgnore: vi.fn(),
     applyImportBulkUnit: vi.fn().mockImplementation(async () => {
@@ -563,7 +563,8 @@ vi.mock("../src/desktopApi", () => {
     return { result: {
       session: { workspace_id: "workspace-1", draft_revision: revision, active_source_id: "source-1",
         active_block_id: selectedBlock || currentRecipe.sections[0].block_id, sources: [source],
-        issues: problems.map((item, index) => ({ issue_id: String(index), code: item.code, source_id: "source-1", message_params: item, blocking: item.blocking || false })),
+        issues: problems.map((item, index) => ({ issue_id: String(index), code: item.code, source_id: "source-1", message_params: item, blocking: item.blocking || false,
+          bulk_scope_id: item.code === "UNIT_REQUIRES_REVIEW" && !uiState.unitApplied ? "summary-unit" : null })),
         readiness: { ready_to_commit: currentPlan.ready_to_commit !== false && (uiState.mode === "clean" || (uiState.unitApplied && !uiState.detailsEnabled && uiState.duplicatesReviewed)) },
       },
       active: { source_id: "source-1", inspection: (await api.inspectImportSource()).result, recipe: currentRecipe,
@@ -1251,10 +1252,10 @@ test("user resolves a repeated complex workbook with sheet-level and grouped dec
   await user.click(screen.getByRole("button", { name: "Не импортировать лист Details" }));
   await waitFor(() => expect(uiState.detailsEnabled).toBe(false));
 
-  const groupedUnit = screen.getByRole("combobox", { name: "Единица для группы SiO2" });
+  const groupedUnit = await screen.findByRole("combobox", { name: "Единица для группы SiO2" });
   await waitFor(() => expect(groupedUnit.disabled).toBe(false));
   await user.selectOptions(groupedUnit, "wt.%");
-  const applyUnit = screen.getByRole("button", { name: "Применить" });
+  const applyUnit = screen.getByRole("button", { name: "Назначить 1 полю" });
   await waitFor(() => expect(applyUnit.disabled).toBe(false));
   await user.click(applyUnit);
   await waitFor(() => expect(uiState.unitApplied).toBe(true));

@@ -107,6 +107,10 @@
 .mapping-view-toggle button { flex: 1; min-height: 29px; border: 0; border-radius: 5px; background: transparent; color: #647068; font-size: 9px; }
 .mapping-view-toggle button.active { background: #e9f1ea; color: #315d45; font-weight: 750; }
 .mapping-ignore-all { min-height: 32px; border: 0; background: transparent; color: #87523a; padding: 0; font-size: 9px; text-align: left; text-decoration: underline; }
+.mapping-group-covered { display: grid; gap: 5px; padding: 16px 12px; background: #f8fbf8; color: #496052; text-align: center; }
+.mapping-group-covered b { font-size: 10px; }
+.mapping-group-covered span { font-size: 9px; line-height: 1.45; }
+.mapping-group-covered button { justify-self: center; min-height: 28px; border: 0; background: transparent; color: #315f46; font-size: 9px; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .mapping-all-resolved { display: grid; gap: 4px; padding: 18px 12px; color: #4a6655; text-align: center; }
 .mapping-all-resolved b { font-size: 10px; }
 .mapping-all-resolved span { color: #7b867f; font-size: 9px; }

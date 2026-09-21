@@ -140,7 +140,7 @@ test("unit suggestions are not dirty edits and one valid mapping can be applied 
   render(<App />);
   await user.click(await enabledButton('Выбрать файл'));
   await enabledButton('Добавить файл');
-  await enabledButton('Нужно решить 2');
+  await user.click(await enabledButton('Настроить поля по одному'));
   const unit = await screen.findByRole('combobox', { name: 'Единица SiO2' });
   await waitFor(() => expect(unit.disabled).toBe(false));
   await user.selectOptions(unit, 'wt.%');
@@ -151,12 +151,38 @@ test("unit suggestions are not dirty edits and one valid mapping can be applied 
   await user.click(await enabledButton('Сбросить изменения'));
   expect(screen.getByRole('combobox', { name: 'Единица SiO2' }).value).toBe('');
   expect(screen.queryByText(/Изменения ещё не применены/)).toBeNull();
-  await enabledButton('Нужно решить 2');
   await user.selectOptions(unit, 'wt.%');
   await user.click(await enabledButton(/Применить сопоставление/));
-  await enabledButton('Нужно решить 1');
+  await screen.findByText('Один вопрос для 1 поля');
   expect(screen.queryByRole('combobox', { name: 'Единица SiO2' })).toBeNull();
   expect(screen.getByRole('button', { name: 'Импортировать после проверки' }).disabled).toBe(true);
+}, 20000);
+
+test("one server-issued unit scope is presented as one guided question", async () => {
+  const source = 'Analysis,SiO2,MgO\nB1,40,50\nB2,41,49\n';
+  await writeFile(second, source);
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+  await enabledButton('Добавить файл');
+
+  expect(screen.getAllByText(/Какая единица у этих полей/).length).toBeGreaterThan(0);
+  expect(screen.getByText('Один вопрос для 2 полей')).toBeTruthy();
+  expect(screen.getByText(/2 поля этой таблицы входят в один вопрос выше/)).toBeTruthy();
+  expect(screen.getByText('Записи появятся после решения вопросов выше')).toBeTruthy();
+  expect(screen.queryByRole('combobox', { name: 'Единица SiO2' })).toBeNull();
+  expect(document.querySelector('.footer-warning')?.textContent).toContain('1 обязательное решение · 2 поля');
+
+  const unit = screen.getByRole('combobox', { name: /Единица для группы/ });
+  await user.selectOptions(unit, 'wt.%');
+  await user.click(await enabledButton('Назначить 2 полям'));
+  await waitFor(() => expect(screen.queryByText('Один вопрос для 2 полей')).toBeNull());
+  expect(requests.some((request) => request.command === 'import.workspace.apply_bulk_decision'
+    && request.payload.decision?.kind === 'unit'
+    && request.payload.decision?.unit === 'wt.%')).toBe(true);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Сохранить импорт в проект' }).disabled).toBe(false), { timeout: 10000 });
+  expect(await readFile(second, 'utf8')).toBe(source);
 }, 20000);
 
 test("ambiguous Fe is one guided decision and preserves source numbers", async () => {

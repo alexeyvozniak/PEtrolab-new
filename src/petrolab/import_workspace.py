@@ -264,11 +264,17 @@ class ImportWorkspaceStore:
                         issues.append({'code': 'UNIT_REQUIRES_REVIEW' if field.get('suggested_target') == 'measurement' else 'UNMAPPED_FIELD_REQUIRES_REVIEW',
                                        'severity': 'error', 'blocking': True, 'sheet_name': section['sheet_name'],
                                        'block_id': section['block_id'], 'row_number': section['header_row'], **field})
+            mapping_blocked = any(item.get('blocking') and item.get('code') in {
+                'UNIT_REQUIRES_REVIEW', 'UNMAPPED_FIELD_REQUIRES_REVIEW'
+            } for item in issues)
             for check, args in [(_require_non_empty_plan, (plan,)), (_require_duplicate_review, (plan, source['recipe']))]:
                 try:
                     check(*args)
                 except ImportCommandError as error:
-                    issues.append({'code': error.code, 'message': error.message, 'severity': 'error', 'blocking': True})
+                    derived_empty_plan = error.code == 'IMPORT_PLAN_EMPTY' and mapping_blocked
+                    issues.append({'code': error.code, 'message': error.message,
+                                   'severity': 'info' if derived_empty_plan else 'error',
+                                   'blocking': not derived_empty_plan})
             units = bulk_unit_scopes(source['staged_path'], source['recipe'])['scopes']
             ignores = bulk_ignore_scopes(source['staged_path'], source['recipe'])['scopes']
         except ImportCommandError as error:
@@ -286,11 +292,13 @@ class ImportWorkspaceStore:
         sources, issues, plans, reviews, scopes = [], [], [], {}, []
         for source in state['sources']:
             review = self._review(source)
+            scope_by_target = {}
             for scope in review['bulk_unit_scopes'] + review['bulk_ignore_scopes']:
                 scope['bulk_scope_id'] = f"{state['draft_revision']}:{source['source_id']}:{scope['bulk_scope_id']}"
                 targets = []
                 for target in scope['targets']:
                     section = next(s for s in source['recipe']['sections'] if s['block_id'] == target['block_id'])
+                    scope_by_target[(target['block_id'], target['source_axis'], target['source_index'])] = scope['bulk_scope_id']
                     targets.append({'source_id': source['source_id'], 'sheet_key': f"{source['source_id']}:{section['sheet_name']}",
                                     'source_axis': target['source_axis'], 'source_index': target['source_index']})
                 scopes.append({'bulk_scope_id': scope['bulk_scope_id'], 'decision_kind': scope['decision_kind'], 'targets': targets,
@@ -306,13 +314,17 @@ class ImportWorkspaceStore:
                 section = next((s for s in recipe['sections'] if s['block_id'] == item.get('block_id')), None)
                 row = item.get('row_number') or (item.get('source_row_index', -1) + 1) or (section['header_row'] if section else None)
                 column = item.get('source_column_index', 0)
+                axis = item.get('source_axis', 'column')
+                index = item.get('source_column_index') if axis == 'column' else item.get('source_row_index')
+                bulk_scope_id = scope_by_target.get((item.get('block_id'), axis, index))
                 issues.append({
                     'issue_id': digest([source['source_id'], item['code'], item.get('sheet_name'), item.get('block_id'), row, column, item.get('source_header')]),
                     'code': item['code'], 'severity': item.get('severity', 'warning'), 'blocking': bool(item.get('blocking')),
                     'source_id': source['source_id'], 'sheet_key': f"{source['source_id']}:{item['sheet_name']}" if item.get('sheet_name') else None,
                     'physical_range': {'start_row': row, 'end_row': row, 'start_column': column, 'end_column': column} if row else None,
                     'logical_block_id': item.get('block_id'), 'message_params': {k: v for k, v in item.items() if isinstance(v, (str, int, float, bool)) or v is None},
-                    'allowed_decisions': ['mappings', 'sections', 'source_inclusion'], 'current_decision': None, 'bulk_scope_id': None,
+                    'allowed_decisions': ['mappings', 'sections', 'source_inclusion'], 'current_decision': None,
+                    'bulk_scope_id': bulk_scope_id,
                 })
             source_issues = [i for i in issues if i['source_id'] == source['source_id']]
             sheets = []
