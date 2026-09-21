@@ -730,7 +730,10 @@ def _plan_rows(inspection: SourceInspection, sheet: SheetInspection, section: di
             continue
         row = sheet.rows[row_number - 1]
         relevant = [_row_value(row, _mapping_index(item)) for item in mappings if item["target_role"] != "ignore"]
-        if not any(value not in (None, "") for value in relevant):
+        # Spreadsheet applications often leave a space in an otherwise blank
+        # row. It is not an Analysis and must not turn into an unresolvable
+        # identity error after a Measurement mapping is confirmed.
+        if not any(value is not None and (not isinstance(value, str) or value.strip()) for value in relevant):
             continue
         identity = tuple(str(_row_value(row, _mapping_index(item)) or "") for item in identities)
         if not identity and section.get("analysis_identity_policy") == "source_row":

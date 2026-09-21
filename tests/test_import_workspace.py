@@ -128,6 +128,18 @@ class ImportWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.current['session']['readiness']['ready_to_commit'])
         self.assertEqual(source.read_bytes(), original)
 
+    def test_whitespace_only_trailing_row_is_not_an_unresolvable_analysis(self):
+        source = Path(self.temp.name) / 'whitespace.csv'
+        original = b'Analysis,SiO2 [wt.%]\nA1,40\n , \t\n'
+        source.write_bytes(original)
+        result = self.store.command('create', {'sources': [{'staged_path': str(source)}]})
+
+        self.assertTrue(result['session']['readiness']['ready_to_commit'])
+        self.assertEqual(result['active']['plan']['summary']['planned_analysis_count'], 1)
+        self.assertFalse(any(item['code'] == 'ANALYSIS_IDENTITY_REQUIRED'
+                             for item in result['session']['issues']))
+        self.assertEqual(source.read_bytes(), original)
+
     def test_ndjson_commands_and_session_schema(self):
         response = handle_request({'protocol_version': '1.0', 'request_id': str(uuid.uuid4()),
             'command': 'import.workspace.create', 'payload': {'sources': [{'staged_path': str(self.other)}]}})
