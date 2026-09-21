@@ -167,10 +167,10 @@ class NdjsonServiceTests(unittest.TestCase):
             })
             import sqlite3
             with closing(sqlite3.connect(database)) as connection:
-                analysis_ids = [row[0] for row in connection.execute("SELECT analysis_id FROM analysis ORDER BY rowid LIMIT 2")]
+                analysis_ids = [row[0] for row in connection.execute("SELECT analysis_id FROM analysis ORDER BY rowid LIMIT 3")]
             point = handle_request({
                 "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.create",
-                "payload": {"project_database_path": database, "sample_name": "KIV-2", "point_name": "P-07", "analysis_ids": analysis_ids, "link_type": "same_point"},
+                "payload": {"project_database_path": database, "sample_name": "KIV-2", "point_name": "P-07", "analysis_ids": analysis_ids[:2], "link_type": "same_point"},
             })["result"]
 
             retired = handle_request({
@@ -203,6 +203,26 @@ class NdjsonServiceTests(unittest.TestCase):
                 "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.list",
                 "payload": {"project_database_path": database},
             })["result"]["total"], 1)
+
+            added = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.analysis.add",
+                "payload": {
+                    "project_database_path": database,
+                    "analytical_point_id": point["analytical_point_id"],
+                    "expected_analysis_ids": point["analysis_ids"],
+                    "expected_spatial_annotation_ids": [],
+                    "analysis_id": analysis_ids[2],
+                    "link_type": "same_zone",
+                    "reason": "Общая зона подтверждена повторной проверкой",
+                },
+            })["result"]
+            self.assertEqual(added["effect"], "analysis_added")
+            self.assertEqual(len(added["analysis_ids"]), 3)
+            removed_again = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "operation_journal.undo",
+                "payload": {"project_database_path": database, "operation_id": added["operation"]["operation_id"]},
+            })["result"]
+            self.assertEqual(removed_again["effect"], "analysis_removed")
 
 
 if __name__ == "__main__":

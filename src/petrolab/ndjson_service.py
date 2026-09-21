@@ -28,6 +28,7 @@ from .import_preview import (
 )
 from .manual_mapping import review_duplicate_candidates, revise_import_mapping, revise_import_mappings, revise_import_sections
 from .media_import import (
+    add_analysis_to_analytical_point,
     apply_media_import_plan,
     create_analytical_point,
     create_media_import_plan,
@@ -35,6 +36,7 @@ from .media_import import (
     inspect_media_sources,
     list_analytical_points,
     list_operation_journal,
+    remove_analysis_from_analytical_point,
     retire_analytical_point,
     undo_operation,
 )
@@ -316,6 +318,29 @@ def _dispatch_analytical_point_retire(params: Mapping[str, Any]) -> dict[str, An
     )}
 
 
+def _dispatch_analytical_point_analysis_add(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": add_analysis_to_analytical_point(
+        _project_database_path(params),
+        _string(params, "analytical_point_id"),
+        _string_array(params, "expected_analysis_ids"),
+        _string_array(params, "expected_spatial_annotation_ids"),
+        _string(params, "analysis_id"),
+        _string(params, "link_type"),
+        _string(params, "reason"),
+    )}
+
+
+def _dispatch_analytical_point_analysis_remove(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": remove_analysis_from_analytical_point(
+        _project_database_path(params),
+        _string(params, "analytical_point_id"),
+        _string_array(params, "expected_analysis_ids"),
+        _string_array(params, "expected_spatial_annotation_ids"),
+        _string(params, "analysis_id"),
+        _string(params, "reason"),
+    )}
+
+
 def _dispatch_operation_journal_list(params: Mapping[str, Any]) -> dict[str, Any]:
     raw_limit = params.get("limit", 50)
     if not isinstance(raw_limit, int):
@@ -388,6 +413,8 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "analytical_point.create": _dispatch_analytical_point_create,
     "analytical_point.list": _dispatch_analytical_point_list,
     "analytical_point.retire": _dispatch_analytical_point_retire,
+    "analytical_point.analysis.add": _dispatch_analytical_point_analysis_add,
+    "analytical_point.analysis.remove": _dispatch_analytical_point_analysis_remove,
     "operation_journal.list": _dispatch_operation_journal_list,
     "operation_journal.undo": _dispatch_operation_journal_undo,
     "media.inspect_sources": _dispatch_media_inspect,

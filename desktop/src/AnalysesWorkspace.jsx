@@ -285,6 +285,7 @@ export function AnalysesWorkspace({
   onAddData,
   onLoadMore,
   onCreateAnalyticalPoint,
+  onChangeAnalyticalPointMembership,
   onRetireAnalyticalPoint,
   onUndoOperation,
 }) {
@@ -408,6 +409,7 @@ export function AnalysesWorkspace({
     operationNotice={pointOperationNotice}
     onBack={() => setViewMode("analyses")}
     onRefresh={onRefreshAnalyticalPoints}
+    onChangeMembership={onChangeAnalyticalPointMembership}
     onRetire={onRetireAnalyticalPoint}
     onUndo={onUndoOperation}
     onShowAnalyses={(analysisIds) => {

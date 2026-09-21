@@ -14,6 +14,7 @@ import {
   Warning,
 } from "@phosphor-icons/react";
 import {
+  addAnalysisToAnalyticalPoint,
   createImportWorkspace, addWorkspaceSources, getImportWorkspace, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
   createAnalyticalPoint,
   applyMediaImportPlan,
@@ -33,6 +34,7 @@ import {
   pickMediaFolder,
   pickMediaFiles,
   retractLastImport,
+  removeAnalysisFromAnalyticalPoint,
   retireAnalyticalPoint,
   stageImportFile,
   undoOperation,
@@ -500,6 +502,51 @@ export function App() {
     }
   };
 
+  const changePointMembership = async ({ point, action, analysisId, linkType, reason }) => {
+    if (busy || !databasePath) return null;
+    setBusy(true);
+    setActivity(action === "add" ? "Добавляю Analysis и записываю обратимую операцию…" : "Снимаю Analysis и записываю обратимую операцию…");
+    setError("");
+    setSuccess("");
+    try {
+      const changed = unwrap(await (action === "add"
+        ? addAnalysisToAnalyticalPoint(databasePath, point, analysisId, linkType, reason)
+        : removeAnalysisFromAnalyticalPoint(databasePath, point, analysisId, reason)));
+      const verb = action === "add" ? "добавлена в" : "снята с";
+      setPointOperationNotice({
+        operation: changed.operation,
+        message: `Analysis ${verb} Analytical Point «${point.point_name}».`,
+      });
+      setMediaPoints((current) => ({
+        ...current,
+        items: (current.items || []).map((item) => item.analytical_point_id === point.analytical_point_id
+          ? { ...item, analysis_ids: changed.analysis_ids }
+          : item),
+      }));
+      setSuccess(`Состав «${point.point_name}» изменён обратимо: теперь ${changed.analysis_ids.length} Analyses. Analysis, Measurements и Source сохранены.`);
+      let projectionRefreshed = true;
+      try {
+        const [pointProjection, journal] = await Promise.all([
+          listAnalyticalPoints(databasePath).then(unwrap),
+          listOperationJournal(databasePath).then(unwrap),
+        ]);
+        setMediaPoints(pointProjection);
+        setOperationJournal(journal);
+      } catch (caught) {
+        projectionRefreshed = false;
+        const detail = caught instanceof Error ? caught.message : String(caught);
+        setError(`Состав изменён, но обновить реестр не удалось: ${detail}`);
+      }
+      return { ...changed, projection_refreshed: projectionRefreshed };
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      throw caught;
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
   const undoPointOperation = async (operationId) => {
     if (busy || !databasePath || !operationId) return null;
     setBusy(true);
@@ -515,9 +562,12 @@ export function App() {
           return { ...current, total: items.length, sample_names: [...new Set(items.map((item) => item.sample_name))].sort((left, right) => left.localeCompare(right, "ru")), items };
         });
       }
-      setSuccess(undone.effect === "restored"
-        ? "Связь Analytical Point восстановлена по устойчивым ID."
-        : "Создание Analytical Point отменено обратимо; исходные Analyses сохранены.");
+      setSuccess({
+        restored: "Связь Analytical Point восстановлена по устойчивым ID.",
+        retracted: "Создание Analytical Point отменено обратимо; исходные Analyses сохранены.",
+        analysis_added: "Analysis возвращена в состав Analytical Point по устойчивому ID.",
+        analysis_removed: "Добавление Analysis отменено; исходная Analysis сохранена.",
+      }[undone.effect] || "Операция отменена по устойчивым ID.");
       let projectionRefreshed = true;
       try {
         const [pointProjection, journal] = await Promise.all([
@@ -794,6 +844,7 @@ export function App() {
             onAddData={startNewImport}
             onLoadMore={loadMoreAnalyses}
             onCreateAnalyticalPoint={createPointFromAnalyses}
+            onChangeAnalyticalPointMembership={changePointMembership}
             onRetireAnalyticalPoint={retirePoint}
             onUndoOperation={undoPointOperation}
           />

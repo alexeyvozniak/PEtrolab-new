@@ -53,6 +53,7 @@ test('selected Analyses require explicit semantics before creating an Analytical
 test('Analytical Point registry exposes provenance, reversible unlink and source Analyses', async () => {
   const user = userEvent.setup();
   const onRetire = vi.fn().mockResolvedValue({ analytical_point_id: 'point-stable-p01' });
+  const onChangeMembership = vi.fn().mockResolvedValue({ effect: 'analysis_added' });
   const onUndo = vi.fn().mockResolvedValue({ effect: 'restored' });
   const analyses = [{
     analysis_id: 'epma-p01', source_name: 'KIV-2_EPMA.xlsx', sheet_name: 'Data', source_row_number: 9,
@@ -60,6 +61,9 @@ test('Analytical Point registry exposes provenance, reversible unlink and source
   }, {
     analysis_id: 'la-p01', source_name: 'KIV-2_LA.xlsx', sheet_name: 'Trace', source_row_number: 11,
     identity: { Analysis: 'P-01-LA', Sample: 'KIV-2' }, measurement_list: [{ method: 'LA-ICP-MS' }], measurements: {},
+  }, {
+    analysis_id: 'epma-other', source_name: 'OTHER_EPMA.xlsx', sheet_name: 'Data', source_row_number: 4,
+    identity: { Analysis: 'P-03-EPMA', Sample: 'OTHER' }, measurement_list: [{ method: 'EPMA' }], measurements: {},
   }];
   const analyticalPoints = { total: 2, sample_names: ['KIV-2', 'OTHER'], items: [{
     analytical_point_id: 'point-stable-p01', point_name: 'P-01', sample_name: 'KIV-2',
@@ -91,7 +95,7 @@ test('Analytical Point registry exposes provenance, reversible unlink and source
   render(<AnalysesWorkspace
     project={{ total: 2, source_count: 2, analyses }} analyticalPoints={analyticalPoints}
     operationJournal={{ total: 1, items: [operation] }} pointOperationNotice={{ operation, message: 'Связь Analytical Point «P-01» снята.' }}
-    busy={false} onRefreshAnalyticalPoints={vi.fn()} onRetireAnalyticalPoint={onRetire} onUndoOperation={onUndo}
+    busy={false} onRefreshAnalyticalPoints={vi.fn()} onChangeAnalyticalPointMembership={onChangeMembership} onRetireAnalyticalPoint={onRetire} onUndoOperation={onUndo}
   />);
   await user.click(screen.getByRole('button', { name: /Analytical Points 2/ }));
 
@@ -105,6 +109,25 @@ test('Analytical Point registry exposes provenance, reversible unlink and source
   expect(screen.getByTitle('media-stable-bse')).toBeTruthy();
   expect(screen.getByText('Operation Journal')).toBeTruthy();
   expect(screen.getByText('2 Analyses · 1 пространственных связей')).toBeTruthy();
+
+  await user.click(screen.getByRole('button', { name: 'Изменить состав' }));
+  let compositionDialog = screen.getByRole('dialog', { name: 'Изменить состав P-01' });
+  await user.selectOptions(within(compositionDialog).getByRole('combobox', { name: 'Analysis для добавления' }), 'epma-other');
+  expect(within(compositionDialog).getByText(/Analysis относится к Sample «OTHER»/)).toBeTruthy();
+  await user.selectOptions(within(compositionDialog).getByRole('combobox', { name: 'Тип связи добавляемой Analysis' }), 'same_zone');
+  await user.type(within(compositionDialog).getByRole('textbox', { name: 'Причина изменения состава' }), 'Общая зона подтверждена на изображении');
+  await user.click(within(compositionDialog).getByRole('checkbox', { name: /Подтверждаю изменение одной Analysis/ }));
+  await user.click(within(compositionDialog).getByRole('button', { name: 'Добавить Analysis' }));
+  await waitFor(() => expect(onChangeMembership).toHaveBeenCalledWith({
+    point: analyticalPoints.items[0], action: 'add', analysisId: 'epma-other', linkType: 'same_zone', reason: 'Общая зона подтверждена на изображении',
+  }));
+
+  await user.click(screen.getByRole('button', { name: 'Изменить состав' }));
+  compositionDialog = screen.getByRole('dialog', { name: 'Изменить состав P-01' });
+  await user.click(within(compositionDialog).getByRole('button', { name: 'Выбрать снятие Analysis' }));
+  expect(within(compositionDialog).getByText(/должны остаться минимум две Analyses/)).toBeTruthy();
+  expect(within(compositionDialog).getByRole('button', { name: 'Снять Analysis' }).disabled).toBe(true);
+  await user.click(within(compositionDialog).getByRole('button', { name: 'Отмена' }));
 
   await user.click(screen.getByRole('button', { name: 'Разорвать связь' }));
   const unlinkDialog = screen.getByRole('dialog', { name: 'Разорвать связь P-01' });
@@ -416,6 +439,24 @@ vi.mock("../src/desktopApi", () => {
         link_type: linkType,
       } };
     }),
+    addAnalysisToAnalyticalPoint: vi.fn().mockImplementation(async (_path, point, analysisId, linkType, reason) => ({ result: {
+      analytical_point_id: point.analytical_point_id, analysis_id: analysisId,
+      analysis_ids: [...point.analysis_ids, analysisId], link_type: linkType, effect: 'analysis_added',
+      operation: {
+        operation_id: 'operation-add-analysis', action_kind: 'analytical_point.analysis.add', actor: 'local-desktop-user', entity_type: 'analytical_point',
+        entity_ids: { analytical_point_ids: [point.analytical_point_id], analysis_ids: [...point.analysis_ids, analysisId], spatial_annotation_ids: [], media_asset_ids: [] },
+        parameters: { reason, analysis_id: analysisId, link_type: linkType, point_name: point.point_name, sample_name: point.sample_name }, outcome: 'applied', created_at: '2026-09-15T10:38:00Z',
+      },
+    } })),
+    removeAnalysisFromAnalyticalPoint: vi.fn().mockImplementation(async (_path, point, analysisId, reason) => ({ result: {
+      analytical_point_id: point.analytical_point_id, analysis_id: analysisId,
+      analysis_ids: point.analysis_ids.filter((id) => id !== analysisId), effect: 'analysis_removed',
+      operation: {
+        operation_id: 'operation-remove-analysis', action_kind: 'analytical_point.analysis.remove', actor: 'local-desktop-user', entity_type: 'analytical_point',
+        entity_ids: { analytical_point_ids: [point.analytical_point_id], analysis_ids: point.analysis_ids.filter((id) => id !== analysisId), spatial_annotation_ids: [], media_asset_ids: [] },
+        parameters: { reason, analysis_id: analysisId, point_name: point.point_name, sample_name: point.sample_name }, outcome: 'applied', created_at: '2026-09-15T10:39:00Z',
+      },
+    } })),
     retireAnalyticalPoint: vi.fn().mockImplementation(async (_path, point, reason) => {
       uiState.pointRetired = true;
       return { result: { analytical_point_id: point.analytical_point_id, sample_name: point.sample_name, point_name: point.point_name, operation: {
@@ -426,7 +467,7 @@ vi.mock("../src/desktopApi", () => {
     }),
     undoOperation: vi.fn().mockImplementation(async (_path, operationId) => {
       uiState.pointRetired = false;
-      return { result: { target_operation_id: operationId, analytical_point_id: 'point-kiv-2-p07', effect: 'restored', operation: { operation_id: 'operation-undo-p07', action_kind: 'operation.undo' } } };
+      return { result: { target_operation_id: operationId, analytical_point_id: 'point-kiv-2-p07', effect: operationId === 'operation-add-analysis' ? 'analysis_removed' : 'restored', operation: { operation_id: 'operation-undo-p07', action_kind: 'operation.undo' } } };
     }),
     getMediaPreview: vi.fn().mockImplementation(async (sourcePath) => {
       if (uiState.mediaPreviewFailures > 0) {
@@ -553,7 +594,7 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { applyImportPlan, applyMediaImportPlan, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, pickImportFile, pickMediaFolder, retireAnalyticalPoint, undoOperation } from "../src/desktopApi";
+import { addAnalysisToAnalyticalPoint, applyImportPlan, applyMediaImportPlan, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, pickImportFile, pickMediaFolder, retireAnalyticalPoint, undoOperation } from "../src/desktopApi";
 import { App } from "../src/App";
 import { ImagesWorkspace } from "../src/ImagesWorkspace";
 
@@ -646,6 +687,34 @@ test('App retires one exact Analytical Point scope and restores it through Opera
   await waitFor(() => expect(undoOperation).toHaveBeenCalledWith('C:/PetroLab/project.sqlite', 'operation-retire-p07'));
   expect(await screen.findByText('Связь Analytical Point восстановлена по устойчивым ID.')).toBeTruthy();
   expect((await screen.findAllByText('P-07')).length).toBeGreaterThan(0);
+});
+
+test('App changes one Analytical Point membership and exposes immediate undo', async () => {
+  uiState.imported = true;
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole('button', { name: 'Анализы' }));
+  await user.click(await screen.findByRole('button', { name: /Analytical Points 2/ }));
+  await user.click(screen.getByRole('button', { name: 'Изменить состав' }));
+  const dialog = screen.getByRole('dialog', { name: 'Изменить состав P-07' });
+  await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Analysis для добавления' }), 'analysis-ui-2');
+  await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Тип связи добавляемой Analysis' }), 'same_zone');
+  await user.type(within(dialog).getByRole('textbox', { name: 'Причина изменения состава' }), 'Общая зона подтверждена на BSE');
+  await user.click(within(dialog).getByRole('checkbox', { name: /Подтверждаю изменение одной Analysis/ }));
+  await user.click(within(dialog).getByRole('button', { name: 'Добавить Analysis' }));
+
+  await waitFor(() => expect(addAnalysisToAnalyticalPoint).toHaveBeenCalledWith(
+    'C:/PetroLab/project.sqlite',
+    expect.objectContaining({ analytical_point_id: 'point-kiv-2-p07', analysis_ids: ['analysis-ui-1', 'analysis-la-87'] }),
+    'analysis-ui-2',
+    'same_zone',
+    'Общая зона подтверждена на BSE',
+  ));
+  expect(await screen.findByText(/Состав «P-07» изменён обратимо: теперь 3 Analyses/)).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Отменить' }));
+  await waitFor(() => expect(undoOperation).toHaveBeenCalledWith('C:/PetroLab/project.sqlite', 'operation-add-analysis'));
+  expect(await screen.findByText('Добавление Analysis отменено; исходная Analysis сохранена.')).toBeTruthy();
 });
 
 test("user confirms an image batch, places same- and cross-sample points, reviews and imports", async () => {

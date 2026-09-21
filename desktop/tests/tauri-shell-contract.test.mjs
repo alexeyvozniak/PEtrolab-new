@@ -324,6 +324,8 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
   assert.match(api, /media\.import\.apply/);
   assert.match(api, /analytical_point\.create/);
   assert.match(api, /analytical_point\.retire/);
+  assert.match(api, /analytical_point\.analysis\.add/);
+  assert.match(api, /analytical_point\.analysis\.remove/);
   assert.match(api, /operation_journal\.list/);
   assert.match(api, /operation_journal\.undo/);
 });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowCounterClockwise, ArrowLeft, CheckSquare, Database, LinkBreak, LinkSimple, MagnifyingGlass, MapPin, Warning, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowLeft, CheckSquare, Database, LinkBreak, LinkSimple, MagnifyingGlass, MapPin, Minus, PencilSimple, Plus, Warning, X } from "@phosphor-icons/react";
 import "./analyticalPointsRegistry.css";
 
 const LINK_TYPE_LABELS = {
@@ -57,12 +57,81 @@ function journalActionLabel(action) {
   return {
     "analytical_point.create": "Создание связи",
     "analytical_point.retire": "Снятие связи",
+    "analytical_point.analysis.add": "Analysis добавлена",
+    "analytical_point.analysis.remove": "Analysis снята",
     "operation.undo": "Отмена операции",
   }[action] || action;
 }
 
 function scopeCount(operation, field) {
   return operation?.entity_ids?.[field]?.length || 0;
+}
+
+function PointCompositionDialog({ point, analyses, busy, onCancel, onConfirm }) {
+  const linked = new Set(point.analysis_ids || []);
+  const addCandidates = analyses.filter((analysis) => !linked.has(analysis.analysis_id));
+  const removeCandidates = (point.analysis_ids || []).map((id) => ({ id, analysis: analyses.find((item) => item.analysis_id === id) }));
+  const [mode, setMode] = useState("add");
+  const [analysisId, setAnalysisId] = useState(addCandidates[0]?.analysis_id || "");
+  const [linkType, setLinkType] = useState("same_point");
+  const [reason, setReason] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const selectedAnalysis = analyses.find((analysis) => analysis.analysis_id === analysisId);
+  const selectedSample = selectedAnalysis?.identity?.Sample;
+  const crossSample = mode === "add" && selectedSample && selectedSample !== point.sample_name;
+  const removalBlocked = (point.analysis_ids || []).length <= 2;
+  const canConfirm = Boolean(analysisId && reason.trim() && confirmed && !busy && !(mode === "remove" && removalBlocked));
+
+  useEffect(() => {
+    const closeOnEscape = (event) => { if (event.key === "Escape" && !busy) onCancel(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [busy, onCancel]);
+
+  const changeMode = (nextMode) => {
+    setMode(nextMode);
+    setAnalysisId(nextMode === "add" ? addCandidates[0]?.analysis_id || "" : removeCandidates[0]?.id || "");
+    setReason("");
+    setConfirmed(false);
+    setLocalError("");
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!canConfirm) return;
+    setLocalError("");
+    try {
+      await onConfirm({ point, action: mode, analysisId, linkType, reason: reason.trim() });
+      onCancel();
+    } catch (caught) {
+      setLocalError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  return <div className="point-retire-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
+    <section className="point-retire-dialog point-composition-dialog" role="dialog" aria-modal="true" aria-labelledby="point-composition-title">
+      <header><div><span>Одна обратимая операция</span><h2 id="point-composition-title">Изменить состав {point.point_name}</h2></div><button className="icon-button" type="button" onClick={onCancel} disabled={busy} aria-label="Закрыть изменение состава"><X size={19} /></button></header>
+      <section className="point-retire-scope" aria-label="Точный текущий состав"><div><span>Sample</span><b>{point.sample_name}</b></div><div><span>Analyses</span><b>{(point.analysis_ids || []).length}</b></div><div><span>Spatial Annotations</span><b>{(point.placements || []).length}</b></div><code title={point.analytical_point_id}>{point.analytical_point_id}</code></section>
+      <form onSubmit={submit}>
+        <div className="point-composition-modes" role="group" aria-label="Операция с составом"><button type="button" aria-label="Выбрать добавление Analysis" className={mode === "add" ? "active" : ""} onClick={() => changeMode("add")}><Plus size={16} /> Добавить Analysis</button><button type="button" aria-label="Выбрать снятие Analysis" className={mode === "remove" ? "active" : ""} onClick={() => changeMode("remove")}><Minus size={16} /> Снять Analysis</button></div>
+        {mode === "add" ? <>
+          <label>Analysis из загруженной таблицы<select aria-label="Analysis для добавления" value={analysisId} onChange={(event) => { setAnalysisId(event.target.value); setConfirmed(false); }}><option value="">Выбери Analysis</option>{addCandidates.map((analysis) => <option value={analysis.analysis_id} key={analysis.analysis_id}>{analysisName(analysis, analysis.analysis_id)} · {analysisMethods(analysis)}</option>)}</select></label>
+          <small className="point-composition-hint">Показаны только загруженные Analyses проекта. Если нужной нет, сначала загрузи её в таблице Analyses.</small>
+          <label>Смысл связи<select aria-label="Тип связи добавляемой Analysis" value={linkType} onChange={(event) => { setLinkType(event.target.value); setConfirmed(false); }}>{Object.entries(LINK_TYPE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+          {crossSample && <div className="point-composition-warning"><Warning size={18} weight="fill" /><span>Analysis относится к Sample «{selectedSample}», а точка — к «{point.sample_name}». Причина ниже должна явно объяснять эту связь.</span></div>}
+          {!addCandidates.length && <p className="point-composition-empty">Все загруженные Analyses уже входят в эту точку.</p>}
+        </> : <>
+          <label>Analysis в текущем составе<select aria-label="Analysis для снятия" value={analysisId} disabled={removalBlocked} onChange={(event) => { setAnalysisId(event.target.value); setConfirmed(false); }}>{removeCandidates.map(({ id, analysis }) => <option value={id} key={id}>{analysisName(analysis, id)} · {analysisMethods(analysis)}</option>)}</select></label>
+          {removalBlocked && <div className="point-composition-warning"><Warning size={18} weight="fill" /><span>Снять Analysis нельзя: в Analytical Point должны остаться минимум две Analyses.</span></div>}
+        </>}
+        <label>Причина<textarea aria-label="Причина изменения состава" value={reason} maxLength={500} onChange={(event) => { setReason(event.target.value); setConfirmed(false); }} placeholder={mode === "add" ? "Почему эта Analysis относится к той же физической точке?" : "Почему Analysis нужно снять с этой точки?"} /></label>
+        <label className="point-retire-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>Подтверждаю изменение одной Analysis в показанном составе. Analysis, Measurements и Source не удаляются.</span></label>
+        {localError && <p className="point-retire-error" role="alert">{localError}</p>}
+        <footer><button className="outline-button" type="button" onClick={onCancel} disabled={busy}>Отмена</button><button className="point-composition-submit" type="submit" disabled={!canConfirm}>{mode === "add" ? <Plus size={18} /> : <Minus size={18} />} {mode === "add" ? "Добавить Analysis" : "Снять Analysis"}</button></footer>
+      </form>
+    </section>
+  </div>;
 }
 
 function RetirePointDialog({ point, busy, onCancel, onConfirm }) {
@@ -117,6 +186,7 @@ export function AnalyticalPointsRegistry({
   onBack,
   onShowAnalyses,
   onRefresh,
+  onChangeMembership,
   onRetire,
   onUndo,
 }) {
@@ -128,6 +198,7 @@ export function AnalyticalPointsRegistry({
   const [selectedPointIds, setSelectedPointIds] = useState(initialPointId ? [initialPointId] : []);
   const [focusedPointId, setFocusedPointId] = useState(initialPointId);
   const [retirePoint, setRetirePoint] = useState(null);
+  const [compositionPoint, setCompositionPoint] = useState(null);
   const [undoError, setUndoError] = useState("");
   const analysisById = useMemo(() => new Map(analyses.map((analysis) => [analysis.analysis_id, analysis])), [analyses]);
   const methods = useMemo(() => [...new Set(items.flatMap((point) => point.methods || []))].sort((a, b) => a.localeCompare(b, "ru")), [items]);
@@ -230,7 +301,7 @@ export function AnalyticalPointsRegistry({
           </article>)}
         </section>
         <section><h3>Устойчивый ID</h3><code>{focusedPoint.analytical_point_id}</code><small>Создано: {createdLabel(focusedPoint.created_at)}</small></section>
-        <section className="point-registry-actions"><h3>Действия со связью</h3><button type="button" disabled={busy || !onRetire} onClick={() => setRetirePoint(focusedPoint)}><LinkBreak size={17} /> Разорвать связь</button><small>Операция попадёт в журнал и сможет быть отменена, пока точный состав точки не изменился.</small></section>
+        <section className="point-registry-actions"><h3>Действия со связью</h3><button className="point-composition-action" type="button" disabled={busy || !onChangeMembership} onClick={() => setCompositionPoint(focusedPoint)}><PencilSimple size={17} /> Изменить состав</button><button type="button" disabled={busy || !onRetire} onClick={() => setRetirePoint(focusedPoint)}><LinkBreak size={17} /> Разорвать связь</button><small>Каждое изменение попадёт в журнал и сможет быть отменено, пока точный состав точки не изменился.</small></section>
         <section className="point-journal"><h3>Operation Journal</h3>{recentOperations.length ? recentOperations.map((operation) => <article key={operation.operation_id}><div><b>{journalActionLabel(operation.action_kind)}</b><span className={operation.outcome === "undone" ? "undone" : ""}>{operation.outcome === "undone" ? "отменено" : "применено"}</span></div><small>{createdLabel(operation.created_at)} · {operation.actor}</small><p>{scopeCount(operation, "analysis_ids")} Analyses · {scopeCount(operation, "spatial_annotation_ids")} пространственных связей</p><code title={operation.operation_id}>{operation.operation_id}</code></article>) : <p>Операций пока нет.</p>}</section>
       </> : <div className="point-registry-inspector-empty"><LinkSimple size={25} /><span>Выбери строку реестра, чтобы проверить состав связи.</span></div>}
     </aside>
@@ -240,6 +311,7 @@ export function AnalyticalPointsRegistry({
       <div>{selectedPoints.slice(0, 4).map((point) => <button type="button" key={point.analytical_point_id} onClick={() => togglePoint(point.analytical_point_id)}>{point.point_name} <X size={13} /></button>)}</div>
       <button className="primary-button" type="button" onClick={() => onShowAnalyses(selectedAnalysisIds)} disabled={!selectedAnalysisIds.length}>Показать исходные Analyses</button>
     </div>}
+    {compositionPoint && <PointCompositionDialog point={compositionPoint} analyses={analyses} busy={busy} onCancel={() => setCompositionPoint(null)} onConfirm={onChangeMembership} />}
     {retirePoint && <RetirePointDialog point={retirePoint} busy={busy} onCancel={() => setRetirePoint(null)} onConfirm={onRetire} />}
   </div>;
 }

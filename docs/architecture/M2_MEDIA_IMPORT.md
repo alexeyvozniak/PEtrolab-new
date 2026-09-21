@@ -46,6 +46,8 @@ read-only предложения из имени файла, массовое п
 | `analytical_point.create` | да | явно созданная Analytical Point и contributing Analysis IDs |
 | `analytical_point.list` | нет | устойчивые Point/Analysis/Spatial Annotation/Media Asset IDs, Sample, типы связи, методы, время создания, исходно-пиксельная геометрия и provenance размещений |
 | `analytical_point.retire` | да | retraction marker и Operation Journal Entry при точном совпадении ожидаемого состава |
+| `analytical_point.analysis.add` | да | одна Analysis–Point связь, проверенный exact scope и inverse payload |
+| `analytical_point.analysis.remove` | да | снятие одной Analysis–Point связи без удаления Analysis/Measurement/Source; минимум две Analyses |
 | `operation_journal.list` | нет | actor, timestamp, exact entity IDs, параметры, outcome и inverse payload |
 | `operation_journal.undo` | да | восстановленная либо снятая связь после проверки текущего exact scope |
 | `media.inspect_sources` | нет | форматы, размеры, SHA-256 и группы дубликатов |

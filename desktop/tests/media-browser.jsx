@@ -19,6 +19,7 @@ const points = [
 const analyses = [
   { analysis_id: "synthetic-epma", source_name: "KIV-2_EPMA.xlsx", sheet_name: "Data", source_row_number: 9, source_orientation: "rows_are_analyses", identity: { Analysis: "P-07-EPMA", Sample: "KIV-2", Point: "P-07" }, source_metadata: {}, measurements: { SiO2: { raw_token: "48.2", unit: "wt.%", method: "EPMA" } }, measurement_list: [{ field: "SiO2", raw_token: "48.2", unit: "wt.%", method: "EPMA" }] },
   { analysis_id: "synthetic-la", source_name: "KIV-2_LA-ICP-MS.xlsx", sheet_name: "Trace", source_row_number: 11, source_orientation: "rows_are_analyses", identity: { Analysis: "P-07-LA", Sample: "KIV-2", Point: "P-07" }, source_metadata: {}, measurements: { Rb: { raw_token: "12.4", unit: "ppm", method: "LA-ICP-MS" } }, measurement_list: [{ field: "Rb", raw_token: "12.4", unit: "ppm", method: "LA-ICP-MS" }] },
+  { analysis_id: "synthetic-candidate", source_name: "KIV-3_EPMA.xlsx", sheet_name: "Data", source_row_number: 6, source_orientation: "rows_are_analyses", identity: { Analysis: "P-11-EPMA", Sample: "KIV-3", Point: "P-11" }, source_metadata: {}, measurements: { SiO2: { raw_token: "47.6", unit: "wt.%", method: "EPMA" } }, measurement_list: [{ field: "SiO2", raw_token: "47.6", unit: "wt.%", method: "EPMA" }] },
 ];
 const canvas = document.createElement("canvas");
 canvas.width = 640; canvas.height = 480;
@@ -59,6 +60,18 @@ window.__TAURI_INTERNALS__ = {
         journal = [operation, ...journal];
         return response({ analytical_point_id: point.analytical_point_id, sample_name: point.sample_name, point_name: point.point_name, operation });
       }
+      case "analytical_point.analysis.add": {
+        const point = activePoints.find((item) => item.analytical_point_id === payload.analytical_point_id);
+        const analysisIds = [...point.analysis_ids, payload.analysis_id];
+        const operation = {
+          operation_id: "operation-add-analysis", action_kind: "analytical_point.analysis.add", actor: "local-desktop-user", entity_type: "analytical_point",
+          entity_ids: { analytical_point_ids: [point.analytical_point_id], analysis_ids: analysisIds, spatial_annotation_ids: (point.placements || []).map((placement) => placement.spatial_annotation_id), media_asset_ids: (point.placements || []).map((placement) => placement.media_asset_id) },
+          parameters: { reason: payload.reason, analysis_id: payload.analysis_id, link_type: payload.link_type, sample_name: point.sample_name, point_name: point.point_name }, outcome: "applied", inverse_action_kind: "analytical_point.analysis.remove", created_at: "2026-09-15T10:39:00Z",
+        };
+        activePoints = activePoints.map((item) => item.analytical_point_id === point.analytical_point_id ? { ...item, analysis_ids: analysisIds, link_types: [...new Set([...item.link_types, payload.link_type])] } : item);
+        journal = [operation, ...journal];
+        return response({ analytical_point_id: point.analytical_point_id, analysis_id: payload.analysis_id, analysis_ids: analysisIds, link_type: payload.link_type, effect: "analysis_added", operation });
+      }
       case "operation_journal.undo": {
         activePoints = [...points];
         journal = journal.map((item) => item.operation_id === payload.operation_id ? { ...item, outcome: "undone", undone_by_operation_id: "operation-undo-p07" } : item);
@@ -89,7 +102,7 @@ createRoot(document.getElementById("root")).render(<App />);
 
 // Deterministic screenshot routes for registry and reversible unlink QA states.
 const qaState = new URLSearchParams(window.location.search).get("qa");
-if (["registry", "operation"].includes(qaState)) {
+if (["registry", "operation", "composition"].includes(qaState)) {
   const clickWhenReady = (find, next) => {
     const started = Date.now();
     const timer = window.setInterval(() => {
@@ -109,7 +122,9 @@ if (["registry", "operation"].includes(qaState)) {
       () => [...document.querySelectorAll("button")].find((button) => button.textContent.includes("Analytical Points")),
       () => clickWhenReady(() => qaState === "operation"
         ? [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Разорвать связь")
-        : document.querySelector('input[aria-label="Выбрать Analytical Point P-07"]')),
+        : qaState === "composition"
+          ? [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Изменить состав")
+          : document.querySelector('input[aria-label="Выбрать Analytical Point P-07"]')),
     ),
   );
 }

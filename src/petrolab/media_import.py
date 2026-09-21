@@ -570,6 +570,172 @@ def retire_analytical_point(
         connection.close()
 
 
+def _active_point_metadata(connection: sqlite3.Connection, point_id: str) -> sqlite3.Row:
+    point = connection.execute(
+        """SELECT ap.point_name, s.sample_name
+           FROM analytical_point ap JOIN sample s ON s.sample_id = ap.sample_id
+           WHERE ap.analytical_point_id = ?""",
+        (point_id,),
+    ).fetchone()
+    if point is None:
+        _fail("POINT_NOT_FOUND", "Analytical Point does not exist.", analytical_point_id=point_id)
+    if connection.execute(
+        "SELECT 1 FROM analytical_point_retraction WHERE analytical_point_id = ?", (point_id,)
+    ).fetchone():
+        _fail("POINT_ALREADY_RETRACTED", "Analytical Point link is retracted.", analytical_point_id=point_id)
+    return point
+
+
+def _verify_point_revision(
+    connection: sqlite3.Connection,
+    point_id: str,
+    expected_analysis_ids: list[str],
+    expected_spatial_annotation_ids: list[str],
+) -> dict[str, list[str]]:
+    expected_analyses = _expected_uuid_list(expected_analysis_ids, "expected_analysis_ids")
+    expected_annotations = _expected_uuid_list(expected_spatial_annotation_ids, "expected_spatial_annotation_ids")
+    scope = _point_scope(connection, point_id)
+    if scope["analysis_ids"] != expected_analyses or scope["spatial_annotation_ids"] != expected_annotations:
+        _fail(
+            "POINT_REVISION_CONFLICT",
+            "Analytical Point membership or placement changed after review.",
+            analytical_point_id=point_id,
+            current_analysis_ids=scope["analysis_ids"],
+            current_spatial_annotation_ids=scope["spatial_annotation_ids"],
+        )
+    return scope
+
+
+def add_analysis_to_analytical_point(
+    database_path: str | Path,
+    analytical_point_id: str,
+    expected_analysis_ids: list[str],
+    expected_spatial_annotation_ids: list[str],
+    analysis_id: str,
+    link_type: str,
+    reason: str,
+    actor: str = "local-desktop-user",
+) -> dict[str, Any]:
+    point_id = _uuid(analytical_point_id, "analytical_point_id")
+    target_analysis_id = _uuid(analysis_id, "analysis_id")
+    if link_type not in LINK_TYPES:
+        _fail("INVALID_ASSIGNMENT", "Analytical Point link type is unsupported.", link_type=link_type)
+    reason = _text(reason, "reason", 500)
+    actor = _text(actor, "actor")
+    connection = open_project(database_path)
+    try:
+        point = _active_point_metadata(connection, point_id)
+        before_scope = _verify_point_revision(
+            connection, point_id, expected_analysis_ids, expected_spatial_annotation_ids
+        )
+        if connection.execute("SELECT 1 FROM analysis WHERE analysis_id = ?", (target_analysis_id,)).fetchone() is None:
+            _fail("ANALYSIS_NOT_FOUND", "Analysis does not exist.", analysis_id=target_analysis_id)
+        if target_analysis_id in before_scope["analysis_ids"]:
+            _fail("ANALYSIS_ALREADY_LINKED", "Analysis is already linked to this Analytical Point.", analysis_id=target_analysis_id)
+        timestamp = _now()
+        with connection:
+            connection.execute(
+                "INSERT INTO analytical_point_analysis (analytical_point_id, analysis_id, link_type, created_at) VALUES (?, ?, ?, ?)",
+                (point_id, target_analysis_id, link_type, timestamp),
+            )
+            scope = _point_scope(connection, point_id)
+            operation = _write_journal_entry(
+                connection,
+                "analytical_point.analysis.add",
+                actor,
+                scope,
+                {
+                    "analysis_id": target_analysis_id,
+                    "link_type": link_type,
+                    "reason": reason,
+                    "sample_name": point["sample_name"],
+                    "point_name": point["point_name"],
+                    "before_analysis_ids": before_scope["analysis_ids"],
+                },
+                "analytical_point.analysis.remove",
+                {"analytical_point_id": point_id, "analysis_id": target_analysis_id, "expected_scope": scope},
+                timestamp,
+            )
+        return {
+            "analytical_point_id": point_id,
+            "analysis_id": target_analysis_id,
+            "analysis_ids": scope["analysis_ids"],
+            "link_type": link_type,
+            "effect": "analysis_added",
+            "operation": operation,
+        }
+    finally:
+        connection.close()
+
+
+def remove_analysis_from_analytical_point(
+    database_path: str | Path,
+    analytical_point_id: str,
+    expected_analysis_ids: list[str],
+    expected_spatial_annotation_ids: list[str],
+    analysis_id: str,
+    reason: str,
+    actor: str = "local-desktop-user",
+) -> dict[str, Any]:
+    point_id = _uuid(analytical_point_id, "analytical_point_id")
+    target_analysis_id = _uuid(analysis_id, "analysis_id")
+    reason = _text(reason, "reason", 500)
+    actor = _text(actor, "actor")
+    connection = open_project(database_path)
+    try:
+        point = _active_point_metadata(connection, point_id)
+        before_scope = _verify_point_revision(
+            connection, point_id, expected_analysis_ids, expected_spatial_annotation_ids
+        )
+        relation = connection.execute(
+            "SELECT link_type FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+            (point_id, target_analysis_id),
+        ).fetchone()
+        if relation is None:
+            _fail("ANALYSIS_NOT_LINKED", "Analysis is not linked to this Analytical Point.", analysis_id=target_analysis_id)
+        if len(before_scope["analysis_ids"]) <= 2:
+            _fail("POINT_MINIMUM_ANALYSES", "Analytical Point must keep at least two Analyses.", analytical_point_id=point_id)
+        timestamp = _now()
+        with connection:
+            connection.execute(
+                "DELETE FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+                (point_id, target_analysis_id),
+            )
+            scope = _point_scope(connection, point_id)
+            operation = _write_journal_entry(
+                connection,
+                "analytical_point.analysis.remove",
+                actor,
+                scope,
+                {
+                    "analysis_id": target_analysis_id,
+                    "link_type": relation["link_type"],
+                    "reason": reason,
+                    "sample_name": point["sample_name"],
+                    "point_name": point["point_name"],
+                    "before_analysis_ids": before_scope["analysis_ids"],
+                },
+                "analytical_point.analysis.add",
+                {
+                    "analytical_point_id": point_id,
+                    "analysis_id": target_analysis_id,
+                    "link_type": relation["link_type"],
+                    "expected_scope": scope,
+                },
+                timestamp,
+            )
+        return {
+            "analytical_point_id": point_id,
+            "analysis_id": target_analysis_id,
+            "analysis_ids": scope["analysis_ids"],
+            "link_type": relation["link_type"],
+            "effect": "analysis_removed",
+            "operation": operation,
+        }
+    finally:
+        connection.close()
+
+
 def list_operation_journal(database_path: str | Path, limit: int = 50) -> dict[str, Any]:
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
         _fail("INVALID_ASSIGNMENT", "Journal limit must be an integer from 1 to 100.", limit=limit)
@@ -626,7 +792,12 @@ def undo_operation(
             _fail("OPERATION_NOT_FOUND", "Operation Journal entry does not exist.", operation_id=target_id)
         if target["outcome"] != "applied" or target["undone_by_operation_id"] is not None:
             _fail("OPERATION_ALREADY_UNDONE", "Operation has already been undone.", operation_id=target_id)
-        if target["action_kind"] not in {"analytical_point.create", "analytical_point.retire"}:
+        if target["action_kind"] not in {
+            "analytical_point.create",
+            "analytical_point.retire",
+            "analytical_point.analysis.add",
+            "analytical_point.analysis.remove",
+        }:
             _fail("UNDO_UNSUPPORTED", "This operation does not have a supported inverse action.", operation_id=target_id)
         scope = json.loads(target["entity_ids_json"])
         parameters = json.loads(target["parameters_json"])
@@ -645,18 +816,59 @@ def undo_operation(
                 _fail("POINT_REVISION_CONFLICT", "Analytical Point retraction state changed after review.", analytical_point_id=point_id)
             effect = "restored"
             inverse_action = "analytical_point.retire"
-        else:
+        elif target["action_kind"] == "analytical_point.create":
             if retraction is not None:
                 _fail("POINT_REVISION_CONFLICT", "Analytical Point is no longer active.", analytical_point_id=point_id)
             effect = "retracted"
             inverse_action = "analytical_point.restore"
+        else:
+            if retraction is not None:
+                _fail("POINT_REVISION_CONFLICT", "Analytical Point is no longer active.", analytical_point_id=point_id)
+            target_analysis_id = _uuid(parameters.get("analysis_id"), "analysis_id")
+            link_type = parameters.get("link_type")
+            if link_type not in LINK_TYPES:
+                _fail("JOURNAL_CORRUPT", "Operation Journal link type is invalid.", operation_id=target_id)
+            relation = connection.execute(
+                "SELECT link_type FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+                (point_id, target_analysis_id),
+            ).fetchone()
+            if target["action_kind"] == "analytical_point.analysis.add":
+                if relation is None or relation["link_type"] != link_type or len(current_scope["analysis_ids"]) <= 2:
+                    _fail("POINT_REVISION_CONFLICT", "Analytical Point membership changed after review.", analytical_point_id=point_id)
+                effect = "analysis_removed"
+                inverse_action = "analytical_point.analysis.add"
+            else:
+                if relation is not None or connection.execute(
+                    "SELECT 1 FROM analysis WHERE analysis_id = ?", (target_analysis_id,)
+                ).fetchone() is None:
+                    _fail("POINT_REVISION_CONFLICT", "Analytical Point membership changed after review.", analytical_point_id=point_id)
+                effect = "analysis_added"
+                inverse_action = "analytical_point.analysis.remove"
         timestamp = _now()
         with connection:
+            if target["action_kind"] == "analytical_point.retire":
+                connection.execute("DELETE FROM analytical_point_retraction WHERE analytical_point_id = ?", (point_id,))
+            elif target["action_kind"] == "analytical_point.create":
+                connection.execute(
+                    "INSERT INTO analytical_point_retraction (analytical_point_id, operation_id, reason, created_at) VALUES (?, ?, ?, ?)",
+                    (point_id, target_id, "Undo analytical_point.create", timestamp),
+                )
+            elif target["action_kind"] == "analytical_point.analysis.add":
+                connection.execute(
+                    "DELETE FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+                    (point_id, target_analysis_id),
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO analytical_point_analysis (analytical_point_id, analysis_id, link_type, created_at) VALUES (?, ?, ?, ?)",
+                    (point_id, target_analysis_id, link_type, timestamp),
+                )
+            resulting_scope = _point_scope(connection, point_id)
             undo_entry = _write_journal_entry(
                 connection,
                 "operation.undo",
                 actor,
-                scope,
+                resulting_scope,
                 {
                     "target_operation_id": target_id,
                     "target_action_kind": target["action_kind"],
@@ -664,15 +876,13 @@ def undo_operation(
                     "point_name": parameters.get("point_name"),
                 },
                 inverse_action,
-                {"analytical_point_id": point_id, "expected_scope": scope},
+                {"analytical_point_id": point_id, "expected_scope": resulting_scope},
                 timestamp,
             )
-            if target["action_kind"] == "analytical_point.retire":
-                connection.execute("DELETE FROM analytical_point_retraction WHERE analytical_point_id = ?", (point_id,))
-            else:
+            if target["action_kind"] == "analytical_point.create":
                 connection.execute(
-                    "INSERT INTO analytical_point_retraction (analytical_point_id, operation_id, reason, created_at) VALUES (?, ?, ?, ?)",
-                    (point_id, undo_entry["operation_id"], "Undo analytical_point.create", timestamp),
+                    "UPDATE analytical_point_retraction SET operation_id = ? WHERE analytical_point_id = ?",
+                    (undo_entry["operation_id"], point_id),
                 )
             connection.execute(
                 "UPDATE operation_journal_entry SET outcome = 'undone', undone_by_operation_id = ? WHERE operation_id = ?",

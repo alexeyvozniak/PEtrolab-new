@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from petrolab.import_apply import apply_import_plan, open_project  # noqa: E402
 from petrolab.import_preview import ImportCommandError  # noqa: E402
 from petrolab.media_import import (  # noqa: E402
+    add_analysis_to_analytical_point,
     apply_media_import_plan,
     create_analytical_point,
     create_media_import_plan,
@@ -27,6 +28,7 @@ from petrolab.media_import import (  # noqa: E402
     inspect_media_sources,
     list_analytical_points,
     list_operation_journal,
+    remove_analysis_from_analytical_point,
     retire_analytical_point,
     undo_operation,
 )
@@ -194,6 +196,100 @@ class MediaImportTests(unittest.TestCase):
             with closing(sqlite3.connect(database)) as connection:
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point WHERE analytical_point_id = ?", (point["analytical_point_id"],)).fetchone()[0], 1)
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point_analysis WHERE analytical_point_id = ?", (point["analytical_point_id"],)).fetchone()[0], 2)
+
+    def test_analysis_can_be_added_and_undone_without_changing_scientific_entities(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, other = self._project_with_points(Path(directory_name))
+            target_analysis_id = other["analysis_ids"][0]
+            with closing(sqlite3.connect(database)) as connection:
+                before = {
+                    table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    for table in ("analysis", "measurement", "source_file")
+                }
+            added = add_analysis_to_analytical_point(
+                database,
+                point["analytical_point_id"],
+                point["analysis_ids"],
+                [],
+                target_analysis_id,
+                "same_zone",
+                "Один участок зерна подтверждён повторной проверкой",
+            )
+            self.assertEqual(added["effect"], "analysis_added")
+            self.assertEqual(added["operation"]["action_kind"], "analytical_point.analysis.add")
+            self.assertEqual(len(added["analysis_ids"]), 3)
+            with closing(sqlite3.connect(database)) as connection:
+                for table, count in before.items():
+                    self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], count)
+                self.assertEqual(connection.execute(
+                    "SELECT link_type FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+                    (point["analytical_point_id"], target_analysis_id),
+                ).fetchone()[0], "same_zone")
+
+            undone = undo_operation(database, added["operation"]["operation_id"])
+            self.assertEqual(undone["effect"], "analysis_removed")
+            projected = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            self.assertEqual(sorted(projected["analysis_ids"]), sorted(point["analysis_ids"]))
+
+    def test_analysis_can_be_removed_and_undone_but_point_keeps_two_analyses(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, other = self._project_with_points(Path(directory_name))
+            target_analysis_id = other["analysis_ids"][0]
+            added = add_analysis_to_analytical_point(
+                database, point["analytical_point_id"], point["analysis_ids"], [],
+                target_analysis_id, "repeat_measurement", "Добавление для проверки снятия",
+            )
+            with closing(sqlite3.connect(database)) as connection:
+                entity_counts = {
+                    table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    for table in ("analysis", "measurement", "source_file")
+                }
+            removed = remove_analysis_from_analytical_point(
+                database, point["analytical_point_id"], added["analysis_ids"], [],
+                target_analysis_id, "Analysis относится к другой физической точке",
+            )
+            self.assertEqual(removed["effect"], "analysis_removed")
+            self.assertEqual(removed["operation"]["action_kind"], "analytical_point.analysis.remove")
+            self.assertEqual(removed["operation"]["parameters"]["link_type"], "repeat_measurement")
+            self.assertEqual(len(removed["analysis_ids"]), 2)
+            with closing(sqlite3.connect(database)) as connection:
+                for table, count in entity_counts.items():
+                    self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], count)
+            restored = undo_operation(database, removed["operation"]["operation_id"])
+            self.assertEqual(restored["effect"], "analysis_added")
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute(
+                    "SELECT link_type FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+                    (point["analytical_point_id"], target_analysis_id),
+                ).fetchone()[0], "repeat_measurement")
+
+            current = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            remove_analysis_from_analytical_point(
+                database, point["analytical_point_id"], current["analysis_ids"], [],
+                target_analysis_id, "Вернуть состав к двум Analysis",
+            )
+            with self.assertRaises(ImportCommandError) as minimum:
+                remove_analysis_from_analytical_point(
+                    database, point["analytical_point_id"], point["analysis_ids"], [],
+                    point["analysis_ids"][0], "Нельзя оставить одну Analysis",
+                )
+            self.assertEqual(minimum.exception.code, "POINT_MINIMUM_ANALYSES")
+
+    def test_membership_change_rejects_stale_scope_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, other = self._project_with_points(Path(directory_name))
+            with self.assertRaises(ImportCommandError) as raised:
+                add_analysis_to_analytical_point(
+                    database, point["analytical_point_id"], point["analysis_ids"][:1], [],
+                    other["analysis_ids"][0], "same_point", "Устаревший состав",
+                )
+            self.assertEqual(raised.exception.code, "POINT_REVISION_CONFLICT")
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM operation_journal_entry").fetchone()[0], 2)
+                self.assertEqual(connection.execute(
+                    "SELECT COUNT(*) FROM analytical_point_analysis WHERE analytical_point_id = ?",
+                    (point["analytical_point_id"],),
+                ).fetchone()[0], 2)
 
     def test_windows_batch_file_is_not_treated_as_an_image(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
