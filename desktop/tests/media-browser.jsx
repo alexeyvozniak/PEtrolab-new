@@ -28,6 +28,8 @@ context.fillStyle = "#fff"; context.font = "20px sans-serif";
 context.fillText("SYNTHETIC QA IMAGE — 640 × 480", 120, 230);
 const preview = canvas.toDataURL("image/png");
 let requestIndex = 0;
+let activePoints = [...points];
+let journal = [];
 // The internal QA origin uses HTTP; production Tauri provides randomUUID.
 if (!window.crypto.randomUUID) window.crypto.randomUUID = () => `synthetic-request-${++requestIndex}`;
 
@@ -44,7 +46,24 @@ window.__TAURI_INTERNALS__ = {
       case "project.analyses.list": return response({ total: analyses.length, returned: analyses.length, offset: 0, has_more: false, source_count: 2, import_batch_count: 1, latest_import: null, analyses });
       case "project.mineral_identification.list": return response({ total: analyses.length, identifications: [], status_counts: {} });
       case "media.inspect_sources": return response({ items: items.filter((item) => payload.source_paths.includes(item.source_path)), duplicate_groups: [] });
-      case "analytical_point.list": return response({ total: 2, sample_names: ["KIV-2", "OTHER"], items: points });
+      case "analytical_point.list": return response({ total: activePoints.length, sample_names: [...new Set(activePoints.map((point) => point.sample_name))], items: activePoints });
+      case "operation_journal.list": return response({ total: journal.length, items: journal });
+      case "analytical_point.retire": {
+        const point = points.find((item) => item.analytical_point_id === payload.analytical_point_id);
+        const operation = {
+          operation_id: "operation-retire-p07", action_kind: "analytical_point.retire", actor: "local-desktop-user",
+          entity_type: "analytical_point", entity_ids: { analytical_point_ids: [point.analytical_point_id], analysis_ids: point.analysis_ids, spatial_annotation_ids: (point.placements || []).map((placement) => placement.spatial_annotation_id), media_asset_ids: (point.placements || []).map((placement) => placement.media_asset_id) },
+          parameters: { reason: payload.reason, sample_name: point.sample_name, point_name: point.point_name }, outcome: "applied", inverse_action_kind: "analytical_point.restore", created_at: "2026-09-15T10:40:00Z",
+        };
+        activePoints = activePoints.filter((item) => item.analytical_point_id !== point.analytical_point_id);
+        journal = [operation, ...journal];
+        return response({ analytical_point_id: point.analytical_point_id, sample_name: point.sample_name, point_name: point.point_name, operation });
+      }
+      case "operation_journal.undo": {
+        activePoints = [...points];
+        journal = journal.map((item) => item.operation_id === payload.operation_id ? { ...item, outcome: "undone", undone_by_operation_id: "operation-undo-p07" } : item);
+        return response({ target_operation_id: payload.operation_id, analytical_point_id: "point-1", effect: "restored", operation: { operation_id: "operation-undo-p07", action_kind: "operation.undo" } });
+      }
       case "media.preview": {
         const item = items.find((entry) => entry.source_path === payload.source_path);
         return response({ ...item, preview_data_url: preview, preview_width_px: 640, preview_height_px: 480 });
@@ -68,8 +87,9 @@ window.__TAURI_INTERNALS__ = {
 
 createRoot(document.getElementById("root")).render(<App />);
 
-// Deterministic screenshot route for the read-only registry QA state.
-if (new URLSearchParams(window.location.search).get("qa") === "registry") {
+// Deterministic screenshot routes for registry and reversible unlink QA states.
+const qaState = new URLSearchParams(window.location.search).get("qa");
+if (["registry", "operation"].includes(qaState)) {
   const clickWhenReady = (find, next) => {
     const started = Date.now();
     const timer = window.setInterval(() => {
@@ -87,7 +107,9 @@ if (new URLSearchParams(window.location.search).get("qa") === "registry") {
     () => [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Анализы"),
     () => clickWhenReady(
       () => [...document.querySelectorAll("button")].find((button) => button.textContent.includes("Analytical Points")),
-      () => clickWhenReady(() => document.querySelector('input[aria-label="Выбрать Analytical Point P-07"]')),
+      () => clickWhenReady(() => qaState === "operation"
+        ? [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Разорвать связь")
+        : document.querySelector('input[aria-label="Выбрать Analytical Point P-07"]')),
     ),
   );
 }

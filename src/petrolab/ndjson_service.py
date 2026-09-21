@@ -34,6 +34,9 @@ from .media_import import (
     create_media_preview,
     inspect_media_sources,
     list_analytical_points,
+    list_operation_journal,
+    retire_analytical_point,
+    undo_operation,
 )
 from .formula_methods import list_methods
 from .formula_workflow import preview_formula, save_formula, list_formula_runs
@@ -122,6 +125,13 @@ def _optional_string(params: Mapping[str, Any], name: str) -> str | None:
 def _string_list(params: Mapping[str, Any], name: str) -> list[str]:
     value = params.get(name)
     if not isinstance(value, list) or not value or not all(isinstance(item, str) and item for item in value):
+        raise ValueError(name)
+    return value
+
+
+def _string_array(params: Mapping[str, Any], name: str) -> list[str]:
+    value = params.get(name)
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
         raise ValueError(name)
     return value
 
@@ -296,6 +306,30 @@ def _dispatch_analytical_point_list(params: Mapping[str, Any]) -> dict[str, Any]
     return {"result": list_analytical_points(_project_database_path(params))}
 
 
+def _dispatch_analytical_point_retire(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": retire_analytical_point(
+        _project_database_path(params),
+        _string(params, "analytical_point_id"),
+        _string_array(params, "expected_analysis_ids"),
+        _string_array(params, "expected_spatial_annotation_ids"),
+        _string(params, "reason"),
+    )}
+
+
+def _dispatch_operation_journal_list(params: Mapping[str, Any]) -> dict[str, Any]:
+    raw_limit = params.get("limit", 50)
+    if not isinstance(raw_limit, int):
+        raise ValueError("limit")
+    return {"result": list_operation_journal(_project_database_path(params), raw_limit)}
+
+
+def _dispatch_operation_journal_undo(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": undo_operation(
+        _project_database_path(params),
+        _string(params, "operation_id"),
+    )}
+
+
 def _dispatch_media_inspect(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": inspect_media_sources(_string_list(params, "source_paths"))}
 
@@ -353,6 +387,9 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.recipe.save_revision": _dispatch_recipe_save_revision,
     "analytical_point.create": _dispatch_analytical_point_create,
     "analytical_point.list": _dispatch_analytical_point_list,
+    "analytical_point.retire": _dispatch_analytical_point_retire,
+    "operation_journal.list": _dispatch_operation_journal_list,
+    "operation_journal.undo": _dispatch_operation_journal_undo,
     "media.inspect_sources": _dispatch_media_inspect,
     "media.preview": _dispatch_media_preview,
     "media.import.plan": _dispatch_media_plan,

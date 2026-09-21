@@ -197,3 +197,24 @@ export const createAnalyticalPoint = (projectDatabasePath, sampleName, pointName
     analysis_ids: analysisIds,
     link_type: linkType,
   });
+
+export const retireAnalyticalPoint = (projectDatabasePath, point, reason) =>
+  invokePetrolab("analytical_point.retire", {
+    project_database_path: projectDatabasePath,
+    analytical_point_id: point.analytical_point_id,
+    expected_analysis_ids: point.analysis_ids || [],
+    expected_spatial_annotation_ids: (point.placements || []).map((placement) => placement.spatial_annotation_id),
+    reason,
+  });
+
+export const listOperationJournal = (projectDatabasePath, limit = 50) =>
+  invokePetrolab("operation_journal.list", {
+    project_database_path: projectDatabasePath,
+    limit,
+  });
+
+export const undoOperation = (projectDatabasePath, operationId) =>
+  invokePetrolab("operation_journal.undo", {
+    project_database_path: projectDatabasePath,
+    operation_id: operationId,
+  });

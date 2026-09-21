@@ -7,9 +7,18 @@
 .point-registry-note { display: flex; align-items: flex-start; gap: 7px; margin-top: 18px; padding: 10px; border: 1px solid #dfe7e1; border-radius: 8px; background: #f4f8f5; color: #657269; font-size: 9px; line-height: 1.45; }
 .point-registry-note svg { flex: 0 0 auto; color: #47735a; }
 .point-registry-main { min-width: 0; display: grid; grid-template-rows: auto minmax(220px, 1fr) minmax(145px, .42fr); overflow: hidden; }
+.point-registry-main.has-operation { grid-template-rows: auto auto minmax(190px, 1fr) minmax(145px, .42fr); }
 .point-registry-toolbar { min-height: 57px; display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-bottom: 1px solid #e1e7e2; }
 .point-registry-toolbar > span { color: #738078; font-size: 9px; white-space: nowrap; }
 .point-registry-toolbar .outline-button { min-height: 36px; padding: 0 10px; font-size: 9px; white-space: nowrap; }
+.point-operation-banner { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; padding: 8px 12px; border-bottom: 1px solid #cbdccf; background: #edf6ef; color: #315d45; }
+.point-operation-banner > div { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.point-operation-banner p { min-width: 0; display: grid; gap: 2px; margin: 0; }
+.point-operation-banner b { font-size: 10px; }
+.point-operation-banner span { color: #64756a; font-size: 8px; }
+.point-operation-banner button { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid #9db5a4; border-radius: 7px; background: #fff; color: #315d45; font-size: 9px; font-weight: 750; }
+.point-operation-banner button:disabled { cursor: not-allowed; opacity: .55; }
+.point-operation-banner > small { grid-column: 1 / -1; color: #a33a36; font-size: 8px; }
 .point-registry-search { min-width: 150px; flex: 1; display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 10px; border: 1px solid #d1dad3; border-radius: 8px; background: #fff; color: #77837b; }
 .point-registry-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: #34423a; font-size: 10px; }
 .point-registry-table-scroll { min-width: 0; overflow: auto; border-bottom: 1px solid #e1e7e2; }
@@ -68,6 +77,18 @@
 .point-placement-card dl > div { grid-template-columns: 88px minmax(0, 1fr); padding: 3px 0; }
 .point-placement-card dd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .point-placement-card em { padding: 6px; border-radius: 6px; background: #fff4dc; color: #76541e; font-size: 8px; font-style: normal; line-height: 1.4; }
+.point-registry-actions button { width: 100%; min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #d5a5a0; border-radius: 7px; background: #fff8f7; color: #9a3f38; font-size: 9px; font-weight: 750; }
+.point-registry-actions button:disabled { cursor: not-allowed; opacity: .55; }
+.point-registry-actions small { line-height: 1.45; }
+.point-journal article { display: grid; gap: 4px; margin-top: 8px; padding: 8px; border: 1px solid #e0e6e1; border-radius: 7px; background: #fafcfb; }
+.point-journal article > div { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+.point-journal article b { color: #36473d; font-size: 9px; }
+.point-journal article span { padding: 2px 5px; border-radius: 999px; background: #e6f2e9; color: #2f714b; font-size: 7px; font-weight: 750; }
+.point-journal article span.undone { background: #efefed; color: #6f7772; }
+.point-journal article small,
+.point-journal article p { margin: 0; color: #7a867e; font-size: 8px; }
+.point-journal article code { overflow: hidden; color: #8a948e; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.point-journal > p { color: #7a867e; font-size: 9px; }
 .point-registry-inspector-empty { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: #77827b; font-size: 10px; line-height: 1.5; text-align: center; }
 .point-registry-selection { position: absolute; z-index: 5; right: 270px; bottom: 10px; left: 190px; min-height: 54px; display: grid; grid-template-columns: minmax(220px, auto) minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid #cbd8ce; border-radius: 10px; background: rgba(255, 255, 255, .97); box-shadow: 0 8px 24px rgba(34, 53, 42, .13); }
 .point-registry-selection > div:first-child { min-width: 0; display: grid; grid-template-columns: auto auto; align-items: center; justify-content: start; gap: 2px 6px; color: #315d45; }
@@ -75,6 +96,32 @@
 .point-registry-selection > div:nth-child(2) { min-width: 0; display: flex; gap: 5px; overflow: hidden; }
 .point-registry-selection > div:nth-child(2) button { min-height: 29px; display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid #d4ddd6; border-radius: 7px; background: #f5f8f5; color: #314038; font-size: 8px; white-space: nowrap; }
 .point-registry-selection > .primary-button { min-height: 36px; padding: 0 11px; font-size: 9px; white-space: nowrap; }
+
+.point-retire-backdrop { position: fixed; z-index: 40; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(27, 37, 31, .42); }
+.point-retire-dialog { width: min(560px, 100%); max-height: calc(100vh - 48px); overflow: auto; border: 1px solid #d8dfda; border-radius: 13px; background: #fff; box-shadow: 0 22px 65px rgba(21, 35, 27, .24); }
+.point-retire-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 17px 19px; border-bottom: 1px solid #e2e7e3; }
+.point-retire-dialog > header span { color: #9a5149; font-size: 9px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.point-retire-dialog h2 { margin: 4px 0 0; color: #2f3e35; font-size: 18px; }
+.point-retire-warning { display: flex; align-items: flex-start; gap: 10px; margin: 14px 18px 0; padding: 11px; border: 1px solid #ecd0cc; border-radius: 8px; background: #fff7f5; color: #9b443d; }
+.point-retire-warning svg { flex: 0 0 auto; }
+.point-retire-warning p { display: grid; gap: 4px; margin: 0; }
+.point-retire-warning b { font-size: 10px; }
+.point-retire-warning span { color: #765c57; font-size: 9px; line-height: 1.45; }
+.point-retire-scope { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 12px 18px; padding: 10px; border: 1px solid #e0e5e1; border-radius: 8px; background: #fafbfa; }
+.point-retire-scope > div { display: grid; gap: 3px; }
+.point-retire-scope span { color: #7b867f; font-size: 8px; }
+.point-retire-scope b { color: #35463c; font-size: 10px; }
+.point-retire-scope code { grid-column: 1 / -1; overflow: hidden; color: #828d86; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.point-retire-dialog form { display: grid; gap: 13px; padding: 3px 18px 18px; }
+.point-retire-dialog form > label:first-child { display: grid; gap: 6px; color: #5d6a62; font-size: 9px; font-weight: 750; }
+.point-retire-dialog textarea { min-height: 82px; resize: vertical; border: 1px solid #cfd8d1; border-radius: 8px; padding: 9px 10px; color: #34423a; font: inherit; font-size: 10px; line-height: 1.45; }
+.point-retire-confirm { display: flex; align-items: flex-start; gap: 8px; color: #5f6d64; font-size: 9px; line-height: 1.45; }
+.point-retire-confirm input { margin-top: 2px; }
+.point-retire-error { margin: 0; color: #a33a36; font-size: 9px; }
+.point-retire-dialog footer { display: flex; justify-content: flex-end; gap: 8px; }
+.point-retire-dialog footer button { min-height: 36px; padding: 0 12px; }
+.point-retire-submit { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #9d433d; border-radius: 7px; background: #a84b43; color: #fff; font-size: 9px; font-weight: 750; }
+.point-retire-submit:disabled { cursor: not-allowed; opacity: .48; }
 
 @media (max-width: 1050px) {
   .point-registry { grid-template-columns: 155px minmax(0, 1fr) 220px; }

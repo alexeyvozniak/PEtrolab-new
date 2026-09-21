@@ -261,6 +261,82 @@ def _method_label(raw: Any) -> str | None:
     return None
 
 
+def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
+    return connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+    ).fetchone() is not None
+
+
+def _point_scope(connection: sqlite3.Connection, point_id: str) -> dict[str, list[str]]:
+    point = connection.execute(
+        "SELECT 1 FROM analytical_point WHERE analytical_point_id = ?", (point_id,)
+    ).fetchone()
+    if point is None:
+        _fail("POINT_NOT_FOUND", "Analytical Point does not exist.", analytical_point_id=point_id)
+    analysis_ids = sorted(row[0] for row in connection.execute(
+        "SELECT analysis_id FROM analytical_point_analysis WHERE analytical_point_id = ?", (point_id,)
+    ))
+    placements = connection.execute(
+        """SELECT apa.spatial_annotation_id, sa.media_asset_id
+           FROM analytical_point_annotation apa
+           JOIN spatial_annotation sa ON sa.spatial_annotation_id = apa.spatial_annotation_id
+           WHERE apa.analytical_point_id = ?
+           ORDER BY apa.spatial_annotation_id""",
+        (point_id,),
+    ).fetchall()
+    return {
+        "analytical_point_ids": [point_id],
+        "analysis_ids": analysis_ids,
+        "spatial_annotation_ids": [row["spatial_annotation_id"] for row in placements],
+        "media_asset_ids": sorted({row["media_asset_id"] for row in placements}),
+    }
+
+
+def _write_journal_entry(
+    connection: sqlite3.Connection,
+    action_kind: str,
+    actor: str,
+    scope: dict[str, list[str]],
+    parameters: dict[str, Any],
+    inverse_action_kind: str | None,
+    inverse_payload: dict[str, Any] | None,
+    timestamp: str,
+    outcome: str = "applied",
+) -> dict[str, Any]:
+    operation_id = _id()
+    connection.execute(
+        """INSERT INTO operation_journal_entry
+           (operation_id, action_kind, actor, entity_type, entity_ids_json,
+            parameters_json, outcome, inverse_action_kind, inverse_payload_json,
+            undone_by_operation_id, created_at)
+           VALUES (?, ?, ?, 'analytical_point', ?, ?, ?, ?, ?, NULL, ?)""",
+        (
+            operation_id,
+            action_kind,
+            actor,
+            json.dumps(scope, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            json.dumps(parameters, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            outcome,
+            inverse_action_kind,
+            json.dumps(inverse_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")) if inverse_payload is not None else None,
+            timestamp,
+        ),
+    )
+    return {
+        "operation_id": operation_id,
+        "action_kind": action_kind,
+        "actor": actor,
+        "entity_type": "analytical_point",
+        "entity_ids": scope,
+        "parameters": parameters,
+        "outcome": outcome,
+        "inverse_action_kind": inverse_action_kind,
+        "inverse_payload": inverse_payload,
+        "undone_by_operation_id": None,
+        "created_at": timestamp,
+    }
+
+
 def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
     """Project Analytical Points for manual media placement.
 
@@ -271,14 +347,20 @@ def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
     """
     connection = _read_connection(database_path)
     try:
+        active_clause = """
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM analytical_point_retraction apr
+                   WHERE apr.analytical_point_id = ap.analytical_point_id
+               )""" if _table_exists(connection, "analytical_point_retraction") else ""
         rows = connection.execute(
-            """SELECT ap.analytical_point_id, ap.point_name, ap.created_at,
+            f"""SELECT ap.analytical_point_id, ap.point_name, ap.created_at,
                       s.sample_id, s.sample_name, apa.analysis_id, apa.link_type,
                       ais.analytical_method_json
                FROM analytical_point ap
                JOIN sample s ON s.sample_id = ap.sample_id
                LEFT JOIN analytical_point_analysis apa ON apa.analytical_point_id = ap.analytical_point_id
                LEFT JOIN analysis_import_semantics ais ON ais.analysis_id = apa.analysis_id
+               {active_clause}
                ORDER BY lower(s.sample_name), lower(ap.point_name), apa.analysis_id"""
         ).fetchall()
         placement_counts = {
@@ -365,9 +447,11 @@ def create_analytical_point(
     point_name: str,
     analysis_ids: list[str],
     link_type: str,
+    actor: str = "local-desktop-user",
 ) -> dict[str, Any]:
     sample_name = _text(sample_name, "sample_name")
     point_name = _text(point_name, "point_name")
+    actor = _text(actor, "actor")
     if link_type not in LINK_TYPES:
         _fail("INVALID_ASSIGNMENT", "Analytical Point link type is unsupported.", link_type=link_type)
     if len(set(analysis_ids)) < 2 or len(set(analysis_ids)) != len(analysis_ids):
@@ -395,7 +479,211 @@ def create_analytical_point(
                 "INSERT INTO analytical_point_analysis (analytical_point_id, analysis_id, link_type, created_at) VALUES (?, ?, ?, ?)",
                 [(point_id, analysis_id, link_type, timestamp) for analysis_id in normalized_ids],
             )
-        return {"analytical_point_id": point_id, "sample_id": sample_id, "sample_name": sample_name, "point_name": point_name, "analysis_ids": normalized_ids, "link_type": link_type}
+            scope = _point_scope(connection, point_id)
+            operation = _write_journal_entry(
+                connection,
+                "analytical_point.create",
+                actor,
+                scope,
+                {"sample_name": sample_name, "point_name": point_name, "link_type": link_type},
+                "analytical_point.retire",
+                {
+                    "analytical_point_id": point_id,
+                    "expected_analysis_ids": scope["analysis_ids"],
+                    "expected_spatial_annotation_ids": scope["spatial_annotation_ids"],
+                },
+                timestamp,
+            )
+        return {"analytical_point_id": point_id, "sample_id": sample_id, "sample_name": sample_name, "point_name": point_name, "analysis_ids": normalized_ids, "link_type": link_type, "operation": operation}
+    finally:
+        connection.close()
+
+
+def _expected_uuid_list(value: Any, field: str) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        _fail("INVALID_ASSIGNMENT", f"{field} must be an array of UUIDs.", field=field)
+    normalized = [_uuid(item, field) for item in value]
+    if len(normalized) != len(set(normalized)):
+        _fail("INVALID_ASSIGNMENT", f"{field} cannot contain duplicates.", field=field)
+    return sorted(normalized)
+
+
+def retire_analytical_point(
+    database_path: str | Path,
+    analytical_point_id: str,
+    expected_analysis_ids: list[str],
+    expected_spatial_annotation_ids: list[str],
+    reason: str,
+    actor: str = "local-desktop-user",
+) -> dict[str, Any]:
+    point_id = _uuid(analytical_point_id, "analytical_point_id")
+    expected_analyses = _expected_uuid_list(expected_analysis_ids, "expected_analysis_ids")
+    expected_annotations = _expected_uuid_list(expected_spatial_annotation_ids, "expected_spatial_annotation_ids")
+    reason = _text(reason, "reason", 500)
+    actor = _text(actor, "actor")
+    connection = open_project(database_path)
+    try:
+        point = connection.execute(
+            """SELECT ap.point_name, s.sample_name
+               FROM analytical_point ap JOIN sample s ON s.sample_id = ap.sample_id
+               WHERE ap.analytical_point_id = ?""",
+            (point_id,),
+        ).fetchone()
+        if point is None:
+            _fail("POINT_NOT_FOUND", "Analytical Point does not exist.", analytical_point_id=point_id)
+        if connection.execute(
+            "SELECT 1 FROM analytical_point_retraction WHERE analytical_point_id = ?", (point_id,)
+        ).fetchone():
+            _fail("POINT_ALREADY_RETRACTED", "Analytical Point link is already retracted.", analytical_point_id=point_id)
+        scope = _point_scope(connection, point_id)
+        if scope["analysis_ids"] != expected_analyses or scope["spatial_annotation_ids"] != expected_annotations:
+            _fail(
+                "POINT_REVISION_CONFLICT",
+                "Analytical Point membership or placement changed after review.",
+                analytical_point_id=point_id,
+                current_analysis_ids=scope["analysis_ids"],
+                current_spatial_annotation_ids=scope["spatial_annotation_ids"],
+            )
+        timestamp = _now()
+        with connection:
+            operation = _write_journal_entry(
+                connection,
+                "analytical_point.retire",
+                actor,
+                scope,
+                {"reason": reason, "sample_name": point["sample_name"], "point_name": point["point_name"]},
+                "analytical_point.restore",
+                {"analytical_point_id": point_id, "expected_scope": scope},
+                timestamp,
+            )
+            connection.execute(
+                "INSERT INTO analytical_point_retraction (analytical_point_id, operation_id, reason, created_at) VALUES (?, ?, ?, ?)",
+                (point_id, operation["operation_id"], reason, timestamp),
+            )
+        return {
+            "analytical_point_id": point_id,
+            "sample_name": point["sample_name"],
+            "point_name": point["point_name"],
+            "operation": operation,
+        }
+    finally:
+        connection.close()
+
+
+def list_operation_journal(database_path: str | Path, limit: int = 50) -> dict[str, Any]:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        _fail("INVALID_ASSIGNMENT", "Journal limit must be an integer from 1 to 100.", limit=limit)
+    connection = _read_connection(database_path)
+    try:
+        if not _table_exists(connection, "operation_journal_entry"):
+            return {"total": 0, "items": []}
+        total = connection.execute("SELECT COUNT(*) FROM operation_journal_entry").fetchone()[0]
+        rows = connection.execute(
+            """SELECT operation_id, action_kind, actor, entity_type,
+                      entity_ids_json, parameters_json, outcome,
+                      inverse_action_kind, inverse_payload_json,
+                      undone_by_operation_id, created_at
+               FROM operation_journal_entry
+               ORDER BY created_at DESC, rowid DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return {
+            "total": total,
+            "items": [{
+                "operation_id": row["operation_id"],
+                "action_kind": row["action_kind"],
+                "actor": row["actor"],
+                "entity_type": row["entity_type"],
+                "entity_ids": json.loads(row["entity_ids_json"]),
+                "parameters": json.loads(row["parameters_json"]),
+                "outcome": row["outcome"],
+                "inverse_action_kind": row["inverse_action_kind"],
+                "inverse_payload": json.loads(row["inverse_payload_json"]) if row["inverse_payload_json"] else None,
+                "undone_by_operation_id": row["undone_by_operation_id"],
+                "created_at": row["created_at"],
+            } for row in rows],
+        }
+    finally:
+        connection.close()
+
+
+def undo_operation(
+    database_path: str | Path,
+    operation_id: str,
+    actor: str = "local-desktop-user",
+) -> dict[str, Any]:
+    target_id = _uuid(operation_id, "operation_id")
+    actor = _text(actor, "actor")
+    connection = open_project(database_path)
+    try:
+        target = connection.execute(
+            """SELECT operation_id, action_kind, entity_ids_json, parameters_json,
+                      outcome, undone_by_operation_id
+               FROM operation_journal_entry WHERE operation_id = ?""",
+            (target_id,),
+        ).fetchone()
+        if target is None:
+            _fail("OPERATION_NOT_FOUND", "Operation Journal entry does not exist.", operation_id=target_id)
+        if target["outcome"] != "applied" or target["undone_by_operation_id"] is not None:
+            _fail("OPERATION_ALREADY_UNDONE", "Operation has already been undone.", operation_id=target_id)
+        if target["action_kind"] not in {"analytical_point.create", "analytical_point.retire"}:
+            _fail("UNDO_UNSUPPORTED", "This operation does not have a supported inverse action.", operation_id=target_id)
+        scope = json.loads(target["entity_ids_json"])
+        parameters = json.loads(target["parameters_json"])
+        point_ids = scope.get("analytical_point_ids") if isinstance(scope, dict) else None
+        if not isinstance(point_ids, list) or len(point_ids) != 1:
+            _fail("JOURNAL_CORRUPT", "Operation Journal scope is invalid.", operation_id=target_id)
+        point_id = _uuid(point_ids[0], "analytical_point_id")
+        current_scope = _point_scope(connection, point_id)
+        if current_scope != scope:
+            _fail("POINT_REVISION_CONFLICT", "Analytical Point changed after the journalled operation.", analytical_point_id=point_id)
+        retraction = connection.execute(
+            "SELECT operation_id FROM analytical_point_retraction WHERE analytical_point_id = ?", (point_id,)
+        ).fetchone()
+        if target["action_kind"] == "analytical_point.retire":
+            if retraction is None or retraction["operation_id"] != target_id:
+                _fail("POINT_REVISION_CONFLICT", "Analytical Point retraction state changed after review.", analytical_point_id=point_id)
+            effect = "restored"
+            inverse_action = "analytical_point.retire"
+        else:
+            if retraction is not None:
+                _fail("POINT_REVISION_CONFLICT", "Analytical Point is no longer active.", analytical_point_id=point_id)
+            effect = "retracted"
+            inverse_action = "analytical_point.restore"
+        timestamp = _now()
+        with connection:
+            undo_entry = _write_journal_entry(
+                connection,
+                "operation.undo",
+                actor,
+                scope,
+                {
+                    "target_operation_id": target_id,
+                    "target_action_kind": target["action_kind"],
+                    "sample_name": parameters.get("sample_name"),
+                    "point_name": parameters.get("point_name"),
+                },
+                inverse_action,
+                {"analytical_point_id": point_id, "expected_scope": scope},
+                timestamp,
+            )
+            if target["action_kind"] == "analytical_point.retire":
+                connection.execute("DELETE FROM analytical_point_retraction WHERE analytical_point_id = ?", (point_id,))
+            else:
+                connection.execute(
+                    "INSERT INTO analytical_point_retraction (analytical_point_id, operation_id, reason, created_at) VALUES (?, ?, ?, ?)",
+                    (point_id, undo_entry["operation_id"], "Undo analytical_point.create", timestamp),
+                )
+            connection.execute(
+                "UPDATE operation_journal_entry SET outcome = 'undone', undone_by_operation_id = ? WHERE operation_id = ?",
+                (undo_entry["operation_id"], target_id),
+            )
+        return {
+            "target_operation_id": target_id,
+            "analytical_point_id": point_id,
+            "effect": effect,
+            "operation": undo_entry,
+        }
     finally:
         connection.close()
 
@@ -484,7 +772,9 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                 seen_points.add(point_id)
                 point = connection.execute(
                     """SELECT ap.analytical_point_id, ap.point_name, s.sample_name FROM analytical_point ap
-                    JOIN sample s ON s.sample_id = ap.sample_id WHERE ap.analytical_point_id = ?""", (point_id,)
+                    JOIN sample s ON s.sample_id = ap.sample_id
+                    WHERE ap.analytical_point_id = ?
+                      AND NOT EXISTS (SELECT 1 FROM analytical_point_retraction apr WHERE apr.analytical_point_id = ap.analytical_point_id)""", (point_id,)
                 ).fetchone()
                 if point is None:
                     _fail("INVALID_ASSIGNMENT", "Analytical Point does not exist.", analytical_point_id=point_id)
@@ -604,7 +894,12 @@ def apply_media_import_plan(database_path: str | Path, plan: Any) -> dict[str, A
                     )
                     created_assets += 1
                 for placement in item["placements"]:
-                    point = connection.execute("SELECT sample_id FROM analytical_point WHERE analytical_point_id = ?", (placement["analytical_point_id"],)).fetchone()
+                    point = connection.execute(
+                        """SELECT sample_id FROM analytical_point ap
+                           WHERE analytical_point_id = ?
+                             AND NOT EXISTS (SELECT 1 FROM analytical_point_retraction apr WHERE apr.analytical_point_id = ap.analytical_point_id)""",
+                        (placement["analytical_point_id"],),
+                    ).fetchone()
                     if point is None:
                         _fail("INVALID_ASSIGNMENT", "Analytical Point disappeared after planning.", analytical_point_id=placement["analytical_point_id"])
                     is_cross_sample = point["sample_id"] != sample_id

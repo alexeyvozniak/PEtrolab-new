@@ -27,12 +27,15 @@ import {
   isPetrolabDesktop,
   listProjectAnalyses,
   listAnalyticalPoints,
+  listOperationJournal,
   listProjectMineralIdentifications,
   pickImportFile,
   pickMediaFolder,
   pickMediaFiles,
   retractLastImport,
+  retireAnalyticalPoint,
   stageImportFile,
+  undoOperation,
 } from "./desktopApi";
 import { ImportWorkspace } from "./ImportWorkspace";
 import { AnalysesWorkspace } from "./AnalysesWorkspace";
@@ -120,6 +123,8 @@ export function App() {
   const [mediaInspection, setMediaInspection] = useState(null);
   const [mediaPlan, setMediaPlan] = useState(null);
   const [mediaPoints, setMediaPoints] = useState({ total: 0, sample_names: [], items: [] });
+  const [operationJournal, setOperationJournal] = useState({ total: 0, items: [] });
+  const [pointOperationNotice, setPointOperationNotice] = useState(null);
 
   const loadMediaPreview = useCallback(async (sourcePathValue) => (
     unwrap(await getMediaPreview(sourcePathValue))
@@ -134,8 +139,12 @@ export function App() {
   const refreshAnalyticalPoints = useCallback(async (path = databasePath) => {
     if (!path) return;
     try {
-      const pointProjection = unwrap(await listAnalyticalPoints(path));
+      const [pointProjection, journal] = await Promise.all([
+        listAnalyticalPoints(path).then(unwrap),
+        listOperationJournal(path).then(unwrap),
+      ]);
       setMediaPoints(pointProjection);
+      setOperationJournal(journal);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -175,8 +184,14 @@ export function App() {
         const enriched = await attachMineralIdentifications(path, result);
         if (!cancelled) setProject(enriched);
         try {
-          const pointProjection = unwrap(await listAnalyticalPoints(path));
-          if (!cancelled) setMediaPoints(pointProjection);
+          const [pointProjection, journal] = await Promise.all([
+            listAnalyticalPoints(path).then(unwrap),
+            listOperationJournal(path).then(unwrap),
+          ]);
+          if (!cancelled) {
+            setMediaPoints(pointProjection);
+            setOperationJournal(journal);
+          }
         } catch (caught) {
           if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
         }
@@ -416,16 +431,107 @@ export function App() {
       const created = unwrap(await createAnalyticalPoint(databasePath, sampleName, pointName, analysisIds, linkType));
       let projectionRefreshed = true;
       try {
-        const pointProjection = unwrap(await listAnalyticalPoints(databasePath));
+        const [pointProjection, journal] = await Promise.all([
+          listAnalyticalPoints(databasePath).then(unwrap),
+          listOperationJournal(databasePath).then(unwrap),
+        ]);
         setMediaPoints(pointProjection);
+        setOperationJournal(journal);
       } catch (caught) {
         projectionRefreshed = false;
         const detail = caught instanceof Error ? caught.message : String(caught);
         setError(`Analytical Point создана, но обновить список точек не удалось: ${detail}`);
       }
+      if (created.operation) {
+        setPointOperationNotice({
+          operation: created.operation,
+          message: `Analytical Point «${created.point_name}» создана из ${created.analysis_ids.length} Analyses.`,
+        });
+      }
       setSuccess(`Analytical Point «${created.point_name}» создана из ${created.analysis_ids.length} Analyses. Исходные измерения не изменены.`);
       if (mediaInspection && projectionRefreshed) setScreen("Изображения");
       return { ...created, projection_refreshed: projectionRefreshed };
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      throw caught;
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const retirePoint = async (point, reason) => {
+    if (busy || !databasePath) return null;
+    setBusy(true);
+    setActivity("Снимаю связь Analytical Point и записываю операцию…");
+    setError("");
+    setSuccess("");
+    try {
+      const retired = unwrap(await retireAnalyticalPoint(databasePath, point, reason));
+      setPointOperationNotice({
+        operation: retired.operation,
+        message: `Связь Analytical Point «${retired.point_name}» снята.`,
+      });
+      setMediaPoints((current) => {
+        const items = (current.items || []).filter((item) => item.analytical_point_id !== retired.analytical_point_id);
+        return { ...current, total: items.length, sample_names: [...new Set(items.map((item) => item.sample_name))].sort((left, right) => left.localeCompare(right, "ru")), items };
+      });
+      setSuccess(`Связь «${retired.point_name}» снята обратимо. Analyses, Measurements, Source и Media Asset сохранены.`);
+      let projectionRefreshed = true;
+      try {
+        const [pointProjection, journal] = await Promise.all([
+          listAnalyticalPoints(databasePath).then(unwrap),
+          listOperationJournal(databasePath).then(unwrap),
+        ]);
+        setMediaPoints(pointProjection);
+        setOperationJournal(journal);
+      } catch (caught) {
+        projectionRefreshed = false;
+        const detail = caught instanceof Error ? caught.message : String(caught);
+        setError(`Связь снята, но обновить реестр не удалось: ${detail}`);
+      }
+      return { ...retired, projection_refreshed: projectionRefreshed };
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      throw caught;
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
+  const undoPointOperation = async (operationId) => {
+    if (busy || !databasePath || !operationId) return null;
+    setBusy(true);
+    setActivity("Проверяю точный scope и отменяю операцию…");
+    setError("");
+    setSuccess("");
+    try {
+      const undone = unwrap(await undoOperation(databasePath, operationId));
+      setPointOperationNotice(null);
+      if (undone.effect === "retracted") {
+        setMediaPoints((current) => {
+          const items = (current.items || []).filter((item) => item.analytical_point_id !== undone.analytical_point_id);
+          return { ...current, total: items.length, sample_names: [...new Set(items.map((item) => item.sample_name))].sort((left, right) => left.localeCompare(right, "ru")), items };
+        });
+      }
+      setSuccess(undone.effect === "restored"
+        ? "Связь Analytical Point восстановлена по устойчивым ID."
+        : "Создание Analytical Point отменено обратимо; исходные Analyses сохранены.");
+      let projectionRefreshed = true;
+      try {
+        const [pointProjection, journal] = await Promise.all([
+          listAnalyticalPoints(databasePath).then(unwrap),
+          listOperationJournal(databasePath).then(unwrap),
+        ]);
+        setMediaPoints(pointProjection);
+        setOperationJournal(journal);
+      } catch (caught) {
+        projectionRefreshed = false;
+        const detail = caught instanceof Error ? caught.message : String(caught);
+        setError(`Операция отменена, но обновить реестр не удалось: ${detail}`);
+      }
+      return { ...undone, projection_refreshed: projectionRefreshed };
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       throw caught;
@@ -679,6 +785,8 @@ export function App() {
           <AnalysesWorkspace
             project={project}
             analyticalPoints={mediaPoints}
+            operationJournal={operationJournal}
+            pointOperationNotice={pointOperationNotice}
             busy={busy}
             onRefresh={() => refreshAnalyses().catch((caught) => setError(caught.message))}
             onRefreshAnalyticalPoints={() => refreshAnalyticalPoints()}
@@ -686,6 +794,8 @@ export function App() {
             onAddData={startNewImport}
             onLoadMore={loadMoreAnalyses}
             onCreateAnalyticalPoint={createPointFromAnalyses}
+            onRetireAnalyticalPoint={retirePoint}
+            onUndoOperation={undoPointOperation}
           />
         )}
 

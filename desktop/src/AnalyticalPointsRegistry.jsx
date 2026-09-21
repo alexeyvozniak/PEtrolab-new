@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CheckSquare, Database, LinkSimple, MagnifyingGlass, MapPin, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowLeft, CheckSquare, Database, LinkBreak, LinkSimple, MagnifyingGlass, MapPin, Warning, X } from "@phosphor-icons/react";
 import "./analyticalPointsRegistry.css";
 
 const LINK_TYPE_LABELS = {
@@ -53,7 +53,73 @@ function createdLabel(value) {
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
 }
 
-export function AnalyticalPointsRegistry({ projection = { total: 0, items: [] }, analyses = [], busy, initialPointId = "", onBack, onShowAnalyses, onRefresh }) {
+function journalActionLabel(action) {
+  return {
+    "analytical_point.create": "Создание связи",
+    "analytical_point.retire": "Снятие связи",
+    "operation.undo": "Отмена операции",
+  }[action] || action;
+}
+
+function scopeCount(operation, field) {
+  return operation?.entity_ids?.[field]?.length || 0;
+}
+
+function RetirePointDialog({ point, busy, onCancel, onConfirm }) {
+  const [reason, setReason] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const canConfirm = reason.trim() && confirmed && !busy;
+
+  useEffect(() => {
+    const closeOnEscape = (event) => { if (event.key === "Escape" && !busy) onCancel(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [busy, onCancel]);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!canConfirm) return;
+    setLocalError("");
+    try {
+      await onConfirm(point, reason.trim());
+      onCancel();
+    } catch (caught) {
+      setLocalError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  return <div className="point-retire-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
+    <section className="point-retire-dialog" role="dialog" aria-modal="true" aria-labelledby="point-retire-title">
+      <header><div><span>Обратимая операция</span><h2 id="point-retire-title">Разорвать связь {point.point_name}</h2></div><button className="icon-button" type="button" onClick={onCancel} disabled={busy} aria-label="Закрыть разрыв связи"><X size={19} /></button></header>
+      <div className="point-retire-warning"><Warning size={20} weight="fill" /><p><b>Analytical Point исчезнет из активного реестра.</b><span>Исходные Analyses, Measurements, Source, Spatial Annotation и Media Asset останутся в проекте.</span></p></div>
+      <section className="point-retire-scope" aria-label="Точный состав операции">
+        <div><span>Sample</span><b>{point.sample_name}</b></div><div><span>Analyses</span><b>{(point.analysis_ids || []).length}</b></div><div><span>Spatial Annotations</span><b>{(point.placements || []).length}</b></div>
+        <code title={point.analytical_point_id}>{point.analytical_point_id}</code>
+      </section>
+      <form onSubmit={submit}>
+        <label>Причина<textarea aria-label="Причина разрыва связи" value={reason} maxLength={500} onChange={(event) => { setReason(event.target.value); setConfirmed(false); }} placeholder="Например: связаны разные физические точки" autoFocus /></label>
+        <label className="point-retire-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>Подтверждаю снятие только этой связи с указанным точным составом. Исходные научные данные не удаляются.</span></label>
+        {localError && <p className="point-retire-error" role="alert">{localError}</p>}
+        <footer><button className="outline-button" type="button" onClick={onCancel} disabled={busy}>Отмена</button><button className="point-retire-submit" type="submit" disabled={!canConfirm}><LinkBreak size={18} /> Разорвать связь</button></footer>
+      </form>
+    </section>
+  </div>;
+}
+
+export function AnalyticalPointsRegistry({
+  projection = { total: 0, items: [] },
+  analyses = [],
+  operationJournal = { total: 0, items: [] },
+  operationNotice = null,
+  busy,
+  initialPointId = "",
+  onBack,
+  onShowAnalyses,
+  onRefresh,
+  onRetire,
+  onUndo,
+}) {
   const items = projection.items || [];
   const [query, setQuery] = useState("");
   const [sampleFilter, setSampleFilter] = useState("all");
@@ -61,6 +127,8 @@ export function AnalyticalPointsRegistry({ projection = { total: 0, items: [] },
   const [placementFilter, setPlacementFilter] = useState("all");
   const [selectedPointIds, setSelectedPointIds] = useState(initialPointId ? [initialPointId] : []);
   const [focusedPointId, setFocusedPointId] = useState(initialPointId);
+  const [retirePoint, setRetirePoint] = useState(null);
+  const [undoError, setUndoError] = useState("");
   const analysisById = useMemo(() => new Map(analyses.map((analysis) => [analysis.analysis_id, analysis])), [analyses]);
   const methods = useMemo(() => [...new Set(items.flatMap((point) => point.methods || []))].sort((a, b) => a.localeCompare(b, "ru")), [items]);
 
@@ -97,6 +165,7 @@ export function AnalyticalPointsRegistry({ projection = { total: 0, items: [] },
   const selectedAnalysisIds = [...new Set(selectedPoints.flatMap((point) => point.analysis_ids || []))];
   const visibleIds = ordered.map((point) => point.analytical_point_id);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedPointIds.includes(id));
+  const recentOperations = (operationJournal.items || []).filter((item) => item.entity_type === "analytical_point").slice(0, 4);
 
   const togglePoint = (id) => setSelectedPointIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const toggleVisible = () => setSelectedPointIds((current) => allVisibleSelected ? current.filter((id) => !visibleIds.includes(id)) : [...new Set([...current, ...visibleIds])]);
@@ -110,13 +179,19 @@ export function AnalyticalPointsRegistry({ projection = { total: 0, items: [] },
       <div className="point-registry-note"><Database size={17} /><span>Реестр показывает сохранённые связи. Фильтры и фокус не изменяют Analyses.</span></div>
     </aside>
 
-    <main className="point-registry-main">
+    <main className={`point-registry-main${operationNotice ? " has-operation" : ""}`}>
       <div className="point-registry-toolbar">
         <button className="outline-button" type="button" onClick={onBack}><ArrowLeft size={17} /> Analyses</button>
         <div className="point-registry-search"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Точка, Sample или Analysis ID…" aria-label="Поиск Analytical Points" /></div>
         <span>{ordered.length} из {projection.total || items.length}</span>
         <button className="outline-button" type="button" onClick={onRefresh} disabled={busy}>Обновить</button>
       </div>
+
+      {operationNotice && <div className="point-operation-banner" role="status">
+        <div><ArrowCounterClockwise size={20} /><p><b>{operationNotice.message}</b><span>Scope: {scopeCount(operationNotice.operation, "analysis_ids")} Analyses · {scopeCount(operationNotice.operation, "spatial_annotation_ids")} Spatial Annotations. Исходные данные сохранены.</span></p></div>
+        <button type="button" disabled={busy} onClick={async () => { setUndoError(""); try { await onUndo(operationNotice.operation.operation_id); } catch (caught) { setUndoError(caught instanceof Error ? caught.message : String(caught)); } }}><ArrowCounterClockwise size={17} /> Отменить</button>
+        {undoError && <small role="alert">{undoError}</small>}
+      </div>}
 
       <div className="point-registry-table-scroll">
         <table className="point-registry-table">
@@ -155,6 +230,8 @@ export function AnalyticalPointsRegistry({ projection = { total: 0, items: [] },
           </article>)}
         </section>
         <section><h3>Устойчивый ID</h3><code>{focusedPoint.analytical_point_id}</code><small>Создано: {createdLabel(focusedPoint.created_at)}</small></section>
+        <section className="point-registry-actions"><h3>Действия со связью</h3><button type="button" disabled={busy || !onRetire} onClick={() => setRetirePoint(focusedPoint)}><LinkBreak size={17} /> Разорвать связь</button><small>Операция попадёт в журнал и сможет быть отменена, пока точный состав точки не изменился.</small></section>
+        <section className="point-journal"><h3>Operation Journal</h3>{recentOperations.length ? recentOperations.map((operation) => <article key={operation.operation_id}><div><b>{journalActionLabel(operation.action_kind)}</b><span className={operation.outcome === "undone" ? "undone" : ""}>{operation.outcome === "undone" ? "отменено" : "применено"}</span></div><small>{createdLabel(operation.created_at)} · {operation.actor}</small><p>{scopeCount(operation, "analysis_ids")} Analyses · {scopeCount(operation, "spatial_annotation_ids")} пространственных связей</p><code title={operation.operation_id}>{operation.operation_id}</code></article>) : <p>Операций пока нет.</p>}</section>
       </> : <div className="point-registry-inspector-empty"><LinkSimple size={25} /><span>Выбери строку реестра, чтобы проверить состав связи.</span></div>}
     </aside>
 
@@ -163,5 +240,6 @@ export function AnalyticalPointsRegistry({ projection = { total: 0, items: [] },
       <div>{selectedPoints.slice(0, 4).map((point) => <button type="button" key={point.analytical_point_id} onClick={() => togglePoint(point.analytical_point_id)}>{point.point_name} <X size={13} /></button>)}</div>
       <button className="primary-button" type="button" onClick={() => onShowAnalyses(selectedAnalysisIds)} disabled={!selectedAnalysisIds.length}>Показать исходные Analyses</button>
     </div>}
+    {retirePoint && <RetirePointDialog point={retirePoint} busy={busy} onCancel={() => setRetirePoint(null)} onConfirm={onRetire} />}
   </div>;
 }

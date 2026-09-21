@@ -45,12 +45,21 @@ read-only предложения из имени файла, массовое п
 |---|---:|---|
 | `analytical_point.create` | да | явно созданная Analytical Point и contributing Analysis IDs |
 | `analytical_point.list` | нет | устойчивые Point/Analysis/Spatial Annotation/Media Asset IDs, Sample, типы связи, методы, время создания, исходно-пиксельная геометрия и provenance размещений |
+| `analytical_point.retire` | да | retraction marker и Operation Journal Entry при точном совпадении ожидаемого состава |
+| `operation_journal.list` | нет | actor, timestamp, exact entity IDs, параметры, outcome и inverse payload |
+| `operation_journal.undo` | да | восстановленная либо снятая связь после проверки текущего exact scope |
 | `media.inspect_sources` | нет | форматы, размеры, SHA-256 и группы дубликатов |
 | `media.preview` | нет | ограниченный PNG preview в неизменённых осях исходных пикселей |
 | `media.import.plan` | нет | полный проверяемый план, предупреждения и semantic fingerprint |
 | `media.import.apply` | да | Media Assets, Spatial Annotations и связи одной транзакцией |
 
 `media.import.apply` повторно проверяет fingerprint каждого файла и semantic fingerprint плана. Изменённый файл, координата вне изображения, неизвестный ID, скрытый межобразцовый конфликт или дубликат с другим назначением блокируют запись.
+
+Снятие Analytical Point является логическим: строка точки, contributing Analyses,
+Measurements и пространственные связи остаются в SQLite. Активные проекции и
+новые media plans исключают retracted Point. Undo разрешён только при совпадении
+текущих Analysis и Spatial Annotation IDs с journal scope; конфликт не делает
+частичную запись.
 
 ## Release gate
 

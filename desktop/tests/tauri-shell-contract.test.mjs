@@ -323,6 +323,9 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
   assert.match(api, /media\.import\.plan/);
   assert.match(api, /media\.import\.apply/);
   assert.match(api, /analytical_point\.create/);
+  assert.match(api, /analytical_point\.retire/);
+  assert.match(api, /operation_journal\.list/);
+  assert.match(api, /operation_journal\.undo/);
 });
 
 test("Windows release gate installs and launches the packaged application", async () => {

@@ -273,7 +273,21 @@ function AnalysisDetail({ analysis }) {
   );
 }
 
-export function AnalysesWorkspace({ project, analyticalPoints = { total: 0, items: [] }, busy, onRefresh, onRefreshAnalyticalPoints, onRetract, onAddData, onLoadMore, onCreateAnalyticalPoint }) {
+export function AnalysesWorkspace({
+  project,
+  analyticalPoints = { total: 0, items: [] },
+  operationJournal = { total: 0, items: [] },
+  pointOperationNotice = null,
+  busy,
+  onRefresh,
+  onRefreshAnalyticalPoints,
+  onRetract,
+  onAddData,
+  onLoadMore,
+  onCreateAnalyticalPoint,
+  onRetireAnalyticalPoint,
+  onUndoOperation,
+}) {
   const analyses = project.analyses || [];
   const mineralStatusCounts = project.mineral_status_counts || {};
   const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
@@ -390,8 +404,12 @@ export function AnalysesWorkspace({ project, analyticalPoints = { total: 0, item
     analyses={analyses}
     busy={busy}
     initialPointId={registryFocusId}
+    operationJournal={operationJournal}
+    operationNotice={pointOperationNotice}
     onBack={() => setViewMode("analyses")}
     onRefresh={onRefreshAnalyticalPoints}
+    onRetire={onRetireAnalyticalPoint}
+    onUndo={onUndoOperation}
     onShowAnalyses={(analysisIds) => {
       const availableIds = analysisIds.filter((id) => analyses.some((analysis) => analysis.analysis_id === id));
       setSelectedIds(availableIds);

@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { AnalysesWorkspace } from '../src/AnalysesWorkspace';
 import { MineralsWorkspace } from '../src/MineralsWorkspace';
 
-const uiState = vi.hoisted(() => ({ imported: false, mediaImported: false, mediaPlacementCount: 0, pointCreated: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false, mediaDuplicates: false, mediaPreviewFailures: 0 }));
+const uiState = vi.hoisted(() => ({ imported: false, mediaImported: false, mediaPlacementCount: 0, pointCreated: false, pointRetired: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false, mediaDuplicates: false, mediaPreviewFailures: 0 }));
 
 test('selected Analyses require explicit semantics before creating an Analytical Point', async () => {
   const user = userEvent.setup();
@@ -50,8 +50,10 @@ test('selected Analyses require explicit semantics before creating an Analytical
   expect(screen.queryByRole('dialog', { name: 'Создать Analytical Point' })).toBeNull();
 });
 
-test('Analytical Point registry exposes provenance and returns source Analyses to Selection', async () => {
+test('Analytical Point registry exposes provenance, reversible unlink and source Analyses', async () => {
   const user = userEvent.setup();
+  const onRetire = vi.fn().mockResolvedValue({ analytical_point_id: 'point-stable-p01' });
+  const onUndo = vi.fn().mockResolvedValue({ effect: 'restored' });
   const analyses = [{
     analysis_id: 'epma-p01', source_name: 'KIV-2_EPMA.xlsx', sheet_name: 'Data', source_row_number: 9,
     identity: { Analysis: 'P-01-EPMA', Sample: 'KIV-2' }, measurement_list: [{ method: 'EPMA' }], measurements: {},
@@ -81,7 +83,16 @@ test('Analytical Point registry exposes provenance and returns source Analyses t
     }],
   }] };
 
-  render(<AnalysesWorkspace project={{ total: 2, source_count: 2, analyses }} analyticalPoints={analyticalPoints} busy={false} onRefreshAnalyticalPoints={vi.fn()} />);
+  const operation = {
+    operation_id: 'operation-stable-retire', action_kind: 'analytical_point.retire', actor: 'local-desktop-user',
+    entity_type: 'analytical_point', entity_ids: { analytical_point_ids: ['point-stable-p01'], analysis_ids: ['epma-p01', 'la-p01'], spatial_annotation_ids: ['annotation-stable-p01'], media_asset_ids: ['media-stable-bse'] },
+    outcome: 'applied', created_at: '2026-09-15T10:40:00Z',
+  };
+  render(<AnalysesWorkspace
+    project={{ total: 2, source_count: 2, analyses }} analyticalPoints={analyticalPoints}
+    operationJournal={{ total: 1, items: [operation] }} pointOperationNotice={{ operation, message: 'Связь Analytical Point «P-01» снята.' }}
+    busy={false} onRefreshAnalyticalPoints={vi.fn()} onRetireAnalyticalPoint={onRetire} onUndoOperation={onUndo}
+  />);
   await user.click(screen.getByRole('button', { name: /Analytical Points 2/ }));
 
   expect(screen.getAllByText('Та же аналитическая точка').length).toBeGreaterThan(0);
@@ -92,6 +103,21 @@ test('Analytical Point registry exposes provenance and returns source Analyses t
   expect(screen.getByText('Изображение: 8192 × 6144 px')).toBeTruthy();
   expect(screen.getByTitle('annotation-stable-p01')).toBeTruthy();
   expect(screen.getByTitle('media-stable-bse')).toBeTruthy();
+  expect(screen.getByText('Operation Journal')).toBeTruthy();
+  expect(screen.getByText('2 Analyses · 1 пространственных связей')).toBeTruthy();
+
+  await user.click(screen.getByRole('button', { name: 'Разорвать связь' }));
+  const unlinkDialog = screen.getByRole('dialog', { name: 'Разорвать связь P-01' });
+  expect(within(unlinkDialog).getByText(/Analyses, Measurements, Source, Spatial Annotation и Media Asset останутся/)).toBeTruthy();
+  const unlinkSubmit = within(unlinkDialog).getByRole('button', { name: 'Разорвать связь' });
+  expect(unlinkSubmit.disabled).toBe(true);
+  await user.type(within(unlinkDialog).getByRole('textbox', { name: 'Причина разрыва связи' }), 'Связаны разные физические точки');
+  await user.click(within(unlinkDialog).getByRole('checkbox', { name: /Подтверждаю снятие только этой связи/ }));
+  await user.click(unlinkSubmit);
+  await waitFor(() => expect(onRetire).toHaveBeenCalledWith(analyticalPoints.items[0], 'Связаны разные физические точки'));
+
+  await user.click(screen.getByRole('button', { name: 'Отменить' }));
+  expect(onUndo).toHaveBeenCalledWith('operation-stable-retire');
   await user.click(screen.getByText('P-02'));
   expect(screen.getByText('Межобразцовое исключение: Проверено по журналу шлифа')).toBeTruthy();
   expect(screen.getAllByText('Square · X 120 · Y 240 px · 30 × 30 px').length).toBeGreaterThan(0);
@@ -362,15 +388,23 @@ vi.mock("../src/desktopApi", () => {
         "C:/fixtures/KIV-2_A_PPL_01.tif",
       ]] : [],
     } })),
-    listAnalyticalPoints: vi.fn().mockImplementation(async () => ({ result: uiState.pointCreated ? {
+    listAnalyticalPoints: vi.fn().mockImplementation(async () => {
+      const activeItems = analyticalPoints.items.filter((point) => !uiState.pointRetired || point.analytical_point_id !== 'point-kiv-2-p07');
+      return { result: uiState.pointCreated ? {
       ...analyticalPoints,
-      total: analyticalPoints.total + 1,
-      items: [...analyticalPoints.items, {
+      total: activeItems.length + 1,
+      items: [...activeItems, {
         analytical_point_id: 'point-created', sample_id: 'sample-created', sample_name: 'KIV-2', point_name: 'P-01',
         analysis_ids: ['analysis-ui-1', 'analysis-ui-2'], methods: ['EPMA'], link_types: ['same_zone'], placement_count: 0,
         created_at: '2026-09-15T10:26:00Z',
       }],
-    } : analyticalPoints })),
+    } : { ...analyticalPoints, total: activeItems.length, items: activeItems } };
+    }),
+    listOperationJournal: vi.fn().mockImplementation(async () => ({ result: uiState.pointRetired ? { total: 1, items: [{
+      operation_id: 'operation-retire-p07', action_kind: 'analytical_point.retire', actor: 'local-desktop-user', entity_type: 'analytical_point',
+      entity_ids: { analytical_point_ids: ['point-kiv-2-p07'], analysis_ids: ['analysis-ui-1', 'analysis-la-87'], spatial_annotation_ids: [], media_asset_ids: [] },
+      parameters: { reason: 'Связаны разные физические точки', point_name: 'P-07', sample_name: 'KIV-2' }, outcome: 'applied', created_at: '2026-09-15T10:40:00Z',
+    }] } : { total: 0, items: [] } })),
     createAnalyticalPoint: vi.fn().mockImplementation(async (_path, sampleName, pointName, analysisIds, linkType) => {
       uiState.pointCreated = true;
       return { result: {
@@ -381,6 +415,18 @@ vi.mock("../src/desktopApi", () => {
         analysis_ids: analysisIds,
         link_type: linkType,
       } };
+    }),
+    retireAnalyticalPoint: vi.fn().mockImplementation(async (_path, point, reason) => {
+      uiState.pointRetired = true;
+      return { result: { analytical_point_id: point.analytical_point_id, sample_name: point.sample_name, point_name: point.point_name, operation: {
+        operation_id: 'operation-retire-p07', action_kind: 'analytical_point.retire', actor: 'local-desktop-user', entity_type: 'analytical_point',
+        entity_ids: { analytical_point_ids: [point.analytical_point_id], analysis_ids: point.analysis_ids, spatial_annotation_ids: [], media_asset_ids: [] },
+        parameters: { reason, point_name: point.point_name, sample_name: point.sample_name }, outcome: 'applied', created_at: '2026-09-15T10:40:00Z',
+      } } };
+    }),
+    undoOperation: vi.fn().mockImplementation(async (_path, operationId) => {
+      uiState.pointRetired = false;
+      return { result: { target_operation_id: operationId, analytical_point_id: 'point-kiv-2-p07', effect: 'restored', operation: { operation_id: 'operation-undo-p07', action_kind: 'operation.undo' } } };
     }),
     getMediaPreview: vi.fn().mockImplementation(async (sourcePath) => {
       if (uiState.mediaPreviewFailures > 0) {
@@ -507,7 +553,7 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { applyImportPlan, applyMediaImportPlan, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, pickImportFile, pickMediaFolder } from "../src/desktopApi";
+import { applyImportPlan, applyMediaImportPlan, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, pickImportFile, pickMediaFolder, retireAnalyticalPoint, undoOperation } from "../src/desktopApi";
 import { App } from "../src/App";
 import { ImagesWorkspace } from "../src/ImagesWorkspace";
 
@@ -516,6 +562,7 @@ afterEach(() => {
   uiState.mediaImported = false;
   uiState.mediaPlacementCount = 0;
   uiState.pointCreated = false;
+  uiState.pointRetired = false;
   uiState.mode = "clean";
   uiState.detailsEnabled = true;
   uiState.unitApplied = false;
@@ -574,6 +621,31 @@ test('App does not invite a duplicate create when the point projection refresh f
   expect(screen.getByText(/создана, но обновить список точек не удалось: Временный сбой списка/)).toBeTruthy();
   expect(screen.queryByRole('dialog', { name: 'Создать Analytical Point' })).toBeNull();
   expect(createAnalyticalPoint).toHaveBeenCalledTimes(1);
+});
+
+test('App retires one exact Analytical Point scope and restores it through Operation Journal', async () => {
+  uiState.imported = true;
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole('button', { name: 'Анализы' }));
+  await user.click(await screen.findByRole('button', { name: /Analytical Points 2/ }));
+  await user.click(screen.getByRole('button', { name: 'Разорвать связь' }));
+  const dialog = screen.getByRole('dialog', { name: 'Разорвать связь P-07' });
+  await user.type(within(dialog).getByRole('textbox', { name: 'Причина разрыва связи' }), 'Связаны разные физические точки');
+  await user.click(within(dialog).getByRole('checkbox', { name: /Подтверждаю снятие только этой связи/ }));
+  await user.click(within(dialog).getByRole('button', { name: 'Разорвать связь' }));
+
+  await waitFor(() => expect(retireAnalyticalPoint).toHaveBeenCalledWith(
+    'C:/PetroLab/project.sqlite',
+    expect.objectContaining({ analytical_point_id: 'point-kiv-2-p07', analysis_ids: ['analysis-ui-1', 'analysis-la-87'] }),
+    'Связаны разные физические точки',
+  ));
+  expect(await screen.findByText(/Связь «P-07» снята обратимо/)).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Отменить' }));
+  await waitFor(() => expect(undoOperation).toHaveBeenCalledWith('C:/PetroLab/project.sqlite', 'operation-retire-p07'));
+  expect(await screen.findByText('Связь Analytical Point восстановлена по устойчивым ID.')).toBeTruthy();
+  expect((await screen.findAllByText('P-07')).length).toBeGreaterThan(0);
 });
 
 test("user confirms an image batch, places same- and cross-sample points, reviews and imports", async () => {

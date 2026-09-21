@@ -26,6 +26,9 @@ from petrolab.media_import import (  # noqa: E402
     inspect_media_source,
     inspect_media_sources,
     list_analytical_points,
+    list_operation_journal,
+    retire_analytical_point,
+    undo_operation,
 )
 from test_import_preview import FIXTURE, fixture_recipe  # noqa: E402
 
@@ -139,6 +142,59 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(by_id[second["analytical_point_id"]]["sample_name"], "OTHER")
             self.assertEqual(by_id[first["analytical_point_id"]]["placement_count"], 0)
 
+    def test_point_retraction_and_undo_preserve_entities_and_exact_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, _ = self._project_with_points(Path(directory_name))
+            before = {}
+            with closing(sqlite3.connect(database)) as connection:
+                for table in ("analysis", "measurement", "analytical_point", "analytical_point_analysis"):
+                    before[table] = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            retired = retire_analytical_point(
+                database,
+                point["analytical_point_id"],
+                point["analysis_ids"],
+                [],
+                "Ошибочно связаны разные физические точки",
+            )
+            self.assertNotIn(point["analytical_point_id"], {item["analytical_point_id"] for item in list_analytical_points(database)["items"]})
+            operation = retired["operation"]
+            self.assertEqual(operation["action_kind"], "analytical_point.retire")
+            self.assertEqual(operation["entity_ids"]["analysis_ids"], sorted(point["analysis_ids"]))
+            self.assertEqual(operation["inverse_action_kind"], "analytical_point.restore")
+            with closing(sqlite3.connect(database)) as connection:
+                for table, count in before.items():
+                    self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], count)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point_retraction").fetchone()[0], 1)
+
+            undone = undo_operation(database, operation["operation_id"])
+            self.assertEqual(undone["effect"], "restored")
+            self.assertIn(point["analytical_point_id"], {item["analytical_point_id"] for item in list_analytical_points(database)["items"]})
+            journal = list_operation_journal(database)
+            original = next(item for item in journal["items"] if item["operation_id"] == operation["operation_id"])
+            self.assertEqual(original["outcome"], "undone")
+            self.assertEqual(original["undone_by_operation_id"], undone["operation"]["operation_id"])
+            self.assertEqual(journal["items"][0]["parameters"]["target_operation_id"], operation["operation_id"])
+
+    def test_point_retraction_rejects_stale_scope_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, _ = self._project_with_points(Path(directory_name))
+            with self.assertRaises(ImportCommandError) as raised:
+                retire_analytical_point(database, point["analytical_point_id"], point["analysis_ids"][:1], [], "stale view")
+            self.assertEqual(raised.exception.code, "POINT_REVISION_CONFLICT")
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point_retraction").fetchone()[0], 0)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM operation_journal_entry").fetchone()[0], 2)
+
+    def test_undo_create_retracts_the_point_without_deleting_its_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, _ = self._project_with_points(Path(directory_name))
+            undone = undo_operation(database, point["operation"]["operation_id"])
+            self.assertEqual(undone["effect"], "retracted")
+            self.assertNotIn(point["analytical_point_id"], {item["analytical_point_id"] for item in list_analytical_points(database)["items"]})
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point WHERE analytical_point_id = ?", (point["analytical_point_id"],)).fetchone()[0], 1)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point_analysis WHERE analytical_point_id = ?", (point["analytical_point_id"],)).fetchone()[0], 2)
+
     def test_windows_batch_file_is_not_treated_as_an_image(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             script = Path(directory_name) / "images.bat"
@@ -166,7 +222,7 @@ class MediaImportTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM spatial_annotation").fetchone()[0], 1)
                 row = connection.execute("SELECT geometry_kind, x_px, y_px, image_width_px, image_height_px FROM spatial_annotation").fetchone()
                 self.assertEqual(row, ("point", 5.25, 3.5, 12, 8))
-                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 13)
+                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 14)
             self.assertEqual(result["spatial_annotation_count"], 1)
             projected = list_analytical_points(database)
             saved = next(item for item in projected["items"] if item["analytical_point_id"] == point["analytical_point_id"])

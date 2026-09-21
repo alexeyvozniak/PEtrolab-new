@@ -60,6 +60,9 @@ Scientific domain core ← Persistence ports → SQLite adapters
 | `workspace_snapshot.restore` | Workspace Snapshot ID | план полного или частичного восстановления ссылок и ревизий |
 | `analytical_point.create` | Sample, имя Point, Analysis IDs и тип связи | Analytical Point без изменения Analysis/Measurement |
 | `analytical_point.list` | Project | точки с устойчивыми ID, Sample, Analysis IDs, методами и числом размещений |
+| `analytical_point.retire` | Point ID, ожидаемые Analysis/Spatial Annotation IDs и причина | логическое снятие связи без удаления связанных сущностей |
+| `operation_journal.list` | Project, limit | журнал с actor, timestamp, exact scope, outcome и inverse payload |
+| `operation_journal.undo` | Operation ID | проверенная inverse operation либо revision conflict без записи |
 | `media.inspect_sources` | явный список путей | форматы, размеры, SHA-256 и дубликаты без записи |
 | `media.preview` | путь и ограничение размера | локальный PNG preview без изменения ориентации исходных пикселей |
 | `media.import.plan` | назначения Sample/Thin Section, типы и ручные геометрии | проверяемый план с fingerprint |

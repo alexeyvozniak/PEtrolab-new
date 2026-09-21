@@ -158,6 +158,52 @@ class NdjsonServiceTests(unittest.TestCase):
             })["result"]
             self.assertEqual(applied["spatial_annotation_count"], 1)
 
+    def test_point_retraction_journal_and_undo_are_available_through_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database = str(Path(directory_name) / "project.sqlite")
+            handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "import.plan.apply",
+                "payload": {"project_database_path": database, "source_path": str(FIXTURE), "recipe": fixture_recipe()},
+            })
+            import sqlite3
+            with closing(sqlite3.connect(database)) as connection:
+                analysis_ids = [row[0] for row in connection.execute("SELECT analysis_id FROM analysis ORDER BY rowid LIMIT 2")]
+            point = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.create",
+                "payload": {"project_database_path": database, "sample_name": "KIV-2", "point_name": "P-07", "analysis_ids": analysis_ids, "link_type": "same_point"},
+            })["result"]
+
+            retired = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.retire",
+                "payload": {
+                    "project_database_path": database,
+                    "analytical_point_id": point["analytical_point_id"],
+                    "expected_analysis_ids": point["analysis_ids"],
+                    "expected_spatial_annotation_ids": [],
+                    "reason": "Связаны разные физические точки",
+                },
+            })["result"]
+            self.assertEqual(retired["operation"]["action_kind"], "analytical_point.retire")
+            self.assertEqual(handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.list",
+                "payload": {"project_database_path": database},
+            })["result"]["total"], 0)
+
+            journal = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "operation_journal.list",
+                "payload": {"project_database_path": database, "limit": 10},
+            })["result"]
+            self.assertEqual(journal["items"][0]["operation_id"], retired["operation"]["operation_id"])
+            restored = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "operation_journal.undo",
+                "payload": {"project_database_path": database, "operation_id": retired["operation"]["operation_id"]},
+            })["result"]
+            self.assertEqual(restored["effect"], "restored")
+            self.assertEqual(handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.list",
+                "payload": {"project_database_path": database},
+            })["result"]["total"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
