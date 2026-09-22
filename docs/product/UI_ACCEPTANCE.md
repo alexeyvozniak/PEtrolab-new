@@ -46,6 +46,7 @@
 | AT-36 | Сохранить Table View, отметить 17 строк на нескольких страницах и экспортировать Selection XLSX | совпадающие 17 Analysis ID и provenance; неизменные Filter, Selection, Work Group и Plot Visibility |
 | AT-37 | Назначить Generation и создать/снять связь Analytical Point через Operation Journal; отдельно скрыть точки как view-only action и отменить операции | точный journal scope, inverse actions, устойчивые ID и отсутствие изменения Measurement/Source |
 | AT-38 | Сохранить Import Recipe со структурой двух листов, FeO/FeOt decision, units и column mapping; открыть после изменения версии схемы и в несовместимом Dataset | semantic fingerprint, versioned migration report, точный round-trip совместимых полей, явный список отброшенных полей и отсутствие silent partial restore |
+| AT-39 | Импортировать таблицу, где `at.%` уверенно, но ошибочно распознана у нескольких Measurement; одним действием заменить её на `wt.%` для показанного сервисом точного охвата | скриншот вопроса с исходной единицей и числом полей/таблиц, обновлённый recipe, неизменный SHA-256 исходника и отклонение устаревшего bulk scope |
 
 ## Условия провала
 

@@ -123,6 +123,13 @@ File names, sheet names, instrument labels and previous user habits are not sema
 
 The client submits `bulk_scope_id + decision`. The service revalidates the scope against current source and recipe fingerprints before applying it. Stale or widened scopes are rejected.
 
+The same rule applies when a confidently recognized unit is wrong. Python may
+issue a `measurement_unit_override` scope only for one current unit,
+orientation, source fingerprint and compatible Fe semantic group. React shows
+the exact field and sheet counts and submits `unit_override`; it never computes
+or widens the meaning of “all”. The revision changes recipe semantics only and
+does not convert or overwrite source values.
+
 ### 7. Fast and detailed modes share the same shell
 
 `clean_table_fast` is a presentation state of Import Workspace:

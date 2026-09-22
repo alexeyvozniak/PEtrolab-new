@@ -10,7 +10,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from petrolab.desktop_workflow import apply_bulk_unit_scope, bulk_unit_scopes, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe  # noqa: E402
+from petrolab.desktop_workflow import (apply_bulk_unit_override_scope, apply_bulk_unit_scope,
+                                       bulk_unit_override_scopes, bulk_unit_scopes,
+                                       list_project_analyses, list_project_mineral_identifications,
+                                       suggest_import_recipe)  # noqa: E402
 from petrolab.import_apply import apply_import_plan, retract_latest_import  # noqa: E402
 from petrolab.import_preview import ImportCommandError, create_import_plan, inspect_source, validate_recipe  # noqa: E402
 from petrolab.manual_mapping import review_duplicate_candidates  # noqa: E402
@@ -37,6 +40,32 @@ def reviewed_recipe() -> dict:
 
 
 class DesktopWorkflowTests(unittest.TestCase):
+    def test_recognized_unit_can_be_corrected_for_one_server_issued_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "wrong-unit.csv"
+            original = b"Analysis,SiO2 (at.%),MgO (at.%)\nA1,40,50\n"
+            source.write_bytes(original)
+            recipe = suggest_import_recipe(source)["recipe"]
+            scope = bulk_unit_override_scopes(source, recipe)["scopes"][0]
+
+            self.assertEqual(scope["current_unit"], "at.%")
+            self.assertEqual(scope["field_count"], 2)
+            revised = apply_bulk_unit_override_scope(
+                source, recipe, scope["bulk_scope_id"], "wt.%"
+            )["recipe"]
+            measurements = [mapping for section in revised["sections"]
+                            for mapping in section["mappings"]
+                            if mapping["target_role"] == "measurement"]
+
+            self.assertEqual({mapping["unit"] for mapping in measurements}, {"wt.%"})
+            self.assertEqual({mapping["canonical_field"] for mapping in measurements}, {"SiO2", "MgO"})
+            self.assertEqual(source.read_bytes(), original)
+            with self.assertRaises(ImportCommandError) as stale:
+                apply_bulk_unit_override_scope(
+                    source, revised, scope["bulk_scope_id"], "ppm"
+                )
+            self.assertEqual(stale.exception.code, "STALE_BULK_SCOPE")
+
     def test_suggested_recipe_is_conservative_and_valid(self) -> None:
         suggestion = suggest_import_recipe(FIXTURE)
         recipe = suggestion["recipe"]

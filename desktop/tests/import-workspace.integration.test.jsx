@@ -189,6 +189,29 @@ test("one server-issued unit scope is presented as one guided question", async (
   expect(await readFile(second, 'utf8')).toBe(source);
 }, 20000);
 
+test("recognized wrong unit can be corrected for every field in one explicit step", async () => {
+  const source = 'Analysis,SiO2 [at.%],MgO [at.%]\nB1,40,50\nB2,41,49\n';
+  await writeFile(second, source);
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+
+  await user.click(await enabledButton('Единицы определены неверно'));
+  expect(screen.getByRole('heading', { name: 'Какая единица правильная?' })).toBeTruthy();
+  expect(screen.getByText((_, element) => element.tagName === 'P'
+    && element.textContent.includes('Сейчас at.% назначена 2 полям в 1 таблице'))).toBeTruthy();
+  const unit = screen.getByRole('combobox', { name: 'Новая единица для всех полей' });
+  await user.selectOptions(unit, 'wt.%');
+  await user.click(await enabledButton('Заменить в 2 полях'));
+
+  await waitFor(() => expect(screen.queryByRole('heading', { name: 'Какая единица правильная?' })).toBeNull());
+  expect(requests.some((request) => request.command === 'import.workspace.apply_bulk_decision'
+    && request.payload.decision?.kind === 'unit_override'
+    && request.payload.decision?.unit === 'wt.%')).toBe(true);
+  expect(await readFile(second, 'utf8')).toBe(source);
+}, 20000);
+
 test("ambiguous Fe is one guided decision and preserves source numbers", async () => {
   const user = userEvent.setup();
   render(<App />);

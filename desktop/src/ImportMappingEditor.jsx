@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import "./importMapping.css";
 
 const TARGETS = ["Ignore", "Analysis", "Sample", "Sample name", "Point", "Mineral", "Method", "Generation", "Rock", "Source", "Comment", "Position", "Photo number", "Size (µm)", "Measurement"];
-const UNITS = ["wt.%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon", "permil"];
-const UNIT_LABELS = { "wt.%": "wt.% · массовые %", "at.%": "at.% · атомные %", "mol%": "mol% · мольные %", apfu: "apfu · атомы на формулу", ratio: "ratio · отношение", permil: "permil · ‰" };
+const UNITS = ["wt.%", "mass%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon", "permil"];
+const UNIT_LABELS = { "wt.%": "wt.% · массовые %", "mass%": "mass% · массовые %", "at.%": "at.% · атомные %", "mol%": "mol% · мольные %", apfu: "apfu · атомы на формулу", ratio: "ratio · отношение", permil: "permil · ‰" };
 const FE_FORM_OPTIONS = [
   ["FeO", "FeO · двухвалентное железо как FeO"],
   ["FeOt", "FeOt · суммарное железо как FeO"],

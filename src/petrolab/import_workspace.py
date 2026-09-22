@@ -11,8 +11,9 @@ from uuid import uuid4
 from contextlib import closing
 
 from .clean_table import classify_clean_table
-from .desktop_workflow import (suggest_import_recipe, bulk_unit_scopes, bulk_ignore_scopes,
-                               apply_bulk_unit_scope, apply_bulk_ignore_scope)
+from .desktop_workflow import (suggest_import_recipe, bulk_unit_scopes, bulk_unit_override_scopes,
+                               bulk_ignore_scopes, apply_bulk_unit_scope,
+                               apply_bulk_unit_override_scope, apply_bulk_ignore_scope)
 from .import_apply import _require_mapping_review, _require_duplicate_review, _require_non_empty_plan
 from .import_preview import (ImportCommandError, inspect_source, create_import_plan,
                              preview_source_window, semantic_fingerprint)
@@ -142,6 +143,8 @@ class ImportWorkspaceStore:
                     scope_id = scope_id[len(prefix):]
                     if kind == 'unit':
                         revised = apply_bulk_unit_scope(source['staged_path'], source['recipe'], scope_id, decision['unit'])
+                    elif kind == 'unit_override':
+                        revised = apply_bulk_unit_override_scope(source['staged_path'], source['recipe'], scope_id, decision['unit'])
                     elif kind == 'ignore':
                         revised = apply_bulk_ignore_scope(source['staged_path'], source['recipe'], scope_id)
                     else:
@@ -244,7 +247,7 @@ class ImportWorkspaceStore:
         source['recipe']['semantic_fingerprint'] = semantic_fingerprint(source['recipe'])
 
     def _review(self, source):
-        plan, issues, units, ignores = empty_plan(), [], [], []
+        plan, issues, units, unit_overrides, ignores = empty_plan(), [], [], [], []
         try:
             inspection = self._check(source)
             plan = create_import_plan(inspection, source['recipe'])
@@ -276,6 +279,7 @@ class ImportWorkspaceStore:
                                    'severity': 'info' if derived_empty_plan else 'error',
                                    'blocking': not derived_empty_plan})
             units = bulk_unit_scopes(source['staged_path'], source['recipe'])['scopes']
+            unit_overrides = bulk_unit_override_scopes(source['staged_path'], source['recipe'])['scopes']
             ignores = bulk_ignore_scopes(source['staged_path'], source['recipe'])['scopes']
         except ImportCommandError as error:
             issues.append({'code': error.code, 'message': error.message, 'severity': 'error', 'blocking': True})
@@ -285,7 +289,8 @@ class ImportWorkspaceStore:
         plan['ready_to_commit'] = ready
         return {'inspection': source['inspection'], 'recipe': source['recipe'], 'plan': plan,
                 'classification': source['classification'], 'issues': issues,
-                'bulk_unit_scopes': units, 'bulk_ignore_scopes': ignores, 'ready': ready,
+                'bulk_unit_scopes': units, 'bulk_unit_override_scopes': unit_overrides,
+                'bulk_ignore_scopes': ignores, 'ready': ready,
                 'decisions': source['decisions'], 'source_id': source['source_id']}
 
     def _project(self, state):
@@ -307,6 +312,20 @@ class ImportWorkspaceStore:
                                              'orientation': 'analyses_in_columns' if scope.get('orientation') == 'columns_are_analyses' else 'analyses_in_rows',
                                              'adapter_version': source['adapter_version']},
                                'scope_summary': f"{scope['field_count']} полей в одном источнике",
+                               'source_fingerprints': {source['source_id']: source['sha256']}, 'draft_revision': state['draft_revision']})
+            for scope in review['bulk_unit_override_scopes']:
+                scope['bulk_scope_id'] = f"{state['draft_revision']}:{source['source_id']}:{scope['bulk_scope_id']}"
+                targets = []
+                for target in scope['targets']:
+                    section = next(s for s in source['recipe']['sections'] if s['block_id'] == target['block_id'])
+                    targets.append({'source_id': source['source_id'], 'sheet_key': f"{source['source_id']}:{section['sheet_name']}",
+                                    'source_axis': target['source_axis'], 'source_index': target['source_index']})
+                scopes.append({'bulk_scope_id': scope['bulk_scope_id'], 'decision_kind': scope['decision_kind'], 'targets': targets,
+                               'signature': {'normalized_source_header': '|'.join(scope['fields']), 'source_unit': scope['current_unit'],
+                                             'target_role': 'measurement', 'canonical_field': None,
+                                             'orientation': 'analyses_in_columns' if scope.get('orientation') == 'columns_are_analyses' else 'analyses_in_rows',
+                                             'adapter_version': source['adapter_version']},
+                               'scope_summary': f"{scope['field_count']} полей с единицей {scope['current_unit']}",
                                'source_fingerprints': {source['source_id']: source['sha256']}, 'draft_revision': state['draft_revision']})
             reviews[source['source_id']] = review
             recipe = source['recipe']

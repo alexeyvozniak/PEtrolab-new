@@ -118,6 +118,7 @@ export function App() {
   const [inspection, setInspection] = useState(null);
   const [recipe, setRecipe] = useState(null);
   const [bulkUnitScopes, setBulkUnitScopes] = useState([]);
+  const [bulkUnitOverrideScopes, setBulkUnitOverrideScopes] = useState([]);
   const [bulkIgnoreScopes, setBulkIgnoreScopes] = useState([]);
   const [plan, setPlan] = useState(null);
   const [blockPreviews, setBlockPreviews] = useState({});
@@ -260,6 +261,7 @@ export function App() {
     setSourceIssues(active.issues);
     setSemanticTools({ actions: active.semantic_actions || [], analytes: active.canonical_analytes || [], mineralScopes: active.mineral_acceptance_scopes || [], records: active.plan.planned_records || [] });
     setBulkUnitScopes(active.bulk_unit_scopes);
+    setBulkUnitOverrideScopes(active.bulk_unit_override_scopes || []);
     setBulkIgnoreScopes(active.bulk_ignore_scopes);
     setPlan(active.plan);
     setCleanClassification(active.classification);
@@ -284,6 +286,7 @@ export function App() {
     setPlan(null);
     setBlockPreviews({});
     setBulkUnitScopes([]);
+    setBulkUnitOverrideScopes([]);
     setBulkIgnoreScopes([]);
     setCleanClassification(null);
     setDetailedReview(false);
@@ -332,8 +335,10 @@ export function App() {
       const result = unwrap(await applyWorkspaceDecision(workspace.workspace_id, workspace.draft_revision, sourceId, decision, bulk));
       await receiveWorkspace(result, true);
       if (decision.kind !== "activate") setSuccess("Решение сохранено.");
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
+      return false;
     } finally {
       setActivity("");
       setBusy(false);
@@ -343,6 +348,7 @@ export function App() {
   const applySections = (decisions) => decide({ kind: "sections", decisions });
   const applyMappings = (decisions) => decide({ kind: "mappings", decisions });
   const applyBulkUnit = (bulkScopeId, unit) => decide({ kind: "unit", bulk_scope_id: bulkScopeId, unit }, undefined, true);
+  const applyBulkUnitOverride = (bulkScopeId, unit) => decide({ kind: "unit_override", bulk_scope_id: bulkScopeId, unit }, undefined, true);
   const applyBulkIgnore = (bulkScopeId) => decide({ kind: "ignore", bulk_scope_id: bulkScopeId }, undefined, true);
   const keepAllDuplicateCandidates = () => decide({ kind: "duplicates" });
   const openDetailedReview = () => setDetailedReview(true);
@@ -874,6 +880,7 @@ export function App() {
                 recipe={recipe}
                 recipeWarnings={visibleRecipeWarnings}
                 bulkUnitScopes={bulkUnitScopes}
+                bulkUnitOverrideScopes={bulkUnitOverrideScopes}
                 bulkIgnoreScopes={bulkIgnoreScopes}
                 plan={plan}
                 blockPreviews={blockPreviews}
@@ -890,6 +897,7 @@ export function App() {
                 onApplySections={applySections}
                 onApplyMappings={applyMappings}
                 onApplyBulkUnit={applyBulkUnit}
+                onApplyBulkUnitOverride={applyBulkUnitOverride}
                 onApplyBulkIgnore={applyBulkIgnore}
                 onBlockDirtyChange={setBlockDraftDirty}
                 onMappingDirtyChange={setMappingDraftDirty}

@@ -345,6 +345,94 @@ def apply_bulk_unit_scope(source_path: str | Path, recipe: dict[str, Any], bulk_
     return {**revised, "bulk_scope_id": bulk_scope_id, "applied_decision_count": len(decisions)}
 
 
+def bulk_unit_override_scopes(source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
+    """Return exact scopes for correcting an already assigned measurement unit.
+
+    The service, rather than the client, decides what "all" means.  A scope is
+    limited to one source, current unit, orientation and Fe semantic group so a
+    convenient correction cannot broaden into a different scientific meaning.
+    """
+    inspection = inspect_source(source_path)
+    validate_recipe(inspection, recipe)
+    grouped: dict[tuple[str, str, str], list[tuple[dict[str, Any], dict[str, Any]]]] = defaultdict(list)
+    for section in recipe.get("sections", []):
+        if not section.get("enabled", True):
+            continue
+        orientation = str(section.get("orientation", "rows_are_analyses"))
+        for mapping in section.get("mappings", []):
+            unit = mapping.get("unit")
+            canonical_field = mapping.get("canonical_field")
+            if mapping.get("target_role") != "measurement" or not isinstance(unit, str) or not unit:
+                continue
+            fe_group = f"iron:{canonical_field}" if canonical_field in IRON_FIELDS else "non_iron"
+            grouped[(orientation, unit, fe_group)].append((section, mapping))
+
+    scopes: list[dict[str, Any]] = []
+    recipe_fingerprint = semantic_fingerprint(recipe)
+    for (orientation, current_unit, fe_group), pairs in sorted(
+        grouped.items(), key=lambda item: (item[0][1], item[0][0], item[0][2])
+    ):
+        targets = []
+        for section, mapping in pairs:
+            axis = str(mapping.get("source_axis", "column"))
+            index_key = "source_column_index" if axis == "column" else "source_row_index"
+            targets.append({
+                "block_id": section["block_id"],
+                "source_axis": axis,
+                "source_index": mapping[index_key],
+                "canonical_field": mapping["canonical_field"],
+            })
+        identity = {
+            "source_fingerprint": inspection.fingerprint,
+            "recipe_fingerprint": recipe_fingerprint,
+            "decision_kind": "measurement_unit_override",
+            "orientation": orientation,
+            "current_unit": current_unit,
+            "fe_group": fe_group,
+            "targets": targets,
+        }
+        scope_id = hashlib.sha256(json.dumps(
+            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")).hexdigest()[:24]
+        scopes.append({
+            "bulk_scope_id": scope_id,
+            "decision_kind": "measurement_unit_override",
+            "orientation": orientation,
+            "current_unit": current_unit,
+            "fe_group": fe_group,
+            "block_count": len({section["block_id"] for section, _ in pairs}),
+            "field_count": len(targets),
+            "sheet_names": sorted({str(section["sheet_name"]) for section, _ in pairs}),
+            "fields": sorted({str(target["canonical_field"]) for target in targets}),
+            "targets": targets,
+        })
+    return {"source_fingerprint": inspection.fingerprint, "recipe_fingerprint": recipe_fingerprint, "scopes": scopes}
+
+
+def apply_bulk_unit_override_scope(
+    source_path: str | Path,
+    recipe: dict[str, Any],
+    bulk_scope_id: str,
+    unit: str,
+) -> dict[str, Any]:
+    if not isinstance(bulk_scope_id, str) or not bulk_scope_id:
+        raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Bulk scope identifier is required.")
+    scopes = bulk_unit_override_scopes(source_path, recipe)["scopes"]
+    scope = next((item for item in scopes if item["bulk_scope_id"] == bulk_scope_id), None)
+    if scope is None:
+        raise ImportCommandError("STALE_BULK_SCOPE", "Bulk scope no longer matches the current source and recipe.")
+    decisions = [{
+        "block_id": target["block_id"],
+        "source_axis": target["source_axis"],
+        "source_index": target["source_index"],
+        "target": "Measurement",
+        "canonical_field": target["canonical_field"],
+        "unit": unit,
+    } for target in scope["targets"]]
+    revised = revise_import_mappings(source_path, recipe, decisions)
+    return {**revised, "bulk_scope_id": bulk_scope_id, "applied_decision_count": len(decisions)}
+
+
 def bulk_ignore_scopes(source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
     """Return the exact current set of unrecognized fields for explicit skip.
 

@@ -29,6 +29,7 @@ const REPEATABLE_ISSUE_CODES = new Set([
 
 const UNIT_OPTIONS = [
   ["wt.%", "wt.% · массовые проценты"],
+  ["mass%", "mass% · массовые проценты"],
   ["at.%", "at.% · атомные проценты"],
   ["ppm", "ppm · частей на миллион"],
   ["ppb", "ppb · частей на миллиард"],
@@ -36,6 +37,7 @@ const UNIT_OPTIONS = [
   ["mol%", "mol% · мольные проценты"],
   ["ratio", "ratio · отношение"],
   ["epsilon", "epsilon"],
+  ["permil", "permil · промилле"],
 ];
 
 function countNoun(count, one, few, many) {
@@ -172,7 +174,7 @@ function measurementSummary(record) {
   }).join(" · ") || "Нет Measurement";
 }
 
-function CleanReadyPreview({ classification, plan, onDetailed, busy }) {
+function CleanReadyPreview({ classification, plan, onDetailed, onUnitsWrong, busy }) {
   return (
     <div className="workspace-ready">
       <div className="workspace-ready-head">
@@ -181,7 +183,10 @@ function CleanReadyPreview({ classification, plan, onDetailed, busy }) {
           <h3>PetroLab однозначно распознал структуру и единицы</h3>
           <p>Clean Table v{classification.clean_table_version}. Исходный файл не изменяется, а provenance каждой ячейки останется доступна.</p>
         </div>
-        <button className="outline-button" type="button" onClick={onDetailed} disabled={busy}>Открыть подробную проверку</button>
+        <div className="workspace-ready-actions">
+          {onUnitsWrong && <button className="workspace-units-wrong" type="button" onClick={onUnitsWrong} disabled={busy}>Единицы определены неверно</button>}
+          <button className="outline-button" type="button" onClick={onDetailed} disabled={busy}>Открыть подробную проверку</button>
+        </div>
       </div>
       <div className="workspace-plan-table">
         <div className="workspace-plan-head"><span>Источник</span><span>Analysis</span><span>Measurement</span></div>
@@ -257,6 +262,7 @@ export function ImportWorkspace({
   recipe,
   recipeWarnings,
   bulkUnitScopes = [],
+  bulkUnitOverrideScopes = [],
   bulkIgnoreScopes = [],
   plan,
   blockPreviews,
@@ -273,6 +279,7 @@ export function ImportWorkspace({
   onApplySections,
   onApplyMappings,
   onApplyBulkUnit,
+  onApplyBulkUnitOverride,
   onApplyBulkIgnore,
   onBlockDirtyChange,
   onMappingDirtyChange,
@@ -288,11 +295,20 @@ export function ImportWorkspace({
   const [selectedIssueKey, setSelectedIssueKey] = useState(focusedIssueKey);
   const [bulkUnits, setBulkUnits] = useState({});
   const [manualBulkScopeId, setManualBulkScopeId] = useState("");
+  const [unitOverrideOpen, setUnitOverrideOpen] = useState(false);
+  const [unitOverrideScopeId, setUnitOverrideScopeId] = useState("");
+  const [unitOverrideValue, setUnitOverrideValue] = useState("");
   const [showResultPreview, setShowResultPreview] = useState(false);
   const [mineralReview, setMineralReview] = useState(Boolean(recipe.global_decisions.mineral_verification_enabled));
   const [mineralFocus, setMineralFocus] = useState(null);
   useEffect(() => { setMineralReview(Boolean(recipe.global_decisions.mineral_verification_enabled)); setMineralFocus(null); }, [recipe.global_decisions.mineral_verification_enabled, workspace?.active_source_id]);
-  useEffect(() => { setSelectedIssueKey(focusedIssueKey); setManualBulkScopeId(""); }, [focusedIssueKey, workspace?.active_source_id]);
+  useEffect(() => {
+    setSelectedIssueKey(focusedIssueKey);
+    setManualBulkScopeId("");
+    setUnitOverrideOpen(false);
+    setUnitOverrideScopeId("");
+    setUnitOverrideValue("");
+  }, [focusedIssueKey, workspace?.active_source_id]);
 
   const sheetGroups = useMemo(() => {
     const groups = new Map();
@@ -361,6 +377,9 @@ export function ImportWorkspace({
     ? selectedGroup
     : listedBlockingIssueGroups[0] || null;
   const groupedUnitTargets = useMemo(() => activeBulkUnitScopes.flatMap((scope) => scope.targets || []), [activeBulkUnitScopes]);
+  const selectedUnitOverrideScope = bulkUnitOverrideScopes.find((scope) => scope.bulk_scope_id === unitOverrideScopeId)
+    || bulkUnitOverrideScopes[0]
+    || null;
   const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview;
   const blockingCount = workspace ? groupIssues(issues.filter((item) => item.blocking)).length : (blockDraftDirty ? 1 : 0)
     + (plan.issues || []).filter((item) => item.blocking).length
@@ -403,6 +422,20 @@ export function ImportWorkspace({
     const otherEnabled = sections.some((section) => section.sheet_name !== group.sheet_name && section.enabled !== false);
     if (!nextEnabled && !otherEnabled) return;
     onApplySections(group.sections.map((section) => sectionDecision(section, nextEnabled)));
+  };
+
+  const openUnitOverride = () => {
+    setUnitOverrideScopeId(bulkUnitOverrideScopes[0]?.bulk_scope_id || "");
+    setUnitOverrideValue("");
+    setUnitOverrideOpen(true);
+  };
+
+  const applyUnitOverride = async () => {
+    if (!selectedUnitOverrideScope || !unitOverrideValue) return;
+    const applied = await onApplyBulkUnitOverride(selectedUnitOverrideScope.bulk_scope_id, unitOverrideValue);
+    if (!applied) return;
+    setUnitOverrideOpen(false);
+    setUnitOverrideValue("");
   };
 
   return (
@@ -512,7 +545,13 @@ export function ImportWorkspace({
 
         <main className="import-table-pane">
           {cleanFast ? (
-            <CleanReadyPreview classification={cleanClassification} plan={plan} onDetailed={onOpenDetailed} busy={busy} />
+            <CleanReadyPreview
+              classification={cleanClassification}
+              plan={plan}
+              onDetailed={onOpenDetailed}
+              onUnitsWrong={bulkUnitOverrideScopes.length ? () => { onOpenDetailed(); openUnitOverride(); } : null}
+              busy={busy}
+            />
           ) : (
             <ImportBlockReview
               semanticTools={semanticTools}
@@ -531,16 +570,16 @@ export function ImportWorkspace({
         <aside className="import-inspector-pane">
           {onVerifyMinerals && blockingIssueGroups.length === 0 && <div className="import-stage-tabs"><button type="button" onClick={() => setMineralReview(false)} disabled={busy}>1 · Структура</button><button type="button" disabled={busy || blockDraftDirty || mappingDraftDirty || plan.ready_to_commit === false} onClick={() => recipe.global_decisions.mineral_verification_enabled ? setMineralReview(true) : onVerifyMinerals()}>2 · Проверить минералы</button></div>}
           {mineralReview ? <MineralVerificationPanel records={plan.planned_records || []} scopes={semanticTools.mineralScopes || []} busy={busy} onAccept={onAcceptMineral} onReveal={(record) => { setMineralFocus({ ...record, source_column_index: (record.source_column_number || 1) - 1 }); selectBlock(record.block_id); }} /> : <>
-          <div className={`import-pane-label${blockingIssueGroups.length ? " needs-action" : " ready"}`} role="status" aria-live="polite" aria-atomic="true">
-            {blockingIssueGroups.length ? `Текущий вопрос · осталось ${blockingIssueGroups.length}` : "Проверка"}
+          <div className={`import-pane-label${blockingIssueGroups.length && !unitOverrideOpen ? " needs-action" : " ready"}`} role="status" aria-live="polite" aria-atomic="true">
+            {unitOverrideOpen ? "Массовая смена единицы" : blockingIssueGroups.length ? `Текущий вопрос · осталось ${blockingIssueGroups.length}` : "Проверка"}
           </div>
-          {currentBlockingIssueGroup && (
+          {!unitOverrideOpen && currentBlockingIssueGroup && (
             <section className="import-current-question" aria-labelledby="import-current-question-title">
                 <Warning size={16} weight="fill" />
                 <span><h2 id="import-current-question-title">{warningLabel(currentBlockingIssueGroup.item)}{currentBlockingIssueGroup.items.length > 1 ? ` · ${currentBlockingIssueGroup.items.length} мест` : ""}</h2><small>{workspace?.sources.find((s) => s.source_id === currentBlockingIssueGroup.item.source_id)?.original_display_path.split(/[\\/]/).pop()} · {issueDetail(currentBlockingIssueGroup.item) || "Контекст показан в исходной таблице"}</small></span>
             </section>
           )}
-          {blockingIssueGroups.length === 0 && advisoryIssueGroups.length > 0 && <details className="import-advisories">
+          {!unitOverrideOpen && blockingIssueGroups.length === 0 && advisoryIssueGroups.length > 0 && <details className="import-advisories">
             <summary><Info size={15} /><span>{countNoun(advisoryIssueGroups.length, "примечание", "примечания", "примечаний")}</span></summary>
             <div className="import-issue-list">
               {advisoryIssueGroups.map((entry) => (
@@ -557,9 +596,45 @@ export function ImportWorkspace({
               ))}
             </div>
           </details>}
+          {!unitOverrideOpen && !cleanFast && bulkUnitOverrideScopes.length > 0 && (
+            <button className="unit-override-open" type="button" onClick={openUnitOverride} disabled={busy || blockDraftDirty || mappingDraftDirty}>
+              Автоопределение единицы неверно? <b>Исправить сразу</b>
+            </button>
+          )}
 
           {!cleanFast && activeSection && (
             <div className="import-field-inspector">
+              {unitOverrideOpen && selectedUnitOverrideScope ? (
+                <section className="unit-override-question" aria-labelledby="unit-override-title">
+                  <h2 id="unit-override-title">Какая единица правильная?</h2>
+                  {bulkUnitOverrideScopes.length > 1 && <label>
+                    Какие поля изменить
+                    <select
+                      aria-label="Какие поля изменить"
+                      value={selectedUnitOverrideScope.bulk_scope_id}
+                      onChange={(event) => { setUnitOverrideScopeId(event.target.value); setUnitOverrideValue(""); }}
+                      disabled={busy}
+                    >
+                      {bulkUnitOverrideScopes.map((scope) => <option key={scope.bulk_scope_id} value={scope.bulk_scope_id}>
+                        {scope.current_unit} · {scope.fields.slice(0, 3).join(", ")}{scope.fields.length > 3 ? "…" : ""} · {countNoun(scope.field_count, "поле", "поля", "полей")} · {countNoun(scope.sheet_names.length, "таблица", "таблицы", "таблиц")}
+                      </option>)}
+                    </select>
+                  </label>}
+                  <p>Сейчас <b>{selectedUnitOverrideScope.current_unit}</b> назначена {countNoun(selectedUnitOverrideScope.field_count, "полю", "полям", "полям")} в {countNoun(selectedUnitOverrideScope.sheet_names.length, "таблице", "таблицах", "таблицах")}.</p>
+                  <label>
+                    Заменить на
+                    <select aria-label="Новая единица для всех полей" value={unitOverrideValue} onChange={(event) => setUnitOverrideValue(event.target.value)} disabled={busy}>
+                      <option value="">Выбрать единицу…</option>
+                      {UNIT_OPTIONS.filter(([value]) => value !== selectedUnitOverrideScope.current_unit).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                    </select>
+                  </label>
+                  <button className="primary-button" type="button" onClick={applyUnitOverride} disabled={busy || !unitOverrideValue}>
+                    Заменить в {countNoun(selectedUnitOverrideScope.field_count, "поле", "полях", "полях")}
+                  </button>
+                  <button className="mapping-manual-toggle" type="button" onClick={() => setUnitOverrideOpen(false)} disabled={busy}>Отмена</button>
+                  <small>Изменится только рецепт импорта. Числа в исходном файле останутся без изменений.</small>
+                </section>
+              ) : <>
               {selectedBulkDecisionActive && (activeBulkUnitScopes.length > 0 || activeBulkIgnoreScopes.length > 0) && (
                 <div className="import-bulk-scopes">
                   {activeBulkUnitScopes.map((scope, scopeIndex) => (
@@ -611,10 +686,11 @@ export function ImportWorkspace({
                   onDirtyChange={onMappingDirtyChange}
                 />
               </details>}
+              </>}
             </div>
           )}
 
-          {blockingIssueGroups.length === 0 && plan.summary.duplicate_candidate_groups > 0 && (
+          {!unitOverrideOpen && blockingIssueGroups.length === 0 && plan.summary.duplicate_candidate_groups > 0 && (
             <details className="import-duplicate-settings">
               <summary><span>{duplicateReviewRequired ? "Проверить совпадения" : "Совпадения"}</span><small>{countNoun(plan.summary.duplicate_candidate_groups, "группа", "группы", "групп")}</small></summary>
               <ImportDuplicateReview

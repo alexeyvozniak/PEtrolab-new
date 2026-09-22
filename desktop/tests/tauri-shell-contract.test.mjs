@@ -234,10 +234,14 @@ test("raw review groups repetitive issues and gets server-issued bulk unit scope
   assert.match(api, /import\.recipe\.bulk_ignore_scopes/);
   assert.match(api, /import\.recipe\.apply_bulk_ignore/);
   assert.match(app, /active.bulk_unit_scopes/);
+  assert.match(app, /active.bulk_unit_override_scopes/);
   assert.match(app, /kind: "unit", bulk_scope_id/);
+  assert.match(app, /kind: "unit_override", bulk_scope_id/);
   assert.match(app, /kind: "ignore", bulk_scope_id/);
   assert.match(workspace, /item\.bulk_scope_id/);
   assert.match(workspace, /Какая единица у этих измерений/);
+  assert.match(workspace, /Автоопределение единицы неверно/);
+  assert.match(workspace, /Какая единица правильная/);
   assert.match(workspace, /groupedUnitTargets/);
   assert.match(workspace, /REPEATABLE_ISSUE_CODES/);
   assert.match(workspace, /groupIssues/);

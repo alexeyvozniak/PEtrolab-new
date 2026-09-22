@@ -128,6 +128,25 @@ class ImportWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.current['session']['readiness']['ready_to_commit'])
         self.assertEqual(source.read_bytes(), original)
 
+    def test_recognized_wrong_unit_is_corrected_once_without_changing_source(self):
+        source = Path(self.temp.name) / 'recognized-wrong-unit.csv'
+        original = b'Analysis,SiO2 (at.%),MgO (at.%)\nA1,40,50\nA2,41,49\n'
+        source.write_bytes(original)
+        self.current = self.store.command('create', {'sources': [{'staged_path': str(source)}]})
+        scope = self.current['active']['bulk_unit_override_scopes'][0]
+
+        self.assertEqual(scope['current_unit'], 'at.%')
+        self.assertEqual(scope['field_count'], 2)
+        self.call('apply_bulk_decision', decision={
+            'kind': 'unit_override', 'unit': 'wt.%', 'bulk_scope_id': scope['bulk_scope_id']})
+
+        measurements = [mapping for section in self.current['active']['recipe']['sections']
+                        for mapping in section['mappings']
+                        if mapping['target_role'] == 'measurement']
+        self.assertEqual({mapping['unit'] for mapping in measurements}, {'wt.%'})
+        self.assertTrue(self.current['session']['readiness']['ready_to_commit'])
+        self.assertEqual(source.read_bytes(), original)
+
     def test_whitespace_only_trailing_row_is_not_an_unresolvable_analysis(self):
         source = Path(self.temp.name) / 'whitespace.csv'
         original = b'Analysis,SiO2 [wt.%]\nA1,40\n , \t\n'
