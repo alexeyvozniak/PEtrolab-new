@@ -192,7 +192,9 @@ test("ambiguous Fe is one guided decision and preserves source numbers", async (
   render(<App />);
   await user.click(await enabledButton("Выбрать файл"));
   await enabledButton("Добавить файл");
-  expect(screen.getByRole("button", { name: "Нужно решить 1" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Текущий вопрос" })).toBeTruthy();
+  expect(document.querySelectorAll(".mapping-review-item")).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Все 3" })).toBeTruthy();
   expect(screen.getAllByText(/Что означает колонка Fe/).length).toBeGreaterThan(0);
   const form = await screen.findByRole("combobox", { name: "Форма железа Fe (wt.%)" });
   const unit = screen.getByRole("combobox", { name: "Единица Fe (wt.%)" });

@@ -328,23 +328,30 @@ export function ImportWorkspace({
 
   const issueGroups = useMemo(() => groupIssues(issues).sort((left, right) => Number(right.item.source_id === workspace?.active_source_id) - Number(left.item.source_id === workspace?.active_source_id)), [issues, workspace?.active_source_id]);
   const activeSection = sections.find((item) => item.block_id === activeBlockId) || sections[0];
-  const activeBulkUnitScopes = useMemo(() => bulkUnitScopes.filter((scope) => (
-    (scope.targets || []).some((target) => target.block_id === activeBlockId)
-  )), [activeBlockId, bulkUnitScopes]);
-  const activeBulkScopeIds = useMemo(() => new Set(activeBulkUnitScopes.map((scope) => scope.bulk_scope_id)), [activeBulkUnitScopes]);
   const blockingIssueGroups = useMemo(() => issueGroups.filter((entry) => entry.item.blocking), [issueGroups]);
   const advisoryIssueGroups = useMemo(() => issueGroups.filter((entry) => !entry.item.blocking), [issueGroups]);
-  const listedBlockingIssueGroups = useMemo(() => blockingIssueGroups.filter((entry) => !(
-    entry.item.source_id === workspace?.active_source_id
-    && entry.item.code === "UNIT_REQUIRES_REVIEW"
-    && activeBulkScopeIds.has(entry.item.bulk_scope_id)
-  )), [activeBulkScopeIds, blockingIssueGroups, workspace?.active_source_id]);
   const selectedGroup = issueGroups.find((entry) => entry.key === selectedIssueKey && (!workspace || entry.item.source_id === workspace.active_source_id))
     || blockingIssueGroups.find((entry) => !workspace || entry.item.source_id === workspace.active_source_id)
     || advisoryIssueGroups.find((entry) => !workspace || entry.item.source_id === workspace.active_source_id)
     || null;
   const selectedIssue = selectedGroup?.item || null;
-  const currentBlockingIssueGroup = listedBlockingIssueGroups.includes(selectedGroup)
+  const activeBulkUnitScopes = useMemo(() => bulkUnitScopes.filter((scope) => (
+    scope.bulk_scope_id === selectedIssue?.bulk_scope_id
+  )), [bulkUnitScopes, selectedIssue?.bulk_scope_id]);
+  const activeBulkIgnoreScopes = useMemo(() => bulkIgnoreScopes.filter((scope) => (
+    scope.bulk_scope_id === selectedIssue?.bulk_scope_id
+  )), [bulkIgnoreScopes, selectedIssue?.bulk_scope_id]);
+  const activeBulkScopeIds = useMemo(() => new Set(
+    [...activeBulkUnitScopes, ...activeBulkIgnoreScopes].map((scope) => scope.bulk_scope_id),
+  ), [activeBulkIgnoreScopes, activeBulkUnitScopes]);
+  const selectedBulkDecisionActive = Boolean(selectedIssue?.bulk_scope_id && activeBulkScopeIds.has(selectedIssue.bulk_scope_id));
+  const listedBlockingIssueGroups = useMemo(() => blockingIssueGroups.filter((entry) => !(
+    entry.item.source_id === workspace?.active_source_id
+    && activeBulkScopeIds.has(entry.item.bulk_scope_id)
+  )), [activeBulkScopeIds, blockingIssueGroups, workspace?.active_source_id]);
+  const currentBlockingIssueGroup = selectedBulkDecisionActive
+    ? null
+    : listedBlockingIssueGroups.includes(selectedGroup)
     ? selectedGroup
     : listedBlockingIssueGroups[0] || null;
   const queuedBlockingIssueGroups = listedBlockingIssueGroups.filter((entry) => entry !== currentBlockingIssueGroup);
@@ -356,6 +363,14 @@ export function ImportWorkspace({
     + (unresolvedReviewCount > 0 ? 1 : 0)
     + (plannedMeasurementCount === 0 ? 1 : 0);
   const unappliedChanges = blockDraftDirty || mappingDraftDirty;
+
+  useEffect(() => {
+    const explicitlySelected = selectedIssueKey && selectedGroup?.key === selectedIssueKey;
+    if (!workspace || explicitlySelected || !selectedIssue?.blocking || !selectedIssue.block_id
+      || selectedIssue.block_id === activeBlockId || busy || blockDraftDirty || mappingDraftDirty) return;
+    setSelectedIssueKey(selectedGroup.key);
+    onSelectSource(selectedIssue.source_id || workspace.active_source_id, selectedIssue.block_id, selectedGroup.key);
+  }, [activeBlockId, blockDraftDirty, busy, mappingDraftDirty, onSelectSource, selectedGroup, selectedIssue, selectedIssueKey, workspace]);
 
   const selectIssue = (entry) => {
     setMineralFocus(null);
@@ -564,7 +579,7 @@ export function ImportWorkspace({
 
           {!cleanFast && activeSection && (
             <div className="import-field-inspector">
-              {(activeBulkUnitScopes.length > 0 || bulkIgnoreScopes.length > 0) && (
+              {(activeBulkUnitScopes.length > 0 || activeBulkIgnoreScopes.length > 0) && (
                 <div className="import-bulk-scopes">
                   {activeBulkUnitScopes.map((scope, scopeIndex) => (
                     <section className="import-bulk-scope guided-unit" key={scope.bulk_scope_id} aria-labelledby={`unit-question-${scopeIndex}`}>
@@ -579,21 +594,22 @@ export function ImportWorkspace({
                       </div>
                     </section>
                   ))}
-                  {bulkIgnoreScopes.map((scope) => (
-                    <div className="import-bulk-scope ignore-scope" key={scope.bulk_scope_id}>
-                      <b>{scope.field_count} нераспознанных полей · {scope.sheet_names.length} {scope.sheet_names.length === 1 ? "лист" : "листов"}</b>
+                  {activeBulkIgnoreScopes.map((scope, scopeIndex) => (
+                    <section className="import-bulk-scope ignore-scope guided-ignore" key={scope.bulk_scope_id} aria-labelledby={`ignore-question-${scopeIndex}`}>
+                      <h2 id={`ignore-question-${scopeIndex}`}>Что делать с нераспознанными полями?</h2>
                       <small>{scope.fields.slice(0, 6).join(", ")}{scope.fields.length > 6 ? "…" : ""}</small>
-                      <button className="compact-button" type="button" onClick={() => onApplyBulkIgnore(scope.bulk_scope_id)} disabled={busy || blockDraftDirty || mappingDraftDirty}>Не импортировать все нераспознанные поля</button>
-                    </div>
+                      <button className="compact-button" type="button" onClick={() => onApplyBulkIgnore(scope.bulk_scope_id)} disabled={busy || blockDraftDirty || mappingDraftDirty}>Не импортировать {countNoun(scope.field_count, "поле", "поля", "полей")}</button>
+                    </section>
                   ))}
                 </div>
               )}
-              <details className="import-field-settings" open={mappingDraftDirty || Boolean(selectedIssue?.blocking && !activeBulkScopeIds.has(selectedIssue.bulk_scope_id))}>
+              <details className="import-field-settings" open={mappingDraftDirty || Boolean(selectedIssue?.blocking && !selectedBulkDecisionActive)}>
                 <summary><span>Поля таблицы</span><small>{activeSection.mappings.length}</small></summary>
                 <ImportMappingEditor
                   recipe={recipe}
                   warnings={recipeWarnings}
                   activeBlockId={activeBlockId}
+                  focusedIssue={selectedIssue}
                   groupedUnitTargets={groupedUnitTargets}
                   busy={busy || blockDraftDirty}
                   onApplyAll={onApplyMappings}

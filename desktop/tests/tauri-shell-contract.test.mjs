@@ -230,7 +230,10 @@ test("raw review groups repetitive issues and gets server-issued bulk unit scope
   assert.match(workspace, /REPEATABLE_ISSUE_CODES/);
   assert.match(workspace, /groupIssues/);
   assert.match(workspace, /import-advisories/);
-  assert.match(workspace, /Не импортировать все нераспознанные поля/);
+  assert.match(workspace, /activeBulkIgnoreScopes/);
+  assert.match(workspace, /Что делать с нераспознанными полями/);
+  assert.match(workspace, /Не импортировать \{countNoun\(scope\.field_count/);
+  assert.doesNotMatch(workspace, /Не импортировать все нераспознанные поля/);
 });
 
 test("analyses view exposes source metadata, method context and truthful physical origin", async () => {

@@ -181,7 +181,7 @@ function MappingRow({ mapping, value, busy, onChange, feFormRequired = false }) 
   );
 }
 
-export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = null, groupedUnitTargets = [], busy, onApplyAll, onDirtyChange }) {
+export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = null, focusedIssue = null, groupedUnitTargets = [], busy, onApplyAll, onDirtyChange }) {
   const [draft, setDraft] = useState(() => buildDraft(recipe, warnings));
   const [blockUnits, setBlockUnits] = useState({});
   const [showAll, setShowAll] = useState(false);
@@ -198,6 +198,14 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
   const groupedUnitKeys = useMemo(() => new Set(groupedUnitTargets.map((target) => (
     keyFor(target.block_id, target.source_axis || "column", target.source_index)
   ))), [groupedUnitTargets]);
+  const focusedMappingKey = useMemo(() => {
+    if (!focusedIssue?.blocking || !focusedIssue.block_id) return null;
+    const axis = focusedIssue.source_axis || "column";
+    const index = axis === "column" ? focusedIssue.source_column_index : focusedIssue.source_row_index;
+    return Number.isInteger(index) ? keyFor(focusedIssue.block_id, axis, index) : null;
+  }, [focusedIssue]);
+
+  useEffect(() => { setShowAll(false); }, [activeBlockId, focusedMappingKey]);
 
   const dirtyKeys = useMemo(() => Object.keys(draft).filter((key) => !statesEqual(draft[key], applied[key])), [draft, applied]);
   const invalidCount = useMemo(
@@ -280,7 +288,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
         </div>
       </div>
 
-      {enabledSections.map((section, sectionIndex) => (
+      {enabledSections.map((section) => (
         <section className="mapping-sheet" key={section.block_id}>
           {(() => {
             const unresolvedCount = section.mappings.filter((mapping) => {
@@ -291,8 +299,11 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
             }).length;
             const groupedCount = section.mappings.filter((mapping) => groupedUnitKeys.has(keyForMapping(section.block_id, mapping))).length;
             const individualUnresolvedCount = Math.max(0, unresolvedCount - groupedCount);
+            const focusedMappingExists = Boolean(focusedMappingKey && section.mappings.some((mapping) => keyForMapping(section.block_id, mapping) === focusedMappingKey));
             const shownMappings = showAll ? section.mappings : section.mappings.filter((mapping) => {
               if (groupedUnitKeys.has(keyForMapping(section.block_id, mapping))) return false;
+              if (focusedMappingExists) return keyForMapping(section.block_id, mapping) === focusedMappingKey
+                || dirtyKeys.includes(keyForMapping(section.block_id, mapping));
               const value = draft[keyForMapping(section.block_id, mapping)] || appliedState(mapping);
               return dirtyKeys.includes(keyForMapping(section.block_id, mapping))
                 || value.reviewDecision === "unresolved"
@@ -303,11 +314,11 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
           <>
             <div className="mapping-sheet-head">
               <div>
-                <b>{section.sheet_name} · блок {sectionIndex + 1}</b>
+                <b>{section.sheet_name}</b>
                 <span>{section.orientation === "columns_are_analyses" ? "анализы по столбцам" : `заголовок: строка ${section.header_row}`} · полей: {section.mappings.length}</span>
               </div>
               <div className="mapping-view-toggle" role="group" aria-label="Какие поля показывать">
-                <button type="button" className={!showAll ? "active" : ""} onClick={() => setShowAll(false)}>{groupedCount ? `Отдельно ${individualUnresolvedCount}` : `Нужно решить ${unresolvedCount}`}</button>
+                <button type="button" className={!showAll ? "active" : ""} onClick={() => setShowAll(false)}>{focusedMappingExists ? "Текущий вопрос" : groupedCount ? `Отдельно ${individualUnresolvedCount}` : `Нужно решить ${unresolvedCount}`}</button>
                 <button type="button" className={showAll ? "active" : ""} onClick={() => setShowAll(true)}>Все {section.mappings.length}</button>
               </div>
               <details className="mapping-bulk-options">

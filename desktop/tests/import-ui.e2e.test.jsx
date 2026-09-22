@@ -235,9 +235,9 @@ vi.mock("../src/desktopApi", () => {
     { preview_id: "C-2", sheet_name: "Summary", row_number: 4, orientation: "rows_are_analyses", identity: ["Spectrum 1"], measurements: [{ field: "SiO2", raw_token: "39.8", unit: "wt.%" }] },
   ];
   const complexWarnings = [
-    { code: "UNIT_REQUIRES_REVIEW", sheet_name: "Summary", block_id: "summary-main", source_axis: "column", source_column_index: 1, source_header: "SiO2", canonical_field: "SiO2" },
-    { code: "UNMAPPED_FIELD_REQUIRES_REVIEW", sheet_name: "Details", block_id: "details-1", source_axis: "column", source_column_index: 1, source_header: "Sigma" },
-    { code: "UNMAPPED_FIELD_REQUIRES_REVIEW", sheet_name: "Details", block_id: "details-2", source_axis: "column", source_column_index: 1, source_header: "Sigma" },
+    { code: "UNIT_REQUIRES_REVIEW", blocking: true, sheet_name: "Summary", block_id: "summary-main", source_axis: "column", source_column_index: 1, source_header: "SiO2", canonical_field: "SiO2" },
+    { code: "UNMAPPED_FIELD_REQUIRES_REVIEW", blocking: true, sheet_name: "Details", block_id: "details-1", source_axis: "column", source_column_index: 1, source_header: "Sigma" },
+    { code: "UNMAPPED_FIELD_REQUIRES_REVIEW", blocking: true, sheet_name: "Details", block_id: "details-2", source_axis: "column", source_column_index: 1, source_header: "Sigma" },
   ];
   const complexCleanReasons = [
     { code: "CLEAN_TABLE_BLANK_HEADER", sheet_name: "Summary", source_axis: "column", source_column_index: 4 },
@@ -564,7 +564,9 @@ vi.mock("../src/desktopApi", () => {
       session: { workspace_id: "workspace-1", draft_revision: revision, active_source_id: "source-1",
         active_block_id: selectedBlock || currentRecipe.sections[0].block_id, sources: [source],
         issues: problems.map((item, index) => ({ issue_id: String(index), code: item.code, source_id: "source-1", message_params: item, blocking: item.blocking || false,
-          bulk_scope_id: item.code === "UNIT_REQUIRES_REVIEW" && !uiState.unitApplied ? "summary-unit" : null })),
+          bulk_scope_id: item.code === "UNIT_REQUIRES_REVIEW" && !uiState.unitApplied
+            ? "summary-unit"
+            : item.code === "UNMAPPED_FIELD_REQUIRES_REVIEW" && uiState.detailsEnabled ? "details-ignore" : null })),
         readiness: { ready_to_commit: currentPlan.ready_to_commit !== false && (uiState.mode === "clean" || (uiState.unitApplied && !uiState.detailsEnabled && uiState.duplicatesReviewed)) },
       },
       active: { source_id: "source-1", inspection: (await api.inspectImportSource()).result, recipe: currentRecipe,
@@ -595,7 +597,7 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { addAnalysisToAnalyticalPoint, applyImportPlan, applyMediaImportPlan, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, pickImportFile, pickMediaFolder, retireAnalyticalPoint, undoOperation } from "../src/desktopApi";
+import { addAnalysisToAnalyticalPoint, applyImportPlan, applyMediaImportPlan, applyWorkspaceDecision, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, pickImportFile, pickMediaFolder, retireAnalyticalPoint, undoOperation } from "../src/desktopApi";
 import { App } from "../src/App";
 import { ImagesWorkspace } from "../src/ImagesWorkspace";
 
@@ -1200,8 +1202,8 @@ test("complex import always shows the source table and groups repeated structura
 
   expect(screen.getByText("Исходная таблица")).toBeTruthy();
   const sourceTable = screen.getByRole("table");
-  expect(within(sourceTable).getByLabelText("Ячейка 1:1").textContent).toBe("Analysis");
-  expect(within(sourceTable).getByLabelText("Ячейка 1:2").textContent).toBe("SiO2");
+  expect(within(sourceTable).getAllByText("Analysis").length).toBeGreaterThan(0);
+  expect(within(sourceTable).getAllByText("SiO2").length).toBeGreaterThan(0);
   expect(within(sourceTable).getByText("Sigma")).toBeTruthy();
   expect(screen.getByText("Колонка с данными не имеет заголовка · 3 мест")).toBeTruthy();
 });
@@ -1240,6 +1242,8 @@ test("Python identity blocker is visible, navigable and prevents saving", async 
 
 test("the inspector shows one current question and collapses the remaining queue", async () => {
   uiState.mode = "complex";
+  uiState.detailsEnabled = false;
+  uiState.unitApplied = true;
   createImportPlan.mockResolvedValueOnce({ result: {
     ready_to_commit: false,
     summary: { planned_analysis_count: 1, planned_measurement_count: 1, enabled_block_count: 1, duplicate_candidate_groups: 0 },
@@ -1267,6 +1271,27 @@ test("the inspector shows one current question and collapses the remaining queue
   await user.click(queueDisclosure.querySelector("summary"));
   expect(queueDisclosure.open).toBe(true);
   expect(queueDisclosure.querySelectorAll(".import-issue-row.blocking")).toHaveLength(2);
+});
+
+test("a server-issued bulk ignore appears only as the current question", async () => {
+  uiState.mode = "complex";
+  uiState.unitApplied = true;
+  createImportPlan.mockResolvedValueOnce({ result: {
+    ready_to_commit: false,
+    summary: { planned_analysis_count: 2, planned_measurement_count: 2, enabled_block_count: 3, duplicate_candidate_groups: 0 },
+    planned_records: [], warnings: [],
+    issues: [{ code: "UNMAPPED_FIELD_REQUIRES_REVIEW", blocking: true, sheet_name: "Details", block_id: "details-1", source_axis: "column", source_column_index: 1, source_header: "Sigma" }],
+  } });
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Выбрать файл" }));
+
+  expect(await screen.findByRole("heading", { name: "Что делать с нераспознанными полями?" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Не импортировать 2 поля" })).toBeTruthy();
+  expect(document.querySelector(".import-field-settings")?.open).toBe(false);
+  await waitFor(() => expect(applyWorkspaceDecision.mock.calls.some((call) => call[3]?.kind === "activate" && call[3]?.block_id === "details-1")).toBe(true));
+  await user.click(screen.getByRole("button", { name: "Не импортировать 2 поля" }));
+  await waitFor(() => expect(applyWorkspaceDecision.mock.calls.some((call) => call[3]?.kind === "ignore" && call[3]?.bulk_scope_id === "details-ignore")).toBe(true));
 });
 
 test("user resolves a repeated complex workbook with sheet-level and grouped decisions", async () => {

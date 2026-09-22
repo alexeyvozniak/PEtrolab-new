@@ -265,7 +265,7 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .import-bulk-scope .bulk-question-action .compact-button { width: 100%; border-color: #4f8063; background: #396d50; color: #fff; }
 .import-bulk-scope .bulk-question-action .compact-button:hover:not(:disabled) { background: #2e6045; }
 .import-bulk-scope.ignore-scope { background: #fffbf5; }
-.import-bulk-scope.ignore-scope b { color: #765138; }
+.import-bulk-scope.ignore-scope h2 { color: #765138; font-size: 13px; line-height: 1.3; }
 .import-bulk-scope.ignore-scope .compact-button { width: 100%; color: #765138; border-color: #dcc8b8; background: #fff; }
 .import-inspector-title { padding: 11px 12px; border-bottom: 1px solid #e7eae7; }
 .import-inspector-title span,
