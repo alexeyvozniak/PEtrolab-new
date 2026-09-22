@@ -1281,7 +1281,7 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
   await waitFor(() => expect(uiState.imported).toBe(true));
 });
 
-test("complex import always shows the source table and groups repeated structural issues", async () => {
+test("complex import keeps the source table visible beside one current question", async () => {
   uiState.mode = "complex";
   const user = userEvent.setup();
   render(<App />);
@@ -1294,7 +1294,9 @@ test("complex import always shows the source table and groups repeated structura
   expect(within(sourceTable).getAllByText("Analysis").length).toBeGreaterThan(0);
   expect(within(sourceTable).getAllByText("SiO2").length).toBeGreaterThan(0);
   expect(within(sourceTable).getByText("Sigma")).toBeTruthy();
-  expect(screen.getByText("Колонка с данными не имеет заголовка · 3 мест")).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "Какая единица у этих измерений?" })).toBeTruthy();
+  expect(document.querySelector(".import-question-queue")).toBeNull();
+  expect(screen.queryByText("Колонка с данными не имеет заголовка · 3 мест")).toBeNull();
 });
 
 test("post-import mineral queue keeps source, suggestion and accepted decision separate", async () => {
@@ -1322,14 +1324,13 @@ test("Python identity blocker is visible, navigable and prevents saving", async 
   const user = userEvent.setup();
   render(<App />);
   await user.click(await screen.findByRole("button", { name: "Выбрать файл" }));
-  const issue = await screen.findByRole("button", { name: /Нет идентичности Analysis/ });
-  await user.click(issue);
+  expect(await screen.findByRole("heading", { name: /Нет идентичности Analysis/ })).toBeTruthy();
   expect(screen.getByText("Исходная таблица")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Импортировать после проверки" }).disabled).toBe(true);
   expect(applyImportPlan).not.toHaveBeenCalled();
 });
 
-test("the inspector shows one current question and collapses the remaining queue", async () => {
+test("the inspector presents one current question without a competing queue", async () => {
   uiState.mode = "complex";
   uiState.detailsEnabled = false;
   uiState.unitApplied = true;
@@ -1347,19 +1348,14 @@ test("the inspector shows one current question and collapses the remaining queue
   render(<App />);
   await user.click(await screen.findByRole("button", { name: "Выбрать файл" }));
 
-  await waitFor(() => expect(document.querySelector(".import-inspector-pane > .import-pane-label")?.textContent).toBe("3 вопроса"));
+  await waitFor(() => expect(document.querySelector(".import-inspector-pane > .import-pane-label")?.textContent).toBe("Текущий вопрос · осталось 3"));
   const status = document.querySelector(".import-inspector-pane > .import-pane-label");
   expect(status?.getAttribute("role")).toBe("status");
   expect(status?.getAttribute("aria-live")).toBe("polite");
-  expect(document.querySelectorAll(".import-inspector-pane > .import-issue-list .import-issue-row.blocking")).toHaveLength(1);
-  const queueDisclosure = document.querySelector(".import-question-queue");
-  expect(queueDisclosure?.open).toBe(false);
-  expect(queueDisclosure?.querySelector("summary")?.textContent).toBe("Ещё 2 вопроса");
-  queueDisclosure.querySelector("summary").focus();
-  expect(document.activeElement).toBe(queueDisclosure.querySelector("summary"));
-  await user.click(queueDisclosure.querySelector("summary"));
-  expect(queueDisclosure.open).toBe(true);
-  expect(queueDisclosure.querySelectorAll(".import-issue-row.blocking")).toHaveLength(2);
+  expect(screen.getByRole("heading", { name: /Нет идентичности Analysis/ })).toBeTruthy();
+  expect(document.querySelectorAll(".import-current-question")).toHaveLength(1);
+  expect(document.querySelector(".import-question-queue")).toBeNull();
+  expect(document.querySelector(".import-advisories")).toBeNull();
 });
 
 test("a server-issued bulk ignore appears only as the current question", async () => {
@@ -1377,7 +1373,7 @@ test("a server-issued bulk ignore appears only as the current question", async (
 
   expect(await screen.findByRole("heading", { name: "Что делать с нераспознанными полями?" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Не импортировать 2 поля" })).toBeTruthy();
-  expect(document.querySelector(".import-field-settings")?.open).toBe(false);
+  expect(document.querySelector(".import-field-settings")).toBeNull();
   await waitFor(() => expect(applyWorkspaceDecision.mock.calls.some((call) => call[3]?.kind === "activate" && call[3]?.block_id === "details-1")).toBe(true));
   await user.click(screen.getByRole("button", { name: "Не импортировать 2 поля" }));
   await waitFor(() => expect(applyWorkspaceDecision.mock.calls.some((call) => call[3]?.kind === "ignore" && call[3]?.bulk_scope_id === "details-ignore")).toBe(true));

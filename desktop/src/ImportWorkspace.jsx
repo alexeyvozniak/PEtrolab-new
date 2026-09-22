@@ -287,11 +287,12 @@ export function ImportWorkspace({
   const selectBlock = (blockId) => workspace ? onSelectSource(workspace.active_source_id, blockId) : setActiveBlockId(blockId);
   const [selectedIssueKey, setSelectedIssueKey] = useState(focusedIssueKey);
   const [bulkUnits, setBulkUnits] = useState({});
+  const [manualBulkScopeId, setManualBulkScopeId] = useState("");
   const [showResultPreview, setShowResultPreview] = useState(false);
   const [mineralReview, setMineralReview] = useState(Boolean(recipe.global_decisions.mineral_verification_enabled));
   const [mineralFocus, setMineralFocus] = useState(null);
   useEffect(() => { setMineralReview(Boolean(recipe.global_decisions.mineral_verification_enabled)); setMineralFocus(null); }, [recipe.global_decisions.mineral_verification_enabled, workspace?.active_source_id]);
-  useEffect(() => { setSelectedIssueKey(focusedIssueKey); }, [focusedIssueKey, workspace?.active_source_id]);
+  useEffect(() => { setSelectedIssueKey(focusedIssueKey); setManualBulkScopeId(""); }, [focusedIssueKey, workspace?.active_source_id]);
 
   const sheetGroups = useMemo(() => {
     const groups = new Map();
@@ -344,17 +345,21 @@ export function ImportWorkspace({
   const activeBulkScopeIds = useMemo(() => new Set(
     [...activeBulkUnitScopes, ...activeBulkIgnoreScopes].map((scope) => scope.bulk_scope_id),
   ), [activeBulkIgnoreScopes, activeBulkUnitScopes]);
-  const selectedBulkDecisionActive = Boolean(selectedIssue?.bulk_scope_id && activeBulkScopeIds.has(selectedIssue.bulk_scope_id));
+  const selectedBulkDecisionActive = Boolean(
+    selectedIssue?.bulk_scope_id
+    && activeBulkScopeIds.has(selectedIssue.bulk_scope_id)
+    && manualBulkScopeId !== selectedIssue.bulk_scope_id
+  );
   const listedBlockingIssueGroups = useMemo(() => blockingIssueGroups.filter((entry) => !(
     entry.item.source_id === workspace?.active_source_id
     && activeBulkScopeIds.has(entry.item.bulk_scope_id)
-  )), [activeBulkScopeIds, blockingIssueGroups, workspace?.active_source_id]);
+    && manualBulkScopeId !== entry.item.bulk_scope_id
+  )), [activeBulkScopeIds, blockingIssueGroups, manualBulkScopeId, workspace?.active_source_id]);
   const currentBlockingIssueGroup = selectedBulkDecisionActive
     ? null
     : listedBlockingIssueGroups.includes(selectedGroup)
     ? selectedGroup
     : listedBlockingIssueGroups[0] || null;
-  const queuedBlockingIssueGroups = listedBlockingIssueGroups.filter((entry) => entry !== currentBlockingIssueGroup);
   const groupedUnitTargets = useMemo(() => activeBulkUnitScopes.flatMap((scope) => scope.targets || []), [activeBulkUnitScopes]);
   const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview;
   const blockingCount = workspace ? groupIssues(issues.filter((item) => item.blocking)).length : (blockDraftDirty ? 1 : 0)
@@ -524,42 +529,18 @@ export function ImportWorkspace({
         </main>
 
         <aside className="import-inspector-pane">
-          {onVerifyMinerals && <div className="import-stage-tabs"><button type="button" onClick={() => setMineralReview(false)} disabled={busy}>1 · Структура</button><button type="button" disabled={busy || blockDraftDirty || mappingDraftDirty || plan.ready_to_commit === false} onClick={() => recipe.global_decisions.mineral_verification_enabled ? setMineralReview(true) : onVerifyMinerals()}>2 · Проверить минералы</button></div>}
+          {onVerifyMinerals && blockingIssueGroups.length === 0 && <div className="import-stage-tabs"><button type="button" onClick={() => setMineralReview(false)} disabled={busy}>1 · Структура</button><button type="button" disabled={busy || blockDraftDirty || mappingDraftDirty || plan.ready_to_commit === false} onClick={() => recipe.global_decisions.mineral_verification_enabled ? setMineralReview(true) : onVerifyMinerals()}>2 · Проверить минералы</button></div>}
           {mineralReview ? <MineralVerificationPanel records={plan.planned_records || []} scopes={semanticTools.mineralScopes || []} busy={busy} onAccept={onAcceptMineral} onReveal={(record) => { setMineralFocus({ ...record, source_column_index: (record.source_column_number || 1) - 1 }); selectBlock(record.block_id); }} /> : <>
           <div className={`import-pane-label${blockingIssueGroups.length ? " needs-action" : " ready"}`} role="status" aria-live="polite" aria-atomic="true">
-            {blockingIssueGroups.length ? countNoun(blockingIssueGroups.length, "вопрос", "вопроса", "вопросов") : "Проверка"}
+            {blockingIssueGroups.length ? `Текущий вопрос · осталось ${blockingIssueGroups.length}` : "Проверка"}
           </div>
           {currentBlockingIssueGroup && (
-            <div className="import-issue-list">
-              <button
-                className="import-issue-row blocking active"
-                type="button"
-                onClick={() => selectIssue(currentBlockingIssueGroup)}
-                disabled={busy || blockDraftDirty || mappingDraftDirty}
-              >
+            <section className="import-current-question" aria-labelledby="import-current-question-title">
                 <Warning size={16} weight="fill" />
-                <span><b>{warningLabel(currentBlockingIssueGroup.item)}{currentBlockingIssueGroup.items.length > 1 ? ` · ${currentBlockingIssueGroup.items.length} мест` : ""}</b><small>{workspace?.sources.find((s) => s.source_id === currentBlockingIssueGroup.item.source_id)?.original_display_path.split(/[\\/]/).pop()} · {issueDetail(currentBlockingIssueGroup.item) || "Открыть контекст источника"}</small></span>
-              </button>
-            </div>
+                <span><h2 id="import-current-question-title">{warningLabel(currentBlockingIssueGroup.item)}{currentBlockingIssueGroup.items.length > 1 ? ` · ${currentBlockingIssueGroup.items.length} мест` : ""}</h2><small>{workspace?.sources.find((s) => s.source_id === currentBlockingIssueGroup.item.source_id)?.original_display_path.split(/[\\/]/).pop()} · {issueDetail(currentBlockingIssueGroup.item) || "Контекст показан в исходной таблице"}</small></span>
+            </section>
           )}
-          {queuedBlockingIssueGroups.length > 0 && <details className="import-question-queue">
-            <summary><span>Ещё {countNoun(queuedBlockingIssueGroups.length, "вопрос", "вопроса", "вопросов")}</span></summary>
-            <div className="import-issue-list">
-              {queuedBlockingIssueGroups.map((entry) => (
-                <button
-                  className="import-issue-row blocking"
-                  type="button"
-                  key={entry.key}
-                  onClick={() => selectIssue(entry)}
-                  disabled={busy || blockDraftDirty || mappingDraftDirty}
-                >
-                  <Warning size={16} weight="fill" />
-                  <span><b>{warningLabel(entry.item)}{entry.items.length > 1 ? ` · ${entry.items.length} мест` : ""}</b><small>{workspace?.sources.find((s) => s.source_id === entry.item.source_id)?.original_display_path.split(/[\\/]/).pop()} · {issueDetail(entry.item) || "Открыть контекст источника"}</small></span>
-                </button>
-              ))}
-            </div>
-          </details>}
-          {advisoryIssueGroups.length > 0 && <details className="import-advisories">
+          {blockingIssueGroups.length === 0 && advisoryIssueGroups.length > 0 && <details className="import-advisories">
             <summary><Info size={15} /><span>{countNoun(advisoryIssueGroups.length, "примечание", "примечания", "примечаний")}</span></summary>
             <div className="import-issue-list">
               {advisoryIssueGroups.map((entry) => (
@@ -579,7 +560,7 @@ export function ImportWorkspace({
 
           {!cleanFast && activeSection && (
             <div className="import-field-inspector">
-              {(activeBulkUnitScopes.length > 0 || activeBulkIgnoreScopes.length > 0) && (
+              {selectedBulkDecisionActive && (activeBulkUnitScopes.length > 0 || activeBulkIgnoreScopes.length > 0) && (
                 <div className="import-bulk-scopes">
                   {activeBulkUnitScopes.map((scope, scopeIndex) => (
                     <section className="import-bulk-scope guided-unit" key={scope.bulk_scope_id} aria-labelledby={`unit-question-${scopeIndex}`}>
@@ -592,6 +573,7 @@ export function ImportWorkspace({
                         </select>
                         <button className="compact-button" type="button" onClick={() => onApplyBulkUnit(scope.bulk_scope_id, bulkUnits[scope.bulk_scope_id])} disabled={busy || blockDraftDirty || mappingDraftDirty || !bulkUnits[scope.bulk_scope_id]}>Назначить {scope.field_count} {scope.field_count === 1 ? "полю" : "полям"}</button>
                       </div>
+                      <button className="mapping-manual-toggle" type="button" onClick={() => setManualBulkScopeId(scope.bulk_scope_id)} disabled={busy || blockDraftDirty || mappingDraftDirty}>Задать единицы отдельно</button>
                     </section>
                   ))}
                   {activeBulkIgnoreScopes.map((scope, scopeIndex) => (
@@ -599,11 +581,24 @@ export function ImportWorkspace({
                       <h2 id={`ignore-question-${scopeIndex}`}>Что делать с нераспознанными полями?</h2>
                       <small>{scope.fields.slice(0, 6).join(", ")}{scope.fields.length > 6 ? "…" : ""}</small>
                       <button className="compact-button" type="button" onClick={() => onApplyBulkIgnore(scope.bulk_scope_id)} disabled={busy || blockDraftDirty || mappingDraftDirty}>Не импортировать {countNoun(scope.field_count, "поле", "поля", "полей")}</button>
+                      <button className="mapping-manual-toggle" type="button" onClick={() => setManualBulkScopeId(scope.bulk_scope_id)} disabled={busy || blockDraftDirty || mappingDraftDirty}>Разобрать поля по одному</button>
                     </section>
                   ))}
                 </div>
               )}
-              <details className="import-field-settings" open={mappingDraftDirty || Boolean(selectedIssue?.blocking && !selectedBulkDecisionActive)}>
+              {selectedIssue?.blocking ? (!selectedBulkDecisionActive && <div className="import-guided-mapping">
+                <ImportMappingEditor
+                  recipe={recipe}
+                  warnings={recipeWarnings}
+                  activeBlockId={activeBlockId}
+                  focusedIssue={selectedIssue}
+                  groupedUnitTargets={manualBulkScopeId ? [] : groupedUnitTargets}
+                  guided
+                  busy={busy || blockDraftDirty}
+                  onApplyAll={onApplyMappings}
+                  onDirtyChange={onMappingDirtyChange}
+                />
+              </div>) : <details className="import-field-settings" open={mappingDraftDirty}>
                 <summary><span>Поля таблицы</span><small>{activeSection.mappings.length}</small></summary>
                 <ImportMappingEditor
                   recipe={recipe}
@@ -615,11 +610,11 @@ export function ImportWorkspace({
                   onApplyAll={onApplyMappings}
                   onDirtyChange={onMappingDirtyChange}
                 />
-              </details>
+              </details>}
             </div>
           )}
 
-          {plan.summary.duplicate_candidate_groups > 0 && (
+          {blockingIssueGroups.length === 0 && plan.summary.duplicate_candidate_groups > 0 && (
             <details className="import-duplicate-settings">
               <summary><span>{duplicateReviewRequired ? "Проверить совпадения" : "Совпадения"}</span><small>{countNoun(plan.summary.duplicate_candidate_groups, "группа", "группы", "групп")}</small></summary>
               <ImportDuplicateReview

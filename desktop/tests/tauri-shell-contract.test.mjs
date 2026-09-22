@@ -143,6 +143,18 @@ test("approved import workspace keeps source list, physical table, issue inspect
   assert.match(styles, /import-workspace-footer/);
 });
 
+test("blocking import decisions are presented one at a time", async () => {
+  const workspace = await read("src/ImportWorkspace.jsx");
+  const editor = await read("src/ImportMappingEditor.jsx");
+  assert.match(workspace, /import-current-question/);
+  assert.doesNotMatch(workspace, /import-question-queue/);
+  assert.match(workspace, /blockingIssueGroups\.length === 0 && advisoryIssueGroups/);
+  assert.match(workspace, /blockingIssueGroups\.length === 0 && plan\.summary\.duplicate_candidate_groups/);
+  assert.match(editor, /guided = false/);
+  assert.match(editor, /focusedOnly = guided/);
+  assert.match(editor, /mapping-manual-toggle/);
+});
+
 test("raw block review precedes field mapping and supports transposed orientation", async () => {
   const api = await read("src/desktopApi.js");
   const app = await read("src/App.jsx");
@@ -352,7 +364,7 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(smoke, /petrolab-v2\.sqlite/);
   assert.match(smoke, /Installed PetroLab smoke test passed/);
   assert.match(uiSmoke, /user clicks through Clean Table import/);
-  assert.match(uiSmoke, /complex import always shows the source table/);
+  assert.match(uiSmoke, /complex import keeps the source table visible beside one current question/);
   assert.match(uiSmoke, /Выбрать файл/);
   assert.match(uiSmoke, /Импортировать таблицу/);
   assert.match(uiSmoke, /UI-1/);

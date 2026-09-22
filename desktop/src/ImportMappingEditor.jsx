@@ -111,20 +111,20 @@ function statesEqual(left, right) {
     && left.reviewDecision === right.reviewDecision;
 }
 
-function MappingRow({ mapping, value, busy, onChange, feFormRequired = false }) {
+function MappingRow({ mapping, value, busy, onChange, feFormRequired = false, guided = false }) {
   const measurement = value.target === "Measurement";
   const invalid = measurement && (!value.field.trim() || !value.unit);
   const unresolved = value.reviewDecision === "unresolved" || (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore") || invalid;
   return (
-    <article className={`mapping-review-item${unresolved ? " unresolved" : ""}${invalid ? " mapping-invalid" : ""}`}>
-      <div className="mapping-review-source">
+    <article className={`mapping-review-item${guided ? " guided" : ""}${unresolved ? " unresolved" : ""}${invalid ? " mapping-invalid" : ""}`}>
+      {!guided && <div className="mapping-review-source">
         <div>
           <b className={mapping.source_header ? "" : "blank-source-header"}>{sourceTitle(mapping)}</b>
           <small>{sourceCoordinate(mapping)}</small>
         </div>
         <span className={unresolved ? "needs-decision" : "ready"}>{invalid ? "Нужна единица" : unresolved ? "Нужно решить" : "Готово"}</span>
-      </div>
-      <label className="mapping-control mapping-target-control">
+      </div>}
+      {!(guided && feFormRequired) && <label className="mapping-control mapping-target-control">
         <span>Что это</span>
         <select
           value={value.target}
@@ -144,7 +144,7 @@ function MappingRow({ mapping, value, busy, onChange, feFormRequired = false }) 
         >
           {TARGETS.map((item) => <option key={item} value={item}>{item === "Ignore" ? "Не импортировать" : item}</option>)}
         </select>
-      </label>
+      </label>}
       {measurement && (
         <div className="mapping-measurement-controls">
           <label className="mapping-control">
@@ -161,19 +161,19 @@ function MappingRow({ mapping, value, busy, onChange, feFormRequired = false }) 
               </select>
             ) : <input value={value.field} onChange={(event) => onChange({ ...value, field: event.target.value })} disabled={busy} aria-label={`Поле ${sourceTitle(mapping)}`} placeholder={mapping.source_header ? "" : "Введите название поля"} />}
           </label>
-          <label className="mapping-control">
+          {!(guided && feFormRequired) && <label className="mapping-control">
             <span>Единица</span>
             <select aria-label={`Единица ${sourceTitle(mapping)}`} value={value.unit} onChange={(event) => onChange({ ...value, unit: event.target.value, reviewDecision: event.target.value ? "assigned" : "unresolved" })} disabled={busy}>
               <option value="">Выбрать…</option>
               {UNITS.map((item) => <option key={item} value={item}>{UNIT_LABELS[item] || item}</option>)}
             </select>
-          </label>
-          <details className="mapping-advanced">
+          </label>}
+          {!guided && <details className="mapping-advanced">
             <summary>Метод и набор</summary>
             <label className="mapping-control"><span>Метод</span><input value={value.method} onChange={(event) => onChange({ ...value, method: event.target.value })} disabled={busy} placeholder="EPMA / WDS / SIMS…" aria-label={`Метод ${sourceTitle(mapping)}`} /></label>
             <label className="mapping-control"><span>Набор</span><input value={value.measurementSet} onChange={(event) => onChange({ ...value, measurementSet: event.target.value })} disabled={busy} placeholder="major / trace…" aria-label={`Набор ${sourceTitle(mapping)}`} /></label>
-          </details>
-          {feFormRequired && <p className="mapping-fe-note">Единица описывает числа и уже распознана отдельно. Выберите, в какой форме источник сообщает железо — PetroLab сохранит исходные значения без пересчёта.</p>}
+          </details>}
+          {feFormRequired && <p className="mapping-fe-note">{guided ? `Единица ${value.unit || "не указана"} уже распознана. Исходные числа не изменятся.` : "Единица описывает числа и уже распознана отдельно. Выберите, в какой форме источник сообщает железо — PetroLab сохранит исходные значения без пересчёта."}</p>}
         </div>
       )}
       {value.target === "Ignore" && value.reviewDecision === "explicit_ignore" && <p className="mapping-ignore-note">Поле будет сохранено только в исходном файле и не попадёт в Analysis.</p>}
@@ -181,7 +181,7 @@ function MappingRow({ mapping, value, busy, onChange, feFormRequired = false }) 
   );
 }
 
-export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = null, focusedIssue = null, groupedUnitTargets = [], busy, onApplyAll, onDirtyChange }) {
+export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = null, focusedIssue = null, groupedUnitTargets = [], guided = false, busy, onApplyAll, onDirtyChange }) {
   const [draft, setDraft] = useState(() => buildDraft(recipe, warnings));
   const [blockUnits, setBlockUnits] = useState({});
   const [showAll, setShowAll] = useState(false);
@@ -300,6 +300,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
             const groupedCount = section.mappings.filter((mapping) => groupedUnitKeys.has(keyForMapping(section.block_id, mapping))).length;
             const individualUnresolvedCount = Math.max(0, unresolvedCount - groupedCount);
             const focusedMappingExists = Boolean(focusedMappingKey && section.mappings.some((mapping) => keyForMapping(section.block_id, mapping) === focusedMappingKey));
+            const focusedOnly = guided && focusedMappingExists && !showAll;
             const shownMappings = showAll ? section.mappings : section.mappings.filter((mapping) => {
               if (groupedUnitKeys.has(keyForMapping(section.block_id, mapping))) return false;
               if (focusedMappingExists) return keyForMapping(section.block_id, mapping) === focusedMappingKey
@@ -312,7 +313,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
             });
             return (
           <>
-            <div className="mapping-sheet-head">
+            {!focusedOnly && <div className="mapping-sheet-head">
               <div>
                 <b>{section.sheet_name}</b>
                 <span>{section.orientation === "columns_are_analyses" ? "анализы по столбцам" : `заголовок: строка ${section.header_row}`} · полей: {section.mappings.length}</span>
@@ -335,7 +336,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
               </div>
               {section.mappings.some((mapping) => { const value = draft[keyForMapping(section.block_id, mapping)]; return value?.target === 'Ignore' && value.reviewDecision !== 'explicit_ignore'; }) && <button className="mapping-ignore-all" onClick={() => explicitlyIgnoreUnresolved(section)} disabled={busy}>Не импортировать нераспознанные поля</button>}
               </details>
-            </div>
+            </div>}
             <div className="mapping-review-list">
               {shownMappings.length ? shownMappings.map((mapping) => (
                 <MappingRow
@@ -344,6 +345,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
                   value={draft[keyForMapping(section.block_id, mapping)] || appliedState(mapping)}
                   busy={busy}
                   feFormRequired={feFormKeys.has(keyForMapping(section.block_id, mapping))}
+                  guided={focusedOnly}
                   onChange={(nextValue) => update(section, mapping, nextValue)}
                 />
               )) : groupedCount && !showAll ? (
@@ -354,17 +356,18 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
                 </div>
               ) : <div className="mapping-all-resolved"><b>Все поля этого блока разобраны</b><span>Открой «Все», чтобы проверить автоматические сопоставления.</span></div>}
             </div>
+            {focusedOnly && <button className="mapping-manual-toggle" type="button" onClick={() => setShowAll(true)}>Изменить роль или единицу</button>}
           </>
             );
           })()}
         </section>
       ))}
 
-      <div className="mapping-actions">
-        {dirtyKeys.length > 0 && <p role="status">Изменения ещё не применены. Проверьте выбранные значения и нажмите «Применить сопоставление».</p>}
-        <button className="outline-button" onClick={resetDraft} disabled={busy || dirtyKeys.length === 0}>Сбросить изменения</button>
+      <div className={`mapping-actions${guided ? " guided" : ""}`}>
+        {dirtyKeys.length > 0 && !guided && <p role="status">Изменения ещё не применены. Проверьте выбранные значения и нажмите «Применить сопоставление».</p>}
+        {dirtyKeys.length > 0 && <button className="outline-button" onClick={resetDraft} disabled={busy}>Сбросить</button>}
         <button className="primary-button" onClick={submit} disabled={busy || dirtyKeys.length === 0 || dirtyKeys.some((key) => draft[key].target === 'Measurement' && (!draft[key].field.trim() || !draft[key].unit))}>
-          Применить сопоставление ({dirtyKeys.length})
+          {guided ? "Сохранить ответ" : `Применить сопоставление (${dirtyKeys.length})`}
         </button>
       </div>
     </div>
