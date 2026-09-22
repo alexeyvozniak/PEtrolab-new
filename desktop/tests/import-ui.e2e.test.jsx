@@ -1238,6 +1238,37 @@ test("Python identity blocker is visible, navigable and prevents saving", async 
   expect(applyImportPlan).not.toHaveBeenCalled();
 });
 
+test("the inspector shows one current question and collapses the remaining queue", async () => {
+  uiState.mode = "complex";
+  createImportPlan.mockResolvedValueOnce({ result: {
+    ready_to_commit: false,
+    summary: { planned_analysis_count: 1, planned_measurement_count: 1, enabled_block_count: 1, duplicate_candidate_groups: 0 },
+    planned_records: [], warnings: [],
+    issues: [
+      { code: "ANALYSIS_IDENTITY_REQUIRED", blocking: true, sheet_name: "Summary", block_id: "summary-main", row_number: 3, source_column_index: 0 },
+      { code: "ANALYSIS_IDENTITY_REQUIRED", blocking: true, sheet_name: "Summary", block_id: "summary-main", row_number: 4, source_column_index: 0 },
+      { code: "ANALYSIS_IDENTITY_REQUIRED", blocking: true, sheet_name: "Summary", block_id: "summary-main", row_number: 5, source_column_index: 0 },
+    ],
+  } });
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Выбрать файл" }));
+
+  await waitFor(() => expect(document.querySelector(".import-inspector-pane > .import-pane-label")?.textContent).toBe("3 вопроса"));
+  const status = document.querySelector(".import-inspector-pane > .import-pane-label");
+  expect(status?.getAttribute("role")).toBe("status");
+  expect(status?.getAttribute("aria-live")).toBe("polite");
+  expect(document.querySelectorAll(".import-inspector-pane > .import-issue-list .import-issue-row.blocking")).toHaveLength(1);
+  const queueDisclosure = document.querySelector(".import-question-queue");
+  expect(queueDisclosure?.open).toBe(false);
+  expect(queueDisclosure?.querySelector("summary")?.textContent).toBe("Ещё 2 вопроса");
+  queueDisclosure.querySelector("summary").focus();
+  expect(document.activeElement).toBe(queueDisclosure.querySelector("summary"));
+  await user.click(queueDisclosure.querySelector("summary"));
+  expect(queueDisclosure.open).toBe(true);
+  expect(queueDisclosure.querySelectorAll(".import-issue-row.blocking")).toHaveLength(2);
+});
+
 test("user resolves a repeated complex workbook with sheet-level and grouped decisions", async () => {
   uiState.mode = "complex";
   const user = userEvent.setup();
@@ -1260,6 +1291,7 @@ test("user resolves a repeated complex workbook with sheet-level and grouped dec
   await user.click(applyUnit);
   await waitFor(() => expect(uiState.unitApplied).toBe(true));
 
+  await user.click(document.querySelector(".import-duplicate-settings > summary"));
   await user.click(await screen.findByRole("button", { name: "Проверено: оставить все записи" }));
   await waitFor(() => expect(uiState.duplicatesReviewed).toBe(true));
 

@@ -344,6 +344,10 @@ export function ImportWorkspace({
     || advisoryIssueGroups.find((entry) => !workspace || entry.item.source_id === workspace.active_source_id)
     || null;
   const selectedIssue = selectedGroup?.item || null;
+  const currentBlockingIssueGroup = listedBlockingIssueGroups.includes(selectedGroup)
+    ? selectedGroup
+    : listedBlockingIssueGroups[0] || null;
+  const queuedBlockingIssueGroups = listedBlockingIssueGroups.filter((entry) => entry !== currentBlockingIssueGroup);
   const groupedUnitTargets = useMemo(() => activeBulkUnitScopes.flatMap((scope) => scope.targets || []), [activeBulkUnitScopes]);
   const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview;
   const blockingCount = workspace ? groupIssues(issues.filter((item) => item.blocking)).length : (blockDraftDirty ? 1 : 0)
@@ -507,14 +511,28 @@ export function ImportWorkspace({
         <aside className="import-inspector-pane">
           {onVerifyMinerals && <div className="import-stage-tabs"><button type="button" onClick={() => setMineralReview(false)} disabled={busy}>1 · Структура</button><button type="button" disabled={busy || blockDraftDirty || mappingDraftDirty || plan.ready_to_commit === false} onClick={() => recipe.global_decisions.mineral_verification_enabled ? setMineralReview(true) : onVerifyMinerals()}>2 · Проверить минералы</button></div>}
           {mineralReview ? <MineralVerificationPanel records={plan.planned_records || []} scopes={semanticTools.mineralScopes || []} busy={busy} onAccept={onAcceptMineral} onReveal={(record) => { setMineralFocus({ ...record, source_column_index: (record.source_column_number || 1) - 1 }); selectBlock(record.block_id); }} /> : <>
-          <div className={`import-pane-label${blockingIssueGroups.length ? " needs-action" : " ready"}`}>
+          <div className={`import-pane-label${blockingIssueGroups.length ? " needs-action" : " ready"}`} role="status" aria-live="polite" aria-atomic="true">
             {blockingIssueGroups.length ? countNoun(blockingIssueGroups.length, "вопрос", "вопроса", "вопросов") : "Проверка"}
           </div>
-          {listedBlockingIssueGroups.length > 0 && (
+          {currentBlockingIssueGroup && (
             <div className="import-issue-list">
-              {listedBlockingIssueGroups.map((entry) => (
+              <button
+                className="import-issue-row blocking active"
+                type="button"
+                onClick={() => selectIssue(currentBlockingIssueGroup)}
+                disabled={busy || blockDraftDirty || mappingDraftDirty}
+              >
+                <Warning size={16} weight="fill" />
+                <span><b>{warningLabel(currentBlockingIssueGroup.item)}{currentBlockingIssueGroup.items.length > 1 ? ` · ${currentBlockingIssueGroup.items.length} мест` : ""}</b><small>{workspace?.sources.find((s) => s.source_id === currentBlockingIssueGroup.item.source_id)?.original_display_path.split(/[\\/]/).pop()} · {issueDetail(currentBlockingIssueGroup.item) || "Открыть контекст источника"}</small></span>
+              </button>
+            </div>
+          )}
+          {queuedBlockingIssueGroups.length > 0 && <details className="import-question-queue">
+            <summary><span>Ещё {countNoun(queuedBlockingIssueGroups.length, "вопрос", "вопроса", "вопросов")}</span></summary>
+            <div className="import-issue-list">
+              {queuedBlockingIssueGroups.map((entry) => (
                 <button
-                  className={`import-issue-row blocking${selectedGroup === entry ? " active" : ""}`}
+                  className="import-issue-row blocking"
                   type="button"
                   key={entry.key}
                   onClick={() => selectIssue(entry)}
@@ -525,7 +543,7 @@ export function ImportWorkspace({
                 </button>
               ))}
             </div>
-          )}
+          </details>}
           {advisoryIssueGroups.length > 0 && <details className="import-advisories">
             <summary><Info size={15} /><span>{countNoun(advisoryIssueGroups.length, "примечание", "примечания", "примечаний")}</span></summary>
             <div className="import-issue-list">
@@ -548,9 +566,9 @@ export function ImportWorkspace({
             <div className="import-field-inspector">
               {(activeBulkUnitScopes.length > 0 || bulkIgnoreScopes.length > 0) && (
                 <div className="import-bulk-scopes">
-                  {activeBulkUnitScopes.map((scope) => (
-                    <div className="import-bulk-scope guided-unit" key={scope.bulk_scope_id}>
-                      <b>Какая единица у этих измерений?</b>
+                  {activeBulkUnitScopes.map((scope, scopeIndex) => (
+                    <section className="import-bulk-scope guided-unit" key={scope.bulk_scope_id} aria-labelledby={`unit-question-${scopeIndex}`}>
+                      <h2 id={`unit-question-${scopeIndex}`}>Какая единица у этих измерений?</h2>
                       <small>{scope.fields.slice(0, 8).join(", ")}{scope.fields.length > 8 ? "…" : ""} · {countNoun(scope.block_count, "таблица", "таблицы", "таблиц")}</small>
                       <div className="bulk-question-action">
                         <select aria-label={`Единица для группы ${scope.fields.join(", ")}`} value={bulkUnits[scope.bulk_scope_id] || ""} onChange={(event) => setBulkUnits((current) => ({ ...current, [scope.bulk_scope_id]: event.target.value }))} disabled={busy || blockDraftDirty || mappingDraftDirty}>
@@ -559,7 +577,7 @@ export function ImportWorkspace({
                         </select>
                         <button className="compact-button" type="button" onClick={() => onApplyBulkUnit(scope.bulk_scope_id, bulkUnits[scope.bulk_scope_id])} disabled={busy || blockDraftDirty || mappingDraftDirty || !bulkUnits[scope.bulk_scope_id]}>Назначить {scope.field_count} {scope.field_count === 1 ? "полю" : "полям"}</button>
                       </div>
-                    </div>
+                    </section>
                   ))}
                   {bulkIgnoreScopes.map((scope) => (
                     <div className="import-bulk-scope ignore-scope" key={scope.bulk_scope_id}>
@@ -586,12 +604,15 @@ export function ImportWorkspace({
           )}
 
           {plan.summary.duplicate_candidate_groups > 0 && (
-            <ImportDuplicateReview
-              plan={plan}
-              recipe={recipe}
-              busy={busy || blockDraftDirty || mappingDraftDirty}
-              onKeepAll={onKeepAllDuplicates}
-            />
+            <details className="import-duplicate-settings">
+              <summary><span>{duplicateReviewRequired ? "Проверить совпадения" : "Совпадения"}</span><small>{countNoun(plan.summary.duplicate_candidate_groups, "группа", "группы", "групп")}</small></summary>
+              <ImportDuplicateReview
+                plan={plan}
+                recipe={recipe}
+                busy={busy || blockDraftDirty || mappingDraftDirty}
+                onKeepAll={onKeepAllDuplicates}
+              />
+            </details>
           )}
           </>}
         </aside>

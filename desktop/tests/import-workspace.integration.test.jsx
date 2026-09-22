@@ -167,7 +167,7 @@ test("one server-issued unit scope is presented as one guided question", async (
   await user.click(await enabledButton('Выбрать файл'));
   await enabledButton('Добавить файл');
 
-  expect(screen.getByText('Какая единица у этих измерений?')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Какая единица у этих измерений?' })).toBeTruthy();
   expect(screen.getByText('1 обязательный вопрос')).toBeTruthy();
   expect(document.querySelector('.import-advisories')?.open).toBe(false);
   expect(document.querySelector('.import-field-settings')?.open).toBe(false);
