@@ -362,6 +362,10 @@ vi.mock("../src/desktopApi", () => {
       sample_id: "sample-kiv-2",
       sample_name: "KIV-2",
       analysis_ids: ["analysis-ui-1", "analysis-la-87"],
+      analysis_members: [
+        { analysis_id: "analysis-ui-1", method: "EPMA", source_name: "Windows UI smoke", sheet_name: "Data", source_row_number: 2, source_orientation: "rows_are_analyses" },
+        { analysis_id: "analysis-la-87", method: "LA-ICP-MS", source_name: "KIV-2_LA.csv", sheet_name: "Trace", source_row_number: 87, source_orientation: "rows_are_analyses" },
+      ],
       methods: ["EPMA", "LA-ICP-MS"],
       link_types: ["same_point"],
       placement_count: 0,
@@ -381,7 +385,15 @@ vi.mock("../src/desktopApi", () => {
   const api = {
     isPetrolabDesktop: () => true,
     getProjectDatabasePath: vi.fn().mockResolvedValue("C:/PetroLab/project.sqlite"),
-    listProjectAnalyses: vi.fn().mockImplementation(async () => ({ result: uiState.imported ? importedProject : emptyProject })),
+    listProjectAnalyses: vi.fn().mockImplementation(async (_path, _limit, _offset, analysisIds) => {
+      const project = uiState.imported ? importedProject : emptyProject;
+      if (!Array.isArray(analysisIds)) return { result: project };
+      const requested = analysisIds.map((analysisId) => analysisId === "analysis-la-87" ? {
+        analysis_id: "analysis-la-87", source_name: "KIV-2_LA.csv", sheet_name: "Trace", source_row_number: 87,
+        source_orientation: "rows_are_analyses", identity: { Analysis: "P-07-LA", Sample: "KIV-2" }, source_metadata: {}, measurements: {}, measurement_list: [{ method: "LA-ICP-MS" }],
+      } : project.analyses.find((analysis) => analysis.analysis_id === analysisId)).filter(Boolean);
+      return { result: { ...project, total: requested.length, returned: requested.length, has_more: false, analyses: requested } };
+    }),
     listProjectMineralIdentifications: vi.fn().mockImplementation(async () => {
       const analyses = uiState.imported ? importedProject.analyses : [];
       return { result: {
@@ -628,7 +640,7 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { addAnalysisToAnalyticalPoint, applyImportPlan, applyMediaImportPlan, applyWorkspaceDecision, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, pickImportFile, pickMediaFolder, removeSpatialAnnotationFromAnalyticalPoint, retireAnalyticalPoint, undoOperation } from "../src/desktopApi";
+import { addAnalysisToAnalyticalPoint, applyImportPlan, applyMediaImportPlan, applyWorkspaceDecision, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, listProjectAnalyses, pickImportFile, pickMediaFolder, removeSpatialAnnotationFromAnalyticalPoint, retireAnalyticalPoint, undoOperation } from "../src/desktopApi";
 import { App } from "../src/App";
 import { ImagesWorkspace } from "../src/ImagesWorkspace";
 
@@ -778,6 +790,23 @@ test('App removes one saved spatial link and restores it through Operation Journ
   await waitFor(() => expect(undoOperation).toHaveBeenCalledWith('C:/PetroLab/project.sqlite', 'operation-remove-annotation'));
   expect(await screen.findByText('Пространственная связь восстановлена по устойчивым ID.')).toBeTruthy();
   expect((await screen.findAllByText(/Размещена/)).length).toBeGreaterThan(0);
+});
+
+test('App loads every selected source Analysis by ID before leaving the point registry', async () => {
+  uiState.imported = true;
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole('button', { name: 'Анализы' }));
+  await user.click(await screen.findByRole('button', { name: /Analytical Points 2/ }));
+  await user.click(screen.getByRole('checkbox', { name: 'Выбрать Analytical Point P-07' }));
+  await user.click(screen.getByRole('button', { name: 'Показать исходные Analyses' }));
+
+  await waitFor(() => expect(listProjectAnalyses).toHaveBeenLastCalledWith(
+    'C:/PetroLab/project.sqlite', 2, 0, ['analysis-ui-1', 'analysis-la-87'],
+  ));
+  expect((await screen.findAllByText('P-07-LA')).length).toBeGreaterThan(0);
+  expect(screen.getAllByText('KIV-2_LA.csv').length).toBeGreaterThan(0);
 });
 
 test("user confirms an image batch, places same- and cross-sample points, reviews and imports", async () => {

@@ -323,6 +323,11 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(result["spatial_annotation_count"], 1)
             projected = list_analytical_points(database)
             saved = next(item for item in projected["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            self.assertEqual(
+                [member["analysis_id"] for member in saved["analysis_members"]],
+                saved["analysis_ids"],
+            )
+            self.assertTrue(all("method" in member and "source_name" in member for member in saved["analysis_members"]))
             self.assertEqual(saved["placement_count"], 1)
             self.assertEqual(len(saved["placements"]), 1)
             placement = saved["placements"][0]

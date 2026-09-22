@@ -355,10 +355,14 @@ def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
         rows = connection.execute(
             f"""SELECT ap.analytical_point_id, ap.point_name, ap.created_at,
                       s.sample_id, s.sample_name, apa.analysis_id, apa.link_type,
-                      ais.analytical_method_json
+                      ais.analytical_method_json, a.sheet_name, a.source_row_number,
+                      a.source_column_number, a.source_orientation,
+                      sf.display_name AS source_name
                FROM analytical_point ap
                JOIN sample s ON s.sample_id = ap.sample_id
                LEFT JOIN analytical_point_analysis apa ON apa.analytical_point_id = ap.analytical_point_id
+               LEFT JOIN analysis a ON a.analysis_id = apa.analysis_id
+               LEFT JOIN source_file sf ON sf.source_id = a.source_id
                LEFT JOIN analysis_import_semantics ais ON ais.analysis_id = apa.analysis_id
                {active_clause}
                ORDER BY lower(s.sample_name), lower(ap.point_name), apa.analysis_id"""
@@ -378,6 +382,7 @@ def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
                 "sample_id": row["sample_id"],
                 "sample_name": row["sample_name"],
                 "analysis_ids": [],
+                "analysis_members": [],
                 "methods": [],
                 "link_types": [],
                 "placement_count": placement_counts.get(row["analytical_point_id"], 0),
@@ -386,11 +391,20 @@ def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
             })
             if row["analysis_id"] is not None:
                 item["analysis_ids"].append(row["analysis_id"])
+                method = _method_label(row["analytical_method_json"])
+                item["analysis_members"].append({
+                    "analysis_id": row["analysis_id"],
+                    "method": method,
+                    "source_name": row["source_name"],
+                    "sheet_name": row["sheet_name"],
+                    "source_row_number": row["source_row_number"],
+                    "source_column_number": row["source_column_number"],
+                    "source_orientation": row["source_orientation"],
+                })
+                if method and method not in item["methods"]:
+                    item["methods"].append(method)
             if row["link_type"] and row["link_type"] not in item["link_types"]:
                 item["link_types"].append(row["link_type"])
-            method = _method_label(row["analytical_method_json"])
-            if method and method not in item["methods"]:
-                item["methods"].append(method)
         items = list(by_id.values())
         for item in items:
             item["link_types"].sort()

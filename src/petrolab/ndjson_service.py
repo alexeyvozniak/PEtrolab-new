@@ -249,7 +249,10 @@ def _dispatch_project_analyses_list(params: Mapping[str, Any]) -> dict[str, Any]
     raw_offset = params.get("offset", 0)
     if not isinstance(raw_limit, int) or not isinstance(raw_offset, int):
         raise ValueError("limit")
-    return {"result": list_project_analyses(_project_database_path(params), raw_limit, raw_offset)}
+    analysis_ids = _string_list(params, "analysis_ids") if "analysis_ids" in params else None
+    return {"result": list_project_analyses(
+        _project_database_path(params), raw_limit, raw_offset, analysis_ids=analysis_ids,
+    )}
 
 
 def _dispatch_project_mineral_identification_list(params: Mapping[str, Any]) -> dict[str, Any]:

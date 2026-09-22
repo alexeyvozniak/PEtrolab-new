@@ -84,6 +84,12 @@ function mergeStatusCounts(...counts) {
   }, {});
 }
 
+function mergeAnalysesById(current, additions) {
+  const byId = new Map((current || []).map((analysis) => [analysis.analysis_id, analysis]));
+  (additions || []).forEach((analysis) => byId.set(analysis.analysis_id, analysis));
+  return [...byId.values()];
+}
+
 async function attachMineralIdentifications(path, project) {
   const review = unwrap(await listProjectMineralIdentifications(path, project.returned || project.analyses.length, project.offset || 0));
   const byId = new Map((review.identifications || []).map((item) => [item.analysis_id, item]));
@@ -158,12 +164,12 @@ export function App() {
     setBusy(true);
     setActivity("Загружаю следующую страницу анализов…");
     try {
-      const next = unwrap(await listProjectAnalyses(databasePath, ANALYSES_PAGE_SIZE, project.analyses.length));
+      const next = unwrap(await listProjectAnalyses(databasePath, ANALYSES_PAGE_SIZE, project.returned));
       const enriched = await attachMineralIdentifications(databasePath, next);
       setProject((current) => ({
         ...current,
         ...enriched,
-        returned: current.analyses.length + enriched.analyses.length,
+        returned: current.returned + enriched.returned,
         mineral_status_counts: mergeStatusCounts(current.mineral_status_counts, enriched.mineral_status_counts),
         analyses: [...current.analyses, ...enriched.analyses],
       }));
@@ -173,7 +179,25 @@ export function App() {
       setActivity("");
       setBusy(false);
     }
-  }, [busy, databasePath, project.analyses.length, project.has_more]);
+  }, [busy, databasePath, project.returned, project.has_more]);
+
+  const loadSourceAnalyses = useCallback(async (analysisIds) => {
+    if (busy || !databasePath || !Array.isArray(analysisIds) || !analysisIds.length) return [];
+    setBusy(true);
+    setActivity("Загружаю выбранные исходные Analyses…");
+    setError("");
+    try {
+      const exact = unwrap(await listProjectAnalyses(databasePath, analysisIds.length, 0, analysisIds));
+      setProject((current) => ({ ...current, analyses: mergeAnalysesById(current.analyses, exact.analyses) }));
+      return exact.analyses;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      throw caught;
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  }, [busy, databasePath]);
 
   useEffect(() => {
     if (!desktopRuntimeAvailable) return undefined;
@@ -890,6 +914,7 @@ export function App() {
             onRetract={retractLatest}
             onAddData={startNewImport}
             onLoadMore={loadMoreAnalyses}
+            onLoadSourceAnalyses={loadSourceAnalyses}
             onCreateAnalyticalPoint={createPointFromAnalyses}
             onChangeAnalyticalPointMembership={changePointMembership}
             onRemoveAnalyticalPointPlacement={removePointPlacement}

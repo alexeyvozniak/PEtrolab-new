@@ -35,13 +35,19 @@ function analysisName(analysis, fallback) {
   return identity.Analysis || identity.Point || fallback;
 }
 
-function analysisMethods(analysis) {
+function analysisMethods(analysis, member) {
   const methods = [...new Set((analysis?.measurement_list || []).map((measurement) => measurement.method).filter(Boolean))];
-  return methods.length ? methods.join(", ") : "Метод не указан";
+  return methods.length ? methods.join(", ") : member?.method || "Метод не указан";
 }
 
-function analysisOrigin(analysis) {
-  if (!analysis) return "Analysis ещё не загружен в таблицу";
+function analysisOrigin(analysis, member) {
+  if (!analysis && !member) return "Analysis ещё не загружен в таблицу";
+  if (!analysis) {
+    const origin = member.source_orientation === "columns_are_analyses"
+      ? `колонка ${member.source_column_number ?? "?"}`
+      : `строка ${member.source_row_number ?? "?"}`;
+    return [member.source_name, member.sheet_name && `лист ${member.sheet_name}`, origin].filter(Boolean).join(" · ");
+  }
   const parts = [analysis.source_name, analysis.sheet_name && `лист ${analysis.sheet_name}`];
   if (analysis.source_row_number) parts.push(`строка ${analysis.source_row_number}`);
   return parts.filter(Boolean).join(" · ");
@@ -274,7 +280,8 @@ export function AnalyticalPointsRegistry({
   }, [filtered, selectedPointIds]);
 
   const focusedPoint = items.find((point) => point.analytical_point_id === focusedPointId) || ordered[0] || null;
-  const focusedAnalyses = (focusedPoint?.analysis_ids || []).map((id) => ({ id, analysis: analysisById.get(id) }));
+  const focusedAnalysisMembers = new Map((focusedPoint?.analysis_members || []).map((member) => [member.analysis_id, member]));
+  const focusedAnalyses = (focusedPoint?.analysis_ids || []).map((id) => ({ id, analysis: analysisById.get(id), member: focusedAnalysisMembers.get(id) }));
   const selectedPoints = selectedPointIds.map((id) => items.find((point) => point.analytical_point_id === id)).filter(Boolean);
   const selectedAnalysisIds = [...new Set(selectedPoints.flatMap((point) => point.analysis_ids || []))];
   const visibleIds = ordered.map((point) => point.analytical_point_id);
@@ -325,7 +332,7 @@ export function AnalyticalPointsRegistry({
 
       {focusedPoint && <section className="point-registry-analyses" aria-label={`Исходные Analyses точки ${focusedPoint.point_name}`}>
         <header><div><span>Исходные Analyses</span><h3>{focusedPoint.point_name}</h3></div><b>{focusedAnalyses.length}</b></header>
-        <div>{focusedAnalyses.map(({ id, analysis }) => <article key={id}><strong>{analysisName(analysis, id)}</strong><span>{analysisMethods(analysis)}</span><small>{analysisOrigin(analysis)}</small><code title={id}>{id}</code></article>)}</div>
+        <div>{focusedAnalyses.map(({ id, analysis, member }) => <article key={id}><strong>{analysisName(analysis, id)}</strong><span>{analysisMethods(analysis, member)}</span><small>{analysisOrigin(analysis, member)}</small><code title={id}>{id}</code></article>)}</div>
       </section>}
     </main>
 

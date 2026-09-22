@@ -284,6 +284,7 @@ export function AnalysesWorkspace({
   onRetract,
   onAddData,
   onLoadMore,
+  onLoadSourceAnalyses,
   onCreateAnalyticalPoint,
   onChangeAnalyticalPointMembership,
   onRemoveAnalyticalPointPlacement,
@@ -332,6 +333,7 @@ export function AnalysesWorkspace({
   const [pointDialogOpen, setPointDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState("analyses");
   const [registryFocusId, setRegistryFocusId] = useState("");
+  const [sourceAnalysesNotice, setSourceAnalysesNotice] = useState("");
 
   useEffect(() => {
     setVisibleColumnIds((current) => {
@@ -414,11 +416,18 @@ export function AnalysesWorkspace({
     onRemovePlacement={onRemoveAnalyticalPointPlacement}
     onRetire={onRetireAnalyticalPoint}
     onUndo={onUndoOperation}
-    onShowAnalyses={(analysisIds) => {
-      const availableIds = analysisIds.filter((id) => analyses.some((analysis) => analysis.analysis_id === id));
-      setSelectedIds(availableIds);
-      setFocusedId(availableIds[0] || "");
-      setViewMode("analyses");
+    onShowAnalyses={async (analysisIds) => {
+      try {
+        const loaded = onLoadSourceAnalyses ? await onLoadSourceAnalyses(analysisIds) : analyses.filter((analysis) => analysisIds.includes(analysis.analysis_id));
+        const loadedIds = loaded.map((analysis) => analysis.analysis_id);
+        const unavailableIds = analysisIds.filter((id) => !loadedIds.includes(id));
+        setSelectedIds(loadedIds);
+        setFocusedId(loadedIds[0] || "");
+        setSourceAnalysesNotice(unavailableIds.length ? `Не удалось открыть ${unavailableIds.length} исходных Analyses: они больше не активны в проекте.` : "");
+        setViewMode("analyses");
+      } catch {
+        // App shows the service error; keeping the registry open makes retry explicit.
+      }
     }}
   />;
 
@@ -441,6 +450,7 @@ export function AnalysesWorkspace({
       </aside>
 
       <main className="analyses-table-pane">
+        {sourceAnalysesNotice && <p className="analyses-source-notice" role="status">{sourceAnalysesNotice}</p>}
         <div className="analyses-toolbar">
           <button className="outline-button analysis-points-registry-button" type="button" onClick={() => { setRegistryFocusId(""); setViewMode("points"); }}><LinkSimple size={17} /> Analytical Points <span>{analyticalPoints.total || 0}</span></button>
           <div className="analysis-search"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sample, Mineral, Generation, значение…" aria-label="Поиск анализов" /></div>

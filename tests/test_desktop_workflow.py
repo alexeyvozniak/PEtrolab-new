@@ -137,6 +137,21 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertEqual(first["total"], applied["analysis_count"])
         self.assertFalse({row["analysis_id"] for row in first["analyses"]} & {row["analysis_id"] for row in second["analyses"]})
 
+    def test_analysis_projection_can_load_exact_ids_outside_the_current_page(self) -> None:
+        recipe = reviewed_recipe()
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "petrolab.sqlite"
+            apply_import_plan(database, FIXTURE, recipe)
+            first = list_project_analyses(database, limit=3, offset=0)
+            later = list_project_analyses(database, limit=3, offset=3)
+            requested_ids = [later["analyses"][0]["analysis_id"], first["analyses"][1]["analysis_id"]]
+            exact = list_project_analyses(database, analysis_ids=requested_ids)
+
+        self.assertEqual(exact["total"], 2)
+        self.assertEqual(exact["returned"], 2)
+        self.assertFalse(exact["has_more"])
+        self.assertEqual({row["analysis_id"] for row in exact["analyses"]}, set(requested_ids))
+
     def test_retracted_latest_import_is_preserved_but_hidden_from_active_projection(self) -> None:
         recipe = reviewed_recipe()
         with tempfile.TemporaryDirectory() as directory:

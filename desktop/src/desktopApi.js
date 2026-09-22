@@ -134,11 +134,12 @@ export const applyImportPlan = (projectDatabasePath, sourcePath, recipe) =>
     recipe,
   });
 
-export const listProjectAnalyses = (projectDatabasePath, limit = 500, offset = 0) =>
+export const listProjectAnalyses = (projectDatabasePath, limit = 500, offset = 0, analysisIds = null) =>
   invokePetrolab("project.analyses.list", {
     project_database_path: projectDatabasePath,
     limit,
     offset,
+    ...(Array.isArray(analysisIds) ? { analysis_ids: analysisIds } : {}),
   });
 
 export const listProjectMineralIdentifications = (projectDatabasePath, limit = 500, offset = 0) =>

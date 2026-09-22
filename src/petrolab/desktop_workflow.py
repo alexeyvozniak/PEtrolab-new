@@ -449,6 +449,7 @@ def list_project_analyses(
     limit: int = 500,
     offset: int = 0,
     analysis_id: str | None = None,
+    analysis_ids: list[str] | None = None,
     _connection=None,
 ) -> dict[str, Any]:
     """Return active Analysis/Measurement rows plus lossless source metadata."""
@@ -457,8 +458,23 @@ def list_project_analyses(
     connection = _connection if _connection is not None else open_project(database_path)
     try:
         active_filter = _active_import_filter()
-        identity_filter = " AND a.analysis_id = ?" if analysis_id else ""
-        identity_params = (analysis_id,) if analysis_id else ()
+        if analysis_id is not None and analysis_ids is not None:
+            raise ValueError("analysis_id and analysis_ids are mutually exclusive")
+        if analysis_ids is not None:
+            if (
+                not isinstance(analysis_ids, list)
+                or not 1 <= len(analysis_ids) <= 500
+                or not all(isinstance(item, str) and item for item in analysis_ids)
+            ):
+                raise ValueError("analysis_ids")
+            requested_ids = list(dict.fromkeys(analysis_ids))
+            identity_filter = f" AND a.analysis_id IN ({', '.join('?' for _ in requested_ids)})"
+            identity_params = tuple(requested_ids)
+            limit = len(requested_ids)
+            offset = 0
+        else:
+            identity_filter = " AND a.analysis_id = ?" if analysis_id else ""
+            identity_params = (analysis_id,) if analysis_id else ()
         total = connection.execute(
             f"""SELECT COUNT(*)
                 FROM analysis a

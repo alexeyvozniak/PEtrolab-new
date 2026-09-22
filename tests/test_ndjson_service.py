@@ -78,6 +78,15 @@ class NdjsonServiceTests(unittest.TestCase):
                 "payload": {"project_database_path": database, "source_path": str(FIXTURE), "recipe": fixture_recipe()},
             })
             self.assertEqual(response["result"]["analysis_count"], 8)
+            listed = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "project.analyses.list",
+                "payload": {"project_database_path": database, "limit": 2, "offset": 0},
+            })["result"]
+            exact = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "project.analyses.list",
+                "payload": {"project_database_path": database, "limit": 2, "offset": 0, "analysis_ids": [listed["analyses"][1]["analysis_id"]]},
+            })["result"]
+            self.assertEqual([row["analysis_id"] for row in exact["analyses"]], [listed["analyses"][1]["analysis_id"]])
             status = handle_request({
                 "protocol_version": "1.0",
                 "request_id": str(uuid.uuid4()),
