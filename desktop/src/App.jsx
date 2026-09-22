@@ -306,7 +306,7 @@ export function App() {
     try {
       const result = unwrap(await applyWorkspaceDecision(workspace.workspace_id, workspace.draft_revision, sourceId, decision, bulk));
       await receiveWorkspace(result, true);
-      if (decision.kind !== "activate") setSuccess("Решение сохранено в этой очереди. Исходный файл не изменён.");
+      if (decision.kind !== "activate") setSuccess("Решение сохранено.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -777,12 +777,11 @@ export function App() {
               <div className="file-start-card">
                 <div className="file-start-icon"><FileArrowUp size={46} weight="duotone" /></div>
                 <h1>Добавить файл</h1>
-                <p>Если это PetroLab Clean Table, импорт будет коротким. Сырые и неоднозначные Excel откроются в отдельной подготовке.</p>
+                <p>Excel или CSV · исходный файл останется без изменений</p>
                 <button className="primary-button large" onClick={chooseFile} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}>
                   {busy ? <SpinnerGap className="spin" size={20} /> : <FileArrowUp size={20} />}
                   {busy ? "Открываю файл…" : "Выбрать файл"}
                 </button>
-                <small>Исходный файл не изменяется. Перед чтением PetroLab создаёт локальную временную копию.</small>
               </div>
             )}
 

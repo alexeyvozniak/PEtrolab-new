@@ -120,7 +120,7 @@ test("Clean Table fast path is classified by Python and skips raw review by defa
   assert.match(workspace, /Таблица готова к импорту/);
   assert.match(workspace, /Импортировать таблицу/);
   assert.match(workspace, /Открыть подробную проверку/);
-  assert.match(workspace, /требует внимания/);
+  assert.match(workspace, /countNoun\(blockingIssueGroups\.length/);
   assert.match(workspace, /Clean Table v/);
 });
 
@@ -131,8 +131,9 @@ test("approved import workspace keeps source list, physical table, issue inspect
   const styles = await read("src/importWorkspace.css");
   assert.match(app, /<ImportWorkspace/);
   assert.match(workspace, /Файл и листы/);
-  assert.match(workspace, /Проверка · \{issueGroups\.length\} типов/);
-  assert.match(workspace, /Исходный файл не изменится/);
+  assert.match(workspace, /blockingIssueGroups/);
+  assert.match(workspace, /import-advisories/);
+  assert.match(workspace, /import-field-settings/);
   assert.match(workspace, /activeBlockId/);
   assert.match(workspace, /focusedIssue=\{mineralFocus \|\| selectedIssue\}/);
   assert.match(workspace, /ImportMappingEditor/);
@@ -156,7 +157,8 @@ test("raw block review precedes field mapping and supports transposed orientatio
   assert.match(workspace, /activeBlockId/);
   assert.match(workspace, /ImportMappingEditor/);
   assert.match(workspace, /анализы по столбцам/);
-  assert.match(workspace, /исходная таблица всегда должна быть видна в центре/);
+  assert.match(workspace, /import-table-pane/);
+  assert.match(review, /raw-preview-table/);
   assert.match(review, /По столбцам \(инвертировано\)/);
   assert.match(review, /STRUCTURE_DEBOUNCE_MS/);
   assert.match(review, /Изменения структуры применяются автоматически/);
@@ -223,12 +225,11 @@ test("raw review groups repetitive issues and gets server-issued bulk unit scope
   assert.match(app, /kind: "unit", bulk_scope_id/);
   assert.match(app, /kind: "ignore", bulk_scope_id/);
   assert.match(workspace, /item\.bulk_scope_id/);
-  assert.match(workspace, /bulk-question-kicker/);
-  assert.match(workspace, /Один вопрос для \{scope\.field_count\}/);
+  assert.match(workspace, /Какая единица у этих измерений/);
   assert.match(workspace, /groupedUnitTargets/);
   assert.match(workspace, /REPEATABLE_ISSUE_CODES/);
   assert.match(workspace, /groupIssues/);
-  assert.match(workspace, /Исходные числа не изменятся/);
+  assert.match(workspace, /import-advisories/);
   assert.match(workspace, /Не импортировать все нераспознанные поля/);
 });
 

@@ -327,12 +327,23 @@ export function ImportWorkspace({
   }, [workspace, cleanClassification, plan.warnings, plan.issues, recipeWarnings]);
 
   const issueGroups = useMemo(() => groupIssues(issues).sort((left, right) => Number(right.item.source_id === workspace?.active_source_id) - Number(left.item.source_id === workspace?.active_source_id)), [issues, workspace?.active_source_id]);
-  const selectedGroup = issueGroups.find((entry) => entry.key === selectedIssueKey && (!workspace || entry.item.source_id === workspace.active_source_id)) || issueGroups.find((entry) => !workspace || entry.item.source_id === workspace.active_source_id) || null;
-  const selectedIssue = selectedGroup?.item || null;
   const activeSection = sections.find((item) => item.block_id === activeBlockId) || sections[0];
   const activeBulkUnitScopes = useMemo(() => bulkUnitScopes.filter((scope) => (
     (scope.targets || []).some((target) => target.block_id === activeBlockId)
   )), [activeBlockId, bulkUnitScopes]);
+  const activeBulkScopeIds = useMemo(() => new Set(activeBulkUnitScopes.map((scope) => scope.bulk_scope_id)), [activeBulkUnitScopes]);
+  const blockingIssueGroups = useMemo(() => issueGroups.filter((entry) => entry.item.blocking), [issueGroups]);
+  const advisoryIssueGroups = useMemo(() => issueGroups.filter((entry) => !entry.item.blocking), [issueGroups]);
+  const listedBlockingIssueGroups = useMemo(() => blockingIssueGroups.filter((entry) => !(
+    entry.item.source_id === workspace?.active_source_id
+    && entry.item.code === "UNIT_REQUIRES_REVIEW"
+    && activeBulkScopeIds.has(entry.item.bulk_scope_id)
+  )), [activeBulkScopeIds, blockingIssueGroups, workspace?.active_source_id]);
+  const selectedGroup = issueGroups.find((entry) => entry.key === selectedIssueKey && (!workspace || entry.item.source_id === workspace.active_source_id))
+    || blockingIssueGroups.find((entry) => !workspace || entry.item.source_id === workspace.active_source_id)
+    || advisoryIssueGroups.find((entry) => !workspace || entry.item.source_id === workspace.active_source_id)
+    || null;
+  const selectedIssue = selectedGroup?.item || null;
   const groupedUnitTargets = useMemo(() => activeBulkUnitScopes.flatMap((scope) => scope.targets || []), [activeBulkUnitScopes]);
   const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview;
   const blockingCount = workspace ? groupIssues(issues.filter((item) => item.blocking)).length : (blockDraftDirty ? 1 : 0)
@@ -377,7 +388,7 @@ export function ImportWorkspace({
           <File size={25} weight="duotone" />
           <div>
             <h1>Импорт таблиц</h1>
-            <p>{cleanFast ? "Таблица готова к импорту" : issueGroups.length ? `${workspace?.sources.length > 1 ? 'Очередь' : 'Файл'} требует внимания: ${issueGroups.length} ${issueGroups.length === 1 ? "тип вопроса" : "типов вопросов"}` : "Подробная проверка"}</p>
+            <p>{cleanFast || blockingIssueGroups.length === 0 ? "Готово к импорту" : countNoun(blockingIssueGroups.length, "вопрос", "вопроса", "вопросов")}</p>
           </div>
         </div>
         <div className="import-workspace-head-actions">
@@ -392,7 +403,9 @@ export function ImportWorkspace({
           <div className="import-pane-label">Файл и листы</div>
           {workspace && <div className="workspace-source-queue" aria-label="Очередь источников">
             {workspace.sources.map((source) => {
-              const count = workspace.issues.filter((issue) => issue.source_id === source.source_id && issue.blocking).length;
+              const count = groupIssues(workspace.issues
+                .filter((issue) => issue.source_id === source.source_id && issue.blocking)
+                .map((issue) => ({ ...issue.message_params, ...issue }))).length;
               const name = source.original_display_path.split(/[\\/]/).pop();
               return <div key={source.source_id} className={source.source_id === workspace.active_source_id ? "queue-source active" : "queue-source"}>
                 <button type="button" aria-label={`Открыть источник ${name}`} aria-pressed={source.source_id === workspace.active_source_id} onClick={() => onSelectSource(source.source_id)} disabled={busy || blockDraftDirty || mappingDraftDirty}>
@@ -403,14 +416,15 @@ export function ImportWorkspace({
               </div>;
             })}
           </div>}
-          <div className="import-source-file">
+          {!workspace && <div className="import-source-file">
             <File size={19} weight="duotone" />
-            <div><b>{workspace ? 'Листы выбранного файла' : sourceName}</b><span>{inspection.sheets.length} листов</span></div>
-          </div>
+            <div><b>{sourceName}</b><span>{inspection.sheets.length} листов</span></div>
+          </div>}
           <div className="import-sheet-list">
             {sheetGroups.map((group) => {
-              const sourceIssues = workspace ? issues.filter((item) => item.source_id === workspace.active_source_id) : issues;
-              const count = group.sections.reduce((total, section) => total + sectionIssueCount(section, sourceIssues), 0);
+              const sourceIssues = (workspace ? issues.filter((item) => item.source_id === workspace.active_source_id) : issues)
+                .filter((item) => item.blocking);
+              const count = groupIssues(group.sections.flatMap((section) => sectionIssues(section, sourceIssues))).length;
               const active = group.sections.some((section) => section.block_id === activeBlockId);
               const enabledCount = group.sections.filter((section) => section.enabled !== false).length;
               const disabled = enabledCount === 0;
@@ -425,7 +439,7 @@ export function ImportWorkspace({
                         <small title={disabled ? group.sections[0].exclusion_reason : undefined}>{disabled ? group.sections[0].exclusion_reason || "Исключено пользователем" : group.sections.length === 1 ? sectionSubtitle(group.sections[0]) : `${group.sections.length} таблиц · включено ${enabledCount}`}</small>
                       </span>
                       <span className={`import-sheet-status${count ? " warning" : ""}`}>
-                        {disabled ? "Пропущен" : count ? `${count} типов` : "Готов"}
+                        {disabled ? "Пропущен" : count ? countNoun(count, "вопрос", "вопроса", "вопросов") : "Готов"}
                       </span>
                       <CaretRight size={14} />
                     </button>
@@ -453,7 +467,7 @@ export function ImportWorkspace({
                             disabled={busy || blockDraftDirty || mappingDraftDirty}
                           >
                             <span>Таблица {index + 1}</span>
-                            <small>{section.enabled === false ? "пропущена" : blockIssues ? `${blockIssues} типов` : "готова"}</small>
+                            <small>{section.enabled === false ? "пропущена" : blockIssues ? countNoun(blockIssues, "вопрос", "вопроса", "вопросов") : "готова"}</small>
                           </button>
                         );
                       })}
@@ -470,7 +484,6 @@ export function ImportWorkspace({
               </div>
             ))}
           </div>
-          <div className="import-source-note"><Info size={15} /><span>Выбери лист слева. Его исходная таблица всегда должна быть видна в центре.</span></div>
         </aside>
 
         <main className="import-table-pane">
@@ -494,25 +507,42 @@ export function ImportWorkspace({
         <aside className="import-inspector-pane">
           {onVerifyMinerals && <div className="import-stage-tabs"><button type="button" onClick={() => setMineralReview(false)} disabled={busy}>1 · Структура</button><button type="button" disabled={busy || blockDraftDirty || mappingDraftDirty || plan.ready_to_commit === false} onClick={() => recipe.global_decisions.mineral_verification_enabled ? setMineralReview(true) : onVerifyMinerals()}>2 · Проверить минералы</button></div>}
           {mineralReview ? <MineralVerificationPanel records={plan.planned_records || []} scopes={semanticTools.mineralScopes || []} busy={busy} onAccept={onAcceptMineral} onReveal={(record) => { setMineralFocus({ ...record, source_column_index: (record.source_column_number || 1) - 1 }); selectBlock(record.block_id); }} /> : <>
-          <div className="import-pane-label">Проверка · {issueGroups.length} типов · {issues.length} мест</div>
-          {issueGroups.length > 0 ? (
+          <div className={`import-pane-label${blockingIssueGroups.length ? " needs-action" : " ready"}`}>
+            {blockingIssueGroups.length ? countNoun(blockingIssueGroups.length, "вопрос", "вопроса", "вопросов") : "Проверка"}
+          </div>
+          {listedBlockingIssueGroups.length > 0 && (
             <div className="import-issue-list">
-              {issueGroups.map((entry) => (
+              {listedBlockingIssueGroups.map((entry) => (
                 <button
-                  className={`import-issue-row${entry.item.blocking ? " blocking" : " advisory"}${selectedGroup === entry ? " active" : ""}`}
+                  className={`import-issue-row blocking${selectedGroup === entry ? " active" : ""}`}
                   type="button"
                   key={entry.key}
                   onClick={() => selectIssue(entry)}
                   disabled={busy || blockDraftDirty || mappingDraftDirty}
                 >
-                  {entry.item.blocking ? <Warning size={16} weight="fill" /> : <Info size={16} weight="fill" />}
+                  <Warning size={16} weight="fill" />
                   <span><b>{warningLabel(entry.item)}{entry.items.length > 1 ? ` · ${entry.items.length} мест` : ""}</b><small>{workspace?.sources.find((s) => s.source_id === entry.item.source_id)?.original_display_path.split(/[\\/]/).pop()} · {issueDetail(entry.item) || "Открыть контекст источника"}</small></span>
                 </button>
               ))}
             </div>
-          ) : (
-            <div className="import-no-issues"><CheckCircle size={20} weight="fill" /><span>Обязательных вопросов нет</span></div>
           )}
+          {advisoryIssueGroups.length > 0 && <details className="import-advisories">
+            <summary><Info size={15} /><span>{countNoun(advisoryIssueGroups.length, "примечание", "примечания", "примечаний")}</span></summary>
+            <div className="import-issue-list">
+              {advisoryIssueGroups.map((entry) => (
+                <button
+                  className={`import-issue-row advisory${selectedGroup === entry ? " active" : ""}`}
+                  type="button"
+                  key={entry.key}
+                  onClick={() => selectIssue(entry)}
+                  disabled={busy || blockDraftDirty || mappingDraftDirty}
+                >
+                  <Info size={16} weight="fill" />
+                  <span><b>{warningLabel(entry.item)}{entry.items.length > 1 ? ` · ${entry.items.length} мест` : ""}</b><small>{workspace?.sources.find((s) => s.source_id === entry.item.source_id)?.original_display_path.split(/[\\/]/).pop()} · {issueDetail(entry.item) || "Открыть контекст источника"}</small></span>
+                </button>
+              ))}
+            </div>
+          </details>}
 
           {!cleanFast && activeSection && (
             <div className="import-field-inspector">
@@ -520,10 +550,8 @@ export function ImportWorkspace({
                 <div className="import-bulk-scopes">
                   {activeBulkUnitScopes.map((scope) => (
                     <div className="import-bulk-scope guided-unit" key={scope.bulk_scope_id}>
-                      <span className="bulk-question-kicker">Один вопрос для {scope.field_count} {scope.field_count === 1 ? "поля" : "полей"}</span>
                       <b>Какая единица у этих измерений?</b>
                       <small>{scope.fields.slice(0, 8).join(", ")}{scope.fields.length > 8 ? "…" : ""} · {countNoun(scope.block_count, "таблица", "таблицы", "таблиц")}</small>
-                      <p>Ответ будет применён только к этой проверенной группе. Исходные числа не изменятся.</p>
                       <div className="bulk-question-action">
                         <select aria-label={`Единица для группы ${scope.fields.join(", ")}`} value={bulkUnits[scope.bulk_scope_id] || ""} onChange={(event) => setBulkUnits((current) => ({ ...current, [scope.bulk_scope_id]: event.target.value }))} disabled={busy || blockDraftDirty || mappingDraftDirty}>
                           <option value="">Выбрать единицу…</option>
@@ -542,20 +570,18 @@ export function ImportWorkspace({
                   ))}
                 </div>
               )}
-              <div className="import-inspector-title">
-                <span>Поля выбранной таблицы</span>
-                <b>{activeSection.sheet_name}</b>
-                {selectedIssue && <small>{warningLabel(selectedIssue)}</small>}
-              </div>
-              <ImportMappingEditor
-                recipe={recipe}
-                warnings={recipeWarnings}
-                activeBlockId={activeBlockId}
-                groupedUnitTargets={groupedUnitTargets}
-                busy={busy || blockDraftDirty}
-                onApplyAll={onApplyMappings}
-                onDirtyChange={onMappingDirtyChange}
-              />
+              <details className="import-field-settings" open={mappingDraftDirty || Boolean(selectedIssue?.blocking && !activeBulkScopeIds.has(selectedIssue.bulk_scope_id))}>
+                <summary><span>Поля таблицы</span><small>{activeSection.mappings.length}</small></summary>
+                <ImportMappingEditor
+                  recipe={recipe}
+                  warnings={recipeWarnings}
+                  activeBlockId={activeBlockId}
+                  groupedUnitTargets={groupedUnitTargets}
+                  busy={busy || blockDraftDirty}
+                  onApplyAll={onApplyMappings}
+                  onDirtyChange={onMappingDirtyChange}
+                />
+              </details>
             </div>
           )}
 
@@ -573,12 +599,9 @@ export function ImportWorkspace({
 
       <footer className={`import-workspace-footer${canSaveImport ? "" : " blocked"}`}>
         <div className="import-footer-metrics">
-          <span><b>{inspection.sheets.length}</b> листов</span>
-          <span><b>{plan.summary.planned_analysis_count}</b> Analysis</span>
-          <span><b>{plannedMeasurementCount}</b> Measurement</span>
-          <span className={blockingCount || unappliedChanges ? "footer-warning" : ""}><b>{blockingCount}</b> {blockingCount === 1 ? "обязательное решение" : "обязательных решений"}{unresolvedReviewCount ? ` · ${countNoun(unresolvedReviewCount, "поле", "поля", "полей")}` : ""}{unappliedChanges ? " · правки не применены" : ""}</span>
+          <span><b>{plan.summary.planned_analysis_count}</b> Analysis · <b>{plannedMeasurementCount}</b> Measurement</span>
+          {(blockingCount > 0 || unappliedChanges) && <span className="footer-warning"><b>{blockingCount}</b> {blockingCount === 1 ? "обязательное решение" : "обязательных решений"}{unresolvedReviewCount ? ` · ${countNoun(unresolvedReviewCount, "поле", "поля", "полей")}` : ""}{unappliedChanges ? " · правки не применены" : ""}</span>}
         </div>
-        <div className="import-footer-safety"><Info size={15} /><span>Исходный файл не изменится</span></div>
         <div className="import-footer-actions">
           <button className="outline-button" type="button" onClick={() => setShowResultPreview(true)} disabled={busy || !plan.planned_records?.length}>Предпросмотр результата</button>
           <button className="primary-button large" type="button" onClick={onCommit} disabled={busy || !canSaveImport}>

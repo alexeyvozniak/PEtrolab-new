@@ -114,6 +114,8 @@
   letter-spacing: .04em;
   text-transform: uppercase;
 }
+.import-pane-label.needs-action { color: #87571e; }
+.import-pane-label.ready { color: #3f6d51; }
 
 .import-source-file {
   gap: 9px;
@@ -213,6 +215,21 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .import-issue-row b { color: #4f3e27; font-size: 10px; }
 .import-issue-row small { margin-top: 3px; color: #8b7659; font-size: 8px; line-height: 1.3; }
 .import-no-issues { flex: 0 0 auto; gap: 7px; padding: 13px; color: #47705a; font-size: 10px; border-bottom: 1px solid #e7eae7; }
+.import-advisories { flex: 0 0 auto; border-bottom: 1px solid #e7eae7; background: #fff; }
+.import-advisories > summary {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  color: #587064;
+  font-size: 9px;
+  cursor: pointer;
+  list-style: none;
+}
+.import-advisories > summary::-webkit-details-marker { display: none; }
+.import-advisories[open] > summary { border-bottom: 1px solid #e7eae7; }
+.import-advisories .import-issue-list { max-height: 160px; border-bottom: 0; }
 
 .import-field-inspector {
   min-width: 0;
@@ -229,9 +246,8 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .import-bulk-scope > div { display: flex; flex-wrap: wrap; gap: 6px; }
 .import-bulk-scope select { min-width: 94px; }
 .import-bulk-scope.guided-unit { padding: 12px; border-top: 0; border-left: 3px solid #4f8063; background: #f2f8f3; }
-.import-bulk-scope.guided-unit .bulk-question-kicker { display: block; margin-bottom: 4px; color: #4f8063; font-size: 8px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
 .import-bulk-scope.guided-unit b { color: #274b37; font-size: 13px; line-height: 1.3; }
-.import-bulk-scope.guided-unit p { margin: 7px 0 9px; color: #53675b; font-size: 9px; line-height: 1.45; }
+.import-bulk-scope.guided-unit small { margin: 5px 0 9px; }
 .import-bulk-scope .bulk-question-action { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; }
 .import-bulk-scope .bulk-question-action select { width: 100%; min-height: 36px; }
 .import-bulk-scope .bulk-question-action .compact-button { width: 100%; border-color: #4f8063; background: #396d50; color: #fff; }
@@ -246,6 +262,26 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .import-inspector-title span { color: #7d8580; font-size: 8px; text-transform: uppercase; letter-spacing: .05em; }
 .import-inspector-title b { margin-top: 3px; font-size: 11px; }
 .import-inspector-title small { margin-top: 4px; color: #a45f1c; font-size: 9px; }
+.import-field-settings { border-top: 1px solid #e7eae7; background: #fff; }
+.import-field-settings > summary {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  color: #536159;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+.import-field-settings > summary::-webkit-details-marker { display: none; }
+.import-field-settings > summary::before { content: "›"; color: #758079; transform: rotate(0deg); transition: transform .12s ease; }
+.import-field-settings[open] > summary::before { transform: rotate(90deg); }
+.import-field-settings > summary span { flex: 1; }
+.import-field-settings > summary small { color: #7d8781; font-size: 9px; font-weight: 500; }
+.import-field-settings[open] > summary { border-bottom: 1px solid #e7eae7; }
 .import-inspector-pane .mapping-explainer { display: none; }
 .import-inspector-pane .mapping-sheet { border: 0; border-radius: 0; margin: 0; }
 .import-inspector-pane .mapping-sheet-head {
@@ -302,7 +338,7 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .import-workspace-footer {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) auto auto;
+  grid-template-columns: minmax(300px, 1fr) auto;
   align-items: center;
   gap: 6px 14px;
   padding: 9px 16px;
@@ -311,7 +347,7 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 }
 .import-footer-metrics { display: flex; align-items: center; gap: 18px; min-width: 0; }
 .import-footer-metrics span { color: #737c76; font-size: 9px; white-space: nowrap; }
-.import-footer-metrics b { display: block; color: #26322b; font-size: 15px; }
+.import-footer-metrics b { color: #26322b; font-size: 12px; }
 .import-footer-metrics .footer-warning,
 .import-footer-metrics .footer-warning b { color: #a9631d; }
 .import-footer-safety { gap: 6px; color: #6f7872; font-size: 9px; white-space: nowrap; }

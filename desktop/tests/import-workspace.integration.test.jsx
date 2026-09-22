@@ -153,7 +153,7 @@ test("unit suggestions are not dirty edits and one valid mapping can be applied 
   expect(screen.queryByText(/Изменения ещё не применены/)).toBeNull();
   await user.selectOptions(unit, 'wt.%');
   await user.click(await enabledButton(/Применить сопоставление/));
-  await screen.findByText('Один вопрос для 1 поля');
+  await screen.findByText('Какая единица у этих измерений?');
   expect(screen.queryByRole('combobox', { name: 'Единица SiO2' })).toBeNull();
   expect(screen.getByRole('button', { name: 'Импортировать после проверки' }).disabled).toBe(true);
 }, 20000);
@@ -167,8 +167,10 @@ test("one server-issued unit scope is presented as one guided question", async (
   await user.click(await enabledButton('Выбрать файл'));
   await enabledButton('Добавить файл');
 
-  expect(screen.getAllByText(/Какая единица у этих полей/).length).toBeGreaterThan(0);
-  expect(screen.getByText('Один вопрос для 2 полей')).toBeTruthy();
+  expect(screen.getByText('Какая единица у этих измерений?')).toBeTruthy();
+  expect(screen.getByText('1 обязательный вопрос')).toBeTruthy();
+  expect(document.querySelector('.import-advisories')?.open).toBe(false);
+  expect(document.querySelector('.import-field-settings')?.open).toBe(false);
   expect(screen.getByText(/2 поля этой таблицы входят в один вопрос выше/)).toBeTruthy();
   expect(screen.getByText('Записи появятся после решения вопросов выше')).toBeTruthy();
   expect(screen.queryByRole('combobox', { name: 'Единица SiO2' })).toBeNull();
@@ -177,7 +179,7 @@ test("one server-issued unit scope is presented as one guided question", async (
   const unit = screen.getByRole('combobox', { name: /Единица для группы/ });
   await user.selectOptions(unit, 'wt.%');
   await user.click(await enabledButton('Назначить 2 полям'));
-  await waitFor(() => expect(screen.queryByText('Один вопрос для 2 полей')).toBeNull());
+  await waitFor(() => expect(screen.queryByText('Какая единица у этих измерений?')).toBeNull());
   expect(requests.some((request) => request.command === 'import.workspace.apply_bulk_decision'
     && request.payload.decision?.kind === 'unit'
     && request.payload.decision?.unit === 'wt.%')).toBe(true);
