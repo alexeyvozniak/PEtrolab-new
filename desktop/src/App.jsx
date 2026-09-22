@@ -35,6 +35,7 @@ import {
   pickMediaFiles,
   retractLastImport,
   removeAnalysisFromAnalyticalPoint,
+  removeSpatialAnnotationFromAnalyticalPoint,
   retireAnalyticalPoint,
   stageImportFile,
   undoOperation,
@@ -547,6 +548,52 @@ export function App() {
     }
   };
 
+  const removePointPlacement = async (point, placement, reason) => {
+    if (busy || !databasePath) return null;
+    setBusy(true);
+    setActivity("Снимаю пространственную связь и записываю обратимую операцию…");
+    setError("");
+    setSuccess("");
+    try {
+      const removed = unwrap(await removeSpatialAnnotationFromAnalyticalPoint(
+        databasePath, point, placement.spatial_annotation_id, reason,
+      ));
+      setPointOperationNotice({
+        operation: removed.operation,
+        message: `Размещение ${placement.media_display_name} снято с Analytical Point «${point.point_name}».`,
+      });
+      setMediaPoints((current) => ({
+        ...current,
+        items: (current.items || []).map((item) => {
+          if (item.analytical_point_id !== point.analytical_point_id) return item;
+          const placements = (item.placements || []).filter((candidate) => candidate.spatial_annotation_id !== placement.spatial_annotation_id);
+          return { ...item, placements, placement_count: placements.length };
+        }),
+      }));
+      setSuccess(`Размещение «${placement.media_display_name}» снято обратимо. Spatial Annotation, Media Asset и научные данные сохранены.`);
+      let projectionRefreshed = true;
+      try {
+        const [pointProjection, journal] = await Promise.all([
+          listAnalyticalPoints(databasePath).then(unwrap),
+          listOperationJournal(databasePath).then(unwrap),
+        ]);
+        setMediaPoints(pointProjection);
+        setOperationJournal(journal);
+      } catch (caught) {
+        projectionRefreshed = false;
+        const detail = caught instanceof Error ? caught.message : String(caught);
+        setError(`Размещение снято, но обновить реестр не удалось: ${detail}`);
+      }
+      return { ...removed, projection_refreshed: projectionRefreshed };
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      throw caught;
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
+  };
+
   const undoPointOperation = async (operationId) => {
     if (busy || !databasePath || !operationId) return null;
     setBusy(true);
@@ -567,6 +614,7 @@ export function App() {
         retracted: "Создание Analytical Point отменено обратимо; исходные Analyses сохранены.",
         analysis_added: "Analysis возвращена в состав Analytical Point по устойчивому ID.",
         analysis_removed: "Добавление Analysis отменено; исходная Analysis сохранена.",
+        annotation_link_restored: "Пространственная связь восстановлена по устойчивым ID.",
       }[undone.effect] || "Операция отменена по устойчивым ID.");
       let projectionRefreshed = true;
       try {
@@ -844,6 +892,7 @@ export function App() {
             onLoadMore={loadMoreAnalyses}
             onCreateAnalyticalPoint={createPointFromAnalyses}
             onChangeAnalyticalPointMembership={changePointMembership}
+            onRemoveAnalyticalPointPlacement={removePointPlacement}
             onRetireAnalyticalPoint={retirePoint}
             onUndoOperation={undoPointOperation}
           />

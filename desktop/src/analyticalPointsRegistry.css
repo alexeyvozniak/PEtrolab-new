@@ -77,6 +77,8 @@
 .point-placement-card dl > div { grid-template-columns: 88px minmax(0, 1fr); padding: 3px 0; }
 .point-placement-card dd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .point-placement-card em { padding: 6px; border-radius: 6px; background: #fff4dc; color: #76541e; font-size: 8px; font-style: normal; line-height: 1.4; }
+.point-placement-card .point-placement-unlink { min-height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #ddbbb7; border-radius: 6px; background: #fff9f8; color: #91463f; font-size: 8px; font-weight: 750; }
+.point-placement-card .point-placement-unlink:disabled { cursor: not-allowed; opacity: .5; }
 .point-registry-actions button { width: 100%; min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #d5a5a0; border-radius: 7px; background: #fff8f7; color: #9a3f38; font-size: 9px; font-weight: 750; }
 .point-registry-actions button + button { margin-top: 7px; }
 .point-registry-actions button.point-composition-action { border-color: #b7cbbd; background: #f3f8f4; color: #356148; }
@@ -136,6 +138,15 @@
 .point-composition-empty { margin: 0; color: #7d8881; font-size: 9px; }
 .point-composition-submit { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #3f7255; border-radius: 7px; background: #477b5c; color: #fff; font-size: 9px; font-weight: 750; }
 .point-composition-submit:disabled { cursor: not-allowed; opacity: .48; }
+.point-placement-target { display: grid; gap: 7px; margin: 0 18px 12px; padding: 11px; border: 1px solid #dce4de; border-radius: 8px; background: #f8faf8; }
+.point-placement-target > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.point-placement-target > header b { color: #334239; font-size: 10px; }
+.point-placement-target > header span { padding: 2px 6px; border-radius: 999px; background: #e8f1ea; color: #315d45; font-size: 8px; font-weight: 750; }
+.point-placement-target > p { margin: 0; color: #53635a; font-size: 9px; }
+.point-placement-target dl { display: grid; gap: 4px; margin: 0; }
+.point-placement-target dl > div { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; }
+.point-placement-target dt { color: #7b867f; font-size: 8px; }
+.point-placement-target dd { margin: 0; overflow: hidden; color: #46554c; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 1050px) {
   .point-registry { grid-template-columns: 155px minmax(0, 1fr) 220px; }

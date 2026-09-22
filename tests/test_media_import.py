@@ -29,6 +29,7 @@ from petrolab.media_import import (  # noqa: E402
     list_analytical_points,
     list_operation_journal,
     remove_analysis_from_analytical_point,
+    remove_spatial_annotation_from_analytical_point,
     retire_analytical_point,
     undo_operation,
 )
@@ -355,6 +356,66 @@ class MediaImportTests(unittest.TestCase):
                     connection.execute("SELECT cross_sample_exception, exception_reason FROM analytical_point_annotation").fetchone(),
                     (1, "Legacy label verified in lab notebook"),
                 )
+
+    def test_saved_spatial_link_can_be_removed_and_undone_without_deleting_entities(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            database, point, _ = self._project_with_points(directory)
+            image = directory / "KIV-2_BSE.png"
+            write_png(image)
+            plan = create_media_import_plan(database, [self._assignment(image, point["analytical_point_id"])])
+            apply_media_import_plan(database, plan)
+            projected = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            placement = projected["placements"][0]
+            with closing(sqlite3.connect(database)) as connection:
+                before = {
+                    table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    for table in ("analysis", "measurement", "source_file", "media_asset", "spatial_annotation")
+                }
+
+            removed = remove_spatial_annotation_from_analytical_point(
+                database,
+                point["analytical_point_id"],
+                point["analysis_ids"],
+                [placement["spatial_annotation_id"]],
+                placement["spatial_annotation_id"],
+                "Метка поставлена не на ту физическую точку",
+            )
+            self.assertEqual(removed["effect"], "annotation_link_removed")
+            self.assertEqual(removed["operation"]["action_kind"], "analytical_point.annotation.remove")
+            self.assertEqual(removed["operation"]["parameters"]["media_asset_id"], placement["media_asset_id"])
+            self.assertEqual(removed["spatial_annotation_ids"], [])
+            after_remove = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            self.assertEqual(after_remove["placements"], [])
+            with closing(sqlite3.connect(database)) as connection:
+                for table, count in before.items():
+                    self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], count)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point_annotation").fetchone()[0], 0)
+
+            restored = undo_operation(database, removed["operation"]["operation_id"])
+            self.assertEqual(restored["effect"], "annotation_link_restored")
+            after_undo = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            self.assertEqual(after_undo["placements"][0]["spatial_annotation_id"], placement["spatial_annotation_id"])
+            self.assertEqual(after_undo["placements"][0]["media_asset_id"], placement["media_asset_id"])
+
+    def test_spatial_unlink_rejects_stale_scope_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            database, point, _ = self._project_with_points(directory)
+            image = directory / "KIV-2_BSE.png"
+            write_png(image)
+            plan = create_media_import_plan(database, [self._assignment(image, point["analytical_point_id"])])
+            apply_media_import_plan(database, plan)
+            annotation_id = plan["items"][0]["placements"][0]["spatial_annotation_id"]
+            with self.assertRaises(ImportCommandError) as raised:
+                remove_spatial_annotation_from_analytical_point(
+                    database, point["analytical_point_id"], point["analysis_ids"], [],
+                    annotation_id, "Устаревший экран",
+                )
+            self.assertEqual(raised.exception.code, "POINT_REVISION_CONFLICT")
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point_annotation").fetchone()[0], 1)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM operation_journal_entry").fetchone()[0], 2)
 
     def test_unplaced_image_is_allowed_but_visible_in_review_warnings(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

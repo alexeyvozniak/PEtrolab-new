@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { AnalysesWorkspace } from '../src/AnalysesWorkspace';
 import { MineralsWorkspace } from '../src/MineralsWorkspace';
 
-const uiState = vi.hoisted(() => ({ imported: false, mediaImported: false, mediaPlacementCount: 0, pointCreated: false, pointRetired: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false, mediaDuplicates: false, mediaPreviewFailures: 0 }));
+const uiState = vi.hoisted(() => ({ imported: false, mediaImported: false, mediaPlacementCount: 0, pointCreated: false, pointRetired: false, pointPlacementAvailable: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false, mediaDuplicates: false, mediaPreviewFailures: 0 }));
 
 test('selected Analyses require explicit semantics before creating an Analytical Point', async () => {
   const user = userEvent.setup();
@@ -54,6 +54,7 @@ test('Analytical Point registry exposes provenance, reversible unlink and source
   const user = userEvent.setup();
   const onRetire = vi.fn().mockResolvedValue({ analytical_point_id: 'point-stable-p01' });
   const onChangeMembership = vi.fn().mockResolvedValue({ effect: 'analysis_added' });
+  const onRemovePlacement = vi.fn().mockResolvedValue({ effect: 'annotation_link_removed' });
   const onUndo = vi.fn().mockResolvedValue({ effect: 'restored' });
   const analyses = [{
     analysis_id: 'epma-p01', source_name: 'KIV-2_EPMA.xlsx', sheet_name: 'Data', source_row_number: 9,
@@ -95,7 +96,7 @@ test('Analytical Point registry exposes provenance, reversible unlink and source
   render(<AnalysesWorkspace
     project={{ total: 2, source_count: 2, analyses }} analyticalPoints={analyticalPoints}
     operationJournal={{ total: 1, items: [operation] }} pointOperationNotice={{ operation, message: 'Связь Analytical Point «P-01» снята.' }}
-    busy={false} onRefreshAnalyticalPoints={vi.fn()} onChangeAnalyticalPointMembership={onChangeMembership} onRetireAnalyticalPoint={onRetire} onUndoOperation={onUndo}
+    busy={false} onRefreshAnalyticalPoints={vi.fn()} onChangeAnalyticalPointMembership={onChangeMembership} onRemoveAnalyticalPointPlacement={onRemovePlacement} onRetireAnalyticalPoint={onRetire} onUndoOperation={onUndo}
   />);
   await user.click(screen.getByRole('button', { name: /Analytical Points 2/ }));
 
@@ -128,6 +129,17 @@ test('Analytical Point registry exposes provenance, reversible unlink and source
   expect(within(compositionDialog).getByText(/должны остаться минимум две Analyses/)).toBeTruthy();
   expect(within(compositionDialog).getByRole('button', { name: 'Снять Analysis' }).disabled).toBe(true);
   await user.click(within(compositionDialog).getByRole('button', { name: 'Отмена' }));
+
+  await user.click(screen.getByRole('button', { name: 'Снять размещение' }));
+  const placementDialog = screen.getByRole('dialog', { name: 'Снять размещение P-01' });
+  expect(within(placementDialog).getByText(/Spatial Annotation, Media Asset, Analytical Point, Analyses и Measurements останутся/)).toBeTruthy();
+  expect(within(placementDialog).getByText(/KIV-2-A · Point · X 5710 · Y 4876 px/)).toBeTruthy();
+  await user.type(within(placementDialog).getByRole('textbox', { name: 'Причина снятия размещения' }), 'Метка поставлена не на ту физическую точку');
+  await user.click(within(placementDialog).getByRole('checkbox', { name: /Подтверждаю снятие только показанной связи/ }));
+  await user.click(within(placementDialog).getByRole('button', { name: 'Снять размещение' }));
+  await waitFor(() => expect(onRemovePlacement).toHaveBeenCalledWith(
+    analyticalPoints.items[0], analyticalPoints.items[0].placements[0], 'Метка поставлена не на ту физическую точку',
+  ));
 
   await user.click(screen.getByRole('button', { name: 'Разорвать связь' }));
   const unlinkDialog = screen.getByRole('dialog', { name: 'Разорвать связь P-01' });
@@ -412,7 +424,13 @@ vi.mock("../src/desktopApi", () => {
       ]] : [],
     } })),
     listAnalyticalPoints: vi.fn().mockImplementation(async () => {
-      const activeItems = analyticalPoints.items.filter((point) => !uiState.pointRetired || point.analytical_point_id !== 'point-kiv-2-p07');
+      const activeItems = analyticalPoints.items
+        .filter((point) => !uiState.pointRetired || point.analytical_point_id !== 'point-kiv-2-p07')
+        .map((point) => point.analytical_point_id === 'point-kiv-2-p07' && uiState.pointPlacementAvailable ? { ...point, placement_count: 1, placements: [{
+          spatial_annotation_id: 'annotation-ui-p07', media_asset_id: 'media-ui-bse', media_display_name: 'KIV-2_A_BSE_01.tif', media_type: 'BSE',
+          thin_section_id: 'section-ui-kiv-2-a', thin_section_name: 'KIV-2-A', geometry: { kind: 'point', x_px: 320, y_px: 240 },
+          image_width_px: 640, image_height_px: 480, cross_sample_exception: false, exception_reason: null,
+        }] } : point);
       return { result: uiState.pointCreated ? {
       ...analyticalPoints,
       total: activeItems.length + 1,
@@ -457,6 +475,17 @@ vi.mock("../src/desktopApi", () => {
         parameters: { reason, analysis_id: analysisId, point_name: point.point_name, sample_name: point.sample_name }, outcome: 'applied', created_at: '2026-09-15T10:39:00Z',
       },
     } })),
+    removeSpatialAnnotationFromAnalyticalPoint: vi.fn().mockImplementation(async (_path, point, spatialAnnotationId, reason) => {
+      uiState.pointPlacementAvailable = false;
+      return { result: {
+        analytical_point_id: point.analytical_point_id, spatial_annotation_id: spatialAnnotationId, media_asset_id: 'media-ui-bse',
+        spatial_annotation_ids: [], effect: 'annotation_link_removed', operation: {
+          operation_id: 'operation-remove-annotation', action_kind: 'analytical_point.annotation.remove', actor: 'local-desktop-user', entity_type: 'analytical_point',
+          entity_ids: { analytical_point_ids: [point.analytical_point_id], analysis_ids: point.analysis_ids, spatial_annotation_ids: [], media_asset_ids: [] },
+          parameters: { reason, spatial_annotation_id: spatialAnnotationId, media_asset_id: 'media-ui-bse', point_name: point.point_name, sample_name: point.sample_name }, outcome: 'applied', created_at: '2026-09-15T10:39:30Z',
+        },
+      } };
+    }),
     retireAnalyticalPoint: vi.fn().mockImplementation(async (_path, point, reason) => {
       uiState.pointRetired = true;
       return { result: { analytical_point_id: point.analytical_point_id, sample_name: point.sample_name, point_name: point.point_name, operation: {
@@ -467,7 +496,9 @@ vi.mock("../src/desktopApi", () => {
     }),
     undoOperation: vi.fn().mockImplementation(async (_path, operationId) => {
       uiState.pointRetired = false;
-      return { result: { target_operation_id: operationId, analytical_point_id: 'point-kiv-2-p07', effect: operationId === 'operation-add-analysis' ? 'analysis_removed' : 'restored', operation: { operation_id: 'operation-undo-p07', action_kind: 'operation.undo' } } };
+      if (operationId === 'operation-remove-annotation') uiState.pointPlacementAvailable = true;
+      const effect = operationId === 'operation-add-analysis' ? 'analysis_removed' : operationId === 'operation-remove-annotation' ? 'annotation_link_restored' : 'restored';
+      return { result: { target_operation_id: operationId, analytical_point_id: 'point-kiv-2-p07', effect, operation: { operation_id: 'operation-undo-p07', action_kind: 'operation.undo' } } };
     }),
     getMediaPreview: vi.fn().mockImplementation(async (sourcePath) => {
       if (uiState.mediaPreviewFailures > 0) {
@@ -597,7 +628,7 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { addAnalysisToAnalyticalPoint, applyImportPlan, applyMediaImportPlan, applyWorkspaceDecision, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, pickImportFile, pickMediaFolder, retireAnalyticalPoint, undoOperation } from "../src/desktopApi";
+import { addAnalysisToAnalyticalPoint, applyImportPlan, applyMediaImportPlan, applyWorkspaceDecision, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, pickImportFile, pickMediaFolder, removeSpatialAnnotationFromAnalyticalPoint, retireAnalyticalPoint, undoOperation } from "../src/desktopApi";
 import { App } from "../src/App";
 import { ImagesWorkspace } from "../src/ImagesWorkspace";
 
@@ -607,6 +638,7 @@ afterEach(() => {
   uiState.mediaPlacementCount = 0;
   uiState.pointCreated = false;
   uiState.pointRetired = false;
+  uiState.pointPlacementAvailable = false;
   uiState.mode = "clean";
   uiState.detailsEnabled = true;
   uiState.unitApplied = false;
@@ -718,6 +750,34 @@ test('App changes one Analytical Point membership and exposes immediate undo', a
   await user.click(screen.getByRole('button', { name: 'Отменить' }));
   await waitFor(() => expect(undoOperation).toHaveBeenCalledWith('C:/PetroLab/project.sqlite', 'operation-add-analysis'));
   expect(await screen.findByText('Добавление Analysis отменено; исходная Analysis сохранена.')).toBeTruthy();
+});
+
+test('App removes one saved spatial link and restores it through Operation Journal', async () => {
+  uiState.imported = true;
+  uiState.pointPlacementAvailable = true;
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole('button', { name: 'Анализы' }));
+  await user.click(await screen.findByRole('button', { name: /Analytical Points 2/ }));
+  await user.click(screen.getByRole('button', { name: 'Снять размещение' }));
+  const dialog = screen.getByRole('dialog', { name: 'Снять размещение P-07' });
+  await user.type(within(dialog).getByRole('textbox', { name: 'Причина снятия размещения' }), 'Метка поставлена не на ту физическую точку');
+  await user.click(within(dialog).getByRole('checkbox', { name: /Подтверждаю снятие только показанной связи/ }));
+  await user.click(within(dialog).getByRole('button', { name: 'Снять размещение' }));
+
+  await waitFor(() => expect(removeSpatialAnnotationFromAnalyticalPoint).toHaveBeenCalledWith(
+    'C:/PetroLab/project.sqlite',
+    expect.objectContaining({ analytical_point_id: 'point-kiv-2-p07' }),
+    'annotation-ui-p07',
+    'Метка поставлена не на ту физическую точку',
+  ));
+  expect(await screen.findByText(/Размещение «KIV-2_A_BSE_01.tif» снято обратимо/)).toBeTruthy();
+  expect(screen.getAllByText('Без изображения').length).toBeGreaterThan(0);
+  await user.click(screen.getByRole('button', { name: 'Отменить' }));
+  await waitFor(() => expect(undoOperation).toHaveBeenCalledWith('C:/PetroLab/project.sqlite', 'operation-remove-annotation'));
+  expect(await screen.findByText('Пространственная связь восстановлена по устойчивым ID.')).toBeTruthy();
+  expect((await screen.findAllByText(/Размещена/)).length).toBeGreaterThan(0);
 });
 
 test("user confirms an image batch, places same- and cross-sample points, reviews and imports", async () => {

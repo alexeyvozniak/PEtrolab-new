@@ -59,6 +59,7 @@ function journalActionLabel(action) {
     "analytical_point.retire": "Снятие связи",
     "analytical_point.analysis.add": "Analysis добавлена",
     "analytical_point.analysis.remove": "Analysis снята",
+    "analytical_point.annotation.remove": "Размещение снято",
     "operation.undo": "Отмена операции",
   }[action] || action;
 }
@@ -176,6 +177,46 @@ function RetirePointDialog({ point, busy, onCancel, onConfirm }) {
   </div>;
 }
 
+function RemovePlacementDialog({ point, placement, busy, onCancel, onConfirm }) {
+  const [reason, setReason] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const canConfirm = Boolean(reason.trim() && confirmed && !busy);
+
+  useEffect(() => {
+    const closeOnEscape = (event) => { if (event.key === "Escape" && !busy) onCancel(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [busy, onCancel]);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!canConfirm) return;
+    setLocalError("");
+    try {
+      await onConfirm(point, placement, reason.trim());
+      onCancel();
+    } catch (caught) {
+      setLocalError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  return <div className="point-retire-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
+    <section className="point-retire-dialog point-placement-dialog" role="dialog" aria-modal="true" aria-labelledby="point-placement-remove-title">
+      <header><div><span>Обратимая пространственная связь</span><h2 id="point-placement-remove-title">Снять размещение {point.point_name}</h2></div><button className="icon-button" type="button" onClick={onCancel} disabled={busy} aria-label="Закрыть снятие размещения"><X size={19} /></button></header>
+      <div className="point-retire-warning"><Warning size={20} weight="fill" /><p><b>С точки будет снята только эта метка.</b><span>Spatial Annotation, Media Asset, Analytical Point, Analyses и Measurements останутся в проекте.</span></p></div>
+      <section className="point-retire-scope" aria-label="Точный состав пространственной операции"><div><span>Sample</span><b>{point.sample_name}</b></div><div><span>Analyses</span><b>{(point.analysis_ids || []).length}</b></div><div><span>Размещений сейчас</span><b>{(point.placements || []).length}</b></div><code title={point.analytical_point_id}>{point.analytical_point_id}</code></section>
+      <section className="point-placement-target"><header><b>{placement.media_display_name}</b><span>{placement.media_type}</span></header><p>{placement.thin_section_name} · {geometryLabel(placement)}</p><dl><div><dt>Spatial Annotation</dt><dd>{placement.spatial_annotation_id}</dd></div><div><dt>Media Asset</dt><dd>{placement.media_asset_id}</dd></div></dl></section>
+      <form onSubmit={submit}>
+        <label>Причина<textarea aria-label="Причина снятия размещения" value={reason} maxLength={500} onChange={(event) => { setReason(event.target.value); setConfirmed(false); }} placeholder="Например: метка поставлена не на ту физическую точку" autoFocus /></label>
+        <label className="point-retire-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>Подтверждаю снятие только показанной связи Point ↔ Spatial Annotation. Исходные объекты не удаляются.</span></label>
+        {localError && <p className="point-retire-error" role="alert">{localError}</p>}
+        <footer><button className="outline-button" type="button" onClick={onCancel} disabled={busy}>Отмена</button><button className="point-retire-submit" type="submit" disabled={!canConfirm}><LinkBreak size={18} /> Снять размещение</button></footer>
+      </form>
+    </section>
+  </div>;
+}
+
 export function AnalyticalPointsRegistry({
   projection = { total: 0, items: [] },
   analyses = [],
@@ -187,6 +228,7 @@ export function AnalyticalPointsRegistry({
   onShowAnalyses,
   onRefresh,
   onChangeMembership,
+  onRemovePlacement,
   onRetire,
   onUndo,
 }) {
@@ -199,6 +241,7 @@ export function AnalyticalPointsRegistry({
   const [focusedPointId, setFocusedPointId] = useState(initialPointId);
   const [retirePoint, setRetirePoint] = useState(null);
   const [compositionPoint, setCompositionPoint] = useState(null);
+  const [placementTarget, setPlacementTarget] = useState(null);
   const [undoError, setUndoError] = useState("");
   const analysisById = useMemo(() => new Map(analyses.map((analysis) => [analysis.analysis_id, analysis])), [analyses]);
   const methods = useMemo(() => [...new Set(items.flatMap((point) => point.methods || []))].sort((a, b) => a.localeCompare(b, "ru")), [items]);
@@ -298,6 +341,7 @@ export function AnalyticalPointsRegistry({
             <small>Изображение: {placement.image_width_px} × {placement.image_height_px} px</small>
             <dl><div><dt>Spatial Annotation</dt><dd title={placement.spatial_annotation_id}>{placement.spatial_annotation_id}</dd></div><div><dt>Media Asset</dt><dd title={placement.media_asset_id}>{placement.media_asset_id}</dd></div></dl>
             {placement.cross_sample_exception && <em>Межобразцовое исключение: {placement.exception_reason}</em>}
+            <button className="point-placement-unlink" type="button" disabled={busy || !onRemovePlacement} onClick={() => setPlacementTarget({ point: focusedPoint, placement })}><LinkBreak size={14} /> Снять размещение</button>
           </article>)}
         </section>
         <section><h3>Устойчивый ID</h3><code>{focusedPoint.analytical_point_id}</code><small>Создано: {createdLabel(focusedPoint.created_at)}</small></section>
@@ -312,6 +356,7 @@ export function AnalyticalPointsRegistry({
       <button className="primary-button" type="button" onClick={() => onShowAnalyses(selectedAnalysisIds)} disabled={!selectedAnalysisIds.length}>Показать исходные Analyses</button>
     </div>}
     {compositionPoint && <PointCompositionDialog point={compositionPoint} analyses={analyses} busy={busy} onCancel={() => setCompositionPoint(null)} onConfirm={onChangeMembership} />}
+    {placementTarget && <RemovePlacementDialog point={placementTarget.point} placement={placementTarget.placement} busy={busy} onCancel={() => setPlacementTarget(null)} onConfirm={onRemovePlacement} />}
     {retirePoint && <RetirePointDialog point={retirePoint} busy={busy} onCancel={() => setRetirePoint(null)} onConfirm={onRetire} />}
   </div>;
 }

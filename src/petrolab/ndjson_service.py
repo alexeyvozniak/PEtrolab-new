@@ -37,6 +37,7 @@ from .media_import import (
     list_analytical_points,
     list_operation_journal,
     remove_analysis_from_analytical_point,
+    remove_spatial_annotation_from_analytical_point,
     retire_analytical_point,
     undo_operation,
 )
@@ -341,6 +342,17 @@ def _dispatch_analytical_point_analysis_remove(params: Mapping[str, Any]) -> dic
     )}
 
 
+def _dispatch_analytical_point_annotation_remove(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": remove_spatial_annotation_from_analytical_point(
+        _project_database_path(params),
+        _string(params, "analytical_point_id"),
+        _string_array(params, "expected_analysis_ids"),
+        _string_array(params, "expected_spatial_annotation_ids"),
+        _string(params, "spatial_annotation_id"),
+        _string(params, "reason"),
+    )}
+
+
 def _dispatch_operation_journal_list(params: Mapping[str, Any]) -> dict[str, Any]:
     raw_limit = params.get("limit", 50)
     if not isinstance(raw_limit, int):
@@ -415,6 +427,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "analytical_point.retire": _dispatch_analytical_point_retire,
     "analytical_point.analysis.add": _dispatch_analytical_point_analysis_add,
     "analytical_point.analysis.remove": _dispatch_analytical_point_analysis_remove,
+    "analytical_point.annotation.remove": _dispatch_analytical_point_annotation_remove,
     "operation_journal.list": _dispatch_operation_journal_list,
     "operation_journal.undo": _dispatch_operation_journal_undo,
     "media.inspect_sources": _dispatch_media_inspect,

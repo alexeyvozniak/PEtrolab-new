@@ -157,6 +157,24 @@ class NdjsonServiceTests(unittest.TestCase):
                 "payload": {"project_database_path": database, "plan": plan},
             })["result"]
             self.assertEqual(applied["spatial_annotation_count"], 1)
+            annotation_id = plan["items"][0]["placements"][0]["spatial_annotation_id"]
+            unlinked = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.annotation.remove",
+                "payload": {
+                    "project_database_path": database,
+                    "analytical_point_id": point["analytical_point_id"],
+                    "expected_analysis_ids": point["analysis_ids"],
+                    "expected_spatial_annotation_ids": [annotation_id],
+                    "spatial_annotation_id": annotation_id,
+                    "reason": "Метка поставлена не на ту физическую точку",
+                },
+            })["result"]
+            self.assertEqual(unlinked["effect"], "annotation_link_removed")
+            restored = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "operation_journal.undo",
+                "payload": {"project_database_path": database, "operation_id": unlinked["operation"]["operation_id"]},
+            })["result"]
+            self.assertEqual(restored["effect"], "annotation_link_restored")
 
     def test_point_retraction_journal_and_undo_are_available_through_transport(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

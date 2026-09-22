@@ -736,6 +736,82 @@ def remove_analysis_from_analytical_point(
         connection.close()
 
 
+def remove_spatial_annotation_from_analytical_point(
+    database_path: str | Path,
+    analytical_point_id: str,
+    expected_analysis_ids: list[str],
+    expected_spatial_annotation_ids: list[str],
+    spatial_annotation_id: str,
+    reason: str,
+    actor: str = "local-desktop-user",
+) -> dict[str, Any]:
+    point_id = _uuid(analytical_point_id, "analytical_point_id")
+    annotation_id = _uuid(spatial_annotation_id, "spatial_annotation_id")
+    reason = _text(reason, "reason", 500)
+    actor = _text(actor, "actor")
+    connection = open_project(database_path)
+    try:
+        point = _active_point_metadata(connection, point_id)
+        before_scope = _verify_point_revision(
+            connection, point_id, expected_analysis_ids, expected_spatial_annotation_ids
+        )
+        relation = connection.execute(
+            """SELECT apa.cross_sample_exception, apa.exception_reason, apa.created_at,
+                      sa.media_asset_id
+               FROM analytical_point_annotation apa
+               JOIN spatial_annotation sa ON sa.spatial_annotation_id = apa.spatial_annotation_id
+               WHERE apa.analytical_point_id = ? AND apa.spatial_annotation_id = ?""",
+            (point_id, annotation_id),
+        ).fetchone()
+        if relation is None:
+            _fail(
+                "SPATIAL_LINK_NOT_FOUND",
+                "Spatial Annotation is not linked to this Analytical Point.",
+                spatial_annotation_id=annotation_id,
+            )
+        timestamp = _now()
+        with connection:
+            connection.execute(
+                "DELETE FROM analytical_point_annotation WHERE analytical_point_id = ? AND spatial_annotation_id = ?",
+                (point_id, annotation_id),
+            )
+            scope = _point_scope(connection, point_id)
+            operation = _write_journal_entry(
+                connection,
+                "analytical_point.annotation.remove",
+                actor,
+                scope,
+                {
+                    "spatial_annotation_id": annotation_id,
+                    "media_asset_id": relation["media_asset_id"],
+                    "cross_sample_exception": bool(relation["cross_sample_exception"]),
+                    "exception_reason": relation["exception_reason"],
+                    "link_created_at": relation["created_at"],
+                    "reason": reason,
+                    "sample_name": point["sample_name"],
+                    "point_name": point["point_name"],
+                    "before_spatial_annotation_ids": before_scope["spatial_annotation_ids"],
+                },
+                "analytical_point.annotation.restore",
+                {
+                    "analytical_point_id": point_id,
+                    "spatial_annotation_id": annotation_id,
+                    "expected_scope": scope,
+                },
+                timestamp,
+            )
+        return {
+            "analytical_point_id": point_id,
+            "spatial_annotation_id": annotation_id,
+            "media_asset_id": relation["media_asset_id"],
+            "spatial_annotation_ids": scope["spatial_annotation_ids"],
+            "effect": "annotation_link_removed",
+            "operation": operation,
+        }
+    finally:
+        connection.close()
+
+
 def list_operation_journal(database_path: str | Path, limit: int = 50) -> dict[str, Any]:
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
         _fail("INVALID_ASSIGNMENT", "Journal limit must be an integer from 1 to 100.", limit=limit)
@@ -797,6 +873,7 @@ def undo_operation(
             "analytical_point.retire",
             "analytical_point.analysis.add",
             "analytical_point.analysis.remove",
+            "analytical_point.annotation.remove",
         }:
             _fail("UNDO_UNSUPPORTED", "This operation does not have a supported inverse action.", operation_id=target_id)
         scope = json.loads(target["entity_ids_json"])
@@ -821,7 +898,7 @@ def undo_operation(
                 _fail("POINT_REVISION_CONFLICT", "Analytical Point is no longer active.", analytical_point_id=point_id)
             effect = "retracted"
             inverse_action = "analytical_point.restore"
-        else:
+        elif target["action_kind"] in {"analytical_point.analysis.add", "analytical_point.analysis.remove"}:
             if retraction is not None:
                 _fail("POINT_REVISION_CONFLICT", "Analytical Point is no longer active.", analytical_point_id=point_id)
             target_analysis_id = _uuid(parameters.get("analysis_id"), "analysis_id")
@@ -844,6 +921,33 @@ def undo_operation(
                     _fail("POINT_REVISION_CONFLICT", "Analytical Point membership changed after review.", analytical_point_id=point_id)
                 effect = "analysis_added"
                 inverse_action = "analytical_point.analysis.remove"
+        else:
+            if retraction is not None:
+                _fail("POINT_REVISION_CONFLICT", "Analytical Point is no longer active.", analytical_point_id=point_id)
+            annotation_id = _uuid(parameters.get("spatial_annotation_id"), "spatial_annotation_id")
+            media_asset_id = _uuid(parameters.get("media_asset_id"), "media_asset_id")
+            cross_sample_exception = parameters.get("cross_sample_exception")
+            exception_reason = parameters.get("exception_reason")
+            link_created_at = parameters.get("link_created_at")
+            if (
+                not isinstance(cross_sample_exception, bool)
+                or not isinstance(link_created_at, str)
+                or not link_created_at
+                or (cross_sample_exception and (not isinstance(exception_reason, str) or not exception_reason.strip()))
+                or (not cross_sample_exception and exception_reason is not None)
+            ):
+                _fail("JOURNAL_CORRUPT", "Operation Journal spatial-link provenance is invalid.", operation_id=target_id)
+            annotation = connection.execute(
+                "SELECT media_asset_id FROM spatial_annotation WHERE spatial_annotation_id = ?", (annotation_id,)
+            ).fetchone()
+            relation = connection.execute(
+                "SELECT 1 FROM analytical_point_annotation WHERE analytical_point_id = ? AND spatial_annotation_id = ?",
+                (point_id, annotation_id),
+            ).fetchone()
+            if annotation is None or annotation["media_asset_id"] != media_asset_id or relation is not None:
+                _fail("POINT_REVISION_CONFLICT", "Spatial link changed after the journalled operation.", analytical_point_id=point_id)
+            effect = "annotation_link_restored"
+            inverse_action = "analytical_point.annotation.remove"
         timestamp = _now()
         with connection:
             if target["action_kind"] == "analytical_point.retire":
@@ -858,10 +962,17 @@ def undo_operation(
                     "DELETE FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
                     (point_id, target_analysis_id),
                 )
-            else:
+            elif target["action_kind"] == "analytical_point.analysis.remove":
                 connection.execute(
                     "INSERT INTO analytical_point_analysis (analytical_point_id, analysis_id, link_type, created_at) VALUES (?, ?, ?, ?)",
                     (point_id, target_analysis_id, link_type, timestamp),
+                )
+            else:
+                connection.execute(
+                    """INSERT INTO analytical_point_annotation
+                       (analytical_point_id, spatial_annotation_id, cross_sample_exception, exception_reason, created_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (point_id, annotation_id, int(cross_sample_exception), exception_reason, link_created_at),
                 )
             resulting_scope = _point_scope(connection, point_id)
             undo_entry = _write_journal_entry(

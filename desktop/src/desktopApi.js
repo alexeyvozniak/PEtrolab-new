@@ -228,6 +228,16 @@ export const removeAnalysisFromAnalyticalPoint = (projectDatabasePath, point, an
     reason,
   });
 
+export const removeSpatialAnnotationFromAnalyticalPoint = (projectDatabasePath, point, spatialAnnotationId, reason) =>
+  invokePetrolab("analytical_point.annotation.remove", {
+    project_database_path: projectDatabasePath,
+    analytical_point_id: point.analytical_point_id,
+    expected_analysis_ids: point.analysis_ids || [],
+    expected_spatial_annotation_ids: (point.placements || []).map((placement) => placement.spatial_annotation_id),
+    spatial_annotation_id: spatialAnnotationId,
+    reason,
+  });
+
 export const listOperationJournal = (projectDatabasePath, limit = 50) =>
   invokePetrolab("operation_journal.list", {
     project_database_path: projectDatabasePath,
