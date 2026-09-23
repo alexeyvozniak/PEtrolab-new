@@ -85,7 +85,11 @@ async function enabledButton(name) {
   const button = await screen.findByRole("button", { name }, { timeout: 20000 });
   // The integration bridge starts a real Python process. On a busy Windows
   // runner its valid response can exceed Testing Library's 1 s default.
-  await waitFor(() => expect(button.disabled).toBe(false), { timeout: 20000 });
+  try {
+    await waitFor(() => expect(button.disabled).toBe(false), { timeout: 20000 });
+  } catch {
+    throw new Error(`Button stayed disabled: ${name}; mapping changes: ${document.querySelector('.mapping-summary')?.textContent || 'none'}; pending requests: ${pending.size}`);
+  }
   return button;
 }
 
@@ -119,7 +123,7 @@ test("real Python workspace retains two sources and mapping, identity repair and
   expect(requests.filter(r => r.command === "import.workspace.commit")).toHaveLength(0);
   expect(await readFile(first, "utf8")).toBe(original);
   expect(within(screen.getByRole("table")).getByText("n.d.")).toBeTruthy();
-}, 20000);
+}, 60000);
 
 test("real Python clean single-source still commits and displays persisted analyses", async () => {
   queue = [second];
@@ -200,7 +204,7 @@ test("two clean sources commit together and their analyses appear in one project
   await user.click(await enabledButton("Импортировать 2 файла"));
   await screen.findByRole("heading", { name: "Анализы" });
   expect((await screen.findAllByText("A1")).length).toBeGreaterThan(0);
-  expect(screen.getAllByText("B1").length).toBeGreaterThan(0);
+  expect((await screen.findAllByText("B1")).length).toBeGreaterThan(0);
   expect(requests.filter(r => r.command === "import.workspace.commit")).toHaveLength(1);
   expect(await readFile(first)).toEqual(firstBytes);
   expect(await readFile(second)).toEqual(secondBytes);
@@ -218,7 +222,7 @@ test("autosaved import question returns after reopening the workspace", async ()
   render(<App />);
   await screen.findByText("Черновик импорта восстановлен. Продолжите с текущего вопроса.");
   expect(screen.getByText("Исходная таблица")).toBeTruthy();
-  expect(within(screen.getByRole("table")).getByText("<DL")).toBeTruthy();
+  expect(within(await screen.findByRole("table")).getByText("<DL")).toBeTruthy();
   expect(requests.some(r => r.command === "import.workspace.restore")).toBe(true);
 }, 20000);
 
@@ -313,7 +317,7 @@ test("real Python semantic range context action, extension confirmation and undo
   await user.click(await enabledButton("Отменить последнее назначение"));
   await waitFor(() => expect(screen.getByLabelText("Ячейка 3:1").title).not.toContain("K-17"));
   expect(await readFile(first, "utf8")).toBe(original);
-}, 20000);
+}, 60000);
 
 test("real Python mineral review separates conflicts and persists only explicit acceptance", async () => {
   await writeFile(second, "Analysis,Mineral,SiO2 (wt.%),Al2O3 (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%),FeO (wt.%)\nB1,olivine,40,0,50,0,0,0,10\nB2,garnet,40,0,50,0,0,0,10\n");
