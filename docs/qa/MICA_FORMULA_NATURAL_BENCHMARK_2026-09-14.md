@@ -51,10 +51,26 @@ not asserted because the paper does not publish OH for this row.
 
 ## Remaining acceptance boundary
 
-The complete Rieder/IMA calculation section still has to be reviewed before
-scientific acceptance. The MSA report returned HTTP 502 in this run; the
-Cambridge reprint exposed only its abstract without subscription access. The
-method therefore remains `draft`. The next scientific slice must verify the
-conditions separating 22 positive charges from measured-H2O and oxidized
-`22+z` calculations, then add at least one independently published benchmark
-covering measured halogens or the applicable oxidation boundary.
+The full Rieder et al. (1999) IMA report is now available from the
+[RRUFF reprint](https://rruff.geo.arizona.edu/doclib/MinMag/Volume_63/63-2-267.pdf),
+pp. 268–269. Its calculation section distinguishes three cases: reliable H2O
+determination (12 O + F), no H2O determination with an idealized anion group
+(22 positive charges), and evidence of later Fe oxidation with deprotonation
+(22 + z positive charges, where z is trivalent Fe). The current method
+implements only the second case; it does not silently infer either of the
+other two. The report also warns that unmeasured Li can cause erroneous
+identification. This source review does not constitute an independent
+benchmark for those omitted cases or site allocation/nomenclature.
+
+The method therefore remains `draft`. The next scientific slice needs an
+independently published benchmark covering measured halogens or the applicable
+oxidation boundary, plus explicit acceptance limits, before expanding the
+method or considering a status change.
+
+The current `0.1.0` result warning still says that no natural-composition
+check has been performed. That wording is outdated after the Mashhad benchmark,
+but `mica_formula.py` is pinned by an implementation SHA-256 in the method
+definition. Changing even this text in place would alter the identity of a
+version already used by saved runs. Correct the warning in a new method version,
+with the corresponding registry definition and provenance checks; do not mutate
+`0.1.0` silently.

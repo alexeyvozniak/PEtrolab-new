@@ -147,6 +147,27 @@ class MicaFormulaTests(unittest.TestCase):
             with self.subTest(fe=fe, basis=basis, oh=oh):
                 self.assertEqual(calculate_mica(source, fe, anion_basis=basis, oh_mode=oh)['status'], 'failed')
 
+    def test_ima_calculation_basis_boundary_does_not_guess_h2o_or_oxidation(self):
+        # Rieder et al. (1999), Mineralogical Magazine 63(2), pp. 268–269:
+        # measured H2O, idealized 22 charges and oxidation/deprotonation 22+z
+        # are distinct calculations, not interchangeable parameter labels.
+        source = measurements({**phlogopite(), 'Fe2O3': 0})
+        before = copy.deepcopy(source)
+        ideal = calculate_mica(source, 'reported_split', anion_basis='ideal_O10_W2',
+                               oh_mode='not_calculated')
+        self.assertEqual(ideal['status'], 'current', ideal['errors'])
+        oxidized = calculate_mica(source, 'reported_split', anion_basis='22_plus_z',
+                                  oh_mode='not_calculated')
+        self.assertEqual(oxidized['status'], 'failed')
+        self.assertEqual(oxidized['values'], {})
+        self.assertTrue(any('22+z' in error for error in oxidized['errors']))
+        with_water = calculate_mica([*source, *measurements({'H2O': 1})], 'reported_split',
+                                    anion_basis='ideal_O10_W2', oh_mode='not_calculated')
+        self.assertEqual(with_water['status'], 'failed')
+        self.assertEqual(with_water['values'], {})
+        self.assertTrue(any('H2O' in error for error in with_water['errors']))
+        self.assertEqual(source, before)
+
     def test_total_iron_is_not_measured_split_iron(self):
         total = phlogopite()
         total['FeOt'] = total.pop('FeO')
