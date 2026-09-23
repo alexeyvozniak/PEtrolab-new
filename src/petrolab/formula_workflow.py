@@ -94,11 +94,16 @@ def save_formula(database_path, analysis_ids, method_id, method_version, paramet
             timestamp, run_id = _now(), _id()
             method = preview['method']
             measurement_ids = [m['measurement_id'] for record in preview['input_snapshots'] for m in record['measurements']]
+            excluded = [
+                {'analysis_id': result['analysis_id'], 'field': item['field'],
+                 'reason': 'incompatible_domain'}
+                for result in preview['results'] for item in result['excluded']
+            ]
             run = {'id': run_id, 'project_id': project_id, 'method_id': method_id, 'method_version': method_version,
                    'method_definition_fingerprint': method['definition_fingerprint'],
                    'input': {'kind': 'analysis_snapshot', 'analysis_ids': analysis_ids},
                    'input_measurement_ids': measurement_ids, 'input_fingerprint': preview_fingerprint,
-                   'parameters': parameters, 'excluded': [], 'result_manifest': preview,
+                   'parameters': parameters, 'excluded': excluded, 'result_manifest': preview,
                    'status': 'current', 'stale_reasons': [], 'created_at': timestamp,
                    'software_versions': {'python': platform.python_version(),
                                          'petrolab_formula': method_version}}

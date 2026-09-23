@@ -53,6 +53,9 @@ Migration 13 adds project identity, immutable formula_run and formula_derived_va
 tables. JSON documents follow existing Calculation Run and Derived Value schemas.
 Result manifest retains the method definition, complete input snapshots, diagnostics,
 used/excluded fields and parameters. Every value links actual Measurement IDs.
+The top-level Calculation Run `excluded` list also records each successfully
+excluded non-compositional field with its Analysis ID and `incompatible_domain`
+reason; the manifest retains the exact Measurement ID and explanatory text.
 Source tables are not updated. Existing open_project migration backup remains.
 Save is idempotent for identical fingerprints; retries return the existing run.
 Read-time freshness compares current input/assignment and method fingerprints,

@@ -140,6 +140,38 @@ class FormulaPersistenceTests(unittest.TestCase):
             self.assertEqual(c.execute('PRAGMA foreign_key_check').fetchall(), [])
         self.assertEqual(self.source.read_bytes(), self.original)
 
+    def test_saved_run_records_noncompositional_exclusion_without_using_it(self):
+        trace_source = self.folder / 'olivine-with-trace.csv'
+        trace_source.write_text(
+            'Analysis,Mineral,SiO2 (wt.%),MgO (wt.%),FeO (wt.%),Rb (ppm)\n'
+            'Fo50-Rb,olivine,34.88,23.40,41.72,120\n', encoding='utf-8')
+        original = trace_source.read_bytes()
+        recipe = ImportWorkspaceStore().command('create', {'sources': [
+            {'staged_path': str(trace_source)}]})['active']['recipe']
+        apply_import_plan(self.database, trace_source, recipe)
+        items = list_project_mineral_identifications(self.database)['identifications']
+        item = next(item for item in items if item['source_name'] == trace_source.name)
+        decide_project_mineral_assignment(self.database, item['analysis_id'], 'olivine',
+            item['input_fingerprint'], item['ruleset_version'], 'Проверено как оливин')
+        args = (self.database, [item['analysis_id']], METHOD_ID, METHOD_VERSION,
+                {'fe_mode': 'all_fe2'})
+        preview = preview_formula(*args)
+        self.assertTrue(preview['can_save'], preview)
+        excluded = preview['results'][0]['excluded']
+        self.assertEqual([entry['field'] for entry in excluded], ['Rb'])
+        saved = save_formula(*args, preview['input_fingerprint'])['run']
+        self.assertEqual(saved['excluded'], [{
+            'analysis_id': item['analysis_id'], 'field': 'Rb', 'reason': 'incompatible_domain'}])
+        reopened = list_formula_runs(self.database, item['analysis_id'])['runs'][0]
+        self.assertEqual(reopened['run']['excluded'], saved['excluded'])
+        self.assertEqual(reopened['run']['result_manifest']['results'][0]['excluded'], excluded)
+        from scripts.validate_contracts import _validate
+        schema = json.loads((Path(__file__).parents[1] / 'schemas/calculation-run.schema.json').read_text())
+        _validate(reopened['run'], schema, schema, {}, 'calculation-run')
+        self.assertNotIn(excluded[0]['measurement_id'], {
+            mid for value in reopened['derived_values'] for mid in value['input_measurement_ids']})
+        self.assertEqual(trace_source.read_bytes(), original)
+
     def test_stale_measurement_preview_and_history(self):
         p = preview_formula(*self.args); save_formula(*self.args, p['input_fingerprint'])
         # Simulate a future explicit correction, never a production write path.
