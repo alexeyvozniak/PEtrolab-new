@@ -27,6 +27,7 @@ from petrolab.media_import import (  # noqa: E402
     inspect_media_source,
     inspect_media_sources,
     list_analytical_points,
+    list_media_assets,
     list_operation_journal,
     remove_analysis_from_analytical_point,
     remove_spatial_annotation_from_analytical_point,
@@ -144,6 +145,37 @@ class MediaImportTests(unittest.TestCase):
             self.assertTrue(by_id[first["analytical_point_id"]]["created_at"])
             self.assertEqual(by_id[second["analytical_point_id"]]["sample_name"], "OTHER")
             self.assertEqual(by_id[first["analytical_point_id"]]["placement_count"], 0)
+
+    def test_saved_media_library_persists_filters_and_reports_missing_linked_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            database, point, _ = self._project_with_points(directory)
+            managed, linked = directory / "KIV-2_BSE.png", directory / "KIV-2_XPL.png"
+            write_png(managed)
+            write_png(linked, width=13)
+            linked_assignment = self._assignment(linked, point["analytical_point_id"])
+            linked_assignment.update({"ownership_mode": "linked_external", "media_type": "XPL"})
+            apply_media_import_plan(database, create_media_import_plan(database, [
+                self._assignment(managed, point["analytical_point_id"]), linked_assignment,
+            ]))
+
+            first_open = list_media_assets(database)
+            self.assertEqual(first_open["total"], 2)
+            self.assertEqual(first_open["sample_names"], ["KIV-2"])
+            by_name = {item["display_name"]: item for item in first_open["items"]}
+            self.assertEqual(by_name["KIV-2_BSE.png"]["storage_mode"], "managed_copy")
+            self.assertEqual(by_name["KIV-2_BSE.png"]["availability"], "available")
+            self.assertEqual(by_name["KIV-2_BSE.png"]["placement_count"], 1)
+            self.assertNotIn("linked_path", by_name["KIV-2_XPL.png"])
+            self.assertEqual(list_media_assets(database, query="xpl")["items"][0]["display_name"], "KIV-2_XPL.png")
+            self.assertEqual(list_media_assets(database, sample_name="other")["total"], 0)
+
+            linked.unlink()
+            reopened = list_media_assets(database)
+            self.assertEqual(
+                {item["display_name"]: item["availability"] for item in reopened["items"]}["KIV-2_XPL.png"],
+                "external_missing",
+            )
 
     def test_point_retraction_and_undo_preserve_entities_and_exact_scope(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

@@ -168,6 +168,15 @@ export const retractLastImport = (projectDatabasePath, reason = "user_retracted"
 export const inspectMediaSources = (sourcePaths) =>
   invokePetrolab("media.inspect_sources", { source_paths: sourcePaths });
 
+export const listMediaAssets = (projectDatabasePath, query = null, sampleName = null, limit = 500, offset = 0) =>
+  invokePetrolab("media.list", {
+    project_database_path: projectDatabasePath,
+    query,
+    sample_name: sampleName,
+    limit,
+    offset,
+  });
+
 export const getMediaPreview = (sourcePath, maxWidthPx = 1600, maxHeightPx = 1200) =>
   invokePetrolab("media.preview", {
     source_path: sourcePath,

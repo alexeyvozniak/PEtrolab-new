@@ -455,6 +455,122 @@ def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
         connection.close()
 
 
+def _media_library_filter(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value.strip()) > 200:
+        _fail("INVALID_FILTER", f"{field} must be text of at most 200 characters.", field=field)
+    return value.strip() or None
+
+
+def _media_asset_availability(project_root: Path, asset: sqlite3.Row) -> str:
+    """Describe whether an asset can be opened without exposing local paths."""
+    if asset["source_kind"] == "managed_copy":
+        relative_path = asset["managed_relative_path"]
+        if not isinstance(relative_path, str) or not relative_path:
+            return "managed_missing"
+        try:
+            managed_path = (project_root / relative_path).resolve()
+            if not managed_path.is_relative_to(project_root.resolve()):
+                return "managed_missing"
+        except OSError:
+            return "managed_missing"
+        return "available" if managed_path.is_file() else "managed_missing"
+    if asset["source_kind"] == "linked_reference":
+        linked_path = asset["linked_path"]
+        return "available" if isinstance(linked_path, str) and Path(linked_path).is_file() else "external_missing"
+    return "source_unknown"
+
+
+def list_media_assets(
+    database_path: str | Path,
+    query: str | None = None,
+    sample_name: str | None = None,
+    limit: int = 500,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """List the persisted image library without returning filesystem locations.
+
+    Availability is evaluated at read time: a managed copy should be inside the
+    project media directory, while a linked reference may disappear outside the
+    project.  Callers receive an actionable state, never a raw source path.
+    """
+    query = _media_library_filter(query, "query")
+    sample_name = _media_library_filter(sample_name, "sample_name")
+    if not isinstance(limit, int) or not 1 <= limit <= 500:
+        _fail("INVALID_FILTER", "limit must be an integer between 1 and 500.", field="limit")
+    if not isinstance(offset, int) or offset < 0:
+        _fail("INVALID_FILTER", "offset must be a non-negative integer.", field="offset")
+
+    connection = _read_connection(database_path)
+    try:
+        if not _table_exists(connection, "media_asset"):
+            return {"total": 0, "returned": 0, "offset": offset, "has_more": False, "sample_names": [], "items": []}
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if query:
+            escaped_query = query.casefold().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            clauses.append("lower(ma.display_name) LIKE ? ESCAPE '\\'")
+            parameters.append(f"%{escaped_query}%")
+        if sample_name:
+            clauses.append("lower(s.sample_name) = lower(?)")
+            parameters.append(sample_name)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        total = connection.execute(
+            f"""SELECT COUNT(*) FROM media_asset ma
+                 JOIN sample s ON s.sample_id = ma.sample_id
+                 {where}""",
+            parameters,
+        ).fetchone()[0]
+        rows = connection.execute(
+            f"""SELECT ma.media_asset_id, ma.source_kind, ma.display_name,
+                       ma.linked_path, ma.managed_relative_path, ma.media_type,
+                       ma.mime_type, ma.width_px, ma.height_px, ma.created_at,
+                       s.sample_id, s.sample_name,
+                       ts.thin_section_id, ts.thin_section_name,
+                       (SELECT COUNT(*) FROM spatial_annotation sa
+                        WHERE sa.media_asset_id = ma.media_asset_id) AS placement_count
+                FROM media_asset ma
+                JOIN sample s ON s.sample_id = ma.sample_id
+                JOIN thin_section ts ON ts.thin_section_id = ma.thin_section_id
+                {where}
+                ORDER BY lower(ma.display_name), ma.media_asset_id
+                LIMIT ? OFFSET ?""",
+            [*parameters, limit, offset],
+        ).fetchall()
+        items = [{
+            "media_asset_id": row["media_asset_id"],
+            "display_name": row["display_name"],
+            "storage_mode": "managed_copy" if row["source_kind"] == "managed_copy" else "linked_external",
+            "availability": _media_asset_availability(Path(database_path).resolve().parent, row),
+            "media_type": row["media_type"],
+            "mime_type": row["mime_type"],
+            "width_px": row["width_px"],
+            "height_px": row["height_px"],
+            "sample_id": row["sample_id"],
+            "sample_name": row["sample_name"],
+            "thin_section_id": row["thin_section_id"],
+            "thin_section_name": row["thin_section_name"],
+            "placement_count": row["placement_count"],
+            "created_at": row["created_at"],
+        } for row in rows]
+        sample_names = [row[0] for row in connection.execute(
+            """SELECT DISTINCT s.sample_name FROM media_asset ma
+               JOIN sample s ON s.sample_id = ma.sample_id
+               ORDER BY lower(s.sample_name)"""
+        )]
+        return {
+            "total": total,
+            "returned": len(items),
+            "offset": offset,
+            "has_more": offset + len(items) < total,
+            "sample_names": sample_names,
+            "items": items,
+        }
+    finally:
+        connection.close()
+
+
 def create_analytical_point(
     database_path: str | Path,
     sample_name: str,

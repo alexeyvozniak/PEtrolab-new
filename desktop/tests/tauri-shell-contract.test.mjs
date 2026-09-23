@@ -341,6 +341,7 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
   assert.match(api, /isPetrolabDesktop/);
   assert.match(api, /preview предназначен только для проверки интерфейса/);
   assert.match(api, /media\.inspect_sources/);
+  assert.match(api, /media\.list/);
   assert.match(api, /project\.mineral_identification\.list/);
   assert.match(api, /project\.mineral_assignment\.decide/);
   assert.match(api, /media\.import\.plan/);

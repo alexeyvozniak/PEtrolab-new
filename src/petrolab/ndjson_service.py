@@ -35,6 +35,7 @@ from .media_import import (
     create_media_preview,
     inspect_media_sources,
     list_analytical_points,
+    list_media_assets,
     list_operation_journal,
     remove_analysis_from_analytical_point,
     remove_spatial_annotation_from_analytical_point,
@@ -374,6 +375,20 @@ def _dispatch_media_inspect(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": inspect_media_sources(_string_list(params, "source_paths"))}
 
 
+def _dispatch_media_list(params: Mapping[str, Any]) -> dict[str, Any]:
+    raw_limit = params.get("limit", 500)
+    raw_offset = params.get("offset", 0)
+    if not isinstance(raw_limit, int) or not isinstance(raw_offset, int):
+        raise ValueError("limit")
+    return {"result": list_media_assets(
+        _project_database_path(params),
+        _optional_string(params, "query"),
+        _optional_string(params, "sample_name"),
+        raw_limit,
+        raw_offset,
+    )}
+
+
 def _dispatch_media_preview(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": create_media_preview(
         _string(params, "source_path"),
@@ -434,6 +449,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "operation_journal.list": _dispatch_operation_journal_list,
     "operation_journal.undo": _dispatch_operation_journal_undo,
     "media.inspect_sources": _dispatch_media_inspect,
+    "media.list": _dispatch_media_list,
     "media.preview": _dispatch_media_preview,
     "media.import.plan": _dispatch_media_plan,
     "media.import.apply": _dispatch_media_apply,

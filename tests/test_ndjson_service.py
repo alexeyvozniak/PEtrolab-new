@@ -166,6 +166,12 @@ class NdjsonServiceTests(unittest.TestCase):
                 "payload": {"project_database_path": database, "plan": plan},
             })["result"]
             self.assertEqual(applied["spatial_annotation_count"], 1)
+            library = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "media.list",
+                "payload": {"project_database_path": database, "query": "bse", "limit": 10, "offset": 0},
+            })["result"]
+            self.assertEqual(library["total"], 1)
+            self.assertEqual(library["items"][0]["availability"], "available")
             annotation_id = plan["items"][0]["placements"][0]["spatial_annotation_id"]
             unlinked = handle_request({
                 "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.annotation.remove",
