@@ -73,7 +73,7 @@ test("desktop image import selects a batch with only supported raster extensions
   assert.match(api, /media\.preview/);
   assert.match(app, /listAnalyticalPoints\(databasePath\)/);
   assert.match(workspace, /Подтвердить предложения/);
-  assert.match(workspace, /Пространственные точки создаются на следующем шаге/);
+  assert.match(workspace, /Подтвердить это назначение/);
   assert.match(workspace, /Point ·/);
   assert.match(workspace, /Rectangle/);
   assert.match(workspace, /Square/);

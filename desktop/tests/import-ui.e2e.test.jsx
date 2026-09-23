@@ -817,10 +817,10 @@ test("user confirms an image batch, places same- and cross-sample points, review
   await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
   await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
   expect(screen.getAllByText("KIV-2_A_BSE_01.tif").length).toBeGreaterThan(1);
-  expect(screen.getByText("0 готово")).toBeTruthy();
+  expect(screen.getByText("0 готовы")).toBeTruthy();
 
   await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
-  expect(await screen.findByText("3 готово")).toBeTruthy();
+  expect(await screen.findByText("3 готовы")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
 
   await user.click(await screen.findByRole("button", { name: /^2\. KIV-2_A_PPL_01\.tif/ }));
@@ -919,15 +919,16 @@ test("removing a placement after review preserves the same point on another imag
   });
 });
 
-test("image file list supports arrow navigation without losing focus", async () => {
+test("the single image list supports arrow navigation without losing focus", async () => {
   render(<App />);
 
   await screen.findByRole("button", { name: "Изображения" }).then((button) => fireEvent.click(button));
   fireEvent.click(screen.getByRole("button", { name: "Выбрать файлы" }));
   await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
 
-  const first = screen.getByText(/1\. KIV-2_A_BSE_01\.tif/).closest("button");
-  const second = screen.getByText(/2\. KIV-2_A_PPL_01\.tif/).closest("button");
+  const assignmentRows = [...document.querySelectorAll("[data-image-assignment-row]")];
+  const [first, second] = assignmentRows;
+  expect(document.querySelector(".image-assignment-workspace .image-source-pane")).toBeNull();
   first.focus();
   fireEvent.keyDown(first, { key: "ArrowDown" });
   expect(second.getAttribute("aria-current")).toBe("true");
@@ -944,6 +945,25 @@ test("image file list supports arrow navigation without losing focus", async () 
   fireEvent.keyDown(placementButtons[0], { key: "ArrowDown" });
   expect(placementButtons[1].getAttribute("aria-current")).toBe("true");
   expect(document.activeElement).toBe(placementButtons[1]);
+});
+
+test("image assignment reveals bulk controls only for multiple selected files", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+
+  expect(document.querySelectorAll("[data-image-assignment-row]")).toHaveLength(3);
+  expect(screen.getByRole("button", { name: "Подтвердить предложения" })).toBeTruthy();
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать KIV-2_A_BSE_01.tif" }));
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать KIV-2_A_PPL_01.tif" }));
+  expect(screen.queryByRole("button", { name: "Подтвердить предложения" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Подтвердить это назначение" })).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: /требуют проверки/ }));
+  expect(document.querySelectorAll("[data-image-assignment-row]")).toHaveLength(3);
 });
 
 test("final image review calls out images without spatial points", async () => {
@@ -1072,16 +1092,17 @@ test("duplicate image rows can be excluded from the transient batch without touc
 
   await user.click(excludeButton);
   expect(screen.queryByRole("button", { name: "Исключить выбранные дубликаты (2)" })).toBeNull();
-  expect(screen.getByText("Выбрано: 1 из 1")).toBeTruthy();
-  expect(screen.getByText("0 готово")).toBeTruthy();
+  expect(screen.queryByText("Выбрано: 1 из 1")).toBeNull();
+  expect(screen.getByText("0 готовы")).toBeTruthy();
 
   await user.click(screen.getByRole("button", { name: "Вернуть в пакет" }));
-  expect(screen.getByText("Выбрано: 1 из 3")).toBeTruthy();
+  expect(screen.queryByText("Выбрано: 1 из 3")).toBeNull();
   expect(screen.getByRole("button", { name: "Исключить выбранные дубликаты (0)" }).disabled).toBe(true);
-  await user.click(screen.getByRole("checkbox", { name: "Выбрано: 1 из 3" }));
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать KIV-2_A_BSE_01.tif" }));
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать KIV-2_A_PPL_01.tif" }));
   await user.click(screen.getByRole("button", { name: "Исключить выбранные дубликаты (2)" }));
 
-  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Подтвердить это назначение" }));
   await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
   expect(await screen.findByText("1 / 1")).toBeTruthy();
 });
@@ -1191,12 +1212,12 @@ test("a preview response from a replaced batch cannot overwrite the current batc
     onCancel: noop,
   };
   const { rerender } = render(<ImagesWorkspace {...props} inspection={oldInspection} />);
-  await user.click(await screen.findByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(await screen.findByRole("button", { name: "Подтвердить это назначение" }));
   await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
   expect(await screen.findByText("Готовлю безопасный preview…")).toBeTruthy();
 
   rerender(<ImagesWorkspace {...props} inspection={newInspection} />);
-  await user.click(await screen.findByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(await screen.findByRole("button", { name: "Подтвердить это назначение" }));
   await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
   expect(await screen.findByRole("application")).toBeTruthy();
   expect(screen.getByRole("img", { name: "BSE KIV-3" }).getAttribute("src")).toBe(newPreviewData);

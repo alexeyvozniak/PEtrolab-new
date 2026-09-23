@@ -100,9 +100,9 @@ window.__TAURI_INTERNALS__ = {
 
 createRoot(document.getElementById("root")).render(<App />);
 
-// Deterministic screenshot routes for registry and reversible unlink QA states.
+// Deterministic screenshot routes for registry, import assignment and reversible unlink QA states.
 const qaState = new URLSearchParams(window.location.search).get("qa");
-if (["registry", "operation", "composition"].includes(qaState)) {
+if (["registry", "operation", "composition", "assignment"].includes(qaState)) {
   const clickWhenReady = (find, next) => {
     const started = Date.now();
     const timer = window.setInterval(() => {
@@ -116,15 +116,22 @@ if (["registry", "operation", "composition"].includes(qaState)) {
       }
     }, 50);
   };
-  clickWhenReady(
-    () => [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Анализы"),
-    () => clickWhenReady(
-      () => [...document.querySelectorAll("button")].find((button) => button.textContent.includes("Analytical Points")),
-      () => clickWhenReady(() => qaState === "operation"
-        ? [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Разорвать связь")
-        : qaState === "composition"
-          ? [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Изменить состав")
-          : document.querySelector('input[aria-label="Выбрать Analytical Point P-07"]')),
-    ),
-  );
+  if (qaState === "assignment") {
+    clickWhenReady(
+      () => [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Изображения"),
+      () => clickWhenReady(() => [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Выбрать папку")),
+    );
+  } else {
+    clickWhenReady(
+      () => [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Анализы"),
+      () => clickWhenReady(
+        () => [...document.querySelectorAll("button")].find((button) => button.textContent.includes("Analytical Points")),
+        () => clickWhenReady(() => qaState === "operation"
+          ? [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Разорвать связь")
+          : qaState === "composition"
+            ? [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Изменить состав")
+            : document.querySelector('input[aria-label="Выбрать Analytical Point P-07"]')),
+      ),
+    );
+  }
 }
