@@ -5,11 +5,21 @@ import {
   CheckSquare,
   Database,
   Funnel,
+  LinkSimple,
   MagnifyingGlass,
+  MapPin,
   Plus,
   SquaresFour,
   X,
 } from "@phosphor-icons/react";
+import {
+  MINERAL_STATUS_LABELS,
+  mineralConfidenceLabel,
+  mineralReasonLabel,
+  mineralStatus,
+  reportedMineral,
+} from "./mineralUi";
+import { AnalyticalPointsRegistry } from "./AnalyticalPointsRegistry";
 import "./analysesWorkspace.css";
 
 function originLabel(analysis) {
@@ -28,10 +38,21 @@ function columnId(kind, field) {
   return `${kind}:${field}`;
 }
 
+function confidenceLabel(value) {
+  return mineralConfidenceLabel(value);
+}
+
+function mineralLabel(analysis) {
+  const verification = analysis.mineral_verification;
+  return verification?.accepted?.target || verification?.prediction || reportedMineral(analysis) || "Не определён";
+}
+
 function valueFor(analysis, column) {
   if (column.kind === "source") return analysis.source_name || "";
   if (column.kind === "sheet") return analysis.sheet_name || "";
   if (column.kind === "origin") return originLabel(analysis);
+  if (column.kind === "mineral") return mineralLabel(analysis);
+  if (column.kind === "mineral-status") return MINERAL_STATUS_LABELS[mineralStatus(analysis)] || mineralStatus(analysis);
   if (column.kind === "identity") return analysis.identity?.[column.field] || "";
   if (column.kind === "metadata") return analysis.source_metadata?.[column.field] || "";
   if (column.kind === "measurement") return analysis.measurements?.[column.field]?.raw_token ?? "";
@@ -43,8 +64,117 @@ function mainIdentity(analysis) {
   return identity.Analysis || identity.Point || identity.Sample || Object.values(identity).find(Boolean) || "Analysis без имени";
 }
 
+const POINT_LINK_TYPES = [
+  ["same_point", "Та же аналитическая точка"],
+  ["same_grain", "То же зерно"],
+  ["same_zone", "Та же зона"],
+  ["repeat_measurement", "Повторное измерение"],
+];
+
+function exactIdentity(analysis, field) {
+  const match = Object.entries(analysis?.identity || {}).find(([name]) => name.toLocaleLowerCase() === field.toLocaleLowerCase());
+  return String(match?.[1] || "").trim();
+}
+
+function commonIdentity(analyses, field) {
+  const values = [...new Set(analyses.map((analysis) => exactIdentity(analysis, field)).filter(Boolean))];
+  return values.length === 1 ? values[0] : "";
+}
+
+function analysisMethodLabel(analysis) {
+  const methods = [...new Set((analysis?.measurement_list || []).map((item) => item.method).filter(Boolean))];
+  return methods.length ? methods.join(", ") : "метод не указан";
+}
+
+function AnalyticalPointDialog({ analyses, busy, onCancel, onCreate }) {
+  const suggestedSample = useMemo(() => commonIdentity(analyses, "Sample"), [analyses]);
+  const suggestedPoint = useMemo(() => commonIdentity(analyses, "Point"), [analyses]);
+  const sourceSamples = useMemo(() => [...new Set(analyses.map((analysis) => exactIdentity(analysis, "Sample")).filter(Boolean))], [analyses]);
+  const [sampleName, setSampleName] = useState(suggestedSample);
+  const [pointName, setPointName] = useState(suggestedPoint);
+  const [linkType, setLinkType] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const canCreate = analyses.length >= 2 && sampleName.trim() && pointName.trim() && linkType && confirmed && !busy;
+
+  useEffect(() => {
+    const closeOnEscape = (event) => { if (event.key === "Escape" && !busy) onCancel(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [busy, onCancel]);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!canCreate) return;
+    setLocalError("");
+    try {
+      await onCreate({
+        sampleName: sampleName.trim(),
+        pointName: pointName.trim(),
+        analysisIds: analyses.map((analysis) => analysis.analysis_id),
+        linkType,
+      });
+      onCancel();
+    } catch (caught) {
+      setLocalError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  return <div className="analysis-point-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
+    <section className="analysis-point-dialog" role="dialog" aria-modal="true" aria-labelledby="analysis-point-dialog-title">
+      <header>
+        <div><span>Явная научная связь</span><h2 id="analysis-point-dialog-title">Создать Analytical Point</h2></div>
+        <button className="icon-button" type="button" onClick={onCancel} disabled={busy} aria-label="Закрыть создание Analytical Point"><X size={19} /></button>
+      </header>
+      <p className="analysis-point-dialog-intro">Новая точка свяжет выбранные Analyses, но не объединит и не изменит их Measurements.</p>
+      {sourceSamples.length > 1 && <div className="analysis-point-dialog-warning"><Funnel size={17} /><span>В исходных данных указаны разные Sample: {sourceSamples.join(", ")}. Проверь принадлежность новой точки особенно внимательно.</span></div>}
+      <div className="analysis-point-evidence" aria-label="Выбранные анализы">
+        {analyses.map((analysis) => <div key={analysis.analysis_id}>
+          <MapPin size={16} /><span><b>{mainIdentity(analysis)}</b><small>{analysisMethodLabel(analysis)} · {analysis.source_name} · {originLabel(analysis)}</small></span><code title={analysis.analysis_id}>{analysis.analysis_id}</code>
+        </div>)}
+      </div>
+      <form onSubmit={submit}>
+        <div className="analysis-point-fields">
+          <label>Sample<input aria-label="Sample новой Analytical Point" value={sampleName} onChange={(event) => { setSampleName(event.target.value); setConfirmed(false); }} placeholder="Например, KIV-2" autoFocus /></label>
+          <label>Имя точки<input aria-label="Имя новой Analytical Point" value={pointName} onChange={(event) => { setPointName(event.target.value); setConfirmed(false); }} placeholder="Например, P-01" /></label>
+        </div>
+        <label>Тип связи<select aria-label="Тип связи Analyses" value={linkType} onChange={(event) => { setLinkType(event.target.value); setConfirmed(false); }}><option value="">Выбери семантику связи</option>{POINT_LINK_TYPES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        <label className="analysis-point-confirmation"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>Подтверждаю, что эти {analyses.length} Analyses относятся к выбранной физической сущности. Совпадение имени само по себе не является доказательством.</span></label>
+        {localError && <p className="analysis-point-dialog-error" role="alert">{localError}</p>}
+        <footer><button className="outline-button" type="button" onClick={onCancel} disabled={busy}>Отмена</button><button className="primary-button" type="submit" disabled={!canCreate}><LinkSimple size={18} /> Создать точку</button></footer>
+      </form>
+    </section>
+  </div>;
+}
+
 function measurementContext(measurement) {
   return measurement.method || measurement.measurement_set || "";
+}
+
+function numericMeasurementValue(measurement) {
+  if (!measurement || (measurement.value_status && measurement.value_status !== "numeric")) return null;
+  const value = Number(String(measurement.raw_token ?? "").replace(",", "."));
+  return Number.isFinite(value) ? value : null;
+}
+
+function AnalysisCompositionSummary({ measurements }) {
+  const numeric = measurements.map(numericMeasurementValue).filter((value) => value !== null);
+  const wtPercent = measurements
+    .map((measurement) => ({ measurement, value: numericMeasurementValue(measurement) }))
+    .filter(({ measurement, value }) => measurement.unit === "wt.%" && value !== null);
+  const reportedTotal = wtPercent.reduce((total, item) => total + item.value, 0);
+  const nonNumeric = Math.max(0, measurements.length - numeric.length);
+  return (
+    <section className="analysis-composition-summary">
+      <div className="analysis-detail-section-head"><h3>Сводка состава</h3><span>{measurements.length}</span></div>
+      <div className="analysis-composition-grid">
+        <div><b>{numeric.length}</b><small>числовых</small></div>
+        <div><b>{wtPercent.length}</b><small>wt.%</small></div>
+        <div><b>{nonNumeric}</b><small>нечисловых</small></div>
+      </div>
+      {wtPercent.length > 0 && <p>Сумма сообщённых wt.%: <b>{reportedTotal.toFixed(2)}</b>. Справочно, без нормализации исходных значений.</p>}
+    </section>
+  );
 }
 
 function EmptyAnalyses({ onAddData }) {
@@ -56,6 +186,37 @@ function EmptyAnalyses({ onAddData }) {
       <button className="primary-button" type="button" onClick={onAddData}><Plus size={18} /> Добавить данные</button>
     </div>
   );
+}
+
+function AnalysisMineralReview({ analysis }) {
+  const verification = analysis?.mineral_verification;
+  const reported = reportedMineral(analysis);
+  if (!verification) {
+    return <section className="analysis-mineral-review">
+      <div className="analysis-detail-section-head"><h3>Идентификация минерала</h3><span>не запускалась</span></div>
+      <p>Для этой записи сохранено исходное название, но химическая проверка ещё не выполнялась.</p>
+      {reported && <dl className="analysis-mineral-facts"><div><dt>В источнике</dt><dd>{reported}</dd></div></dl>}
+    </section>;
+  }
+  const status = MINERAL_STATUS_LABELS[verification.status] || verification.status;
+  const evidence = verification.reasons?.length ? verification.reasons : (verification.issues || []);
+  return <section className="analysis-mineral-review">
+    <div className="analysis-detail-section-head"><h3>Идентификация минерала</h3><span>{status}</span></div>
+    <dl className="analysis-mineral-facts">
+      <div><dt>В источнике</dt><dd>{reported || "Не указан"}</dd></div>
+      <div><dt>Предложение</dt><dd>{verification.prediction || "Не определено"} · {confidenceLabel(verification.confidence)}</dd></div>
+      <div><dt>Принято</dt><dd>{verification.accepted?.target || "Не принято"}</dd></div>
+    </dl>
+    {(verification.candidates || []).length > 0 && <div className="analysis-mineral-candidates">
+      <b>Кандидаты</b>
+      {verification.candidates.slice(0, 5).map((candidate) => <div key={candidate.target}><span>{candidate.target}</span><small>{candidate.score} баллов</small></div>)}
+    </div>}
+    {evidence.length > 0 && <details>
+      <summary>Почему так</summary>
+      {evidence.map((reason) => <p key={reason}>{mineralReasonLabel(reason)}</p>)}
+    </details>}
+    <small className="analysis-mineral-version">Правила: {verification.ruleset_version || "—"}</small>
+  </section>;
 }
 
 function AnalysisDetail({ analysis }) {
@@ -82,6 +243,8 @@ function AnalysisDetail({ analysis }) {
         </dl>
       </section>
 
+      <AnalysisMineralReview analysis={analysis} />
+
       {metadata.length > 0 && (
         <section>
           <h3>Исходные сведения</h3>
@@ -92,6 +255,8 @@ function AnalysisDetail({ analysis }) {
           </dl>
         </section>
       )}
+
+      <AnalysisCompositionSummary measurements={measurements} />
 
       <section className="analysis-measurements-section">
         <div className="analysis-detail-section-head"><h3>Все измерения</h3><span>{measurements.length}</span></div>
@@ -108,8 +273,30 @@ function AnalysisDetail({ analysis }) {
   );
 }
 
-export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
+export function AnalysesWorkspace({
+  project,
+  analyticalPoints = { total: 0, items: [] },
+  operationJournal = { total: 0, items: [] },
+  pointOperationNotice = null,
+  busy,
+  onRefresh,
+  onRefreshAnalyticalPoints,
+  onRetract,
+  onAddData,
+  onLoadMore,
+  onLoadSourceAnalyses,
+  onCreateAnalyticalPoint,
+  onChangeAnalyticalPointMembership,
+  onRemoveAnalyticalPointPlacement,
+  onRetireAnalyticalPoint,
+  onUndoOperation,
+}) {
   const analyses = project.analyses || [];
+  const mineralStatusCounts = project.mineral_status_counts || {};
+  const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
+  const mineralAttentionCount = Object.entries(mineralStatusCounts)
+    .filter(([status]) => !["consistent", "verified"].includes(status))
+    .reduce((total, [, count]) => total + Number(count || 0), 0);
   const identityFields = useMemo(() => uniqueFields(analyses, "identity"), [analyses]);
   const metadataFields = useMemo(() => uniqueFields(analyses, "source_metadata"), [analyses]);
   const measurementFields = useMemo(() => uniqueFields(analyses, "measurements"), [analyses]);
@@ -117,6 +304,8 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
     { id: "source", kind: "source", label: "Источник" },
     { id: "sheet", kind: "sheet", label: "Лист" },
     { id: "origin", kind: "origin", label: "В файле" },
+    { id: "mineral", kind: "mineral", label: "Минерал" },
+    { id: "mineral-status", kind: "mineral-status", label: "Проверка минерала" },
     ...identityFields.map((field) => ({ id: columnId("identity", field), kind: "identity", field, label: field })),
     ...metadataFields.map((field) => ({ id: columnId("metadata", field), kind: "metadata", field, label: `${field} · исходное` })),
     ...measurementFields.map((field) => ({ id: columnId("measurement", field), kind: "measurement", field, label: field })),
@@ -125,6 +314,8 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
     "source",
     "sheet",
     "origin",
+    "mineral",
+    "mineral-status",
     ...identityFields.map((field) => columnId("identity", field)),
     ...metadataFields.slice(0, 2).map((field) => columnId("metadata", field)),
     ...measurementFields.slice(0, 8).map((field) => columnId("measurement", field)),
@@ -133,11 +324,16 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [sheetFilter, setSheetFilter] = useState("all");
+  const [mineralStatusFilter, setMineralStatusFilter] = useState("all");
   const [columnFilters, setColumnFilters] = useState({});
   const [visibleColumnIds, setVisibleColumnIds] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [focusedId, setFocusedId] = useState("");
   const [sort, setSort] = useState({ id: "source", direction: "asc" });
+  const [pointDialogOpen, setPointDialogOpen] = useState(false);
+  const [viewMode, setViewMode] = useState("analyses");
+  const [registryFocusId, setRegistryFocusId] = useState("");
+  const [sourceAnalysesNotice, setSourceAnalysesNotice] = useState("");
 
   useEffect(() => {
     setVisibleColumnIds((current) => {
@@ -159,19 +355,21 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
   }, [analyses]);
   const sheets = useMemo(() => [...new Set(analyses.filter((analysis) => sourceFilter === "all" || analysis.source_name === sourceFilter).map((analysis) => analysis.sheet_name))].sort((a, b) => a.localeCompare(b, "ru")), [analyses, sourceFilter]);
   const visibleColumns = availableColumns.filter((column) => visibleColumnIds.includes(column.id));
+  const mineralStatuses = useMemo(() => [...new Set(analyses.map(mineralStatus))].sort(), [analyses]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return analyses.filter((analysis) => {
       if (sourceFilter !== "all" && analysis.source_name !== sourceFilter) return false;
       if (sheetFilter !== "all" && analysis.sheet_name !== sheetFilter) return false;
+      if (mineralStatusFilter !== "all" && mineralStatus(analysis) !== mineralStatusFilter) return false;
       if (needle && !JSON.stringify(analysis).toLowerCase().includes(needle)) return false;
       return availableColumns.every((column) => {
         const filter = (columnFilters[column.id] || "").trim().toLowerCase();
         return !filter || String(valueFor(analysis, column)).toLowerCase().includes(filter);
       });
     });
-  }, [analyses, availableColumns, columnFilters, query, sheetFilter, sourceFilter]);
+  }, [analyses, availableColumns, columnFilters, mineralStatusFilter, query, sheetFilter, sourceFilter]);
 
   const ordered = useMemo(() => {
     const selected = new Set(selectedIds);
@@ -187,6 +385,7 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
   }, [availableColumns, filtered, selectedIds, sort]);
 
   const focused = analyses.find((analysis) => analysis.analysis_id === focusedId) || ordered[0] || null;
+  const selectedAnalyses = selectedIds.map((id) => analyses.find((analysis) => analysis.analysis_id === id)).filter(Boolean);
   const filteredIds = ordered.map((analysis) => analysis.analysis_id);
   const allVisibleSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedIds.includes(id));
 
@@ -203,6 +402,34 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
   const toggleColumn = (id) => setVisibleColumnIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
 
   if (project.total === 0) return <EmptyAnalyses onAddData={onAddData} />;
+
+  if (viewMode === "points") return <AnalyticalPointsRegistry
+    projection={analyticalPoints}
+    analyses={analyses}
+    busy={busy}
+    initialPointId={registryFocusId}
+    operationJournal={operationJournal}
+    operationNotice={pointOperationNotice}
+    onBack={() => setViewMode("analyses")}
+    onRefresh={onRefreshAnalyticalPoints}
+    onChangeMembership={onChangeAnalyticalPointMembership}
+    onRemovePlacement={onRemoveAnalyticalPointPlacement}
+    onRetire={onRetireAnalyticalPoint}
+    onUndo={onUndoOperation}
+    onShowAnalyses={async (analysisIds) => {
+      try {
+        const loaded = onLoadSourceAnalyses ? await onLoadSourceAnalyses(analysisIds) : analyses.filter((analysis) => analysisIds.includes(analysis.analysis_id));
+        const loadedIds = loaded.map((analysis) => analysis.analysis_id);
+        const unavailableIds = analysisIds.filter((id) => !loadedIds.includes(id));
+        setSelectedIds(loadedIds);
+        setFocusedId(loadedIds[0] || "");
+        setSourceAnalysesNotice(unavailableIds.length ? `Не удалось открыть ${unavailableIds.length} исходных Analyses: они больше не активны в проекте.` : "");
+        setViewMode("analyses");
+      } catch {
+        // App shows the service error; keeping the registry open makes retry explicit.
+      }
+    }}
+  />;
 
   return (
     <div className="analyses-workspace">
@@ -223,9 +450,24 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
       </aside>
 
       <main className="analyses-table-pane">
+        {sourceAnalysesNotice && <p className="analyses-source-notice" role="status">{sourceAnalysesNotice}</p>}
         <div className="analyses-toolbar">
+          <button className="outline-button analysis-points-registry-button" type="button" onClick={() => { setRegistryFocusId(""); setViewMode("points"); }}><LinkSimple size={17} /> Analytical Points <span>{analyticalPoints.total || 0}</span></button>
           <div className="analysis-search"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sample, Mineral, Generation, значение…" aria-label="Поиск анализов" /></div>
           <span className="analyses-result-count">{ordered.length} из {project.total}</span>
+          <span className={`analysis-mineral-health ${mineralReviewedCount === 0 || mineralAttentionCount ? "attention" : "ok"}`} title={`Проверено для ${mineralReviewedCount} загруженных анализов`}>
+            {mineralReviewedCount === 0
+              ? "Проверка минералов ожидает данных"
+              : mineralAttentionCount
+                ? `${mineralAttentionCount} требуют проверки`
+                : "Все загруженные минералы проверены"}
+          </span>
+          <label className="analysis-status-filter">Минерал
+            <select value={mineralStatusFilter} onChange={(event) => setMineralStatusFilter(event.target.value)} aria-label="Статус идентификации минерала">
+              <option value="all">Все статусы</option>
+              {mineralStatuses.map((status) => <option key={status} value={status}>{MINERAL_STATUS_LABELS[status] || status}</option>)}
+            </select>
+          </label>
           <details className="analysis-columns-menu">
             <summary><SquaresFour size={17} /> Колонки <span>{visibleColumns.length}</span></summary>
             <div>
@@ -289,9 +531,21 @@ export function AnalysesWorkspace({ project, busy, onRefresh, onRetract, onAddDa
             })}
             {selectedIds.length > 5 && <span>+{selectedIds.length - 5}</span>}
           </div>
-          <button className="outline-button" type="button" onClick={() => setSelectedIds([])}>Очистить выбор</button>
+          <div className="analysis-selection-actions">
+            {onCreateAnalyticalPoint && <button className="primary-button" type="button" disabled={busy || selectedAnalyses.length < 2} title={selectedAnalyses.length < 2 ? "Выберите минимум два Analysis" : "Создать явную связь выбранных Analyses"} onClick={() => setPointDialogOpen(true)}><LinkSimple size={17} /> Создать Analytical Point</button>}
+            <button className="outline-button" type="button" onClick={() => setSelectedIds([])}>Очистить выбор</button>
+          </div>
         </div>
       )}
+
+      {pointDialogOpen && <AnalyticalPointDialog analyses={selectedAnalyses} busy={busy} onCancel={() => setPointDialogOpen(false)} onCreate={async (payload) => {
+        const created = await onCreateAnalyticalPoint(payload);
+        if (created?.analytical_point_id && created.projection_refreshed !== false) {
+          setRegistryFocusId(created.analytical_point_id);
+          setViewMode("points");
+        }
+        return created;
+      }} />}
 
       {project.latest_import && <button className="analysis-retract-link" type="button" onClick={onRetract} disabled={busy}>Отменить последний импорт</button>}
     </div>

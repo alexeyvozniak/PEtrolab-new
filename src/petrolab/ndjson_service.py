@@ -9,7 +9,8 @@ from collections.abc import Callable, Mapping
 from typing import Any, TextIO
 
 from .clean_table import classify_clean_table
-from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, suggest_import_recipe
+from .import_workspace import ImportWorkspaceStore
+from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, decide_project_mineral_assignment, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe
 from .import_apply import (
     apply_import_plan,
     check_linked_source,
@@ -26,10 +27,32 @@ from .import_preview import (
     run_import_recipe_validate,
 )
 from .manual_mapping import review_duplicate_candidates, revise_import_mapping, revise_import_mappings, revise_import_sections
-from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
+from .media_import import (
+    add_analysis_to_analytical_point,
+    apply_media_import_plan,
+    create_analytical_point,
+    create_media_import_plan,
+    create_media_preview,
+    inspect_media_sources,
+    list_analytical_points,
+    list_media_assets,
+    list_operation_journal,
+    remove_analysis_from_analytical_point,
+    remove_spatial_annotation_from_analytical_point,
+    retire_analytical_point,
+    undo_operation,
+)
+from .formula_methods import list_methods
+from .formula_workflow import preview_formula, save_formula, list_formula_runs
 
 
 PROTOCOL_VERSION = "1.0"
+
+
+def _dispatch_formula(params, save=False):
+    args = (_project_database_path(params), params.get('analysis_ids'),
+            _string(params, 'method_id'), _string(params, 'method_version'), params.get('parameters'))
+    return {'result': save_formula(*args, _string(params, 'preview_fingerprint')) if save else preview_formula(*args)}
 
 
 def _error(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -106,6 +129,13 @@ def _optional_string(params: Mapping[str, Any], name: str) -> str | None:
 def _string_list(params: Mapping[str, Any], name: str) -> list[str]:
     value = params.get(name)
     if not isinstance(value, list) or not value or not all(isinstance(item, str) and item for item in value):
+        raise ValueError(name)
+    return value
+
+
+def _string_array(params: Mapping[str, Any], name: str) -> list[str]:
+    value = params.get(name)
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
         raise ValueError(name)
     return value
 
@@ -220,7 +250,32 @@ def _dispatch_project_analyses_list(params: Mapping[str, Any]) -> dict[str, Any]
     raw_offset = params.get("offset", 0)
     if not isinstance(raw_limit, int) or not isinstance(raw_offset, int):
         raise ValueError("limit")
-    return {"result": list_project_analyses(_project_database_path(params), raw_limit, raw_offset)}
+    analysis_ids = _string_list(params, "analysis_ids") if "analysis_ids" in params else None
+    return {"result": list_project_analyses(
+        _project_database_path(params), raw_limit, raw_offset, analysis_ids=analysis_ids,
+    )}
+
+
+def _dispatch_project_mineral_identification_list(params: Mapping[str, Any]) -> dict[str, Any]:
+    raw_limit = params.get("limit", 500)
+    raw_offset = params.get("offset", 0)
+    if not isinstance(raw_limit, int) or not isinstance(raw_offset, int):
+        raise ValueError("limit")
+    return {"result": list_project_mineral_identifications(_project_database_path(params), raw_limit, raw_offset)}
+
+
+def _dispatch_project_mineral_assignment_decide(params: Mapping[str, Any]) -> dict[str, Any]:
+    target = params.get("target")
+    if target is not None and (not isinstance(target, str) or not target):
+        raise ValueError("target")
+    return {"result": decide_project_mineral_assignment(
+        _project_database_path(params),
+        _string(params, "analysis_id"),
+        target,
+        _string(params, "input_fingerprint"),
+        _string(params, "ruleset_version"),
+        _string(params, "reason"),
+    )}
 
 
 def _dispatch_project_last_import_retract(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -254,8 +309,92 @@ def _dispatch_analytical_point_create(params: Mapping[str, Any]) -> dict[str, An
     )}
 
 
+def _dispatch_analytical_point_list(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": list_analytical_points(_project_database_path(params))}
+
+
+def _dispatch_analytical_point_retire(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": retire_analytical_point(
+        _project_database_path(params),
+        _string(params, "analytical_point_id"),
+        _string_array(params, "expected_analysis_ids"),
+        _string_array(params, "expected_spatial_annotation_ids"),
+        _string(params, "reason"),
+    )}
+
+
+def _dispatch_analytical_point_analysis_add(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": add_analysis_to_analytical_point(
+        _project_database_path(params),
+        _string(params, "analytical_point_id"),
+        _string_array(params, "expected_analysis_ids"),
+        _string_array(params, "expected_spatial_annotation_ids"),
+        _string(params, "analysis_id"),
+        _string(params, "link_type"),
+        _string(params, "reason"),
+    )}
+
+
+def _dispatch_analytical_point_analysis_remove(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": remove_analysis_from_analytical_point(
+        _project_database_path(params),
+        _string(params, "analytical_point_id"),
+        _string_array(params, "expected_analysis_ids"),
+        _string_array(params, "expected_spatial_annotation_ids"),
+        _string(params, "analysis_id"),
+        _string(params, "reason"),
+    )}
+
+
+def _dispatch_analytical_point_annotation_remove(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": remove_spatial_annotation_from_analytical_point(
+        _project_database_path(params),
+        _string(params, "analytical_point_id"),
+        _string_array(params, "expected_analysis_ids"),
+        _string_array(params, "expected_spatial_annotation_ids"),
+        _string(params, "spatial_annotation_id"),
+        _string(params, "reason"),
+    )}
+
+
+def _dispatch_operation_journal_list(params: Mapping[str, Any]) -> dict[str, Any]:
+    raw_limit = params.get("limit", 50)
+    if not isinstance(raw_limit, int):
+        raise ValueError("limit")
+    return {"result": list_operation_journal(_project_database_path(params), raw_limit)}
+
+
+def _dispatch_operation_journal_undo(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": undo_operation(
+        _project_database_path(params),
+        _string(params, "operation_id"),
+    )}
+
+
 def _dispatch_media_inspect(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": inspect_media_sources(_string_list(params, "source_paths"))}
+
+
+def _dispatch_media_list(params: Mapping[str, Any]) -> dict[str, Any]:
+    raw_limit = params.get("limit", 500)
+    raw_offset = params.get("offset", 0)
+    if not isinstance(raw_limit, int) or not isinstance(raw_offset, int):
+        raise ValueError("limit")
+    return {"result": list_media_assets(
+        _project_database_path(params),
+        _optional_string(params, "query"),
+        _optional_string(params, "sample_name"),
+        raw_limit,
+        raw_offset,
+    )}
+
+
+def _dispatch_media_preview(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": create_media_preview(
+        _string(params, "source_path"),
+        params.get("max_width_px", 1600),
+        params.get("max_height_px", 1200),
+    )}
 
 
 def _dispatch_media_plan(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -264,6 +403,14 @@ def _dispatch_media_plan(params: Mapping[str, Any]) -> dict[str, Any]:
 
 def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": apply_media_import_plan(_project_database_path(params), _object(params, "plan"))}
+
+
+def _dispatch_formula_methods(params: Mapping[str, Any]) -> dict[str, Any]:
+    accepted = params.get('accepted_assignment')
+    if accepted is not None and (not isinstance(accepted, str) or not accepted.strip()):
+        raise ImportCommandError('FORMULA_ASSIGNMENT_INVALID',
+                                 'Принятое назначение минерала должно быть непустой строкой.')
+    return {'result': list_methods(accepted)}
 
 
 COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
@@ -283,15 +430,34 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.plan.create": _dispatch_plan_create,
     "import.plan.apply": _dispatch_plan_apply,
     "project.analyses.list": _dispatch_project_analyses_list,
+    "project.mineral_identification.list": _dispatch_project_mineral_identification_list,
+    "project.mineral_assignment.decide": _dispatch_project_mineral_assignment_decide,
+    "formula.methods.list": _dispatch_formula_methods,
+    "formula.preview": _dispatch_formula,
+    "formula.save": lambda params: _dispatch_formula(params, save=True),
+    "formula.runs.list": lambda params: {'result': list_formula_runs(_project_database_path(params), _string(params, 'analysis_id'))},
     "project.last_import.retract": _dispatch_project_last_import_retract,
     "source.check_linked": _dispatch_linked_source_check,
     "import.batch.rollback": _dispatch_batch_rollback,
     "import.recipe.save_revision": _dispatch_recipe_save_revision,
     "analytical_point.create": _dispatch_analytical_point_create,
+    "analytical_point.list": _dispatch_analytical_point_list,
+    "analytical_point.retire": _dispatch_analytical_point_retire,
+    "analytical_point.analysis.add": _dispatch_analytical_point_analysis_add,
+    "analytical_point.analysis.remove": _dispatch_analytical_point_analysis_remove,
+    "analytical_point.annotation.remove": _dispatch_analytical_point_annotation_remove,
+    "operation_journal.list": _dispatch_operation_journal_list,
+    "operation_journal.undo": _dispatch_operation_journal_undo,
     "media.inspect_sources": _dispatch_media_inspect,
+    "media.list": _dispatch_media_list,
+    "media.preview": _dispatch_media_preview,
     "media.import.plan": _dispatch_media_plan,
     "media.import.apply": _dispatch_media_apply,
 }
+
+WORKSPACES = ImportWorkspaceStore()
+for _operation in ('create', 'restore', 'add_sources', 'get', 'preview_window', 'apply_decision', 'apply_bulk_decision', 'replan', 'commit', 'discard'):
+    COMMANDS[f'import.workspace.{_operation}'] = lambda params, operation=_operation: {'result': WORKSPACES.command(operation, params)}
 
 
 def handle_request(request: object) -> dict[str, Any]:

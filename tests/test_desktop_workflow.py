@@ -10,10 +10,13 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from petrolab.desktop_workflow import apply_bulk_unit_scope, bulk_unit_scopes, list_project_analyses, suggest_import_recipe  # noqa: E402
+from petrolab.desktop_workflow import (apply_bulk_unit_override_scope, apply_bulk_unit_scope,
+                                       bulk_unit_override_scopes, bulk_unit_scopes,
+                                       list_project_analyses, list_project_mineral_identifications,
+                                       suggest_import_recipe)  # noqa: E402
 from petrolab.import_apply import apply_import_plan, retract_latest_import  # noqa: E402
 from petrolab.import_preview import ImportCommandError, create_import_plan, inspect_source, validate_recipe  # noqa: E402
-from petrolab.manual_mapping import review_duplicate_candidates  # noqa: E402
+from petrolab.manual_mapping import review_duplicate_candidates, revise_import_mappings  # noqa: E402
 
 
 FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
@@ -37,6 +40,57 @@ def reviewed_recipe() -> dict:
 
 
 class DesktopWorkflowTests(unittest.TestCase):
+    def test_user_named_column_is_persisted_as_metadata_with_physical_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "custom.csv"
+            original = "Analysis,SiO2 [wt.%],Operator note\nA1,40.1,edge checked\n"
+            source.write_text(original, encoding="utf-8")
+            recipe = suggest_import_recipe(source)["recipe"]
+            section = recipe["sections"][0]
+            mapping = next(item for item in section["mappings"] if item["source_header"] == "Operator note")
+            revised = revise_import_mappings(source, recipe, [{
+                "block_id": section["block_id"],
+                "source_axis": mapping.get("source_axis", "column"),
+                "source_index": mapping["source_column_index"],
+                "target": "Metadata",
+                "canonical_field": "Комментарий оператора",
+            }])["recipe"]
+            database = Path(directory) / "petrolab.sqlite"
+
+            applied = apply_import_plan(database, source, revised)
+            analysis = list_project_analyses(database)["analyses"][0]
+
+            self.assertEqual(applied["source_metadata_count"], 1)
+            self.assertEqual(analysis["source_metadata"]["Комментарий оператора"], "edge checked")
+            self.assertEqual(analysis["source_metadata_list"][0]["source_cell"], "C2")
+            self.assertEqual(source.read_text(encoding="utf-8"), original)
+
+    def test_recognized_unit_can_be_corrected_for_one_server_issued_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "wrong-unit.csv"
+            original = b"Analysis,SiO2 (at.%),MgO (at.%)\nA1,40,50\n"
+            source.write_bytes(original)
+            recipe = suggest_import_recipe(source)["recipe"]
+            scope = bulk_unit_override_scopes(source, recipe)["scopes"][0]
+
+            self.assertEqual(scope["current_unit"], "at.%")
+            self.assertEqual(scope["field_count"], 2)
+            revised = apply_bulk_unit_override_scope(
+                source, recipe, scope["bulk_scope_id"], "wt.%"
+            )["recipe"]
+            measurements = [mapping for section in revised["sections"]
+                            for mapping in section["mappings"]
+                            if mapping["target_role"] == "measurement"]
+
+            self.assertEqual({mapping["unit"] for mapping in measurements}, {"wt.%"})
+            self.assertEqual({mapping["canonical_field"] for mapping in measurements}, {"SiO2", "MgO"})
+            self.assertEqual(source.read_bytes(), original)
+            with self.assertRaises(ImportCommandError) as stale:
+                apply_bulk_unit_override_scope(
+                    source, revised, scope["bulk_scope_id"], "ppm"
+                )
+            self.assertEqual(stale.exception.code, "STALE_BULK_SCOPE")
+
     def test_suggested_recipe_is_conservative_and_valid(self) -> None:
         suggestion = suggest_import_recipe(FIXTURE)
         recipe = suggestion["recipe"]
@@ -92,6 +146,19 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertTrue(all(item["source_cell"] for row in mineral_rows for item in row["source_metadata_list"] if item["field"] == "Mineral"))
         self.assertEqual(len(managed_sources), 1)
 
+    def test_mineral_identification_projection_is_read_only_and_pageable(self) -> None:
+        recipe = reviewed_recipe()
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "petrolab.sqlite"
+            applied = apply_import_plan(database, FIXTURE, recipe)
+            review = list_project_mineral_identifications(database, limit=3, offset=0)
+        self.assertEqual(review["total"], applied["analysis_count"])
+        self.assertEqual(review["returned"], 3)
+        self.assertTrue(review["has_more"])
+        self.assertEqual(sum(review["status_counts"].values()), 3)
+        self.assertTrue(all(item["analysis_id"] for item in review["identifications"]))
+
+
     def test_source_metadata_is_persisted_separately_from_identity_and_measurements(self) -> None:
         recipe = reviewed_recipe()
         with tempfile.TemporaryDirectory() as directory:
@@ -123,6 +190,21 @@ class DesktopWorkflowTests(unittest.TestCase):
         self.assertEqual(second["offset"], 3)
         self.assertEqual(first["total"], applied["analysis_count"])
         self.assertFalse({row["analysis_id"] for row in first["analyses"]} & {row["analysis_id"] for row in second["analyses"]})
+
+    def test_analysis_projection_can_load_exact_ids_outside_the_current_page(self) -> None:
+        recipe = reviewed_recipe()
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "petrolab.sqlite"
+            apply_import_plan(database, FIXTURE, recipe)
+            first = list_project_analyses(database, limit=3, offset=0)
+            later = list_project_analyses(database, limit=3, offset=3)
+            requested_ids = [later["analyses"][0]["analysis_id"], first["analyses"][1]["analysis_id"]]
+            exact = list_project_analyses(database, analysis_ids=requested_ids)
+
+        self.assertEqual(exact["total"], 2)
+        self.assertEqual(exact["returned"], 2)
+        self.assertFalse(exact["has_more"])
+        self.assertEqual({row["analysis_id"] for row in exact["analyses"]}, set(requested_ids))
 
     def test_retracted_latest_import_is_preserved_but_hidden_from_active_projection(self) -> None:
         recipe = reviewed_recipe()
