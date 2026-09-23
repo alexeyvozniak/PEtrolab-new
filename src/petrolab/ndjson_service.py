@@ -456,7 +456,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
 }
 
 WORKSPACES = ImportWorkspaceStore()
-for _operation in ('create', 'add_sources', 'get', 'preview_window', 'apply_decision', 'apply_bulk_decision', 'replan', 'discard'):
+for _operation in ('create', 'restore', 'add_sources', 'get', 'preview_window', 'apply_decision', 'apply_bulk_decision', 'replan', 'commit', 'discard'):
     COMMANDS[f'import.workspace.{_operation}'] = lambda params, operation=_operation: {'result': WORKSPACES.command(operation, params)}
 
 

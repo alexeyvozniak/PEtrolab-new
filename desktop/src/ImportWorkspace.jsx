@@ -380,7 +380,7 @@ export function ImportWorkspace({
   const selectedUnitOverrideScope = bulkUnitOverrideScopes.find((scope) => scope.bulk_scope_id === unitOverrideScopeId)
     || bulkUnitOverrideScopes[0]
     || null;
-  const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview;
+  const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview && (!workspace || workspace.sources.length === 1);
   const blockingCount = workspace ? groupIssues(issues.filter((item) => item.blocking)).length : (blockDraftDirty ? 1 : 0)
     + (plan.issues || []).filter((item) => item.blocking).length
     + (duplicateReviewRequired ? 1 : 0)
@@ -707,18 +707,20 @@ export function ImportWorkspace({
 
       <footer className={`import-workspace-footer${canSaveImport ? "" : " blocked"}`}>
         <div className="import-footer-metrics">
-          <span><b>{plan.summary.planned_analysis_count}</b> Analysis · <b>{plannedMeasurementCount}</b> Measurement</span>
+          <span><b>{workspace?.readiness.planned_analysis_count ?? plan.summary.planned_analysis_count}</b> Analysis · <b>{workspace?.readiness.planned_measurement_count ?? plannedMeasurementCount}</b> Measurement</span>
           {(blockingCount > 0 || unappliedChanges) && <span className="footer-warning"><b>{blockingCount}</b> {blockingCount === 1 ? "обязательное решение" : "обязательных решений"}{unresolvedReviewCount ? ` · ${countNoun(unresolvedReviewCount, "поле", "поля", "полей")}` : ""}{unappliedChanges ? " · правки не применены" : ""}</span>}
         </div>
         <div className="import-footer-actions">
           <button className="outline-button" type="button" onClick={() => setShowResultPreview(true)} disabled={busy || !plan.planned_records?.length}>Предпросмотр результата</button>
           <button className="primary-button large" type="button" onClick={onCommit} disabled={busy || !canSaveImport}>
             <CheckCircle size={19} />
-            {cleanFast ? "Импортировать таблицу" : canSaveImport ? "Сохранить импорт в проект" : "Импортировать после проверки"}
+            {cleanFast ? "Импортировать таблицу" : canSaveImport && workspace?.sources.length > 1
+              ? `Импортировать ${countNoun(workspace.readiness.included_source_count, "файл", "файла", "файлов")}`
+              : canSaveImport ? "Сохранить импорт в проект" : "Импортировать после проверки"}
           </button>
         </div>
         {(blockDraftDirty || mappingDraftDirty || workspace?.sources.length > 1) && <div className="workspace-commit-note" role="status">
-          {blockDraftDirty || mappingDraftDirty ? "Примените правки перед переключением источника или экрана." : "Очередь для проверки: сохранение нескольких файлов пока недоступно. Решения хранятся до закрытия приложения."}
+          {blockDraftDirty || mappingDraftDirty ? "Примените правки перед переключением источника или экрана." : "Все включённые файлы сохранятся вместе."}
         </div>}
       </footer>
       {showResultPreview && <ResultPreview plan={plan} sourceName={sourceName} onClose={() => setShowResultPreview(false)} />}

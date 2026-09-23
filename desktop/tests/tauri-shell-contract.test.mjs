@@ -374,7 +374,7 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(uiSmoke, /Импортировать таблицу/);
   assert.match(uiSmoke, /UI-1/);
   assert.match(uiSmoke, /Windows UI smoke/);
-  assert.match(uiSmoke, /applyImportPlan/);
+  assert.match(uiSmoke, /commitImportWorkspace/);
 });
 
 test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {

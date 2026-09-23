@@ -1,4 +1,4 @@
-"""Transient ADR-0014 review sessions. No batch commit or disk draft persistence."""
+"""ADR-0014 import workspace sessions with atomic commit and project drafts."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -46,6 +46,72 @@ class ImportWorkspaceStore:
             raise ImportCommandError('WORKSPACE_SOURCE_NOT_FOUND', 'Источник не найден в этой очереди.')
         return source
 
+    def _persist(self, session):
+        database_path = session.get('database_path')
+        if not database_path:
+            return
+        from .import_apply import open_project
+        fingerprints = {source['source_id']: source['sha256'] for source in session['sources']}
+        snapshot = json.dumps(session, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+        with closing(open_project(database_path)) as connection, connection:
+            connection.execute(
+                '''INSERT INTO import_workspace_draft
+                   (workspace_id, schema_version, draft_revision, draft_json, source_fingerprints_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(workspace_id) DO UPDATE SET
+                     schema_version = excluded.schema_version,
+                     draft_revision = excluded.draft_revision,
+                     draft_json = excluded.draft_json,
+                     source_fingerprints_json = excluded.source_fingerprints_json,
+                     updated_at = excluded.updated_at''',
+                (session['workspace_id'], session.get('schema_version', 1), session['draft_revision'], snapshot,
+                 json.dumps(fingerprints, sort_keys=True), session['created_at'], session['updated_at']),
+            )
+
+    def _delete_draft(self, session):
+        if not session.get('database_path'):
+            return
+        from .import_apply import open_project
+        with closing(open_project(session['database_path'])) as connection, connection:
+            connection.execute('DELETE FROM import_workspace_draft WHERE workspace_id = ?', (session['workspace_id'],))
+
+    def _restore_latest(self, database_path):
+        if not isinstance(database_path, str) or not database_path:
+            raise ValueError('project_database_path')
+        from .import_apply import open_project
+        with closing(open_project(database_path)) as connection:
+            row = connection.execute(
+                'SELECT * FROM import_workspace_draft ORDER BY updated_at DESC LIMIT 1'
+            ).fetchone()
+        if row is None:
+            return {'restore_status': 'empty'}
+        if row['schema_version'] != 1:
+            raise ImportCommandError('DRAFT_SCHEMA_INCOMPATIBLE', 'Черновик создан другой версией PetroLab и не был восстановлен.',
+                                     {'workspace_id': row['workspace_id'], 'schema_version': row['schema_version']})
+        try:
+            session = json.loads(row['draft_json'])
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ImportCommandError('DRAFT_SCHEMA_INCOMPATIBLE', 'Черновик импорта повреждён и не был восстановлен.',
+                                     {'workspace_id': row['workspace_id']}) from error
+        if session.get('workspace_id') != row['workspace_id'] or session.get('draft_revision') != row['draft_revision']:
+            raise ImportCommandError('DRAFT_SCHEMA_INCOMPATIBLE', 'Ревизия черновика не совпадает с сохранённым индексом.',
+                                     {'workspace_id': row['workspace_id']})
+        session['database_path'] = database_path
+        mismatches = []
+        for source in session.get('sources', []):
+            path = Path(source.get('staged_path', ''))
+            if not path.is_file():
+                mismatches.append({'source_id': source.get('source_id'), 'reason': 'unavailable'})
+                continue
+            inspection = inspect_source(path)
+            if inspection.fingerprint != source.get('sha256'):
+                mismatches.append({'source_id': source.get('source_id'), 'reason': 'fingerprint_mismatch'})
+        if mismatches:
+            raise ImportCommandError('DRAFT_SOURCE_MISMATCH', 'Один или несколько файлов черновика изменились или недоступны. Черновик не восстановлен.',
+                                     {'workspace_id': row['workspace_id'], 'sources': mismatches})
+        self.sessions[session['workspace_id']] = session
+        return {'restore_status': 'restored', **self._project(session)}
+
     def _check(self, source):
         inspection = inspect_source(source['staged_path'])
         if inspection.fingerprint != source['sha256']:
@@ -92,9 +158,11 @@ class ImportWorkspaceStore:
             session['active_source_id'] = source['source_id']
 
     def command(self, operation, params):
+        if operation == 'restore':
+            return self._restore_latest(params.get('project_database_path'))
         if operation == 'create':
             timestamp = now()
-            session = {'workspace_id': str(uuid4()), 'draft_revision': 0,
+            session = {'workspace_id': str(uuid4()), 'schema_version': 1, 'draft_revision': 0,
                        'created_at': timestamp, 'updated_at': timestamp, 'sources': [], 'active_source_id': None}
             session['database_path'] = params.get('project_database_path')
             session['project_aliases'] = {}
@@ -103,6 +171,10 @@ class ImportWorkspaceStore:
                 with closing(open_project(session['database_path'])) as connection:
                     session['project_aliases'] = {row['normalized_header']: json.loads(row['alias_json']) for row in connection.execute('SELECT * FROM project_analyte_alias')}
             self._add(session, params.get('sources'))
+            if session['database_path']:
+                from .import_apply import open_project
+                with closing(open_project(session['database_path'])) as connection, connection:
+                    connection.execute('DELETE FROM import_workspace_draft')
         else:
             stored = self.sessions.get(params.get('workspace_id'))
             if stored is None:
@@ -113,7 +185,25 @@ class ImportWorkspaceStore:
                 if type(expected) is not int or expected != session['draft_revision']:
                     raise ImportCommandError('STALE_WORKSPACE_REVISION', 'Очередь уже изменилась. Обновите состояние перед повтором.',
                                              {'expected_revision': expected, 'current_revision': session['draft_revision']})
+            if operation == 'commit':
+                projected = self._project(session)
+                if not projected['session']['readiness']['ready_to_commit']:
+                    raise ImportCommandError('WORKSPACE_NOT_READY', 'Сначала ответьте на обязательные вопросы импорта.',
+                                             {'blocking_reason_codes': projected['session']['readiness']['blocking_reason_codes']})
+                if not session.get('database_path'):
+                    raise ImportCommandError('PROJECT_REQUIRED', 'Выберите проект для сохранения импорта.')
+                from .import_apply import apply_import_workspace
+                included = [source for source in session['sources'] if source['included']]
+                result = apply_import_workspace(
+                    session['database_path'],
+                    [{'source_path': source['staged_path'], 'display_name': Path(source['original_display_path']).name,
+                      'recipe': source['recipe']} for source in included],
+                    workspace_id=session['workspace_id'], draft_revision=session['draft_revision'],
+                )
+                del self.sessions[session['workspace_id']]
+                return {**result, 'status': 'applied', 'staged_paths': [source['staged_path'] for source in session['sources']]}
             if operation == 'discard':
+                self._delete_draft(session)
                 del self.sessions[session['workspace_id']]
                 return {'workspace_id': session['workspace_id'], 'status': 'discarded',
                         'staged_paths': [s['staged_path'] for s in session['sources']]}
@@ -231,6 +321,7 @@ class ImportWorkspaceStore:
         result = self._project(session)
         if operation != 'get':
             self.sessions[session['workspace_id']] = session
+            self._persist(session)
         return result
 
     def _remember_alias(self, session, source, key, alias):
@@ -375,12 +466,10 @@ class ImportWorkspaceStore:
         section = next(s for s in active['recipe']['sections'] if s['block_id'] == active['active_block_id'])
         blockers = [i for i in issues if i['blocking']]
         reasons = sorted({i['code'] for i in blockers})
-        if len(sources) > 1:
-            reasons.append('MULTI_SOURCE_COMMIT_UNAVAILABLE')
         if not any(s['included'] for s in sources):
             reasons.append('NO_INCLUDED_SOURCES')
         session = {k: state[k] for k in ('workspace_id', 'draft_revision', 'created_at', 'updated_at', 'active_source_id')}
-        session.update({'schema_version': 1, 'active_sheet_key': f"{active['source_id']}:{section['sheet_name']}",
+        session.update({'schema_version': state.get('schema_version', 1), 'active_sheet_key': f"{active['source_id']}:{section['sheet_name']}",
                         'active_block_id': active['active_block_id'], 'sources': sources, 'issues': issues, 'bulk_scopes': scopes, 'plans': plans,
                         'readiness': {'ready_to_commit': not reasons, 'blocking_issue_count': len(blockers),
                                       'warning_count': len(issues) - len(blockers), 'included_source_count': sum(s['included'] for s in sources),

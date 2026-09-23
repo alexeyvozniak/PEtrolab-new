@@ -196,7 +196,7 @@ class FormulaPersistenceTests(unittest.TestCase):
         with closing(open_project(old)) as c:
             self.assertEqual(c.execute('SELECT COUNT(*) FROM analysis').fetchone()[0], 1)
             self.assertEqual(c.execute('SELECT COUNT(*) FROM formula_run').fetchone()[0], 0)
-            self.assertEqual(c.execute('SELECT project_schema_version FROM project_meta').fetchone()[0], 14)
+            self.assertEqual(c.execute('SELECT project_schema_version FROM project_meta').fetchone()[0], 15)
         self.assertEqual(len(list(self.folder.glob('old.sqlite.before-v13-*.bak'))), 1)
 
 

@@ -82,10 +82,10 @@ afterEach(async () => {
 });
 
 async function enabledButton(name) {
-  const button = await screen.findByRole("button", { name });
+  const button = await screen.findByRole("button", { name }, { timeout: 20000 });
   // The integration bridge starts a real Python process. On a busy Windows
   // runner its valid response can exceed Testing Library's 1 s default.
-  await waitFor(() => expect(button.disabled).toBe(false), { timeout: 10000 });
+  await waitFor(() => expect(button.disabled).toBe(false), { timeout: 20000 });
   return button;
 }
 
@@ -116,7 +116,7 @@ test("real Python workspace retains two sources and mapping, identity repair and
   await user.click(await enabledButton("Сохранить ответ"));
   await waitFor(() => expect(screen.queryAllByText(/Нет идентичности Analysis/)).toHaveLength(0));
   expect(screen.getByRole("button", { name: "Импортировать после проверки" }).disabled).toBe(true);
-  expect(requests.filter(r => r.command === "import.plan.apply")).toHaveLength(0);
+  expect(requests.filter(r => r.command === "import.workspace.commit")).toHaveLength(0);
   expect(await readFile(first, "utf8")).toBe(original);
   expect(within(screen.getByRole("table")).getByText("n.d.")).toBeTruthy();
 }, 20000);
@@ -130,7 +130,7 @@ test("real Python clean single-source still commits and displays persisted analy
   await screen.findByRole("heading", { name: "Анализы" });
   expect((await screen.findAllByText("B1")).length).toBeGreaterThan(0);
   expect(screen.getAllByText("B2").length).toBeGreaterThan(0);
-  expect(requests.filter(r => r.command === "import.plan.apply")).toHaveLength(1);
+  expect(requests.filter(r => r.command === "import.workspace.commit")).toHaveLength(1);
 }, 20000);
 
 test("unit suggestions are not dirty edits and one valid mapping can be applied while others remain unresolved", async () => {
@@ -187,6 +187,60 @@ test("one server-issued unit scope is presented as one guided question", async (
     && request.payload.decision?.unit === 'wt.%')).toBe(true);
   await waitFor(() => expect(screen.getByRole('button', { name: 'Сохранить импорт в проект' }).disabled).toBe(false), { timeout: 10000 });
   expect(await readFile(second, 'utf8')).toBe(source);
+}, 30000);
+
+test("two clean sources commit together and their analyses appear in one project", async () => {
+  await writeFile(first, "Analysis,MgO [wt.%]\nA1,30\n");
+  const firstBytes = await readFile(first);
+  const secondBytes = await readFile(second);
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton("Добавить файл"));
+  await user.click(await enabledButton("Импортировать 2 файла"));
+  await screen.findByRole("heading", { name: "Анализы" });
+  expect((await screen.findAllByText("A1")).length).toBeGreaterThan(0);
+  expect(screen.getAllByText("B1").length).toBeGreaterThan(0);
+  expect(requests.filter(r => r.command === "import.workspace.commit")).toHaveLength(1);
+  expect(await readFile(first)).toEqual(firstBytes);
+  expect(await readFile(second)).toEqual(secondBytes);
+}, 20000);
+
+test("autosaved import question returns after reopening the workspace", async () => {
+  queue = [first];
+  const user = userEvent.setup();
+  const mounted = render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await enabledButton("Добавить файл");
+  expect(screen.getByText("Исходная таблица")).toBeTruthy();
+  mounted.unmount();
+
+  render(<App />);
+  await screen.findByText("Черновик импорта восстановлен. Продолжите с текущего вопроса.");
+  expect(screen.getByText("Исходная таблица")).toBeTruthy();
+  expect(within(screen.getByRole("table")).getByText("<DL")).toBeTruthy();
+  expect(requests.some(r => r.command === "import.workspace.restore")).toBe(true);
+}, 20000);
+
+test("user column moves from import mapping into Analyses with its original text", async () => {
+  await writeFile(first, "Analysis,SiO2 [wt.%],Operator note\nA1,40.1,edge checked\n");
+  queue = [first];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await enabledButton("Добавить файл");
+  const perField = screen.queryByRole("button", { name: "Разобрать поля по одному" });
+  if (perField) await user.click(perField);
+  else await user.click(await enabledButton("Изменить роль или единицу"));
+  await user.selectOptions(screen.getAllByRole("combobox", { name: "Что это" })[0], "Metadata");
+  const name = screen.getByRole("textbox", { name: "Название пользовательской колонки Operator note" });
+  await user.clear(name);
+  await user.type(name, "Комментарий оператора");
+  await user.click(await enabledButton("Сохранить ответ"));
+  await user.click(await enabledButton("Сохранить импорт в проект"));
+  await screen.findByRole("heading", { name: "Анализы" });
+  expect((await screen.findAllByText("edge checked")).length).toBeGreaterThan(0);
+  expect((await screen.findAllByText(/Комментарий оператора/)).length).toBeGreaterThan(0);
 }, 20000);
 
 test("recognized wrong unit can be corrected for every field in one explicit step", async () => {

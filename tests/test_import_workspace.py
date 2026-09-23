@@ -1,12 +1,18 @@
 from copy import deepcopy
+from contextlib import closing
 from pathlib import Path
 import json
+import sqlite3
 import tempfile
 import unittest
 import uuid
+from unittest.mock import patch
 
 from petrolab.import_preview import ImportCommandError
 from petrolab.import_workspace import ImportWorkspaceStore
+from petrolab import import_apply
+from petrolab.desktop_workflow import list_project_analyses
+from petrolab.import_apply import retract_latest_import
 from petrolab.ndjson_service import handle_request
 from test_import_preview import FIXTURE
 
@@ -50,8 +56,119 @@ class ImportWorkspaceTests(unittest.TestCase):
              'sheet_name': 'first', 'start_row': 2, 'row_count': 1})
         self.assertEqual(preview['rows'][0]['values'][2], '<DL')
         self.assertFalse(session['readiness']['ready_to_commit'])
-        self.assertIn('MULTI_SOURCE_COMMIT_UNAVAILABLE', session['readiness']['blocking_reason_codes'])
+        self.assertNotIn('MULTI_SOURCE_COMMIT_UNAVAILABLE', session['readiness']['blocking_reason_codes'])
         self.assertEqual(original, self.source.read_bytes())
+
+    def test_two_ready_sources_commit_as_one_atomic_workspace(self):
+        third = Path(self.temp.name) / 'third.csv'
+        third.write_text('Analysis,MgO [wt.%]\nC1,30\nC2,31\n', encoding='utf-8')
+        database = Path(self.temp.name) / 'project.sqlite'
+        first_bytes, second_bytes = self.other.read_bytes(), third.read_bytes()
+        store = ImportWorkspaceStore()
+        current = store.command('create', {'project_database_path': str(database), 'sources': [
+            {'staged_path': str(self.other), 'original_display_path': 'second.csv'},
+            {'staged_path': str(third), 'original_display_path': 'third.csv'},
+        ]})
+        session = current['session']
+
+        self.assertTrue(session['readiness']['ready_to_commit'])
+        committed = store.command('commit', {'workspace_id': session['workspace_id'],
+            'expected_revision': session['draft_revision']})
+
+        self.assertEqual(committed['source_count'], 2)
+        self.assertEqual(committed['analysis_count'], 4)
+        self.assertEqual(len(committed['import_batches']), 2)
+        with closing(sqlite3.connect(database)) as connection:
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM import_workspace_commit').fetchone()[0], 1)
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM import_batch').fetchone()[0], 2)
+            self.assertEqual(connection.execute('SELECT COUNT(DISTINCT workspace_commit_id) FROM import_batch').fetchone()[0], 1)
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM analysis').fetchone()[0], 4)
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM import_workspace_draft').fetchone()[0], 0)
+        projection = list_project_analyses(database)
+        self.assertEqual(projection['source_count'], 2)
+        self.assertEqual(projection['import_batch_count'], 1)
+        self.assertEqual(projection['latest_import']['source_count'], 2)
+        retracted = retract_latest_import(database)
+        self.assertEqual(retracted['source_count'], 2)
+        self.assertEqual(retracted['analysis_count'], 4)
+        self.assertEqual(list_project_analyses(database)['total'], 0)
+        self.assertNotIn(session['workspace_id'], store.sessions)
+        self.assertEqual(self.other.read_bytes(), first_bytes)
+        self.assertEqual(third.read_bytes(), second_bytes)
+
+    def test_persistence_failure_rolls_back_every_source_and_keeps_draft(self):
+        third = Path(self.temp.name) / 'third.csv'
+        third.write_text('Analysis,MgO [wt.%]\nC1,30\n', encoding='utf-8')
+        database = Path(self.temp.name) / 'project.sqlite'
+        store = ImportWorkspaceStore()
+        current = store.command('create', {'project_database_path': str(database), 'sources': [
+            {'staged_path': str(self.other)}, {'staged_path': str(third)},
+        ]})
+        session = current['session']
+        original_write = import_apply._write_prepared_import
+        calls = 0
+
+        def fail_second(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError('simulated second-source persistence failure')
+            return original_write(*args, **kwargs)
+
+        with patch('petrolab.import_apply._write_prepared_import', side_effect=fail_second):
+            with self.assertRaisesRegex(RuntimeError, 'second-source'):
+                store.command('commit', {'workspace_id': session['workspace_id'],
+                    'expected_revision': session['draft_revision']})
+
+        with closing(sqlite3.connect(database)) as connection:
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM source_file').fetchone()[0], 0)
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM import_batch').fetchone()[0], 0)
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM analysis').fetchone()[0], 0)
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM import_workspace_commit').fetchone()[0], 0)
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM import_workspace_draft').fetchone()[0], 1)
+        self.assertEqual(list((Path(self.temp.name) / 'sources').glob('*')), [])
+        self.assertIn(session['workspace_id'], store.sessions)
+
+    def test_draft_restores_only_when_every_source_fingerprint_matches(self):
+        database = Path(self.temp.name) / 'project.sqlite'
+        store = ImportWorkspaceStore()
+        created = store.command('create', {'project_database_path': str(database),
+            'sources': [{'staged_path': str(self.other)}]})
+        workspace_id = created['session']['workspace_id']
+        revision = created['session']['draft_revision']
+
+        restored = ImportWorkspaceStore().command('restore', {'project_database_path': str(database)})
+        self.assertEqual(restored['restore_status'], 'restored')
+        self.assertEqual(restored['session']['workspace_id'], workspace_id)
+        self.assertEqual(restored['session']['draft_revision'], revision)
+        with closing(sqlite3.connect(database)) as connection:
+            draft_json = connection.execute('SELECT draft_json FROM import_workspace_draft').fetchone()[0]
+        self.assertNotIn('planned_records', draft_json)
+
+        self.other.write_text('Analysis,SiO2 [wt.%]\nB1,99\n', encoding='utf-8')
+        with self.assertRaises(ImportCommandError) as mismatch:
+            ImportWorkspaceStore().command('restore', {'project_database_path': str(database)})
+        self.assertEqual(mismatch.exception.code, 'DRAFT_SOURCE_MISMATCH')
+
+    def test_autosaved_revision_restores_and_rejects_incompatible_schema(self):
+        database = Path(self.temp.name) / 'project.sqlite'
+        store = ImportWorkspaceStore()
+        created = store.command('create', {'project_database_path': str(database),
+            'sources': [{'staged_path': str(self.other)}]})
+        workspace_id = created['session']['workspace_id']
+        changed = store.command('replan', {'workspace_id': workspace_id,
+            'expected_revision': created['session']['draft_revision']})
+
+        restored = ImportWorkspaceStore().command('restore', {'project_database_path': str(database)})
+        self.assertEqual(restored['session']['draft_revision'], changed['session']['draft_revision'])
+        self.assertEqual(restored['session']['workspace_id'], workspace_id)
+
+        with closing(sqlite3.connect(database)) as connection, connection:
+            connection.execute('UPDATE import_workspace_draft SET schema_version = 99 WHERE workspace_id = ?',
+                               (workspace_id,))
+        with self.assertRaises(ImportCommandError) as incompatible:
+            ImportWorkspaceStore().command('restore', {'project_database_path': str(database)})
+        self.assertEqual(incompatible.exception.code, 'DRAFT_SCHEMA_INCOMPATIBLE')
 
     def test_stale_revision_is_structured_and_does_not_overwrite(self):
         previous = deepcopy(self.current['session'])

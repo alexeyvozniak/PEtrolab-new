@@ -16,7 +16,7 @@ from petrolab.desktop_workflow import (apply_bulk_unit_override_scope, apply_bul
                                        suggest_import_recipe)  # noqa: E402
 from petrolab.import_apply import apply_import_plan, retract_latest_import  # noqa: E402
 from petrolab.import_preview import ImportCommandError, create_import_plan, inspect_source, validate_recipe  # noqa: E402
-from petrolab.manual_mapping import review_duplicate_candidates  # noqa: E402
+from petrolab.manual_mapping import review_duplicate_candidates, revise_import_mappings  # noqa: E402
 
 
 FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
@@ -40,6 +40,31 @@ def reviewed_recipe() -> dict:
 
 
 class DesktopWorkflowTests(unittest.TestCase):
+    def test_user_named_column_is_persisted_as_metadata_with_physical_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "custom.csv"
+            original = "Analysis,SiO2 [wt.%],Operator note\nA1,40.1,edge checked\n"
+            source.write_text(original, encoding="utf-8")
+            recipe = suggest_import_recipe(source)["recipe"]
+            section = recipe["sections"][0]
+            mapping = next(item for item in section["mappings"] if item["source_header"] == "Operator note")
+            revised = revise_import_mappings(source, recipe, [{
+                "block_id": section["block_id"],
+                "source_axis": mapping.get("source_axis", "column"),
+                "source_index": mapping["source_column_index"],
+                "target": "Metadata",
+                "canonical_field": "Комментарий оператора",
+            }])["recipe"]
+            database = Path(directory) / "petrolab.sqlite"
+
+            applied = apply_import_plan(database, source, revised)
+            analysis = list_project_analyses(database)["analyses"][0]
+
+            self.assertEqual(applied["source_metadata_count"], 1)
+            self.assertEqual(analysis["source_metadata"]["Комментарий оператора"], "edge checked")
+            self.assertEqual(analysis["source_metadata_list"][0]["source_cell"], "C2")
+            self.assertEqual(source.read_text(encoding="utf-8"), original)
+
     def test_recognized_unit_can_be_corrected_for_one_server_issued_scope(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "wrong-unit.csv"

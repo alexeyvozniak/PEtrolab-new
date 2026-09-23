@@ -351,7 +351,7 @@ class MediaImportTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM spatial_annotation").fetchone()[0], 1)
                 row = connection.execute("SELECT geometry_kind, x_px, y_px, image_width_px, image_height_px FROM spatial_annotation").fetchone()
                 self.assertEqual(row, ("point", 5.25, 3.5, 12, 8))
-                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 14)
+                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 15)
             self.assertEqual(result["spatial_annotation_count"], 1)
             projected = list_analytical_points(database)
             saved = next(item for item in projected["items"] if item["analytical_point_id"] == point["analytical_point_id"])

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./importMapping.css";
 
-const TARGETS = ["Ignore", "Analysis", "Sample", "Sample name", "Point", "Mineral", "Method", "Generation", "Rock", "Source", "Comment", "Position", "Photo number", "Size (µm)", "Measurement"];
+const TARGETS = ["Ignore", "Analysis", "Sample", "Sample name", "Point", "Mineral", "Method", "Generation", "Rock", "Source", "Comment", "Position", "Photo number", "Size (µm)", "Metadata", "Measurement"];
 const UNITS = ["wt.%", "mass%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon", "permil"];
 const UNIT_LABELS = { "wt.%": "wt.% · массовые %", "mass%": "mass% · массовые %", "at.%": "at.% · атомные %", "mol%": "mol% · мольные %", apfu: "apfu · атомы на формулу", ratio: "ratio · отношение", permil: "permil · ‰" };
 const FE_FORM_OPTIONS = [
@@ -58,7 +58,7 @@ const keyForMapping = (blockId, mapping) => keyFor(blockId, mappingAxis(mapping)
 function targetFromMapping(mapping) {
   if (mapping.target_role === "measurement") return "Measurement";
   if (mapping.target_role === "identity" && ["Analysis", "Sample", "Point"].includes(mapping.canonical_field)) return mapping.canonical_field;
-  if (mapping.target_role === "metadata" && TARGETS.includes(mapping.canonical_field)) return mapping.canonical_field;
+  if (mapping.target_role === "metadata") return TARGETS.includes(mapping.canonical_field) ? mapping.canonical_field : "Metadata";
   return "Ignore";
 }
 
@@ -66,7 +66,7 @@ function appliedState(mapping) {
   const target = targetFromMapping(mapping);
   return {
     target,
-    field: target === "Measurement" ? (mapping.canonical_field || mapping.source_header || "") : target,
+    field: ["Measurement", "Metadata"].includes(target) ? (mapping.canonical_field || mapping.source_header || "") : target,
     unit: target === "Measurement" ? (mapping.unit || "") : "",
     method: target === "Measurement" ? (mapping.method || "") : "",
     measurementSet: target === "Measurement" ? (mapping.measurement_set || "") : "",
@@ -113,7 +113,8 @@ function statesEqual(left, right) {
 
 function MappingRow({ mapping, value, busy, onChange, feFormRequired = false, guided = false }) {
   const measurement = value.target === "Measurement";
-  const invalid = measurement && (!value.field.trim() || !value.unit);
+  const customMetadata = value.target === "Metadata";
+  const invalid = (measurement && (!value.field.trim() || !value.unit)) || (customMetadata && !value.field.trim());
   const unresolved = value.reviewDecision === "unresolved" || (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore") || invalid;
   return (
     <article className={`mapping-review-item${guided ? " guided" : ""}${unresolved ? " unresolved" : ""}${invalid ? " mapping-invalid" : ""}`}>
@@ -122,7 +123,7 @@ function MappingRow({ mapping, value, busy, onChange, feFormRequired = false, gu
           <b className={mapping.source_header ? "" : "blank-source-header"}>{sourceTitle(mapping)}</b>
           <small>{sourceCoordinate(mapping)}</small>
         </div>
-        <span className={unresolved ? "needs-decision" : "ready"}>{invalid ? "Нужна единица" : unresolved ? "Нужно решить" : "Готово"}</span>
+        <span className={unresolved ? "needs-decision" : "ready"}>{invalid ? (customMetadata ? "Нужно название" : "Нужна единица") : unresolved ? "Нужно решить" : "Готово"}</span>
       </div>}
       {!(guided && feFormRequired) && <label className="mapping-control mapping-target-control">
         <span>Что это</span>
@@ -130,10 +131,11 @@ function MappingRow({ mapping, value, busy, onChange, feFormRequired = false, gu
           value={value.target}
           onChange={(event) => {
             const target = event.target.value;
+            const previousNamedField = ["Measurement", "Metadata"].includes(value.target) ? value.field : "";
             onChange({
               ...value,
               target,
-              field: target === "Measurement" ? (value.field || mapping.source_header || "") : target,
+              field: ["Measurement", "Metadata"].includes(target) ? (previousNamedField || mapping.source_header || "") : target,
               unit: target === "Measurement" ? value.unit : "",
               method: target === "Measurement" ? value.method : "",
               measurementSet: target === "Measurement" ? value.measurementSet : "",
@@ -142,8 +144,12 @@ function MappingRow({ mapping, value, busy, onChange, feFormRequired = false, gu
           }}
           disabled={busy}
         >
-          {TARGETS.map((item) => <option key={item} value={item}>{item === "Ignore" ? "Не импортировать" : item}</option>)}
+          {TARGETS.map((item) => <option key={item} value={item}>{item === "Ignore" ? "Не импортировать" : item === "Metadata" ? "Пользовательская колонка" : item}</option>)}
         </select>
+      </label>}
+      {customMetadata && <label className="mapping-control mapping-custom-field-control">
+        <span>Название колонки в PetroLab</span>
+        <input value={value.field} onChange={(event) => onChange({ ...value, field: event.target.value, reviewDecision: event.target.value.trim() ? "assigned" : "unresolved" })} disabled={busy} aria-label={`Название пользовательской колонки ${sourceTitle(mapping)}`} placeholder={mapping.source_header || "Введите название"} />
       </label>}
       {measurement && (
         <div className="mapping-measurement-controls">
@@ -209,7 +215,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
 
   const dirtyKeys = useMemo(() => Object.keys(draft).filter((key) => !statesEqual(draft[key], applied[key])), [draft, applied]);
   const invalidCount = useMemo(
-    () => Object.values(draft).filter((value) => value.target === "Measurement" && (!value.field.trim() || !value.unit)).length,
+    () => Object.values(draft).filter((value) => (value.target === "Measurement" && (!value.field.trim() || !value.unit)) || (value.target === "Metadata" && !value.field.trim())).length,
     [draft],
   );
 
@@ -264,7 +270,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
         source_axis: mappingAxis(mapping),
         source_index: mappingIndex(mapping),
         target: value.target,
-        canonical_field: value.target === "Measurement" ? value.field.trim() : null,
+        canonical_field: ["Measurement", "Metadata"].includes(value.target) ? value.field.trim() : null,
         unit: value.target === "Measurement" ? value.unit : null,
         method: value.target === "Measurement" ? (value.method.trim() || null) : null,
         measurement_set: value.target === "Measurement" ? (value.measurementSet.trim() || null) : null,
@@ -295,7 +301,8 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
               const value = draft[keyForMapping(section.block_id, mapping)] || appliedState(mapping);
               return value.reviewDecision === "unresolved"
                 || (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore")
-                || (value.target === "Measurement" && (!value.field.trim() || !value.unit));
+                || (value.target === "Measurement" && (!value.field.trim() || !value.unit))
+                || (value.target === "Metadata" && !value.field.trim());
             }).length;
             const groupedCount = section.mappings.filter((mapping) => groupedUnitKeys.has(keyForMapping(section.block_id, mapping))).length;
             const individualUnresolvedCount = Math.max(0, unresolvedCount - groupedCount);
@@ -309,7 +316,8 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
               return dirtyKeys.includes(keyForMapping(section.block_id, mapping))
                 || value.reviewDecision === "unresolved"
                 || (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore")
-                || (value.target === "Measurement" && (!value.field.trim() || !value.unit));
+                || (value.target === "Measurement" && (!value.field.trim() || !value.unit))
+                || (value.target === "Metadata" && !value.field.trim());
             });
             return (
           <>
@@ -366,7 +374,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
       <div className={`mapping-actions${guided ? " guided" : ""}`}>
         {dirtyKeys.length > 0 && !guided && <p role="status">Изменения ещё не применены. Проверьте выбранные значения и нажмите «Применить сопоставление».</p>}
         {dirtyKeys.length > 0 && <button className="outline-button" onClick={resetDraft} disabled={busy}>Сбросить</button>}
-        <button className="primary-button" onClick={submit} disabled={busy || dirtyKeys.length === 0 || dirtyKeys.some((key) => draft[key].target === 'Measurement' && (!draft[key].field.trim() || !draft[key].unit))}>
+        <button className="primary-button" onClick={submit} disabled={busy || dirtyKeys.length === 0 || dirtyKeys.some((key) => (draft[key].target === 'Measurement' && (!draft[key].field.trim() || !draft[key].unit)) || (draft[key].target === 'Metadata' && !draft[key].field.trim()))}>
           {guided ? "Сохранить ответ" : `Применить сопоставление (${dirtyKeys.length})`}
         </button>
       </div>

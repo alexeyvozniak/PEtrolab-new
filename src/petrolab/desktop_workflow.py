@@ -702,31 +702,70 @@ def list_project_analyses(
                LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
                WHERE b.status = 'applied' AND x.import_batch_id IS NULL"""
         ).fetchone()[0]
-        batch_count = connection.execute(
-            """SELECT COUNT(*)
-               FROM import_batch b
-               LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-               WHERE b.status = 'applied' AND x.import_batch_id IS NULL"""
-        ).fetchone()[0]
-        latest = connection.execute(
-            """SELECT b.import_batch_id, b.source_id, b.applied_at, s.display_name,
-                      COUNT(a.analysis_id) AS analysis_count
-               FROM import_batch b
-               JOIN source_file s ON s.source_id = b.source_id
-               LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
-               LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-               WHERE b.status = 'applied' AND x.import_batch_id IS NULL
-               GROUP BY b.import_batch_id, b.source_id, b.applied_at, s.display_name
-               ORDER BY b.applied_at DESC, b.rowid DESC
-               LIMIT 1"""
-        ).fetchone()
-        latest_import = None if latest is None else {
-            "import_batch_id": latest["import_batch_id"],
-            "source_id": latest["source_id"],
-            "source_name": latest["display_name"],
-            "analysis_count": latest["analysis_count"],
-            "applied_at": latest["applied_at"],
-        }
+        has_workspace_commit = any(row[1] == 'workspace_commit_id' for row in connection.execute('PRAGMA table_info(import_batch)'))
+        if has_workspace_commit:
+            batch_count = connection.execute(
+                """SELECT COUNT(DISTINCT COALESCE(b.workspace_commit_id, b.import_batch_id))
+                   FROM import_batch b
+                   LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                   WHERE b.status = 'applied' AND x.import_batch_id IS NULL"""
+            ).fetchone()[0]
+            latest = connection.execute(
+                """SELECT MIN(b.import_batch_id) AS import_batch_id,
+                          COALESCE(b.workspace_commit_id, b.import_batch_id) AS workspace_commit_id,
+                          MIN(b.source_id) AS source_id, MAX(b.applied_at) AS applied_at,
+                          GROUP_CONCAT(DISTINCT s.display_name) AS source_names,
+                          COUNT(DISTINCT b.source_id) AS source_count,
+                          COUNT(a.analysis_id) AS analysis_count
+                   FROM import_batch b
+                   JOIN source_file s ON s.source_id = b.source_id
+                   LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
+                   LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                   WHERE b.status = 'applied' AND x.import_batch_id IS NULL
+                   GROUP BY COALESCE(b.workspace_commit_id, b.import_batch_id)
+                   ORDER BY MAX(b.applied_at) DESC, MAX(b.rowid) DESC
+                   LIMIT 1"""
+            ).fetchone()
+            latest_import = None if latest is None else {
+                "import_batch_id": latest["import_batch_id"],
+                "workspace_commit_id": latest["workspace_commit_id"],
+                "source_id": latest["source_id"],
+                "source_name": latest["source_names"] if latest["source_count"] == 1 else f"{latest['source_count']} источника",
+                "source_names": [row[0] for row in connection.execute(
+                    """SELECT s.display_name FROM import_batch b
+                       JOIN source_file s ON s.source_id = b.source_id
+                       LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                       WHERE b.status = 'applied' AND x.import_batch_id IS NULL
+                         AND COALESCE(b.workspace_commit_id, b.import_batch_id) = ?
+                       ORDER BY b.rowid""",
+                    (latest["workspace_commit_id"],),
+                )],
+                "source_count": latest["source_count"],
+                "analysis_count": latest["analysis_count"],
+                "applied_at": latest["applied_at"],
+            }
+        else:
+            batch_count = connection.execute(
+                """SELECT COUNT(*) FROM import_batch b
+                   LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                   WHERE b.status = 'applied' AND x.import_batch_id IS NULL"""
+            ).fetchone()[0]
+            latest = connection.execute(
+                """SELECT b.import_batch_id, b.source_id, b.applied_at, s.display_name,
+                          COUNT(a.analysis_id) AS analysis_count
+                   FROM import_batch b JOIN source_file s ON s.source_id = b.source_id
+                   LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
+                   LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                   WHERE b.status = 'applied' AND x.import_batch_id IS NULL
+                   GROUP BY b.import_batch_id, b.source_id, b.applied_at, s.display_name
+                   ORDER BY b.applied_at DESC, b.rowid DESC LIMIT 1"""
+            ).fetchone()
+            latest_import = None if latest is None else {
+                "import_batch_id": latest["import_batch_id"], "workspace_commit_id": None,
+                "source_id": latest["source_id"], "source_name": latest["display_name"],
+                "source_names": [latest["display_name"]], "source_count": 1,
+                "analysis_count": latest["analysis_count"], "applied_at": latest["applied_at"],
+            }
         return {
             "total": total,
             "returned": len(result),

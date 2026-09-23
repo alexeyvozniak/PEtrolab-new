@@ -15,10 +15,9 @@ import {
 } from "@phosphor-icons/react";
 import {
   addAnalysisToAnalyticalPoint,
-  createImportWorkspace, addWorkspaceSources, getImportWorkspace, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
+  createImportWorkspace, restoreImportWorkspace, addWorkspaceSources, getImportWorkspace, applyWorkspaceDecision, commitImportWorkspace, discardImportWorkspace, previewWorkspaceWindow,
   createAnalyticalPoint,
   applyMediaImportPlan,
-  applyImportPlan,
   clearImportStaging,
   decideProjectMineralAssignment,
   createMediaImportPlan,
@@ -126,7 +125,7 @@ export function App() {
   const [detailedReview, setDetailedReview] = useState(false);
   const [blockDraftDirty, setBlockDraftDirty] = useState(false);
   const [mappingDraftDirty, setMappingDraftDirty] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(desktopRuntimeAvailable);
   const [activity, setActivity] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -223,8 +222,22 @@ export function App() {
         } catch (caught) {
           if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
         }
+        try {
+          const restored = unwrap(await restoreImportWorkspace(path));
+          if (!cancelled && restored.restore_status === "restored") {
+            await receiveWorkspace(restored, true);
+            if (!cancelled) {
+              setScreen("Импорт");
+              setSuccess("Черновик импорта восстановлен. Продолжите с текущего вопроса.");
+            }
+          }
+        } catch (caught) {
+          if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
+        }
       } catch (caught) {
         if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
+      } finally {
+        if (!cancelled) setBusy(false);
       }
     })();
     return () => { cancelled = true; };
@@ -374,13 +387,11 @@ export function App() {
         await receiveWorkspace(current, true);
         throw new Error("Сохранение недоступно: проверьте обязательные вопросы очереди.");
       }
-      const source = current.session.sources[0];
-      const result = unwrap(await applyImportPlan(databasePath, source.staged_path, current.active.recipe));
+      const result = unwrap(await commitImportWorkspace(workspace.workspace_id, current.session.draft_revision));
       // Commit has succeeded. Never offer a second apply if refresh/cleanup fails.
       resetImportState();
-      setSuccess(`Импорт сохранён: ${result.analysis_count} Analysis, ${result.measurement_count} Measurement.`);
-      await discardImportWorkspace(workspace.workspace_id, current.session.draft_revision).then(unwrap);
-      clearImportStaging(source.staged_path).catch(() => {});
+      setSuccess(`Импорт сохранён. Источников: ${result.source_count} · Analyses: ${result.analysis_count} · Measurements: ${result.measurement_count}.`);
+      await Promise.all(result.staged_paths.map((path) => clearImportStaging(path).catch(() => {})));
       await refreshAnalyses(databasePath);
       setScreen("Анализы");
     } catch (caught) {

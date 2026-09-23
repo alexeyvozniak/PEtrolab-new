@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 export const PROTOCOL_VERSION = "1.0";
 
 export const createImportWorkspace = (sources, projectDatabasePath) => invokePetrolab("import.workspace.create", { sources, project_database_path: projectDatabasePath });
+export const restoreImportWorkspace = (projectDatabasePath) => invokePetrolab("import.workspace.restore", { project_database_path: projectDatabasePath });
 export const previewSemanticExtension = (workspaceId, sourceId, decision) => invokePetrolab("import.workspace.preview_window", { workspace_id: workspaceId, source_id: sourceId, semantic_extension: decision });
 export const addWorkspaceSources = (workspaceId, revision, sources) =>
   invokePetrolab("import.workspace.add_sources", { workspace_id: workspaceId, expected_revision: revision, sources });
@@ -13,6 +14,8 @@ export const applyWorkspaceDecision = (workspaceId, revision, sourceId, decision
   });
 export const discardImportWorkspace = (workspaceId, revision) =>
   invokePetrolab("import.workspace.discard", { workspace_id: workspaceId, expected_revision: revision });
+export const commitImportWorkspace = (workspaceId, revision) =>
+  invokePetrolab("import.workspace.commit", { workspace_id: workspaceId, expected_revision: revision });
 export const previewWorkspaceWindow = (workspaceId, sourceId, sheetName, startRow, rowCount = 30, startColumn = 0, columnCount = 24) =>
   invokePetrolab("import.workspace.preview_window", { workspace_id: workspaceId, source_id: sourceId,
     sheet_name: sheetName, start_row: startRow, row_count: rowCount, start_column: startColumn, column_count: columnCount });

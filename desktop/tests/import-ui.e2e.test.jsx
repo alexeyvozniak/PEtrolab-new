@@ -4,8 +4,35 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { AnalysesWorkspace } from '../src/AnalysesWorkspace';
 import { MineralsWorkspace } from '../src/MineralsWorkspace';
+import { ImportMappingEditor } from '../src/ImportMappingEditor';
 
 const uiState = vi.hoisted(() => ({ imported: false, mediaImported: false, mediaPlacementCount: 0, pointCreated: false, pointRetired: false, pointPlacementAvailable: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false, mineralAccepted: false, mediaDuplicates: false, mediaPreviewFailures: 0 }));
+
+test('unrecognized source column can be kept as named user metadata', async () => {
+  const user = userEvent.setup();
+  const onApplyAll = vi.fn();
+  const recipe = { sections: [{
+    block_id: 'data-main', sheet_name: 'Data', header_row: 1, data_end_row: 2,
+    orientation: 'rows_are_analyses', enabled: true,
+    mappings: [{ source_axis: 'column', source_column_index: 3, source_header: 'Operator note',
+      target_role: 'ignore', canonical_field: 'Operator note', measurement_semantics: 'ignored', review_decision: 'unresolved' }],
+  }] };
+
+  render(<ImportMappingEditor recipe={recipe} warnings={[]} busy={false} onApplyAll={onApplyAll} />);
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Что это' }), 'Metadata');
+  const name = screen.getByRole('textbox', { name: 'Название пользовательской колонки Operator note' });
+  expect(name.value).toBe('Operator note');
+  await user.clear(name);
+  expect(screen.getByRole('button', { name: 'Применить сопоставление (1)' }).disabled).toBe(true);
+  await user.type(name, 'Комментарий оператора');
+  await user.click(screen.getByRole('button', { name: 'Применить сопоставление (1)' }));
+
+  expect(onApplyAll).toHaveBeenCalledWith([{
+    block_id: 'data-main', source_axis: 'column', source_index: 3,
+    target: 'Metadata', canonical_field: 'Комментарий оператора', unit: null,
+    method: null, measurement_set: null,
+  }]);
+});
 
 test('selected Analyses require explicit semantics before creating an Analytical Point', async () => {
   const user = userEvent.setup();
@@ -551,6 +578,7 @@ vi.mock("../src/desktopApi", () => {
     }),
     stageImportFile: vi.fn().mockImplementation(async (path) => ({ local_path: `C:/PetroLab/staging/${path.split("/").pop()}`, original_path: path })),
     clearImportStaging: vi.fn().mockResolvedValue(undefined),
+    restoreImportWorkspace: vi.fn().mockResolvedValue({ result: { restore_status: "empty" } }),
     inspectImportSource: vi.fn().mockImplementation(async () => ({ result: uiState.mode === "clean"
       ? { source_format: "csv", source_fingerprint: "0123456789abcdef", sheets: [{ name: "Data" }] }
       : { source_format: "xlsx", source_fingerprint: "fedcba9876543210", sheets: [{ name: "Summary" }, { name: "Details" }] } })),
@@ -585,10 +613,7 @@ vi.mock("../src/desktopApi", () => {
       uiState.duplicatesReviewed = true;
       return { result: { recipe: currentComplexRecipe(), plan: complexPlan(), duplicate_review: { candidate_group_count: 1 } } };
     }),
-    applyImportPlan: vi.fn().mockImplementation(async () => {
-      uiState.imported = true;
-      return { result: { analysis_count: 2, measurement_count: 6, source_metadata_count: 0 } };
-    }),
+    applyImportPlan: vi.fn(),
     reviseImportMappings: vi.fn(),
     retractLastImport: vi.fn(),
   };
@@ -625,6 +650,11 @@ vi.mock("../src/desktopApi", () => {
   });
   api.addWorkspaceSources = vi.fn();
   api.getImportWorkspace = vi.fn(projectWorkspace);
+  api.commitImportWorkspace = vi.fn(async () => {
+    uiState.imported = true;
+    return { result: { status: "applied", source_count: 1, analysis_count: 2, measurement_count: 6,
+      source_metadata_count: 0, staged_paths: [sourceDescriptor.staged_path] } };
+  });
   api.discardImportWorkspace = vi.fn(async () => ({ result: { staged_paths: [sourceDescriptor.staged_path] } }));
   api.previewWorkspaceWindow = vi.fn(async (_workspace, _source, sheetName, startRow, rows, column, columns) =>
     api.previewImportWindow(sourceDescriptor.staged_path, sheetName, startRow, rows, column, columns));
@@ -640,7 +670,7 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { addAnalysisToAnalyticalPoint, applyImportPlan, applyMediaImportPlan, applyWorkspaceDecision, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, listProjectAnalyses, pickImportFile, pickMediaFolder, removeSpatialAnnotationFromAnalyticalPoint, retireAnalyticalPoint, undoOperation } from "../src/desktopApi";
+import { addAnalysisToAnalyticalPoint, commitImportWorkspace, applyMediaImportPlan, applyWorkspaceDecision, createAnalyticalPoint, createMediaImportPlan, createImportPlan, getMediaPreview, listAnalyticalPoints, listProjectAnalyses, pickImportFile, pickMediaFolder, removeSpatialAnnotationFromAnalyticalPoint, retireAnalyticalPoint, undoOperation } from "../src/desktopApi";
 import { App } from "../src/App";
 import { ImagesWorkspace } from "../src/ImagesWorkspace";
 
@@ -1294,11 +1324,7 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
   expect(within(table).getByText("UI-2")).toBeTruthy();
   expect(within(table).queryByText("UI-1")).toBeNull();
   await user.clear(search);
-  expect(applyImportPlan).toHaveBeenCalledWith(
-    "C:/PetroLab/project.sqlite",
-    "C:/PetroLab/staging/ui-clean-table.csv",
-    expect.any(Object),
-  );
+  expect(commitImportWorkspace).toHaveBeenCalledWith("workspace-1", 0);
   await waitFor(() => expect(uiState.imported).toBe(true));
 });
 
@@ -1348,7 +1374,7 @@ test("Python identity blocker is visible, navigable and prevents saving", async 
   expect(await screen.findByRole("heading", { name: /Нет идентичности Analysis/ })).toBeTruthy();
   expect(screen.getByText("Исходная таблица")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Импортировать после проверки" }).disabled).toBe(true);
-  expect(applyImportPlan).not.toHaveBeenCalled();
+  expect(commitImportWorkspace).not.toHaveBeenCalled();
 });
 
 test("the inspector presents one current question without a competing queue", async () => {
@@ -1433,5 +1459,5 @@ test("user resolves a repeated complex workbook with sheet-level and grouped dec
   await user.click(save);
 
   await screen.findByRole("heading", { name: "Анализы" });
-  expect(applyImportPlan).toHaveBeenCalled();
+  expect(commitImportWorkspace).toHaveBeenCalled();
 });
