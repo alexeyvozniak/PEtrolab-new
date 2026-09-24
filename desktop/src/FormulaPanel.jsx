@@ -39,7 +39,7 @@ function Result({ result }) {
     {result.method_id === 'mica.charge22' && <p className="formula-scope"><strong>Bulk APFU.</strong> Без распределения по позициям и без номенклатуры.</p>}
     {Object.keys(result.values || {}).length > 0 && <table aria-label="Рассчитанные значения"><caption>Рассчитано · не исходные измерения</caption>
       <thead><tr><th>Показатель</th><th>Значение</th><th>Единица</th></tr></thead>
-      <tbody>{Object.entries(result.values).sort(([a], [b]) => Number(['Fo', 'Fa'].includes(b)) - Number(['Fo', 'Fa'].includes(a))).map(([field, value]) => <tr key={field}><th>{fieldLabel(field)}{field === 'OH_est_apfu' && <span className="formula-estimate-badge">оценка</span>}</th><td>{format(value)}</td><td>{field === 'oxide_total' ? 'wt.%' : ['Fo', 'Fa'].includes(field) ? 'mol.%' : 'APFU'}</td></tr>)}</tbody>
+      <tbody>{Object.entries(result.values).sort(([a], [b]) => Number(['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(b)) - Number(['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(a))).map(([field, value]) => <tr key={field}><th>{fieldLabel(field)}{field === 'OH_est_apfu' && <span className="formula-estimate-badge">оценка</span>}</th><td>{format(value)}</td><td>{field === 'oxide_total' ? 'wt.%' : ['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(field) ? 'mol.%' : 'APFU'}</td></tr>)}</tbody>
     </table>}
     {result.OH_est_basis && <section className="formula-basis" aria-label="Основание оценки OH">
       <strong>Как получена оценка OH</strong>

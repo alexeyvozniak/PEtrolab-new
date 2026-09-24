@@ -82,15 +82,15 @@ afterEach(async () => {
 });
 
 async function enabledButton(name) {
-  const button = await screen.findByRole("button", { name }, { timeout: 20000 });
   // The integration bridge starts a real Python process. On a busy Windows
-  // runner its valid response can exceed Testing Library's 1 s default.
+  // runner its valid response can exceed Testing Library's 1 s default. Re-query
+  // on every retry: importing another source can replace the entire button node.
   try {
-    await waitFor(() => expect(button.disabled).toBe(false), { timeout: 20000 });
+    await waitFor(() => expect(screen.getByRole("button", { name }).disabled).toBe(false), { timeout: 20000 });
   } catch {
-    throw new Error(`Button stayed disabled: ${name}; mapping changes: ${document.querySelector('.mapping-summary')?.textContent || 'none'}; pending requests: ${pending.size}`);
+    throw new Error(`Button stayed disabled: ${name}; mapping changes: ${document.querySelector('.mapping-summary')?.textContent || 'none'}; note: ${document.querySelector('.workspace-commit-note')?.textContent || 'none'}; activity: ${document.querySelector('.app-activity')?.textContent || 'none'}; pending requests: ${pending.size}`);
   }
-  return button;
+  return screen.getByRole("button", { name });
 }
 
 test("real Python workspace retains two sources and mapping, identity repair and raw tokens", async () => {
@@ -437,4 +437,28 @@ test('real mica formula requires three choices, saves OH provenance and preserve
   expect(restoredBasis.value).toBe('ideal_O10_W2');
   expect(restoredOh.value).toBe('ideal_2_minus_f_cl');
   expect(await readFile(second, 'utf8')).toBe(raw);
+}, 60000);
+
+test('real clinopyroxene formula is available after explicit assignment and saves Wo–En–Fs', async () => {
+  const source = 'Analysis,Mineral,SiO2 (wt.%),Al2O3 (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%),FeO (wt.%)\nCpx-1,diopside,55.49,0,18.61,25.90,0,0,0\n';
+  await writeFile(second, source);
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+  await user.click(await enabledButton('2 · Проверить минералы'));
+  await user.click(await enabledButton('Принять предложение'));
+  await user.click(await enabledButton('Сохранить импорт в проект'));
+  await screen.findByRole('heading', { name: 'Анализы' });
+  await user.click(await enabledButton('Минералы'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  await user.click(await enabledButton('Рассчитать формулу'));
+  const table = await screen.findByRole('table', { name: 'Рассчитанные значения' });
+  for (const field of ['Wo', 'En', 'Fs']) {
+    expect(within(table).getByText(field)).toBeTruthy();
+  }
+  expect(within(table).getAllByText('mol.%')).toHaveLength(3);
+  await user.click(await enabledButton('Сохранить результат формулы'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  expect(await readFile(second, 'utf8')).toBe(source);
 }, 60000);

@@ -3,6 +3,10 @@ import copy
 import hashlib
 import json
 
+from .clinopyroxene_formula import (ATOMIC_MASSES as CPX_ATOMIC_MASSES,
+                                    FE_MODES as CPX_FE_MODES, METHOD_ID as CPX_METHOD_ID,
+                                    METHOD_VERSION as CPX_METHOD_VERSION,
+                                    OXIDES as CPX_OXIDES, calculate_clinopyroxene)
 from .mica_formula import (ANION_BASES as MICA_ANION_BASES, ATOMIC_MASSES as MICA_ATOMIC_MASSES,
                            FE_MODES as MICA_FE_MODES, METHOD_ID as MICA_METHOD_ID,
                            METHOD_VERSION as MICA_METHOD_VERSION, OH_MODES as MICA_OH_MODES,
@@ -16,6 +20,7 @@ METHOD_ID = 'olivine.oxygen4'
 METHOD_VERSION = '1.0.0'
 IMPLEMENTATION_SHA256 = '0d1313ebe3ab47cca45f8e6c5364be51ed8d113c44677f95890bdeeedadc16ee'
 MICA_IMPLEMENTATION_SHA256 = '95821d9252d7577ad1d7bf95e64e6fb62a4ea536086c3c8d0c0c7742afc1442a'
+CPX_IMPLEMENTATION_SHA256 = '25b876fb9ae8da7603449aa61b046c7ba36edfc10b12515384f938d378b5407d'
 COMPACT_FE_MODE_LABELS = {
     'all_fe2': 'Всё Fe как Fe²⁺ · FeO/FeOt',
     'reported_split': 'Раздельные FeO + Fe₂O₃',
@@ -120,10 +125,53 @@ def _mica_definition():
     return definition
 
 
+def _clinopyroxene_definition():
+    fields = sorted({f'{oxide[3]}_apfu' for oxide in CPX_OXIDES.values()})
+    definition = {
+        'method_id': CPX_METHOD_ID, 'version': CPX_METHOD_VERSION,
+        'name': 'Клинопироксен · 6 O · bulk APFU и Wo–En–Fs',
+        'kind': 'formula', 'status': 'draft',
+        'input_domain': {'semantic_domain': 'oxide_wt_percent',
+                         'required_fields': ['SiO2', 'MgO', 'CaO'], 'allowed_units': ['wt.%'],
+                         'missing_policy': 'reject_row', 'censored_policy': 'reject_row',
+                         'compositional_domain_policy': 'explicit_subcomposition_required',
+                         'nonpositive_policy': 'not_applicable', 'mixed_unit_policy': 'reject'},
+        'parameters': [{'name': 'fe_mode', 'value_type': 'choice', 'scientifically_significant': True}],
+        'output_fields': ([{'field': field, 'semantic_role': 'derived_value', 'unit': 'apfu'}
+                           for field in fields]
+                          + [{'field': field, 'semantic_role': 'derived_value', 'unit': 'mol.%'}
+                             for field in ('Wo', 'En', 'Fs')]
+                          + [{'field': 'cation_sum', 'semantic_role': 'diagnostic', 'unit': 'apfu'},
+                             {'field': 'oxide_total', 'semantic_role': 'diagnostic', 'unit': 'wt.%'}]),
+        'citations': [
+            {'title': 'Morimoto et al. (1988), Nomenclature of Pyroxenes',
+             'url': 'https://doi.org/10.3406/bulmi.1988.8099'},
+            {'title': 'Journal of Petrology (2022), experimental Cpx E16–085, Table 6',
+             'url': 'https://academic.oup.com/view-large/392420083'},
+            {'title': 'CIAAW Abridged Standard Atomic Weights 2024',
+             'url': 'https://ciaaw.org/abridged-atomic-weights.htm'}],
+        'assumptions': ['6 O, без нормировки суммы wt.% к 100%.',
+                        'Wo–En–Fs только Ca–Mg–Fe²⁺-тройка, не номенклатурное решение.',
+                        'Fe²⁺ задан all_fe2 либо раздельными измеренными FeO/Fe₂O₃; Droop не применяется.',
+                        'Без распределения M2/M1/T, неопределённости и названия вида.'],
+        'applicability': ['Только явно принятое назначение clinopyroxene (Ca-rich target).',
+                          'Уравнение 6 O не заменяет четырёхкатионную переоценку Fe или Droop.',
+                          'Пригодность состава проверяется заново независимо от назначения.'],
+        'benchmark_ids': ['cpx-diopside', 'cpx-hedenbergite', 'cpx-mixed', 'cpx-e16-085'],
+        'implementation': {'algorithm_id': CPX_METHOD_ID,
+                           'algorithm_version': CPX_METHOD_VERSION,
+                           'implementation_sha256': CPX_IMPLEMENTATION_SHA256},
+        'created_at': '2026-09-24T00:00:00Z',
+    }
+    definition['definition_fingerprint'] = fingerprint(definition)
+    return definition
+
+
 def method_definition(method_id=METHOD_ID, version=None):
     """Return one installed definition without changing existing olivine identity."""
     installed = {METHOD_ID: (METHOD_VERSION, _olivine_definition),
-                 MICA_METHOD_ID: (MICA_METHOD_VERSION, _mica_definition)}
+                 MICA_METHOD_ID: (MICA_METHOD_VERSION, _mica_definition),
+                 CPX_METHOD_ID: (CPX_METHOD_VERSION, _clinopyroxene_definition)}
     current = installed.get(method_id)
     if current is None or (version is not None and version != current[0]):
         raise KeyError((method_id, version))
@@ -141,6 +189,15 @@ def executable_method(method_id, version):
                                    'description': 'Всё железо принимается как Fe²⁺.',
                                    'parameters': {'fe_mode': 'all_fe2'}}],
                 'calculate': lambda rows, p: calculate_olivine(rows, p['fe_mode'])}
+    if method_id == CPX_METHOD_ID:
+        return {'definition': definition, 'accepted_targets': {'clinopyroxene'},
+                'target_label': 'клинопироксена',
+                'parameter_choices': {'fe_mode': CPX_FE_MODES},
+                'parameter_choice_labels': {'fe_mode': COMPACT_FE_MODE_LABELS},
+                'quick_presets': [{'id': 'all_fe2', 'label': 'Рассчитать формулу',
+                                   'description': '6 O; всё железо принято Fe²⁺; без Droop.',
+                                   'parameters': {'fe_mode': 'all_fe2'}}],
+                'calculate': lambda rows, p: calculate_clinopyroxene(rows, p['fe_mode'])}
     return {'definition': definition,
             'accepted_targets': {'trioctahedral mica', 'dioctahedral mica', 'Li-mica'},
             'target_label': 'слюды',
@@ -162,7 +219,8 @@ def list_methods(accepted_assignment=None):
     accepted_target = reported_target(accepted_assignment) if accepted_assignment is not None else None
     methods = []
     for method_id, version, masses in ((METHOD_ID, METHOD_VERSION, OLIVINE_ATOMIC_MASSES),
-                                       (MICA_METHOD_ID, MICA_METHOD_VERSION, MICA_ATOMIC_MASSES)):
+                                       (MICA_METHOD_ID, MICA_METHOD_VERSION, MICA_ATOMIC_MASSES),
+                                       (CPX_METHOD_ID, CPX_METHOD_VERSION, CPX_ATOMIC_MASSES)):
         registration = executable_method(method_id, version)
         if accepted_assignment is not None and accepted_target not in registration['accepted_targets']:
             continue

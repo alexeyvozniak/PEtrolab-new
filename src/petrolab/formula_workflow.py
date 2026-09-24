@@ -112,7 +112,7 @@ def save_formula(database_path, analysis_ids, method_id, method_version, paramet
             for result in preview['results']:
                 used_ids = [m['measurement_id'] for m in result['used']]
                 for field, value in result['values'].items():
-                    unit = 'mol.%' if field in {'Fo', 'Fa'} else 'wt.%' if field == 'oxide_total' else 'apfu'
+                    unit = 'mol.%' if field in {'Fo', 'Fa', 'Wo', 'En', 'Fs'} else 'wt.%' if field == 'oxide_total' else 'apfu'
                     assumptions = list(result['assumptions'])
                     if field == 'OH_est_apfu' and result.get('OH_est_basis'):
                         assumptions.append('OH_est_basis: ' + json.dumps(result['OH_est_basis'],
