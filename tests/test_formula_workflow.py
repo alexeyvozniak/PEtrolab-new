@@ -128,6 +128,10 @@ class FormulaPersistenceTests(unittest.TestCase):
         self.assertTrue(retry['reused']); self.assertEqual(retry['run']['id'], result['run']['id'])
         history = list_formula_runs(self.database, self.analysis_id)['runs']
         self.assertEqual(len(history), 1); self.assertEqual(history[0]['run']['status'], 'current')
+        self.assertEqual(history[0]['run']['result_manifest']['parameter_descriptions']['fe_mode']['all_fe2'],
+                         'Всё железо как Fe²⁺ (FeO или FeOt)')
+        self.assertEqual(history[0]['run']['result_manifest']['parameter_descriptions'],
+                         p['parameter_descriptions'])
         from scripts.validate_contracts import _validate
         root = Path(__file__).parents[1] / 'schemas'
         for name, documents in [('scientific-method-definition', [method_definition()]),

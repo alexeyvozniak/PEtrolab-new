@@ -166,7 +166,7 @@ export function FormulaPanel({ analysis, databasePath }) {
     <h4>Сохранённые расчёты · {runs.length}</h4>
     {runs.map(({ run }) => {
       const savedMethod = run.result_manifest?.method;
-      const choices = methods.find(item => item.method_id === run.method_id)?.parameter_choices || {};
+      const choices = run.result_manifest?.parameter_descriptions || {};
       return <details key={run.id} className="formula-history"><summary>{run.status === 'stale' ? 'Устарел' : 'Сохранён'} · {savedMethod?.name || run.method_id} · v{run.method_version} · {run.created_at}</summary>
         {run.stale_reasons.map(reason => <p className="formula-warning" key={reason}>{reason}</p>)}
         <dl className="formula-parameters">{Object.entries(run.parameters).map(([name, value]) => <div key={name}><dt>{parameterLabel(name)}</dt><dd>{choices[name]?.[value] || value}</dd></div>)}</dl>

@@ -61,6 +61,11 @@ Save is idempotent for identical fingerprints; retries return the existing run.
 Read-time freshness compares current input/assignment and method fingerprints,
 without rewriting historical payloads. Retracted analyses are stale. Parameter
 changes invalidate the unsaved preview and produce a distinct immutable run.
+The result manifest also snapshots the method's parameter descriptions used at
+execution time. History renders those saved descriptions, never descriptions
+from a newer catalog entry with the same method ID. Older runs without the
+snapshot show exact stored parameter keys; their payloads are not migrated or
+silently reinterpreted.
 
 ## Acceptance
 

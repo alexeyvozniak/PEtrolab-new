@@ -1,4 +1,5 @@
 """Explicit previews and immutable, stale-aware formula runs in project SQLite."""
+import copy
 import json
 import platform
 from contextlib import closing
@@ -65,7 +66,9 @@ def _preview(connection, database_path, ids, method_id, version, parameters):
         results.append({'analysis_id': record['analysis_id'], **result})
     input_hash = fingerprint({'inputs': snapshots, 'method': definition['definition_fingerprint'],
                               'parameters': parameters})
-    return {'method': definition, 'parameters': parameters, 'analysis_ids': ids,
+    return {'method': definition, 'parameters': parameters,
+            'parameter_descriptions': copy.deepcopy(registration['parameter_choices']),
+            'analysis_ids': ids,
             'input_fingerprint': input_hash, 'input_snapshots': snapshots, 'results': results,
             'can_save': all(r['status'] == 'current' for r in results)}
 
