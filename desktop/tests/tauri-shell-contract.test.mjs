@@ -393,6 +393,16 @@ test("Tauri config keeps the approved desktop minimum window size and version al
   assert.match(config.build.beforeBuildCommand, /generate_tauri_icon\.py/);
 });
 
+test("fresh Cargo resolution stays on the npm Tauri API major/minor", async () => {
+  const cargo = await read("src-tauri/Cargo.toml");
+  const lock = JSON.parse(await read("package-lock.json"));
+  const apiVersion = lock.packages["node_modules/@tauri-apps/api"].version;
+  const apiMajorMinor = apiVersion.split(".").slice(0, 2).join(".");
+  const rustVersion = cargo.match(/^tauri = \{ version = "~(\d+\.\d+)\.0"/m)?.[1];
+  assert.equal(rustVersion, apiMajorMinor,
+    "Cargo must constrain tauri to the same major/minor as the locked @tauri-apps/api");
+});
+
 test("compact import reserves space for physical rows and accessible range actions", async () => {
   const styles = await read("src/importBlockReview.css");
   const workspace = await read("src/importWorkspace.css");
