@@ -393,14 +393,21 @@ test("Tauri config keeps the approved desktop minimum window size and version al
   assert.match(config.build.beforeBuildCommand, /generate_tauri_icon\.py/);
 });
 
-test("fresh Cargo resolution stays on the npm Tauri API major/minor", async () => {
+test("locked Cargo Tauri family stays on the npm API major/minor", async () => {
   const cargo = await read("src-tauri/Cargo.toml");
+  const cargoLock = await read("src-tauri/Cargo.lock");
   const lock = JSON.parse(await read("package-lock.json"));
   const apiVersion = lock.packages["node_modules/@tauri-apps/api"].version;
   const apiMajorMinor = apiVersion.split(".").slice(0, 2).join(".");
   const rustVersion = cargo.match(/^tauri = \{ version = "~(\d+\.\d+)\.0"/m)?.[1];
   assert.equal(rustVersion, apiMajorMinor,
     "Cargo must constrain tauri to the same major/minor as the locked @tauri-apps/api");
+  const resolved = new Map([...cargoLock.matchAll(/\[\[package\]\]\s*name = "([^"]+)"\s*version = "([^"]+)"/g)]
+    .map(([, name, version]) => [name, version]));
+  for (const name of ["tauri", "tauri-runtime", "tauri-runtime-wry"]) {
+    assert.equal(resolved.get(name)?.split(".").slice(0, 2).join("."), apiMajorMinor,
+      `${name} in Cargo.lock must stay on the npm API major/minor`);
+  }
 });
 
 test("compact import reserves space for physical rows and accessible range actions", async () => {
