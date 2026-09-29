@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { cleanup, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { spawn } from "node:child_process";
@@ -13,14 +13,9 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args) => bridge.invoke(...a
 import { App } from "../src/App";
 configure({ asyncUtilTimeout: 15000 });
 
-let child, folder, first, second, queue, original, pending, lines, requests, stopService;
-beforeEach(async () => {
-  folder = await mkdtemp(join(tmpdir(), "petrolab-workspace-ui-"));
-  first = join(folder, "first.csv"); second = join(folder, "second.csv");
-  original = "Analysis,Fe (wt.%),F (wt.%)\nA1,10,<DL\nA2,11,n.d.\n";
-  await writeFile(first, original);
-  await writeFile(second, "Analysis,SiO2 [wt.%]\nB1,40\nB2,41\n");
-  queue = [first, second]; pending = new Map(); requests = [];
+let child, folder, first, second, queue, original, pending, lines, requests, stopService, stderr;
+beforeAll(async () => {
+  pending = new Map();
   const pythonPath = resolve(process.cwd(), "../src");
   const pathSeparator = process.platform === "win32" ? ";" : ":";
   child = spawn("python", ["-m", "petrolab.ndjson_service"], {
@@ -35,7 +30,7 @@ beforeEach(async () => {
   const service = child;
   const callbacks = pending;
   let closingService = false;
-  let stderr = '';
+  stderr = '';
   service.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); });
   const rejectPending = error => {
     for (const callback of callbacks.values()) callback.reject(error);
@@ -60,35 +55,56 @@ beforeEach(async () => {
     requests.push(args.envelope);
     if (closingService || service.exitCode !== null) throw new Error('Python service is closed');
     return new Promise((resolve, reject) => {
-      callbacks.set(args.envelope.request_id, { resolve, reject });
+      const timer = setTimeout(() => {
+        callbacks.delete(args.envelope.request_id);
+        reject(new Error(`Python service did not answer ${args.envelope.command} in 30 s: ${stderr}`));
+      }, 30000);
+      callbacks.set(args.envelope.request_id, {
+        resolve: value => { clearTimeout(timer); resolve(value); },
+        reject: error => { clearTimeout(timer); reject(error); },
+      });
       service.stdin.write(JSON.stringify(args.envelope) + "\n", error => {
-        if (error) { callbacks.delete(args.envelope.request_id); reject(error); }
+        if (error) { callbacks.delete(args.envelope.request_id); clearTimeout(timer); reject(error); }
       });
     });
   };
-  window.__TAURI_INTERNALS__ = { invoke: () => {} };
   // Wait for scientific imports/startup before timing user interactions on Windows.
+  requests = [];
   await bridge.invoke('petrolab_command', { envelope: { protocol_version: '1.0',
     request_id: crypto.randomUUID(), command: 'formula.methods.list', payload: {} } });
 }, 60000);
 
+beforeEach(async () => {
+  folder = await mkdtemp(join(tmpdir(), "petrolab-workspace-ui-"));
+  first = join(folder, "first.csv"); second = join(folder, "second.csv");
+  original = "Analysis,Fe (wt.%),F (wt.%)\nA1,10,<DL\nA2,11,n.d.\n";
+  await writeFile(first, original);
+  await writeFile(second, "Analysis,SiO2 [wt.%]\nB1,40\nB2,41\n");
+  queue = [first, second]; requests = [];
+  window.__TAURI_INTERNALS__ = { invoke: () => {} };
+});
+
 afterEach(async () => {
   cleanup();
+  await waitFor(() => expect(pending.size).toBe(0), { timeout: 30000 });
+  delete window.__TAURI_INTERNALS__;
+  await rm(folder, { recursive: true, force: true });
+}, 35000);
+
+afterAll(async () => {
   stopService();
   await new Promise((resolve) => { if (child.exitCode !== null) resolve(); else child.once("exit", resolve); });
   lines.close();
-  delete window.__TAURI_INTERNALS__;
-  await rm(folder, { recursive: true, force: true });
-});
+}, 30000);
 
 async function enabledButton(name) {
-  // The integration bridge starts a real Python process. On a busy Windows
+  // The integration bridge shares a real Python process. On a busy Windows
   // runner its valid response can exceed Testing Library's 1 s default. Re-query
   // on every retry: importing another source can replace the entire button node.
   try {
     await waitFor(() => expect(screen.getByRole("button", { name }).disabled).toBe(false), { timeout: 20000 });
   } catch {
-    throw new Error(`Button stayed disabled: ${name}; mapping changes: ${document.querySelector('.mapping-summary')?.textContent || 'none'}; note: ${document.querySelector('.workspace-commit-note')?.textContent || 'none'}; activity: ${document.querySelector('.app-activity')?.textContent || 'none'}; pending requests: ${pending.size}`);
+    throw new Error(`Button stayed disabled: ${name}; mapping changes: ${document.querySelector('.mapping-summary')?.textContent || 'none'}; note: ${document.querySelector('.workspace-commit-note')?.textContent || 'none'}; activity: ${document.querySelector('.app-activity')?.textContent || 'none'}; pending commands: ${requests.filter(request => pending.has(request.request_id)).map(request => request.command).join(', ') || 'none'}; service exit: ${child.exitCode}; stderr: ${stderr}`);
   }
   return screen.getByRole("button", { name });
 }
