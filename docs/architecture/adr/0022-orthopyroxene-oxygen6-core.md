@@ -1,15 +1,17 @@
 # ADR 0022 — Draft orthopyroxene 6 O core boundary
 
-Date: 2026-09-26. Status: Python scientific core and independent tests only;
-not yet offered by Formula Registry or desktop UI.
+Date: 2026-09-26. Status: draft method connected to the existing Formula
+Registry, persistence and desktop preview/save/history flow.
 
 ## Decision and limits
 
 Continue the approved orthopyroxene item in master specification §11 and the
-one-family-at-a-time roadmap M3.3. This first slice adds a standalone,
-versioned `orthopyroxene.oxygen6/0.1.0` calculation. It does not add a new
-screen, classification rule, Tauri command, persistence path or user-visible
-method. Existing `clinopyroxene.oxygen6/0.1.0` remains byte-for-byte unchanged.
+one-family-at-a-time roadmap M3.3. The core slice adds a standalone,
+versioned `orthopyroxene.oxygen6/0.1.0` calculation; the next slice connects
+it to the existing Formula Registry, NDJSON preview/save/history and desktop
+panel. It adds no new screen, classification rule, Tauri command or storage
+table. An explicitly accepted orthopyroxene target is required. Existing
+`clinopyroxene.oxygen6/0.1.0` remains byte-for-byte unchanged.
 The similar calculation is deliberately frozen in a separate source file so a
 future correction to one method cannot silently alter the other's pinned
 implementation. A shared algorithm may be introduced only with explicit new
@@ -44,11 +46,13 @@ the method reports the sum of the displayed inputs and makes no unexplained
 adjustment. Domain and Fe-basis failures, immutable inputs and finite JSON
 outputs are also tested.
 
-## Next vertical slice
+## Integration and remaining acceptance
 
-Before exposing this method: pin its implementation SHA-256 in a bundled
-Scientific Method Definition, add explicit accepted `orthopyroxene` target
-gating and NDJSON preview/save/history round-trip, verify stale and original
-source invariance, and complete a real-service UI scenario at 1363×936 with
-screenshots. AT-44 is the planned acceptance case. Do not promote to
+The bundled Scientific Method Definition pins implementation SHA-256
+`90e6999502d392087e546ba2f5311b47fc57bc3f590c9292eec3180aa47cf0dd`.
+Explicit accepted-target gating, preview/save/reopen, Measurement ID provenance,
+mol.% derived units, source immutability and stale-on-input-change are covered
+by Python tests. A real-service UI test exercises import → accepted suggestion
+→ one-button preview → save/history. AT-44 still requires a native 1363×936
+visual check and screenshots before full release acceptance. Do not promote to
 `validated` solely because the ideal and one published benchmark pass.

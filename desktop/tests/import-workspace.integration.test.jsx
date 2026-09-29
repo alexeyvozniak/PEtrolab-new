@@ -462,3 +462,25 @@ test('real clinopyroxene formula is available after explicit assignment and save
   await screen.findByText('Сохранённые расчёты · 1');
   expect(await readFile(second, 'utf8')).toBe(source);
 }, 60000);
+
+test('real orthopyroxene formula keeps source values and saves published Wo–En–Fs', async () => {
+  const source = 'Analysis,Mineral,SiO2 (wt.%),TiO2 (wt.%),Al2O3 (wt.%),Cr2O3 (wt.%),FeO (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%)\nOpx-1,enstatite,52.43,0.21,9.10,0.65,6.73,30.39,1.19,0.06,0\n';
+  await writeFile(second, source);
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+  await user.click(await enabledButton('2 · Проверить минералы'));
+  await user.click(await enabledButton('Принять предложение'));
+  await user.click(await enabledButton('Сохранить импорт в проект'));
+  await screen.findByRole('heading', { name: 'Анализы' });
+  await user.click(await enabledButton('Минералы'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  await user.click(await enabledButton('Рассчитать формулу'));
+  const table = await screen.findByRole('table', { name: 'Рассчитанные значения' });
+  for (const field of ['Wo', 'En', 'Fs']) expect(within(table).getByText(field)).toBeTruthy();
+  expect(within(table).getAllByText('mol.%')).toHaveLength(3);
+  await user.click(await enabledButton('Сохранить результат формулы'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  expect(await readFile(second, 'utf8')).toBe(source);
+}, 60000);

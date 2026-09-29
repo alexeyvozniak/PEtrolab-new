@@ -17,9 +17,11 @@ from petrolab.import_preview import ImportCommandError
 from petrolab.desktop_workflow import list_project_mineral_identifications, decide_project_mineral_assignment
 from petrolab.formula_methods import (IMPLEMENTATION_SHA256, METHOD_ID, METHOD_VERSION,
                                       MICA_IMPLEMENTATION_SHA256, CPX_IMPLEMENTATION_SHA256,
+                                      OPX_IMPLEMENTATION_SHA256,
                                       list_methods, method_definition)
 from petrolab.formula_workflow import preview_formula, save_formula, list_formula_runs
 from petrolab.clinopyroxene_formula import METHOD_ID as CPX_METHOD_ID, METHOD_VERSION as CPX_METHOD_VERSION
+from petrolab.orthopyroxene_formula import METHOD_ID as OPX_METHOD_ID, METHOD_VERSION as OPX_METHOD_VERSION
 from petrolab.mica_formula import METHOD_ID as MICA_METHOD_ID, METHOD_VERSION as MICA_METHOD_VERSION
 from petrolab.olivine_formula import calculate_olivine
 from petrolab.ndjson_service import handle_request
@@ -273,6 +275,45 @@ class ClinopyroxeneFormulaPersistenceTests(unittest.TestCase):
             self.assertEqual(list_formula_runs(database, item['analysis_id'])['runs'][0]['run']['status'], 'stale')
 
 
+class OrthopyroxeneFormulaPersistenceTests(unittest.TestCase):
+    def test_explicit_assignment_preview_save_reopen_and_stale(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'opx.csv'
+            source.write_text(
+                'Analysis,Mineral,SiO2 (wt.%),TiO2 (wt.%),Al2O3 (wt.%),Cr2O3 (wt.%),FeO (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%)\n'
+                'Opx-1,enstatite,52.43,0.21,9.10,0.65,6.73,30.39,1.19,0.06,0\n', encoding='utf-8')
+            original = source.read_bytes()
+            database = root / 'project.sqlite'
+            recipe = ImportWorkspaceStore().command('create', {'sources': [
+                {'staged_path': str(source)}]})['active']['recipe']
+            apply_import_plan(database, source, recipe)
+            item = list_project_mineral_identifications(database)['identifications'][0]
+            args = (database, [item['analysis_id']], OPX_METHOD_ID, OPX_METHOD_VERSION,
+                    {'fe_mode': 'all_fe2'})
+            self.assertFalse(preview_formula(*args)['can_save'])
+            decide_project_mineral_assignment(database, item['analysis_id'], 'enstatite',
+                item['input_fingerprint'], item['ruleset_version'], 'Проверено как ортопироксен')
+            preview = preview_formula(*args)
+            self.assertTrue(preview['can_save'], preview)
+            self.assertEqual(preview['method']['status'], 'draft')
+            self.assertAlmostEqual(preview['results'][0]['values']['Wo'], 2.45, delta=.05)
+            self.assertAlmostEqual(preview['results'][0]['values']['En'], 86.76, delta=.05)
+            self.assertFalse(preview_formula(database, [item['analysis_id']], CPX_METHOD_ID,
+                                             CPX_METHOD_VERSION, {'fe_mode': 'all_fe2'})['can_save'])
+            saved = save_formula(*args, preview['input_fingerprint'])['run']
+            reopened = list_formula_runs(database, item['analysis_id'])['runs'][0]
+            self.assertEqual(reopened['run']['id'], saved['id'])
+            self.assertEqual(reopened['run']['status'], 'current')
+            self.assertEqual({v['unit'] for v in reopened['derived_values']
+                              if v['field'] in {'Wo', 'En', 'Fs'}}, {'mol.%'})
+            self.assertEqual(source.read_bytes(), original)
+            with closing(open_project(database)) as connection:
+                connection.execute("UPDATE measurement SET raw_token='29' WHERE canonical_field='MgO'")
+                connection.commit()
+            self.assertEqual(list_formula_runs(database, item['analysis_id'])['runs'][0]['run']['status'], 'stale')
+
+
 class MicaFormulaPersistenceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
@@ -304,7 +345,7 @@ class MicaFormulaPersistenceTests(unittest.TestCase):
         catalog = list_methods()['methods']
         self.assertEqual([(m['method_id'], m['version']) for m in catalog],
                          [(METHOD_ID, METHOD_VERSION), (MICA_METHOD_ID, MICA_METHOD_VERSION),
-                          (CPX_METHOD_ID, CPX_METHOD_VERSION)])
+                          (CPX_METHOD_ID, CPX_METHOD_VERSION), (OPX_METHOD_ID, OPX_METHOD_VERSION)])
         self.assertEqual(method_definition()['definition_fingerprint'],
                          '872567da3c7195d75c64790f14aa979fcf8ba6677a910a0a742eb9f2dcd0ed87')
         root = Path(__file__).parents[1] / 'schemas'
@@ -321,6 +362,9 @@ class MicaFormulaPersistenceTests(unittest.TestCase):
         path = Path(__file__).parents[1] / 'src/petrolab/clinopyroxene_formula.py'
         self.assertEqual(hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest(),
                          CPX_IMPLEMENTATION_SHA256)
+        path = Path(__file__).parents[1] / 'src/petrolab/orthopyroxene_formula.py'
+        self.assertEqual(hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest(),
+                         OPX_IMPLEMENTATION_SHA256)
 
     def test_catalog_filters_by_controlled_accepted_assignment(self):
         olivine = list_methods('olivine')['methods']
@@ -343,7 +387,9 @@ class MicaFormulaPersistenceTests(unittest.TestCase):
         self.assertEqual(list_methods('quartz')['methods'], [])
         self.assertEqual([m['method_id'] for m in list_methods('diopside')['methods']], [CPX_METHOD_ID])
         self.assertEqual([m['method_id'] for m in list_methods('clinopyroxene')['methods']], [CPX_METHOD_ID])
-        self.assertEqual(list_methods('orthopyroxene')['methods'], [])
+        self.assertEqual([m['method_id'] for m in list_methods('enstatite')['methods']], [OPX_METHOD_ID])
+        self.assertEqual([m['method_id'] for m in list_methods('orthopyroxene')['methods']], [OPX_METHOD_ID])
+        self.assertEqual(list_methods('pigeonite')['methods'], [])
         response = handle_request({'protocol_version': '1.0', 'request_id': str(uuid.uuid4()),
                                    'command': 'formula.methods.list',
                                    'payload': {'accepted_assignment': 'phlogopite'}})
