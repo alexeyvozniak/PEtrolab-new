@@ -64,10 +64,12 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["spatial_annotation_id", "analytical_point_id", "geometry", "cross_sample_exception_reason"],
+              "required": ["spatial_annotation_id", "analytical_point_id", "point_name", "point_sample_name", "geometry", "cross_sample_exception_reason"],
               "properties": {
                 "spatial_annotation_id": {"type": "string", "format": "uuid"},
                 "analytical_point_id": {"type": "string", "format": "uuid"},
+                "point_name": {"type": "string", "minLength": 1, "maxLength": 200},
+                "point_sample_name": {"type": "string", "minLength": 1, "maxLength": 200},
                 "geometry": {"$ref": "#/$defs/geometry"},
                 "cross_sample_exception_reason": {
                   "oneOf": [{"type": "null"}, {"type": "string", "minLength": 1, "maxLength": 1000}]

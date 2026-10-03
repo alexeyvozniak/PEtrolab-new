@@ -26,6 +26,9 @@ TARGETS = {
     "Ignore": ("ignore", "ignored"),
     "Analysis": ("identity", "identity"),
     "Sample": ("identity", "identity"),
+    "Sample name": ("metadata", "metadata"),
+    "Metadata": ("metadata", "metadata"),
+    "Method": ("metadata", "metadata"),
     "Point": ("identity", "identity"),
     "Mineral": ("metadata", "metadata"),
     "Generation": ("metadata", "metadata"),
@@ -125,6 +128,10 @@ def _apply_mapping_decision(revised: dict[str, Any], decision: dict[str, Any]) -
         if unit not in VALID_UNITS:
             raise ImportCommandError("UNKNOWN_UNIT", "Choose an explicit unit for every measurement.", {"block_id": block_id, "header": source_header, "unit": unit})
         selected_unit = unit
+    elif target == "Metadata":
+        field, selected_unit = str(decision.get('canonical_field') or '').strip(), None
+        if not field:
+            raise ImportCommandError('RECIPE_SCHEMA_INCOMPATIBLE', 'Metadata field name is required.')
     else:
         field, selected_unit = target, None
     mapping.update({

@@ -78,6 +78,15 @@ class NdjsonServiceTests(unittest.TestCase):
                 "payload": {"project_database_path": database, "source_path": str(FIXTURE), "recipe": fixture_recipe()},
             })
             self.assertEqual(response["result"]["analysis_count"], 8)
+            listed = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "project.analyses.list",
+                "payload": {"project_database_path": database, "limit": 2, "offset": 0},
+            })["result"]
+            exact = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "project.analyses.list",
+                "payload": {"project_database_path": database, "limit": 2, "offset": 0, "analysis_ids": [listed["analyses"][1]["analysis_id"]]},
+            })["result"]
+            self.assertEqual([row["analysis_id"] for row in exact["analyses"]], [listed["analyses"][1]["analysis_id"]])
             status = handle_request({
                 "protocol_version": "1.0",
                 "request_id": str(uuid.uuid4()),
@@ -121,6 +130,11 @@ class NdjsonServiceTests(unittest.TestCase):
                 "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.create",
                 "payload": {"project_database_path": database, "sample_name": "KIV-2", "point_name": "P-07", "analysis_ids": analysis_ids, "link_type": "same_point"},
             })["result"]
+            points = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.list",
+                "payload": {"project_database_path": database},
+            })["result"]
+            self.assertEqual(points["items"][0]["analytical_point_id"], point["analytical_point_id"])
             image = directory / "KIV-2_BSE.png"
             write_png(image)
             inspection = handle_request({
@@ -128,6 +142,11 @@ class NdjsonServiceTests(unittest.TestCase):
                 "payload": {"source_paths": [str(image)]},
             })["result"]
             self.assertEqual(inspection["items"][0]["width_px"], 12)
+            preview = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "media.preview",
+                "payload": {"source_path": str(image), "max_width_px": 400, "max_height_px": 400},
+            })["result"]
+            self.assertTrue(preview["preview_data_url"].startswith("data:image/png;base64,"))
             assignments = [{
                 "source_path": str(image), "ownership_mode": "managed_copy", "media_type": "BSE",
                 "sample_name": "KIV-2", "thin_section_name": "KIV-2-TS1",
@@ -141,11 +160,102 @@ class NdjsonServiceTests(unittest.TestCase):
                 "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "media.import.plan",
                 "payload": {"project_database_path": database, "assignments": assignments},
             })["result"]
+            self.assertEqual(plan["items"][0]["placements"][0]["point_name"], "P-07")
             applied = handle_request({
                 "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "media.import.apply",
                 "payload": {"project_database_path": database, "plan": plan},
             })["result"]
             self.assertEqual(applied["spatial_annotation_count"], 1)
+            library = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "media.list",
+                "payload": {"project_database_path": database, "query": "bse", "limit": 10, "offset": 0},
+            })["result"]
+            self.assertEqual(library["total"], 1)
+            self.assertEqual(library["items"][0]["availability"], "available")
+            annotation_id = plan["items"][0]["placements"][0]["spatial_annotation_id"]
+            unlinked = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.annotation.remove",
+                "payload": {
+                    "project_database_path": database,
+                    "analytical_point_id": point["analytical_point_id"],
+                    "expected_analysis_ids": point["analysis_ids"],
+                    "expected_spatial_annotation_ids": [annotation_id],
+                    "spatial_annotation_id": annotation_id,
+                    "reason": "Метка поставлена не на ту физическую точку",
+                },
+            })["result"]
+            self.assertEqual(unlinked["effect"], "annotation_link_removed")
+            restored = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "operation_journal.undo",
+                "payload": {"project_database_path": database, "operation_id": unlinked["operation"]["operation_id"]},
+            })["result"]
+            self.assertEqual(restored["effect"], "annotation_link_restored")
+
+    def test_point_retraction_journal_and_undo_are_available_through_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database = str(Path(directory_name) / "project.sqlite")
+            handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "import.plan.apply",
+                "payload": {"project_database_path": database, "source_path": str(FIXTURE), "recipe": fixture_recipe()},
+            })
+            import sqlite3
+            with closing(sqlite3.connect(database)) as connection:
+                analysis_ids = [row[0] for row in connection.execute("SELECT analysis_id FROM analysis ORDER BY rowid LIMIT 3")]
+            point = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.create",
+                "payload": {"project_database_path": database, "sample_name": "KIV-2", "point_name": "P-07", "analysis_ids": analysis_ids[:2], "link_type": "same_point"},
+            })["result"]
+
+            retired = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.retire",
+                "payload": {
+                    "project_database_path": database,
+                    "analytical_point_id": point["analytical_point_id"],
+                    "expected_analysis_ids": point["analysis_ids"],
+                    "expected_spatial_annotation_ids": [],
+                    "reason": "Связаны разные физические точки",
+                },
+            })["result"]
+            self.assertEqual(retired["operation"]["action_kind"], "analytical_point.retire")
+            self.assertEqual(handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.list",
+                "payload": {"project_database_path": database},
+            })["result"]["total"], 0)
+
+            journal = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "operation_journal.list",
+                "payload": {"project_database_path": database, "limit": 10},
+            })["result"]
+            self.assertEqual(journal["items"][0]["operation_id"], retired["operation"]["operation_id"])
+            restored = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "operation_journal.undo",
+                "payload": {"project_database_path": database, "operation_id": retired["operation"]["operation_id"]},
+            })["result"]
+            self.assertEqual(restored["effect"], "restored")
+            self.assertEqual(handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.list",
+                "payload": {"project_database_path": database},
+            })["result"]["total"], 1)
+
+            added = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "analytical_point.analysis.add",
+                "payload": {
+                    "project_database_path": database,
+                    "analytical_point_id": point["analytical_point_id"],
+                    "expected_analysis_ids": point["analysis_ids"],
+                    "expected_spatial_annotation_ids": [],
+                    "analysis_id": analysis_ids[2],
+                    "link_type": "same_zone",
+                    "reason": "Общая зона подтверждена повторной проверкой",
+                },
+            })["result"]
+            self.assertEqual(added["effect"], "analysis_added")
+            self.assertEqual(len(added["analysis_ids"]), 3)
+            removed_again = handle_request({
+                "protocol_version": "1.0", "request_id": str(uuid.uuid4()), "command": "operation_journal.undo",
+                "payload": {"project_database_path": database, "operation_id": added["operation"]["operation_id"]},
+            })["result"]
+            self.assertEqual(removed_again["effect"], "analysis_removed")
 
 
 if __name__ == "__main__":

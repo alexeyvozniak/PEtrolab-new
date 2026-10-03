@@ -11,6 +11,7 @@ jobs:
     runs-on: windows-latest
     env:
       PYTHONUTF8: "1"
+      PYTHONPATH: ${{ github.workspace }}\\src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -77,6 +78,12 @@ jobs:
           npm run test:sites
           npm run test:tauri-contract
           npm run test:ui
+      - name: Test Tauri shell
+        working-directory: desktop
+        run: |
+          python ../scripts/generate_tauri_icon.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path src-tauri/Cargo.toml
       - name: Build Windows installer
         working-directory: desktop
         run: npm run tauri build

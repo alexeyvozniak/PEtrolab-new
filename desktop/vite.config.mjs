@@ -11,6 +11,14 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     allowedHosts: ["terminal.local"],
+    watch: {
+      // Windows locks Rust executables/DLLs during builds and execution.
+      // Keep generated native artifacts outside Vite's development watcher.
+      ignored: [
+        "**/src-tauri/target/**",
+        "**/src-tauri/binaries/**",
+      ],
+    },
     warmup: {
       clientFiles: ["./src/main.jsx"],
     },

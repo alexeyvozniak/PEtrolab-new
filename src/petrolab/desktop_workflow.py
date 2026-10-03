@@ -345,6 +345,94 @@ def apply_bulk_unit_scope(source_path: str | Path, recipe: dict[str, Any], bulk_
     return {**revised, "bulk_scope_id": bulk_scope_id, "applied_decision_count": len(decisions)}
 
 
+def bulk_unit_override_scopes(source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
+    """Return exact scopes for correcting an already assigned measurement unit.
+
+    The service, rather than the client, decides what "all" means.  A scope is
+    limited to one source, current unit, orientation and Fe semantic group so a
+    convenient correction cannot broaden into a different scientific meaning.
+    """
+    inspection = inspect_source(source_path)
+    validate_recipe(inspection, recipe)
+    grouped: dict[tuple[str, str, str], list[tuple[dict[str, Any], dict[str, Any]]]] = defaultdict(list)
+    for section in recipe.get("sections", []):
+        if not section.get("enabled", True):
+            continue
+        orientation = str(section.get("orientation", "rows_are_analyses"))
+        for mapping in section.get("mappings", []):
+            unit = mapping.get("unit")
+            canonical_field = mapping.get("canonical_field")
+            if mapping.get("target_role") != "measurement" or not isinstance(unit, str) or not unit:
+                continue
+            fe_group = f"iron:{canonical_field}" if canonical_field in IRON_FIELDS else "non_iron"
+            grouped[(orientation, unit, fe_group)].append((section, mapping))
+
+    scopes: list[dict[str, Any]] = []
+    recipe_fingerprint = semantic_fingerprint(recipe)
+    for (orientation, current_unit, fe_group), pairs in sorted(
+        grouped.items(), key=lambda item: (item[0][1], item[0][0], item[0][2])
+    ):
+        targets = []
+        for section, mapping in pairs:
+            axis = str(mapping.get("source_axis", "column"))
+            index_key = "source_column_index" if axis == "column" else "source_row_index"
+            targets.append({
+                "block_id": section["block_id"],
+                "source_axis": axis,
+                "source_index": mapping[index_key],
+                "canonical_field": mapping["canonical_field"],
+            })
+        identity = {
+            "source_fingerprint": inspection.fingerprint,
+            "recipe_fingerprint": recipe_fingerprint,
+            "decision_kind": "measurement_unit_override",
+            "orientation": orientation,
+            "current_unit": current_unit,
+            "fe_group": fe_group,
+            "targets": targets,
+        }
+        scope_id = hashlib.sha256(json.dumps(
+            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")).hexdigest()[:24]
+        scopes.append({
+            "bulk_scope_id": scope_id,
+            "decision_kind": "measurement_unit_override",
+            "orientation": orientation,
+            "current_unit": current_unit,
+            "fe_group": fe_group,
+            "block_count": len({section["block_id"] for section, _ in pairs}),
+            "field_count": len(targets),
+            "sheet_names": sorted({str(section["sheet_name"]) for section, _ in pairs}),
+            "fields": sorted({str(target["canonical_field"]) for target in targets}),
+            "targets": targets,
+        })
+    return {"source_fingerprint": inspection.fingerprint, "recipe_fingerprint": recipe_fingerprint, "scopes": scopes}
+
+
+def apply_bulk_unit_override_scope(
+    source_path: str | Path,
+    recipe: dict[str, Any],
+    bulk_scope_id: str,
+    unit: str,
+) -> dict[str, Any]:
+    if not isinstance(bulk_scope_id, str) or not bulk_scope_id:
+        raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Bulk scope identifier is required.")
+    scopes = bulk_unit_override_scopes(source_path, recipe)["scopes"]
+    scope = next((item for item in scopes if item["bulk_scope_id"] == bulk_scope_id), None)
+    if scope is None:
+        raise ImportCommandError("STALE_BULK_SCOPE", "Bulk scope no longer matches the current source and recipe.")
+    decisions = [{
+        "block_id": target["block_id"],
+        "source_axis": target["source_axis"],
+        "source_index": target["source_index"],
+        "target": "Measurement",
+        "canonical_field": target["canonical_field"],
+        "unit": unit,
+    } for target in scope["targets"]]
+    revised = revise_import_mappings(source_path, recipe, decisions)
+    return {**revised, "bulk_scope_id": bulk_scope_id, "applied_decision_count": len(decisions)}
+
+
 def bulk_ignore_scopes(source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
     """Return the exact current set of unrecognized fields for explicit skip.
 
@@ -422,19 +510,66 @@ def _active_import_filter() -> str:
     return "b.status = 'applied' AND x.import_batch_id IS NULL"
 
 
-def list_project_analyses(database_path: str | Path, limit: int = 500, offset: int = 0) -> dict[str, Any]:
+def _latest_mineral_decision(connection, analysis_id: str) -> dict[str, Any] | None:
+    row = connection.execute(
+        """SELECT decision_id, decision_kind, target, input_fingerprint_sha256,
+                  ruleset_version, reason, created_at
+           FROM mineral_assignment_decision
+           WHERE analysis_id = ? ORDER BY rowid DESC LIMIT 1""",
+        (analysis_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "decision_id": row["decision_id"],
+        "target": row["target"],
+        "origin": "user_accepted_after_import" if row["decision_kind"] != "clear" else "user_cleared_after_import",
+        "decision_kind": row["decision_kind"],
+        "decided_at": row["created_at"],
+        "input_fingerprint": row["input_fingerprint_sha256"],
+        "ruleset_version": row["ruleset_version"],
+        "reason": row["reason"],
+    }
+
+
+def list_project_analyses(
+    database_path: str | Path,
+    limit: int = 500,
+    offset: int = 0,
+    analysis_id: str | None = None,
+    analysis_ids: list[str] | None = None,
+    _connection=None,
+) -> dict[str, Any]:
     """Return active Analysis/Measurement rows plus lossless source metadata."""
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))
-    connection = open_project(database_path)
+    connection = _connection if _connection is not None else open_project(database_path)
     try:
         active_filter = _active_import_filter()
+        if analysis_id is not None and analysis_ids is not None:
+            raise ValueError("analysis_id and analysis_ids are mutually exclusive")
+        if analysis_ids is not None:
+            if (
+                not isinstance(analysis_ids, list)
+                or not 1 <= len(analysis_ids) <= 500
+                or not all(isinstance(item, str) and item for item in analysis_ids)
+            ):
+                raise ValueError("analysis_ids")
+            requested_ids = list(dict.fromkeys(analysis_ids))
+            identity_filter = f" AND a.analysis_id IN ({', '.join('?' for _ in requested_ids)})"
+            identity_params = tuple(requested_ids)
+            limit = len(requested_ids)
+            offset = 0
+        else:
+            identity_filter = " AND a.analysis_id = ?" if analysis_id else ""
+            identity_params = (analysis_id,) if analysis_id else ()
         total = connection.execute(
             f"""SELECT COUNT(*)
                 FROM analysis a
                 JOIN import_batch b ON b.import_batch_id = a.import_batch_id
                 LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-                WHERE {active_filter}"""
+                WHERE {active_filter}{identity_filter}""",
+            identity_params,
         ).fetchone()[0]
         rows = connection.execute(
             f"""SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number,
@@ -445,10 +580,10 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                 JOIN import_batch b ON b.import_batch_id = a.import_batch_id
                 JOIN import_recipe_revision r ON r.recipe_revision_id = b.recipe_revision_id
                 LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-                WHERE {active_filter}
+                WHERE {active_filter}{identity_filter}
                 ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number, a.source_column_number
                 LIMIT ? OFFSET ?""",
-            (limit, offset),
+            (*identity_params, limit, offset),
         ).fetchall()
         result: list[dict[str, Any]] = []
         for row in rows:
@@ -497,18 +632,23 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                 source_metadata[key] = metadata["raw_token"]
 
             measurement_rows = connection.execute(
-                """SELECT canonical_field, unit, raw_token, qualifier, detection_limit,
-                          source_column_name, source_column_index, measurement_set, method, source_cell
+                """SELECT measurement_id, canonical_field, unit, raw_token, qualifier, detection_limit,
+                          source_column_name, source_column_index, measurement_set, method, source_cell,
+                          value_status, reported_fe_form, fe_handling
                    FROM measurement WHERE analysis_id = ? ORDER BY source_column_index, rowid""",
                 (row["analysis_id"],),
             ).fetchall()
             measurement_list = [
                 {
+                    "measurement_id": measurement["measurement_id"],
                     "field": measurement["canonical_field"],
                     "raw_token": measurement["raw_token"],
                     "unit": measurement["unit"],
                     "qualifier": measurement["qualifier"],
                     "detection_limit": measurement["detection_limit"],
+                    "value_status": measurement["value_status"],
+                    "reported_fe_form": measurement["reported_fe_form"],
+                    "fe_handling": measurement["fe_handling"],
                     "source_header": measurement["source_column_name"],
                     "source_index": measurement["source_column_index"],
                     "source_cell": measurement["source_cell"],
@@ -531,7 +671,16 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                     if key in measurement_map:
                         key = f"{key} [{seen[field]}]"
                 measurement_map[key] = measurement
+            semantic_row = connection.execute('SELECT * FROM analysis_import_semantics WHERE analysis_id = ?', (row['analysis_id'],)).fetchone()
+            semantic_evidence = {key.removesuffix('_json'): json.loads(semantic_row[key]) for key in semantic_row.keys() if key.endswith('_json') and semantic_row[key]} if semantic_row else {}
+            latest_mineral_decision = _latest_mineral_decision(connection, row["analysis_id"])
+            if latest_mineral_decision is not None:
+                if latest_mineral_decision["decision_kind"] == "clear":
+                    semantic_evidence.pop("mineral_assignment", None)
+                else:
+                    semantic_evidence["mineral_assignment"] = latest_mineral_decision
             result.append({
+                **semantic_evidence,
                 "analysis_id": row["analysis_id"],
                 "source_id": row["source_id"],
                 "source_name": row["source_name"],
@@ -553,31 +702,70 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
                WHERE b.status = 'applied' AND x.import_batch_id IS NULL"""
         ).fetchone()[0]
-        batch_count = connection.execute(
-            """SELECT COUNT(*)
-               FROM import_batch b
-               LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-               WHERE b.status = 'applied' AND x.import_batch_id IS NULL"""
-        ).fetchone()[0]
-        latest = connection.execute(
-            """SELECT b.import_batch_id, b.source_id, b.applied_at, s.display_name,
-                      COUNT(a.analysis_id) AS analysis_count
-               FROM import_batch b
-               JOIN source_file s ON s.source_id = b.source_id
-               LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
-               LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-               WHERE b.status = 'applied' AND x.import_batch_id IS NULL
-               GROUP BY b.import_batch_id, b.source_id, b.applied_at, s.display_name
-               ORDER BY b.applied_at DESC, b.rowid DESC
-               LIMIT 1"""
-        ).fetchone()
-        latest_import = None if latest is None else {
-            "import_batch_id": latest["import_batch_id"],
-            "source_id": latest["source_id"],
-            "source_name": latest["display_name"],
-            "analysis_count": latest["analysis_count"],
-            "applied_at": latest["applied_at"],
-        }
+        has_workspace_commit = any(row[1] == 'workspace_commit_id' for row in connection.execute('PRAGMA table_info(import_batch)'))
+        if has_workspace_commit:
+            batch_count = connection.execute(
+                """SELECT COUNT(DISTINCT COALESCE(b.workspace_commit_id, b.import_batch_id))
+                   FROM import_batch b
+                   LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                   WHERE b.status = 'applied' AND x.import_batch_id IS NULL"""
+            ).fetchone()[0]
+            latest = connection.execute(
+                """SELECT MIN(b.import_batch_id) AS import_batch_id,
+                          COALESCE(b.workspace_commit_id, b.import_batch_id) AS workspace_commit_id,
+                          MIN(b.source_id) AS source_id, MAX(b.applied_at) AS applied_at,
+                          GROUP_CONCAT(DISTINCT s.display_name) AS source_names,
+                          COUNT(DISTINCT b.source_id) AS source_count,
+                          COUNT(a.analysis_id) AS analysis_count
+                   FROM import_batch b
+                   JOIN source_file s ON s.source_id = b.source_id
+                   LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
+                   LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                   WHERE b.status = 'applied' AND x.import_batch_id IS NULL
+                   GROUP BY COALESCE(b.workspace_commit_id, b.import_batch_id)
+                   ORDER BY MAX(b.applied_at) DESC, MAX(b.rowid) DESC
+                   LIMIT 1"""
+            ).fetchone()
+            latest_import = None if latest is None else {
+                "import_batch_id": latest["import_batch_id"],
+                "workspace_commit_id": latest["workspace_commit_id"],
+                "source_id": latest["source_id"],
+                "source_name": latest["source_names"] if latest["source_count"] == 1 else f"{latest['source_count']} источника",
+                "source_names": [row[0] for row in connection.execute(
+                    """SELECT s.display_name FROM import_batch b
+                       JOIN source_file s ON s.source_id = b.source_id
+                       LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                       WHERE b.status = 'applied' AND x.import_batch_id IS NULL
+                         AND COALESCE(b.workspace_commit_id, b.import_batch_id) = ?
+                       ORDER BY b.rowid""",
+                    (latest["workspace_commit_id"],),
+                )],
+                "source_count": latest["source_count"],
+                "analysis_count": latest["analysis_count"],
+                "applied_at": latest["applied_at"],
+            }
+        else:
+            batch_count = connection.execute(
+                """SELECT COUNT(*) FROM import_batch b
+                   LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                   WHERE b.status = 'applied' AND x.import_batch_id IS NULL"""
+            ).fetchone()[0]
+            latest = connection.execute(
+                """SELECT b.import_batch_id, b.source_id, b.applied_at, s.display_name,
+                          COUNT(a.analysis_id) AS analysis_count
+                   FROM import_batch b JOIN source_file s ON s.source_id = b.source_id
+                   LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
+                   LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                   WHERE b.status = 'applied' AND x.import_batch_id IS NULL
+                   GROUP BY b.import_batch_id, b.source_id, b.applied_at, s.display_name
+                   ORDER BY b.applied_at DESC, b.rowid DESC LIMIT 1"""
+            ).fetchone()
+            latest_import = None if latest is None else {
+                "import_batch_id": latest["import_batch_id"], "workspace_commit_id": None,
+                "source_id": latest["source_id"], "source_name": latest["display_name"],
+                "source_names": [latest["display_name"]], "source_count": 1,
+                "analysis_count": latest["analysis_count"], "applied_at": latest["applied_at"],
+            }
         return {
             "total": total,
             "returned": len(result),
@@ -589,4 +777,131 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
             "analyses": result,
         }
     finally:
+        if _connection is None:
+            connection.close()
+
+
+def list_project_mineral_identifications(database_path: str | Path, limit: int = 500, offset: int = 0) -> dict[str, Any]:
+    """Re-evaluate active imported analyses without changing stored source data.
+
+    This is an explicit review projection: suggestions are calculated from the
+    lossless Measurement rows and never silently become accepted assignments.
+    """
+    projection = list_project_analyses(database_path, limit, offset)
+    from .mineral_verification import mineral_options, verify_record
+
+    identifications: list[dict[str, Any]] = []
+    for analysis in projection["analyses"]:
+        reported = analysis.get("reported_mineral")
+        if not reported:
+            for field, value in analysis.get("source_metadata", {}).items():
+                if str(field).split(" · ", 1)[0].casefold() == "mineral" and value not in (None, ""):
+                    reported = {"value": value, "origin": "source_metadata"}
+                    break
+        verification = verify_record({
+            "preview_id": analysis["analysis_id"],
+            "measurements": analysis.get("measurement_list", []),
+            "reported_mineral": reported,
+        }, accepted=analysis.get("mineral_assignment"))
+        identifications.append({
+            "analysis_id": analysis["analysis_id"],
+            "source_id": analysis["source_id"],
+            "source_name": analysis["source_name"],
+            "sheet_name": analysis["sheet_name"],
+            "source_row_number": analysis["source_row_number"],
+            "source_column_number": analysis["source_column_number"],
+            **verification,
+        })
+    counts = Counter(item["status"] for item in identifications)
+    return {
+        "total": projection["total"],
+        "returned": len(identifications),
+        "offset": projection["offset"],
+        "has_more": projection["has_more"],
+        "identifications": identifications,
+        "mineral_options": mineral_options(),
+        "status_counts": dict(sorted(counts.items())),
+    }
+
+
+def decide_project_mineral_assignment(
+    database_path: str | Path,
+    analysis_id: str,
+    target: str | None,
+    input_fingerprint: str,
+    ruleset_version: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Append an explicit, stale-safe interpretation for one imported analysis."""
+    from .import_apply import _id, _now
+    from .mineral_verification import controlled_label, reported_target, verify_record
+
+    projection = list_project_analyses(database_path, limit=1, analysis_id=analysis_id)
+    if not projection["analyses"]:
+        raise ImportCommandError("ANALYSIS_NOT_FOUND", "Анализ не найден в активном проекте.")
+    analysis = projection["analyses"][0]
+    reported = analysis.get("reported_mineral")
+    if not reported:
+        for field, value in analysis.get("source_metadata", {}).items():
+            if str(field).split(" · ", 1)[0].casefold() == "mineral" and value not in (None, ""):
+                reported = {"value": value, "origin": "source_metadata"}
+                break
+    verification = verify_record({
+        "preview_id": analysis_id,
+        "measurements": analysis.get("measurement_list", []),
+        "reported_mineral": reported,
+    })
+    if verification["input_fingerprint"] != input_fingerprint or verification["ruleset_version"] != ruleset_version:
+        raise ImportCommandError(
+            "STALE_MINERAL_INPUT",
+            "Состав или версия правил изменились. Обновите проверку перед решением.",
+        )
+    if not isinstance(reason, str) or not reason.strip():
+        raise ImportCommandError("MINERAL_REASON_REQUIRED", "Для решения нужно сохранить основание.")
+
+    if target is None:
+        decision_kind = "clear"
+    elif target == verification.get("prediction") and verification.get("confidence") in {"high", "medium"}:
+        decision_kind = "accept_suggestion"
+    elif target == reported_target(reported):
+        decision_kind = "keep_reported"
+    elif controlled_label(target):
+        target = controlled_label(target)
+        decision_kind = "manual_assignment"
+    else:
+        raise ImportCommandError(
+            "MINERAL_TARGET_UNAVAILABLE",
+            "Выберите минерал из справочника. Неизвестное название не может стать подтверждённым назначением.",
+        )
+
+    decision_id = _id()
+    created_at = _now()
+    connection = open_project(database_path)
+    try:
+        with connection:
+            connection.execute(
+                """INSERT INTO mineral_assignment_decision
+                       (decision_id, analysis_id, decision_kind, target,
+                        input_fingerprint_sha256, ruleset_version, reason, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (decision_id, analysis_id, decision_kind, target, input_fingerprint,
+                 ruleset_version, reason.strip(), created_at),
+            )
+    finally:
         connection.close()
+    accepted = None if target is None else {
+        "decision_id": decision_id,
+        "target": target,
+        "origin": "user_accepted_after_import",
+        "decision_kind": decision_kind,
+        "decided_at": created_at,
+        "input_fingerprint": input_fingerprint,
+        "ruleset_version": ruleset_version,
+        "reason": reason.strip(),
+    }
+    updated = verify_record({
+        "preview_id": analysis_id,
+        "measurements": analysis.get("measurement_list", []),
+        "reported_mineral": reported,
+    }, accepted=accepted)
+    return {"analysis_id": analysis_id, "decision": accepted, "verification": updated}

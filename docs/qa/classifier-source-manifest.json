@@ -1,0 +1,12 @@
+{
+  "source": "User-owned PetroLab scientific modules, reused without UI or persistence",
+  "source_snapshot_date": "2026-09-06",
+  "verification": "Byte-for-byte equal to the local source at integration. Portable hashes normalize CRLF to LF.",
+  "sha256_utf8_lf": {
+    "mineral_reference.py": "d63ee3c7b2d19c94e5a50d137fb375476acd8c39b4ecb67efc6cae0cc233fba1",
+    "mineral_recognition.py": "e31ccca7c83352694def6f20b00f1c48a7ff27b914b4e12f1cf3f82a1ec78fdd",
+    "alkaline_mineral_reference.py": "c8b75fa3c30d1f02786d48327769f2953ae9ceb8c44f4187c9427d1f4f2b1223",
+    "alkaline_mineral_recognition.py": "22bfc6aa7b4aef9903f66c5ac6b2efb84f257cbfbb68236e574bdfedd60cde68",
+    "mineral_recognition_extended.py": "50ab8b797bb3d73b14032a524af940e5449d30b4477b75e943eeee103c90e4bb"
+  }
+}

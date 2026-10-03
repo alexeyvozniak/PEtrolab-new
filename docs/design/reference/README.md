@@ -32,7 +32,7 @@
 | Обзор: состояния | `overview-*-v1.png` | пустой, активный, выполняющийся, завершённый и восстановительный контексты |
 | Импорт: состояния | `import-*-v1.png` | колонки, Samples, минералы, Fe-режим и проверка дубликатов |
 | Импорт изображений: точки | `image-import-manual-point-linking-v1.png` | ручное размещение точек Sample на изображении и осознанный выбор другого Sample |
-| Импорт изображений: состояния | `image-import-sample-assignment-v1.png`, `image-import-cross-sample-exception-v1.png`, `image-import-final-review-v1.png` | назначение Sample, подтверждение исключения и итоговая проверка |
+| Импорт изображений: состояния | `image-import-sample-assignment-v2.png`, `image-import-cross-sample-exception-v1.png`, `image-import-final-review-v1.png` | назначение Sample, подтверждение исключения и итоговая проверка |
 | Образец | `sample-overview-approved-v1.png` | паспорт образца, полевой контекст, заметки, связанные данные и экспорт изображений |
 | Поиск | `search-approved-v1.png` | поиск по проекту, табличный результат, массовое выделение и переход к следующему действию |
 | Публикация | `publication-package-approved-v1.png` | большой пакет, профиль журнала, панельные метки и Corel-safe экспорт |

@@ -20,6 +20,8 @@
         {
           "spatial_annotation_id": "019c15f9-5d8a-7e31-89cf-8632391339a2",
           "analytical_point_id": "019c15f9-5d8a-7e31-89cf-8632391339a3",
+          "point_name": "P-07",
+          "point_sample_name": "KIV-2",
           "geometry": {"kind": "point", "x_px": 1820.5, "y_px": 941.25},
           "cross_sample_exception_reason": null
         }

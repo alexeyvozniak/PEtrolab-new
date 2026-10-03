@@ -8,8 +8,8 @@
       "sheets": 7,
       "blocks": 21,
       "planned_analyses": 146,
-      "planned_measurements": 2366,
-      "unresolved_fields": 157,
+      "planned_measurements": 2487,
+      "unresolved_fields": 142,
       "bulk_unit_scopes": 7,
       "bulk_ignore_scopes": 1,
       "duplicate_groups": 16
@@ -89,7 +89,7 @@
       "planned_measurements": 0,
       "unresolved_fields": 48,
       "bulk_unit_scopes": 1,
-      "bulk_ignore_scopes": 1,
+      "bulk_ignore_scopes": 0,
       "duplicate_groups": 0
     },
     {

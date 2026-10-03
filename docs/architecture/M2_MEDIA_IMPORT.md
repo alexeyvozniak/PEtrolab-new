@@ -3,6 +3,10 @@
 **Статус:** архитектурный контракт для утверждённых экранов импорта изображений  
 **Дата:** 2026-08-30
 
+**Реализация UI:** ADR 0017 подключает пакетный выбор файлов и папки,
+read-only предложения из имени файла, массовое подтверждение, ручное
+размещение Point/Rectangle/Square и явный импорт без точек.
+
 ## Утверждённый путь
 
 `Файлы/папка → Sample и Thin Section → BSE/PPL/XPL/custom → ручное размещение → итоговая проверка → атомарное сохранение`.
@@ -13,7 +17,7 @@
 
 ## Границы
 
-- Tauri выбирает один файл, несколько файлов или папку и передаёт Python только явный список путей.
+- Tauri выбирает один файл, несколько файлов или папку и передаёт Python только явный список путей. Для папки он рекурсивно перечисляет поддерживаемые файлы, не следует по ссылкам, сортирует список и ограничивает пакет 5 000 файлами.
 - Python проверяет формат, размеры, SHA-256, назначения и геометрию и создаёт план без записи.
 - React показывает план и preview, но не вычисляет координаты, fingerprints, дубликаты или межобразцовые правила.
 - SQLite применяет подтверждённый план одной транзакцией. Копии файлов подготавливаются и проверяются до транзакции; при ошибке созданные копии удаляются.
@@ -40,11 +44,24 @@
 | Команда | Запись | Результат |
 |---|---:|---|
 | `analytical_point.create` | да | явно созданная Analytical Point и contributing Analysis IDs |
+| `analytical_point.list` | нет | устойчивые Point/Analysis/Spatial Annotation/Media Asset IDs, Sample, типы связи, методы, время создания, исходно-пиксельная геометрия и provenance размещений |
+| `analytical_point.retire` | да | retraction marker и Operation Journal Entry при точном совпадении ожидаемого состава |
+| `analytical_point.analysis.add` | да | одна Analysis–Point связь, проверенный exact scope и inverse payload |
+| `analytical_point.analysis.remove` | да | снятие одной Analysis–Point связи без удаления Analysis/Measurement/Source; минимум две Analyses |
+| `operation_journal.list` | нет | actor, timestamp, exact entity IDs, параметры, outcome и inverse payload |
+| `operation_journal.undo` | да | восстановленная либо снятая связь после проверки текущего exact scope |
 | `media.inspect_sources` | нет | форматы, размеры, SHA-256 и группы дубликатов |
+| `media.preview` | нет | ограниченный PNG preview в неизменённых осях исходных пикселей |
 | `media.import.plan` | нет | полный проверяемый план, предупреждения и semantic fingerprint |
 | `media.import.apply` | да | Media Assets, Spatial Annotations и связи одной транзакцией |
 
 `media.import.apply` повторно проверяет fingerprint каждого файла и semantic fingerprint плана. Изменённый файл, координата вне изображения, неизвестный ID, скрытый межобразцовый конфликт или дубликат с другим назначением блокируют запись.
+
+Снятие Analytical Point является логическим: строка точки, contributing Analyses,
+Measurements и пространственные связи остаются в SQLite. Активные проекции и
+новые media plans исключают retracted Point. Undo разрешён только при совпадении
+текущих Analysis и Spatial Annotation IDs с journal scope; конфликт не делает
+частичную запись.
 
 ## Release gate
 

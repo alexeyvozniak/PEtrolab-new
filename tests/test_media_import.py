@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
 import sqlite3
 import struct
@@ -18,11 +19,20 @@ sys.path.insert(0, str(ROOT / "src"))
 from petrolab.import_apply import apply_import_plan, open_project  # noqa: E402
 from petrolab.import_preview import ImportCommandError  # noqa: E402
 from petrolab.media_import import (  # noqa: E402
+    add_analysis_to_analytical_point,
     apply_media_import_plan,
     create_analytical_point,
     create_media_import_plan,
+    create_media_preview,
     inspect_media_source,
     inspect_media_sources,
+    list_analytical_points,
+    list_media_assets,
+    list_operation_journal,
+    remove_analysis_from_analytical_point,
+    remove_spatial_annotation_from_analytical_point,
+    retire_analytical_point,
+    undo_operation,
 )
 from test_import_preview import FIXTURE, fixture_recipe  # noqa: E402
 
@@ -97,6 +107,223 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(len(result["items"]), 2)
             self.assertEqual(len(result["duplicate_groups"]), 1)
 
+    def test_filename_suggestions_are_review_only_and_keep_the_source_name(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            image = Path(directory_name) / "KIV-2_A_BSE_01.png"
+            write_png(image)
+            result = inspect_media_source(image)
+            self.assertEqual(result["display_name"], "KIV-2_A_BSE_01.png")
+            self.assertEqual(result["suggested_sample_name"], "KIV-2")
+            self.assertEqual(result["suggested_thin_section_name"], "KIV-2-A")
+            self.assertEqual(result["suggested_media_type"], "BSE")
+            self.assertEqual(
+                result["suggestion_basis"],
+                ["filename_modality_token", "filename_prefix", "filename_section_prefix"],
+            )
+
+    def test_preview_is_bounded_and_does_not_change_the_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            image = Path(directory_name) / "large.png"
+            write_png(image, width=1200, height=800)
+            source_hash = hashlib.sha256(image.read_bytes()).hexdigest()
+            result = create_media_preview(image, max_width_px=300, max_height_px=300)
+            self.assertEqual((result["source_width_px"], result["source_height_px"]), (1200, 800))
+            self.assertEqual((result["preview_width_px"], result["preview_height_px"]), (300, 200))
+            self.assertTrue(result["preview_data_url"].startswith("data:image/png;base64,"))
+            self.assertTrue(base64.b64decode(result["preview_data_url"].split(",", 1)[1]).startswith(b"\x89PNG"))
+            self.assertEqual(hashlib.sha256(image.read_bytes()).hexdigest(), source_hash)
+
+    def test_analytical_point_projection_keeps_stable_ids_and_sample_groups(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, first, second = self._project_with_points(Path(directory_name))
+            result = list_analytical_points(database)
+            by_id = {item["analytical_point_id"]: item for item in result["items"]}
+            self.assertEqual(result["sample_names"], ["KIV-2", "OTHER"])
+            self.assertEqual(by_id[first["analytical_point_id"]]["point_name"], "P-07")
+            self.assertEqual(len(by_id[first["analytical_point_id"]]["analysis_ids"]), 2)
+            self.assertEqual(by_id[first["analytical_point_id"]]["link_types"], ["same_point"])
+            self.assertTrue(by_id[first["analytical_point_id"]]["created_at"])
+            self.assertEqual(by_id[second["analytical_point_id"]]["sample_name"], "OTHER")
+            self.assertEqual(by_id[first["analytical_point_id"]]["placement_count"], 0)
+
+    def test_saved_media_library_persists_filters_and_reports_missing_linked_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            database, point, _ = self._project_with_points(directory)
+            managed, linked = directory / "KIV-2_BSE.png", directory / "KIV-2_XPL.png"
+            write_png(managed)
+            write_png(linked, width=13)
+            linked_assignment = self._assignment(linked, point["analytical_point_id"])
+            linked_assignment.update({"ownership_mode": "linked_external", "media_type": "XPL"})
+            apply_media_import_plan(database, create_media_import_plan(database, [
+                self._assignment(managed, point["analytical_point_id"]), linked_assignment,
+            ]))
+
+            first_open = list_media_assets(database)
+            self.assertEqual(first_open["total"], 2)
+            self.assertEqual(first_open["sample_names"], ["KIV-2"])
+            by_name = {item["display_name"]: item for item in first_open["items"]}
+            self.assertEqual(by_name["KIV-2_BSE.png"]["storage_mode"], "managed_copy")
+            self.assertEqual(by_name["KIV-2_BSE.png"]["availability"], "available")
+            self.assertEqual(by_name["KIV-2_BSE.png"]["placement_count"], 1)
+            self.assertNotIn("linked_path", by_name["KIV-2_XPL.png"])
+            self.assertEqual(list_media_assets(database, query="xpl")["items"][0]["display_name"], "KIV-2_XPL.png")
+            self.assertEqual(list_media_assets(database, sample_name="other")["total"], 0)
+
+            linked.unlink()
+            reopened = list_media_assets(database)
+            self.assertEqual(
+                {item["display_name"]: item["availability"] for item in reopened["items"]}["KIV-2_XPL.png"],
+                "external_missing",
+            )
+
+    def test_point_retraction_and_undo_preserve_entities_and_exact_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, _ = self._project_with_points(Path(directory_name))
+            before = {}
+            with closing(sqlite3.connect(database)) as connection:
+                for table in ("analysis", "measurement", "analytical_point", "analytical_point_analysis"):
+                    before[table] = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            retired = retire_analytical_point(
+                database,
+                point["analytical_point_id"],
+                point["analysis_ids"],
+                [],
+                "Ошибочно связаны разные физические точки",
+            )
+            self.assertNotIn(point["analytical_point_id"], {item["analytical_point_id"] for item in list_analytical_points(database)["items"]})
+            operation = retired["operation"]
+            self.assertEqual(operation["action_kind"], "analytical_point.retire")
+            self.assertEqual(operation["entity_ids"]["analysis_ids"], sorted(point["analysis_ids"]))
+            self.assertEqual(operation["inverse_action_kind"], "analytical_point.restore")
+            with closing(sqlite3.connect(database)) as connection:
+                for table, count in before.items():
+                    self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], count)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point_retraction").fetchone()[0], 1)
+
+            undone = undo_operation(database, operation["operation_id"])
+            self.assertEqual(undone["effect"], "restored")
+            self.assertIn(point["analytical_point_id"], {item["analytical_point_id"] for item in list_analytical_points(database)["items"]})
+            journal = list_operation_journal(database)
+            original = next(item for item in journal["items"] if item["operation_id"] == operation["operation_id"])
+            self.assertEqual(original["outcome"], "undone")
+            self.assertEqual(original["undone_by_operation_id"], undone["operation"]["operation_id"])
+            self.assertEqual(journal["items"][0]["parameters"]["target_operation_id"], operation["operation_id"])
+
+    def test_point_retraction_rejects_stale_scope_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, _ = self._project_with_points(Path(directory_name))
+            with self.assertRaises(ImportCommandError) as raised:
+                retire_analytical_point(database, point["analytical_point_id"], point["analysis_ids"][:1], [], "stale view")
+            self.assertEqual(raised.exception.code, "POINT_REVISION_CONFLICT")
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point_retraction").fetchone()[0], 0)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM operation_journal_entry").fetchone()[0], 2)
+
+    def test_undo_create_retracts_the_point_without_deleting_its_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, _ = self._project_with_points(Path(directory_name))
+            undone = undo_operation(database, point["operation"]["operation_id"])
+            self.assertEqual(undone["effect"], "retracted")
+            self.assertNotIn(point["analytical_point_id"], {item["analytical_point_id"] for item in list_analytical_points(database)["items"]})
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point WHERE analytical_point_id = ?", (point["analytical_point_id"],)).fetchone()[0], 1)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point_analysis WHERE analytical_point_id = ?", (point["analytical_point_id"],)).fetchone()[0], 2)
+
+    def test_analysis_can_be_added_and_undone_without_changing_scientific_entities(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, other = self._project_with_points(Path(directory_name))
+            target_analysis_id = other["analysis_ids"][0]
+            with closing(sqlite3.connect(database)) as connection:
+                before = {
+                    table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    for table in ("analysis", "measurement", "source_file")
+                }
+            added = add_analysis_to_analytical_point(
+                database,
+                point["analytical_point_id"],
+                point["analysis_ids"],
+                [],
+                target_analysis_id,
+                "same_zone",
+                "Один участок зерна подтверждён повторной проверкой",
+            )
+            self.assertEqual(added["effect"], "analysis_added")
+            self.assertEqual(added["operation"]["action_kind"], "analytical_point.analysis.add")
+            self.assertEqual(len(added["analysis_ids"]), 3)
+            with closing(sqlite3.connect(database)) as connection:
+                for table, count in before.items():
+                    self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], count)
+                self.assertEqual(connection.execute(
+                    "SELECT link_type FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+                    (point["analytical_point_id"], target_analysis_id),
+                ).fetchone()[0], "same_zone")
+
+            undone = undo_operation(database, added["operation"]["operation_id"])
+            self.assertEqual(undone["effect"], "analysis_removed")
+            projected = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            self.assertEqual(sorted(projected["analysis_ids"]), sorted(point["analysis_ids"]))
+
+    def test_analysis_can_be_removed_and_undone_but_point_keeps_two_analyses(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, other = self._project_with_points(Path(directory_name))
+            target_analysis_id = other["analysis_ids"][0]
+            added = add_analysis_to_analytical_point(
+                database, point["analytical_point_id"], point["analysis_ids"], [],
+                target_analysis_id, "repeat_measurement", "Добавление для проверки снятия",
+            )
+            with closing(sqlite3.connect(database)) as connection:
+                entity_counts = {
+                    table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    for table in ("analysis", "measurement", "source_file")
+                }
+            removed = remove_analysis_from_analytical_point(
+                database, point["analytical_point_id"], added["analysis_ids"], [],
+                target_analysis_id, "Analysis относится к другой физической точке",
+            )
+            self.assertEqual(removed["effect"], "analysis_removed")
+            self.assertEqual(removed["operation"]["action_kind"], "analytical_point.analysis.remove")
+            self.assertEqual(removed["operation"]["parameters"]["link_type"], "repeat_measurement")
+            self.assertEqual(len(removed["analysis_ids"]), 2)
+            with closing(sqlite3.connect(database)) as connection:
+                for table, count in entity_counts.items():
+                    self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], count)
+            restored = undo_operation(database, removed["operation"]["operation_id"])
+            self.assertEqual(restored["effect"], "analysis_added")
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute(
+                    "SELECT link_type FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+                    (point["analytical_point_id"], target_analysis_id),
+                ).fetchone()[0], "repeat_measurement")
+
+            current = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            remove_analysis_from_analytical_point(
+                database, point["analytical_point_id"], current["analysis_ids"], [],
+                target_analysis_id, "Вернуть состав к двум Analysis",
+            )
+            with self.assertRaises(ImportCommandError) as minimum:
+                remove_analysis_from_analytical_point(
+                    database, point["analytical_point_id"], point["analysis_ids"], [],
+                    point["analysis_ids"][0], "Нельзя оставить одну Analysis",
+                )
+            self.assertEqual(minimum.exception.code, "POINT_MINIMUM_ANALYSES")
+
+    def test_membership_change_rejects_stale_scope_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, point, other = self._project_with_points(Path(directory_name))
+            with self.assertRaises(ImportCommandError) as raised:
+                add_analysis_to_analytical_point(
+                    database, point["analytical_point_id"], point["analysis_ids"][:1], [],
+                    other["analysis_ids"][0], "same_point", "Устаревший состав",
+                )
+            self.assertEqual(raised.exception.code, "POINT_REVISION_CONFLICT")
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM operation_journal_entry").fetchone()[0], 2)
+                self.assertEqual(connection.execute(
+                    "SELECT COUNT(*) FROM analytical_point_analysis WHERE analytical_point_id = ?",
+                    (point["analytical_point_id"],),
+                ).fetchone()[0], 2)
+
     def test_windows_batch_file_is_not_treated_as_an_image(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             script = Path(directory_name) / "images.bat"
@@ -114,6 +341,7 @@ class MediaImportTests(unittest.TestCase):
             source_hash = hashlib.sha256(image.read_bytes()).hexdigest()
             plan = create_media_import_plan(database, [self._assignment(image, point["analytical_point_id"])])
             self.assertEqual(plan["items"][0]["media_type"], "BSE")
+            self.assertNotIn("suggested_media_type", plan["items"][0])
             result = apply_media_import_plan(database, plan)
             copied = directory / "media" / f"{plan['items'][0]['media_asset_id']}.png"
             self.assertTrue(copied.is_file())
@@ -123,8 +351,26 @@ class MediaImportTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM spatial_annotation").fetchone()[0], 1)
                 row = connection.execute("SELECT geometry_kind, x_px, y_px, image_width_px, image_height_px FROM spatial_annotation").fetchone()
                 self.assertEqual(row, ("point", 5.25, 3.5, 12, 8))
-                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 8)
+                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 15)
             self.assertEqual(result["spatial_annotation_count"], 1)
+            projected = list_analytical_points(database)
+            saved = next(item for item in projected["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            self.assertEqual(
+                [member["analysis_id"] for member in saved["analysis_members"]],
+                saved["analysis_ids"],
+            )
+            self.assertTrue(all("method" in member and "source_name" in member for member in saved["analysis_members"]))
+            self.assertEqual(saved["placement_count"], 1)
+            self.assertEqual(len(saved["placements"]), 1)
+            placement = saved["placements"][0]
+            self.assertEqual(placement["spatial_annotation_id"], plan["items"][0]["placements"][0]["spatial_annotation_id"])
+            self.assertEqual(placement["media_asset_id"], plan["items"][0]["media_asset_id"])
+            self.assertEqual(placement["media_display_name"], "KIV-2_BSE.png")
+            self.assertEqual(placement["thin_section_name"], "KIV-2-TS1")
+            self.assertEqual(placement["geometry"], {"kind": "point", "x_px": 5.25, "y_px": 3.5})
+            self.assertEqual((placement["image_width_px"], placement["image_height_px"]), (12, 8))
+            self.assertFalse(placement["cross_sample_exception"])
+            self.assertIsNone(placement["exception_reason"])
 
     def test_cross_sample_placement_requires_and_preserves_reason(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
@@ -138,11 +384,75 @@ class MediaImportTests(unittest.TestCase):
             assignment = self._assignment(image, other_point["analytical_point_id"], reason="Legacy label verified in lab notebook")
             result = apply_media_import_plan(database, create_media_import_plan(database, [assignment]))
             self.assertEqual(result["spatial_annotation_count"], 1)
+            projected = list_analytical_points(database)
+            placement = next(item for item in projected["items"] if item["analytical_point_id"] == other_point["analytical_point_id"])["placements"][0]
+            self.assertTrue(placement["cross_sample_exception"])
+            self.assertEqual(placement["exception_reason"], "Legacy label verified in lab notebook")
             with closing(sqlite3.connect(database)) as connection:
                 self.assertEqual(
                     connection.execute("SELECT cross_sample_exception, exception_reason FROM analytical_point_annotation").fetchone(),
                     (1, "Legacy label verified in lab notebook"),
                 )
+
+    def test_saved_spatial_link_can_be_removed_and_undone_without_deleting_entities(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            database, point, _ = self._project_with_points(directory)
+            image = directory / "KIV-2_BSE.png"
+            write_png(image)
+            plan = create_media_import_plan(database, [self._assignment(image, point["analytical_point_id"])])
+            apply_media_import_plan(database, plan)
+            projected = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            placement = projected["placements"][0]
+            with closing(sqlite3.connect(database)) as connection:
+                before = {
+                    table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    for table in ("analysis", "measurement", "source_file", "media_asset", "spatial_annotation")
+                }
+
+            removed = remove_spatial_annotation_from_analytical_point(
+                database,
+                point["analytical_point_id"],
+                point["analysis_ids"],
+                [placement["spatial_annotation_id"]],
+                placement["spatial_annotation_id"],
+                "Метка поставлена не на ту физическую точку",
+            )
+            self.assertEqual(removed["effect"], "annotation_link_removed")
+            self.assertEqual(removed["operation"]["action_kind"], "analytical_point.annotation.remove")
+            self.assertEqual(removed["operation"]["parameters"]["media_asset_id"], placement["media_asset_id"])
+            self.assertEqual(removed["spatial_annotation_ids"], [])
+            after_remove = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            self.assertEqual(after_remove["placements"], [])
+            with closing(sqlite3.connect(database)) as connection:
+                for table, count in before.items():
+                    self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], count)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point_annotation").fetchone()[0], 0)
+
+            restored = undo_operation(database, removed["operation"]["operation_id"])
+            self.assertEqual(restored["effect"], "annotation_link_restored")
+            after_undo = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == point["analytical_point_id"])
+            self.assertEqual(after_undo["placements"][0]["spatial_annotation_id"], placement["spatial_annotation_id"])
+            self.assertEqual(after_undo["placements"][0]["media_asset_id"], placement["media_asset_id"])
+
+    def test_spatial_unlink_rejects_stale_scope_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            database, point, _ = self._project_with_points(directory)
+            image = directory / "KIV-2_BSE.png"
+            write_png(image)
+            plan = create_media_import_plan(database, [self._assignment(image, point["analytical_point_id"])])
+            apply_media_import_plan(database, plan)
+            annotation_id = plan["items"][0]["placements"][0]["spatial_annotation_id"]
+            with self.assertRaises(ImportCommandError) as raised:
+                remove_spatial_annotation_from_analytical_point(
+                    database, point["analytical_point_id"], point["analysis_ids"], [],
+                    annotation_id, "Устаревший экран",
+                )
+            self.assertEqual(raised.exception.code, "POINT_REVISION_CONFLICT")
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analytical_point_annotation").fetchone()[0], 1)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM operation_journal_entry").fetchone()[0], 2)
 
     def test_unplaced_image_is_allowed_but_visible_in_review_warnings(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
