@@ -423,6 +423,7 @@ test('real mica formula requires three choices, saves OH provenance and preserve
   await user.selectOptions(oh, 'ideal_2_minus_f_cl');
   await user.click(await enabledButton('Рассчитать с этими настройками'));
   await screen.findByText('OH (оценка)');
+  expect(screen.getByText('Черновой bulk-пересчёт · не определение вида минерала.')).toBeTruthy();
   expect(screen.getByLabelText('Основание оценки OH').textContent).toContain('F = 0 wt.%');
   expect(screen.getByLabelText('Основание оценки OH').textContent).toContain('Cl = 0 wt.%');
   await user.click(await enabledButton('Сохранить результат формулы'));
@@ -470,6 +471,7 @@ test('real clinopyroxene formula is available after explicit assignment and save
   await user.click(await enabledButton('Приняты пользователем 1'));
   await user.click(await enabledButton('Рассчитать формулу'));
   const table = await screen.findByRole('table', { name: 'Рассчитанные значения' });
+  expect(screen.getByText('Черновой bulk-пересчёт · не определение вида минерала.')).toBeTruthy();
   for (const field of ['Wo', 'En', 'Fs']) {
     expect(within(table).getByText(field)).toBeTruthy();
   }
@@ -494,8 +496,35 @@ test('real orthopyroxene formula keeps source values and saves published Wo–En
   await user.click(await enabledButton('Приняты пользователем 1'));
   await user.click(await enabledButton('Рассчитать формулу'));
   const table = await screen.findByRole('table', { name: 'Рассчитанные значения' });
+  expect(screen.getByText('Черновой bulk-пересчёт · не определение вида минерала.')).toBeTruthy();
   for (const field of ['Wo', 'En', 'Fs']) expect(within(table).getByText(field)).toBeTruthy();
   expect(within(table).getAllByText('mol.%')).toHaveLength(3);
+  await user.click(await enabledButton('Сохранить результат формулы'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  expect(await readFile(second, 'utf8')).toBe(source);
+}, 60000);
+
+test('real amphibole formula keeps 23 O bulk APFU separate from source and history', async () => {
+  const source = 'Analysis,Mineral,SiO2 (wt.%),Al2O3 (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%),NiO (wt.%)\nAmp-1,tremolite,58.8,0,21.5,10.4,0,0,9.1\n';
+  await writeFile(second, source);
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+  await user.click(await enabledButton('2 · Проверить минералы'));
+  await user.click(await enabledButton('Сохранить импорт в проект'));
+  await screen.findByRole('heading', { name: 'Анализы' });
+  await user.click(await enabledButton('Минералы'));
+  await user.click(screen.getByText('Назначить другой минерал'));
+  await user.type(screen.getByLabelText('Минерал из справочника'), 'tremolite');
+  await user.type(screen.getByLabelText('Основание назначения'), 'Проверено как кальциевый амфибол');
+  await user.click(await enabledButton('Сохранить ручное назначение'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  await user.click(await enabledButton('Рассчитать формулу'));
+  const table = await screen.findByRole('table', { name: 'Рассчитанные значения' });
+  expect(screen.getByText('Черновой bulk-пересчёт · не определение вида минерала.')).toBeTruthy();
+  for (const field of ['Si', 'Mg', 'Ca', 'Ni']) expect(within(table).getByText(field)).toBeTruthy();
+  expect(within(table).queryByText('OH (оценка)')).toBeNull();
   await user.click(await enabledButton('Сохранить результат формулы'));
   await screen.findByText('Сохранённые расчёты · 1');
   expect(await readFile(second, 'utf8')).toBe(source);

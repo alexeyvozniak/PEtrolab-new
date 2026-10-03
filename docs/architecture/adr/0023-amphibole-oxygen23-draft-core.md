@@ -1,7 +1,7 @@
 # ADR 0023 — Draft amphibole 23 O bulk core
 
-Date: 2026-10-03. Status: pure Python core only; not exposed in the Formula
-Registry or desktop UI.
+Date: 2026-10-03. Status: draft core connected to the existing Formula
+Registry, NDJSON service and desktop preview/save/history flow.
 
 ## Decision
 
@@ -9,8 +9,8 @@ Start the amphibole item after Cpx/Opx in the approved formula sequence with
 one limited `amphibole.oxygen23/0.1.0` calculation. It accepts measured oxide
 wt.% for Mg-Ca amphiboles and returns bulk cations per 23 oxygen equivalents.
 There is no new adapter, state manager, database table or Tauri boundary.
-Do not offer this method to users until the separate registry/preview/save
-slice has its own contract and real-service acceptance test.
+The connected slice uses the existing single-Analysis flow, requires an
+explicit accepted `calcic amphibole` assignment and has a real-service test.
 
 ## Scientific boundary
 
@@ -47,8 +47,9 @@ uses the paper's listed oxide wt.% and a 0.1 APFU tolerance, accounting for
 rounding and reported spot variability. Tests also exercise Fe policy,
 missing/censored/duplicate inputs, source immutability and finite JSON.
 
-Next, separately connect this frozen method to the existing Formula Registry,
-NDJSON preview/save/history and accepted mineral assignment. Add an AT-45
-real-service and native visual check for source immutability, Measurement ID
-provenance, stale result after input change, error recovery and 1363×936
-layout. Do not call it validated merely because these two benchmarks pass.
+The installed definition pins the SHA-256 of the core implementation.
+Registry/NDJSON preview/save/history, explicit assignment, unchanged source
+bytes, Measurement ID provenance and stale-on-input-change are covered by
+Python tests; a real-service React test covers the one-button user path.
+AT-45 still needs native 1363×936 screenshots, error recovery and keyboard
+checks. Do not call the method validated merely because these benchmarks pass.

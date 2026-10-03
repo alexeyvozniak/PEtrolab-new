@@ -175,7 +175,7 @@ export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMo
       <div className="mineral-queue-divider">По статусу</div>
       {Object.entries(counts).sort(([left], [right]) => mineralStatusLabel(left).localeCompare(mineralStatusLabel(right), "ru")).map(([status, count]) => <button className={queue === `status:${status}` ? "active" : ""} type="button" key={status} onClick={() => setQueue(`status:${status}`)}><span>{mineralStatusLabel(status)}</span><b>{count}</b></button>)}
       <div className="mineral-queue-note"><ShieldCheck size={18} /><p>Название из файла, предложение правил и принятое решение хранятся раздельно.</p></div>
-      <p className="mineral-scope-note">Доступен первый пересчёт оливина на 4 O. Метод и режим Fe выбираются явно; другие методы ещё не подключены.</p>
+      <p className="mineral-scope-note">После принятия минерала доступный для его группы метод рассчитывает производные значения отдельно от измерений.</p>
     </aside>
 
     <main className="mineral-list-pane">

@@ -201,6 +201,7 @@ test('automatic matches remain pending and manual decisions require a catalog la
   const analysis = {analysis_id: 'manual-1', identity: {Analysis: 'A1'}, source_name: 'test.csv', sheet_name: 'Data', source_row_number: 2,
     reported_mineral: {value: 'olivine'}, mineral_verification: {status: 'consistent', prediction: 'olivine', confidence: 'high', issues: [], candidates: []}};
   render(<MineralsWorkspace project={{total: 1, analyses: [analysis], mineral_options: ['olivine', 'forsterite']}} busy={false} onDecide={onDecide} />);
+  expect(screen.getByText('После принятия минерала доступный для его группы метод рассчитывает производные значения отдельно от измерений.')).toBeTruthy();
   expect(screen.getByRole('button', {name: 'Требуют решения 1'})).toBeTruthy();
   expect(screen.getByRole('button', {name: 'Приняты пользователем 0'})).toBeTruthy();
   await user.click(screen.getByText('Назначить другой минерал'));

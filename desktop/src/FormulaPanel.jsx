@@ -36,7 +36,7 @@ function Result({ result }) {
   return <div className="formula-result">
     {(result.errors || []).map(text => <p className="formula-error" key={text}>{text}</p>)}
     {result.warnings?.length > 0 && <details className="formula-result-notes"><summary>Предупреждения · {result.warnings.length}</summary>{result.warnings.map(text => <p className="formula-warning" key={text}>{text}</p>)}</details>}
-    {result.method_id === 'mica.charge22' && <p className="formula-scope"><strong>Bulk APFU.</strong> Без распределения по позициям и без номенклатуры.</p>}
+    {result.method_status === 'draft' && <p className="formula-scope">Черновой bulk-пересчёт · не определение вида минерала.</p>}
     {Object.keys(result.values || {}).length > 0 && <table aria-label="Рассчитанные значения"><caption>Рассчитано · не исходные измерения</caption>
       <thead><tr><th>Показатель</th><th>Значение</th><th>Единица</th></tr></thead>
       <tbody>{Object.entries(result.values).sort(([a], [b]) => Number(['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(b)) - Number(['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(a))).map(([field, value]) => <tr key={field}><th>{fieldLabel(field)}{field === 'OH_est_apfu' && <span className="formula-estimate-badge">оценка</span>}</th><td>{format(value)}</td><td>{field === 'oxide_total' ? 'wt.%' : ['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(field) ? 'mol.%' : 'APFU'}</td></tr>)}</tbody>

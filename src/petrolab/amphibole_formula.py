@@ -14,6 +14,7 @@ OXIDES = {'SiO2': ('Si', 1, 2, 'Si'), 'TiO2': ('Ti', 1, 2, 'Ti'),
           'MgO': ('Mg', 1, 1, 'Mg'), 'MnO': ('Mn', 1, 1, 'Mn'),
           'NiO': ('Ni', 1, 1, 'Ni'), 'CaO': ('Ca', 1, 1, 'Ca'),
           'Na2O': ('Na', 2, 1, 'Na'), 'K2O': ('K', 2, 1, 'K')}
+FE_MODES = {'all_fe2': 'Измеренное железо как Fe²⁺; без оценки Fe³⁺'}
 
 
 def calculate_amphibole(measurements, fe_mode):

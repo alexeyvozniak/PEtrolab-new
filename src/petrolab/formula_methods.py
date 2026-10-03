@@ -3,6 +3,10 @@ import copy
 import hashlib
 import json
 
+from .amphibole_formula import (ATOMIC_MASSES as AMP_ATOMIC_MASSES,
+                                FE_MODES as AMP_FE_MODES, METHOD_ID as AMP_METHOD_ID,
+                                METHOD_VERSION as AMP_METHOD_VERSION,
+                                OXIDES as AMP_OXIDES, calculate_amphibole)
 from .clinopyroxene_formula import (ATOMIC_MASSES as CPX_ATOMIC_MASSES,
                                     FE_MODES as CPX_FE_MODES, METHOD_ID as CPX_METHOD_ID,
                                     METHOD_VERSION as CPX_METHOD_VERSION,
@@ -26,6 +30,7 @@ IMPLEMENTATION_SHA256 = '0d1313ebe3ab47cca45f8e6c5364be51ed8d113c44677f95890bdee
 MICA_IMPLEMENTATION_SHA256 = '95821d9252d7577ad1d7bf95e64e6fb62a4ea536086c3c8d0c0c7742afc1442a'
 CPX_IMPLEMENTATION_SHA256 = '25b876fb9ae8da7603449aa61b046c7ba36edfc10b12515384f938d378b5407d'
 OPX_IMPLEMENTATION_SHA256 = '90e6999502d392087e546ba2f5311b47fc57bc3f590c9292eec3180aa47cf0dd'
+AMP_IMPLEMENTATION_SHA256 = 'e840975a216609ec3deb7a61bb8cc47d4291b7fbafb93b0e4a0419641a0d0727'
 COMPACT_FE_MODE_LABELS = {
     'all_fe2': 'Всё Fe как Fe²⁺ · FeO/FeOt',
     'reported_split': 'Раздельные FeO + Fe₂O₃',
@@ -215,12 +220,53 @@ def _orthopyroxene_definition():
     return definition
 
 
+def _amphibole_definition():
+    fields = sorted({f'{oxide[3]}_apfu' for oxide in AMP_OXIDES.values()})
+    definition = {
+        'method_id': AMP_METHOD_ID, 'version': AMP_METHOD_VERSION,
+        'name': 'Кальциевый амфибол · 23 O · bulk APFU',
+        'kind': 'formula', 'status': 'draft',
+        'input_domain': {'semantic_domain': 'oxide_wt_percent',
+                         'required_fields': ['SiO2', 'MgO', 'CaO'], 'allowed_units': ['wt.%'],
+                         'missing_policy': 'reject_row', 'censored_policy': 'reject_row',
+                         'compositional_domain_policy': 'explicit_subcomposition_required',
+                         'nonpositive_policy': 'not_applicable', 'mixed_unit_policy': 'reject'},
+        'parameters': [{'name': 'fe_mode', 'value_type': 'choice', 'scientifically_significant': True}],
+        'output_fields': ([{'field': field, 'semantic_role': 'derived_value', 'unit': 'apfu'}
+                           for field in fields]
+                          + [{'field': 'cation_sum', 'semantic_role': 'diagnostic', 'unit': 'apfu'},
+                             {'field': 'oxide_total', 'semantic_role': 'diagnostic', 'unit': 'wt.%'}]),
+        'citations': [
+            {'title': 'Hawthorne et al. (2012), Nomenclature of the amphibole supergroup',
+             'url': 'https://www.frankhawthorne.com/_files/ugd/70a3a9_b5b8aceb3d5c456f99e12c346061c1e4.pdf'},
+            {'title': 'Nanomaterials (2023), synthetic Ni-tremolite TN8, Table 2',
+             'url': 'https://www.mdpi.com/2079-4991/13/8/1303'},
+            {'title': 'CIAAW Abridged Standard Atomic Weights 2024',
+             'url': 'https://ciaaw.org/abridged-atomic-weights.htm'}],
+        'assumptions': ['23 кислородных эквивалента; сумма wt.% не нормировалась к 100%.',
+                        'FeO/FeOt, если измерено, считается Fe²⁺; Fe³⁺ не оценивается.',
+                        'F, Cl и H₂O в этом ограниченном методе блокируют расчёт.',
+                        'Без определения OH, W-позиции, A/B/C/T, конечных членов и вида.'],
+        'applicability': ['Только явно принятое назначение calcic amphibole.',
+                          'Положительные SiO₂, MgO и CaO обязательны; Fe может быть не измерено.',
+                          'Только bulk-катионы доступного состава, не полная структурная формула.'],
+        'benchmark_ids': ['amp-ideal-tremolite', 'amp-ni-tremolite-tn8'],
+        'implementation': {'algorithm_id': AMP_METHOD_ID,
+                           'algorithm_version': AMP_METHOD_VERSION,
+                           'implementation_sha256': AMP_IMPLEMENTATION_SHA256},
+        'created_at': '2026-10-03T00:00:00Z',
+    }
+    definition['definition_fingerprint'] = fingerprint(definition)
+    return definition
+
+
 def method_definition(method_id=METHOD_ID, version=None):
     """Return one installed definition without changing existing olivine identity."""
     installed = {METHOD_ID: (METHOD_VERSION, _olivine_definition),
                  MICA_METHOD_ID: (MICA_METHOD_VERSION, _mica_definition),
                  CPX_METHOD_ID: (CPX_METHOD_VERSION, _clinopyroxene_definition),
-                 OPX_METHOD_ID: (OPX_METHOD_VERSION, _orthopyroxene_definition)}
+                 OPX_METHOD_ID: (OPX_METHOD_VERSION, _orthopyroxene_definition),
+                 AMP_METHOD_ID: (AMP_METHOD_VERSION, _amphibole_definition)}
     current = installed.get(method_id)
     if current is None or (version is not None and version != current[0]):
         raise KeyError((method_id, version))
@@ -256,6 +302,15 @@ def executable_method(method_id, version):
                                    'description': '6 O; всё железо принято Fe²⁺; без Droop.',
                                    'parameters': {'fe_mode': 'all_fe2'}}],
                 'calculate': lambda rows, p: calculate_orthopyroxene(rows, p['fe_mode'])}
+    if method_id == AMP_METHOD_ID:
+        return {'definition': definition, 'accepted_targets': {'calcic amphibole'},
+                'target_label': 'кальциевого амфибола',
+                'parameter_choices': {'fe_mode': AMP_FE_MODES},
+                'parameter_choice_labels': {'fe_mode': {'all_fe2': 'Измеренное Fe как Fe²⁺'}},
+                'quick_presets': [{'id': 'all_fe2', 'label': 'Рассчитать формулу',
+                                   'description': '23 O; только bulk APFU; без OH и определения вида.',
+                                   'parameters': {'fe_mode': 'all_fe2'}}],
+                'calculate': lambda rows, p: calculate_amphibole(rows, p['fe_mode'])}
     return {'definition': definition,
             'accepted_targets': {'trioctahedral mica', 'dioctahedral mica', 'Li-mica'},
             'target_label': 'слюды',
@@ -279,7 +334,8 @@ def list_methods(accepted_assignment=None):
     for method_id, version, masses in ((METHOD_ID, METHOD_VERSION, OLIVINE_ATOMIC_MASSES),
                                        (MICA_METHOD_ID, MICA_METHOD_VERSION, MICA_ATOMIC_MASSES),
                                        (CPX_METHOD_ID, CPX_METHOD_VERSION, CPX_ATOMIC_MASSES),
-                                       (OPX_METHOD_ID, OPX_METHOD_VERSION, OPX_ATOMIC_MASSES)):
+                                       (OPX_METHOD_ID, OPX_METHOD_VERSION, OPX_ATOMIC_MASSES),
+                                       (AMP_METHOD_ID, AMP_METHOD_VERSION, AMP_ATOMIC_MASSES)):
         registration = executable_method(method_id, version)
         if accepted_assignment is not None and accepted_target not in registration['accepted_targets']:
             continue
