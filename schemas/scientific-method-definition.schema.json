@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/scientific-method-definition.schema.json",
+  "title": "Scientific Method Definition",
+  "description": "Versioned scientific method contract independent of UI and calculation runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["method_id", "version", "name", "kind", "status", "definition_fingerprint", "input_domain", "output_fields", "citations", "assumptions", "applicability", "benchmark_ids", "implementation", "created_at"],
+  "properties": {
+    "method_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$"},
+    "version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "kind": {"type": "string", "enum": ["formula", "mineral_recognition", "statistics", "field", "thermobarometry", "thermodynamics", "partitioning", "user_expression"]},
+    "status": {"type": "string", "enum": ["draft", "validated", "deprecated"]},
+    "definition_fingerprint": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "input_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["semantic_domain", "required_fields", "allowed_units", "missing_policy", "censored_policy", "compositional_domain_policy", "nonpositive_policy", "mixed_unit_policy"],
+      "properties": {
+        "semantic_domain": {"type": "string", "enum": ["oxide_wt_percent", "trace_concentration", "apfu", "ratio_or_index", "mixed_euclidean", "spatial_xy", "phase_pair", "custom"]},
+        "required_fields": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "allowed_units": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "missing_policy": {"type": "string", "enum": ["reject_row", "pairwise_exclude", "method_specific"]},
+        "censored_policy": {"type": "string", "enum": ["reject_row", "preserve_uncomputed", "versioned_replacement_method"]},
+        "compositional_domain_policy": {"type": "string", "enum": ["single_domain_required", "explicit_subcomposition_required", "not_applicable"]},
+        "nonpositive_policy": {"type": "string", "enum": ["reject", "not_applicable"]},
+        "mixed_unit_policy": {"type": "string", "enum": ["reject", "explicit_conversion_required", "not_applicable"]}
+      }
+    },
+    "parameters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "value_type", "scientifically_significant"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "value_type": {"type": "string", "enum": ["string", "number", "integer", "boolean", "choice", "object"]},
+          "unit": {"type": ["string", "null"]},
+          "default": {"type": ["string", "number", "integer", "boolean", "object", "null"]},
+          "scientifically_significant": {"type": "boolean"}
+        }
+      }
+    },
+    "output_fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "semantic_role", "unit"],
+        "properties": {
+          "field": {"type": "string", "minLength": 1},
+          "semantic_role": {"type": "string", "enum": ["derived_value", "classification_suggestion", "cluster_label", "score", "uncertainty", "qc", "field_geometry", "diagnostic"]},
+          "unit": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "citations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title"],
+        "properties": {
+          "title": {"type": "string", "minLength": 1},
+          "doi": {"type": ["string", "null"]},
+          "url": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "assumptions": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "applicability": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "benchmark_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm_id", "algorithm_version", "implementation_sha256"],
+      "properties": {
+        "algorithm_id": {"type": "string", "minLength": 1},
+        "algorithm_version": {"type": "string", "minLength": 1},
+        "implementation_sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"}
+      }
+    },
+    "implementation_library_versions": {"type": "object"},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

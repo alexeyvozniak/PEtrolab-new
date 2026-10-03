@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "name": "2016-05-04.xls",
+      "sha256": "87ed1cc6a96074aa92d2dfb4f50c4ad00cbcfe1015b9588dde35a208d7ede8e8",
+      "source_format": "xls",
+      "sheets": 7,
+      "blocks": 21,
+      "planned_analyses": 146,
+      "planned_measurements": 2366,
+      "unresolved_fields": 157,
+      "bulk_unit_scopes": 7,
+      "bulk_ignore_scopes": 1,
+      "duplicate_groups": 16
+    },
+    {
+      "name": "2021-11-12.xlsx",
+      "sha256": "e248881b1a2ee95e14ada96989e3ff06dd431102fb8273818870955ed99e807a",
+      "source_format": "xlsx",
+      "sheets": 3,
+      "blocks": 23,
+      "planned_analyses": 294,
+      "planned_measurements": 0,
+      "unresolved_fields": 155,
+      "bulk_unit_scopes": 1,
+      "bulk_ignore_scopes": 1,
+      "duplicate_groups": 12
+    },
+    {
+      "name": "2026-08-05.xlsx",
+      "sha256": "ef04514a30b8c7e2b00473b5863f151d19ec0455dcf91cbf56089666c63673af",
+      "source_format": "xlsx",
+      "sheets": 6,
+      "blocks": 12,
+      "planned_analyses": 137,
+      "planned_measurements": 2273,
+      "unresolved_fields": 0,
+      "bulk_unit_scopes": 0,
+      "bulk_ignore_scopes": 0,
+      "duplicate_groups": 66
+    },
+    {
+      "name": "26-08-10.xls",
+      "sha256": "498527bbef65a6998e3a77225d91e54ea57a6a3238cfb3dad46154c5729e5c9c",
+      "source_format": "xls",
+      "sheets": 3,
+      "blocks": 3,
+      "planned_analyses": 79,
+      "planned_measurements": 0,
+      "unresolved_fields": 49,
+      "bulk_unit_scopes": 1,
+      "bulk_ignore_scopes": 1,
+      "duplicate_groups": 0
+    },
+    {
+      "name": "For Sazonova_Analysis_20_02_20 (1).xlsx",
+      "sha256": "e0b5551cf46e9786045c7a13c3aaa1bb77b28e4f5c4e51547b9aa019482708ea",
+      "source_format": "xlsx",
+      "sheets": 9,
+      "blocks": 47,
+      "planned_analyses": 536,
+      "planned_measurements": 969,
+      "unresolved_fields": 995,
+      "bulk_unit_scopes": 22,
+      "bulk_ignore_scopes": 1,
+      "duplicate_groups": 63
+    },
+    {
+      "name": "MORB.xlsx",
+      "sha256": "51e03dacb3dbdc5e60a869bfb7ccb5196069fd7c27352d8e2d4d50f3b15465cc",
+      "source_format": "xlsx",
+      "sheets": 1,
+      "blocks": 1,
+      "planned_analyses": 1987,
+      "planned_measurements": 5961,
+      "unresolved_fields": 1,
+      "bulk_unit_scopes": 0,
+      "bulk_ignore_scopes": 1,
+      "duplicate_groups": 0
+    },
+    {
+      "name": "mica+Chl_all_zond.xlsx",
+      "sha256": "81c6978d9893da92f4fe9e32f651ca05c2a170339c8040e2da96e8bbecf1745b",
+      "source_format": "xlsx",
+      "sheets": 1,
+      "blocks": 3,
+      "planned_analyses": 22,
+      "planned_measurements": 0,
+      "unresolved_fields": 48,
+      "bulk_unit_scopes": 1,
+      "bulk_ignore_scopes": 1,
+      "duplicate_groups": 0
+    },
+    {
+      "name": "Результаты SIMS (Cpx+Grt).xlsx",
+      "sha256": "d08fbd1a25f7bbb1054fabe3e01bf6e0c0c6f6e51b8542eef322b5602ae6138d",
+      "source_format": "xlsx",
+      "sheets": 5,
+      "blocks": 13,
+      "planned_analyses": 162,
+      "planned_measurements": 0,
+      "unresolved_fields": 706,
+      "bulk_unit_scopes": 5,
+      "bulk_ignore_scopes": 1,
+      "duplicate_groups": 42
+    },
+    {
+      "name": "анализы гранатов из литературы .xlsx",
+      "sha256": "3cd1cc9de52d60b165a858ab71b78c62ea275e47c1fc7d9cdf2c054a4ccc92a2",
+      "source_format": "xlsx",
+      "sheets": 1,
+      "blocks": 3,
+      "planned_analyses": 164,
+      "planned_measurements": 0,
+      "unresolved_fields": 242,
+      "bulk_unit_scopes": 3,
+      "bulk_ignore_scopes": 1,
+      "duplicate_groups": 12
+    }
+  ]
+}

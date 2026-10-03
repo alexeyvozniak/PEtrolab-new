@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/scientific-benchmark.schema.json",
+  "title": "Scientific Benchmark",
+  "description": "Independent expected-value case for one versioned scientific method.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["benchmark_id", "benchmark_set_version", "method_id", "method_version", "source", "input", "expected", "tolerances", "expected_warnings", "expected_error", "reviewed_at"],
+  "properties": {
+    "benchmark_id": {"type": "string", "minLength": 1},
+    "benchmark_set_version": {"type": "string", "minLength": 1},
+    "method_id": {"type": "string", "minLength": 1},
+    "method_version": {"type": "string", "minLength": 1},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "description"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["published", "hand_calculated", "certified_reference", "synthetic_invariant"]},
+        "description": {"type": "string", "minLength": 1},
+        "citation": {"type": ["string", "null"]}
+      }
+    },
+    "input": {"type": "object"},
+    "expected": {"type": "object"},
+    "tolerances": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["absolute", "relative"],
+      "properties": {
+        "absolute": {"type": "number", "minimum": 0},
+        "relative": {"type": "number", "minimum": 0}
+      }
+    },
+    "expected_warnings": {"type": "array", "items": {"type": "string"}},
+    "expected_error": {"type": ["string", "null"]},
+    "reviewed_by": {"type": ["string", "null"]},
+    "reviewed_at": {"type": "string", "format": "date-time"}
+  }
+}

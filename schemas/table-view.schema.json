@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/table-view.schema.json",
+  "title": "Table View",
+  "description": "Saved table projection and filters; it never stores Selection membership.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "project_id", "name", "data_universe_fingerprint", "columns", "sort", "group_by", "filters", "created_at", "updated_at"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "project_id": {"type": "string", "format": "uuid"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 120},
+    "data_universe_fingerprint": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "columns": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "order", "visible", "width_px"],
+        "properties": {
+          "field": {"type": "string", "minLength": 1},
+          "order": {"type": "integer", "minimum": 0},
+          "visible": {"type": "boolean"},
+          "width_px": {"type": ["integer", "null"], "minimum": 40}
+        }
+      }
+    },
+    "sort": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "direction"],
+        "properties": {
+          "field": {"type": "string", "minLength": 1},
+          "direction": {"type": "string", "enum": ["ascending", "descending"]}
+        }
+      }
+    },
+    "group_by": {"type": ["string", "null"]},
+    "filters": {"type": "array", "items": {"$ref": "analysis-filter.schema.json"}},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}

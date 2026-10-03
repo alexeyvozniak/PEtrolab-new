@@ -1,0 +1,92 @@
+name: Windows test build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Enable Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Validate Python contracts and import core
+        run: |
+          python -m pip install --disable-pip-version-check .
+          python scripts/validate_contracts.py
+          python -m unittest discover -s tests
+      - name: Build Windows scientific service
+        run: |
+          python -m pip install --disable-pip-version-check pyinstaller
+          python scripts/build_windows_service.py
+          $request = @{ protocol_version = "1.0"; request_id = [guid]::NewGuid().ToString(); command = "import.inspect_source"; payload = @{ source_path = (Resolve-Path "fixtures/import/m1_1_ambiguous_multisheet.xlsx").Path } } | ConvertTo-Json -Compress
+          $response = $request | & .\desktop\src-tauri\binaries\petrolab-service.exe | ConvertFrom-Json
+          if ($null -eq $response.result.source_fingerprint) { throw "Packaged service did not return import inspection." }
+          $database = Join-Path $env:RUNNER_TEMP "petrolab-packaged-smoke.sqlite"
+          $dbRequest = @{ protocol_version = "1.0"; request_id = [guid]::NewGuid().ToString(); command = "project.analyses.list"; payload = @{ project_database_path = $database; limit = 10 } } | ConvertTo-Json -Compress
+          $dbResponse = $dbRequest | & .\desktop\src-tauri\binaries\petrolab-service.exe | ConvertFrom-Json
+          if ($null -ne $dbResponse.error) { throw "Packaged service could not open project database: $($dbResponse.error.message)" }
+          if ($dbResponse.result.total -ne 0) { throw "Fresh packaged project database must be empty." }
+          if (-not (Test-Path $database)) { throw "Packaged service did not create the SQLite project database." }
+          @'
+          import json
+          import subprocess
+          import uuid
+          from pathlib import Path
+
+          executable = Path("desktop/src-tauri/binaries/petrolab-service.exe")
+          request = {
+              "protocol_version": "1.0",
+              "request_id": str(uuid.uuid4()),
+              "command": "import.inspect_source",
+              "payload": {"source_path": r"C:\тест PetroLab\нет файла.xlsx"},
+          }
+          completed = subprocess.run(
+              [str(executable)],
+              input=(json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"),
+              stdout=subprocess.PIPE,
+              stderr=subprocess.PIPE,
+              check=True,
+          )
+          decoded = completed.stdout.decode("utf-8", errors="strict")
+          response = json.loads(decoded.splitlines()[0])
+          observed = response["error"]["details"]["path"]
+          if "тест PetroLab" not in observed:
+              raise SystemExit(f"Packaged service UTF-8 round-trip failed: {observed!r}")
+          '@ | python -
+      - name: Build and test frontend
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build
+          npm run test:sites
+          npm run test:tauri-contract
+          npm run test:ui
+      - name: Build Windows installer
+        working-directory: desktop
+        run: npm run tauri build
+      - name: Install and launch packaged Windows app
+        shell: pwsh
+        run: .\\scripts\\smoke_windows_installer.ps1
+      - name: Upload test installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: PetroLab-Windows-test-${{ github.sha }}
+          path: desktop/src-tauri/target/release/bundle/**
+          if-no-files-found: error
+          retention-days: 14

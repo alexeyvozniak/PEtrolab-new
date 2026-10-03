@@ -1,0 +1,293 @@
+{
+  "$contract": "import-workspace-session.schema.json",
+  "workspace_id": "77777777-7777-4777-8777-777777777777",
+  "schema_version": 1,
+  "draft_revision": 4,
+  "created_at": "2026-09-01T20:00:00Z",
+  "updated_at": "2026-09-01T20:05:00Z",
+  "active_source_id": "11111111-1111-4111-8111-111111111111",
+  "active_sheet_key": "core",
+  "sources": [
+    {
+      "source_id": "11111111-1111-4111-8111-111111111111",
+      "original_display_path": "C:\\Data\\2024 Phlogopite.xlsx",
+      "staged_path": "C:\\PetroLab\\staging\\77777777\\2024 Phlogopite.xlsx",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size_bytes": 248576,
+      "modified_at": "2026-09-01T19:58:00Z",
+      "source_kind": "xlsx",
+      "adapter_version": "excel-general/2",
+      "inspection_status": "inspected",
+      "sheets": [
+        {
+          "sheet_key": "core",
+          "physical_sheet_name": "Core",
+          "included": true,
+          "exclusion_reason": null,
+          "classification": "review_required",
+          "header_row": 4,
+          "orientation": "analyses_in_rows",
+          "blocks": [
+            {
+              "block_id": "core-1",
+              "start_row": 4,
+              "end_row": 128,
+              "start_column": 0,
+              "end_column": 8
+            }
+          ],
+          "field_mappings": [
+            {
+              "source_axis": "column",
+              "source_index": 0,
+              "source_header": "Sample",
+              "target_role": "identity",
+              "canonical_field": "Sample",
+              "unit": null,
+              "measurement_semantics": "identity",
+              "decision_state": "confirmed"
+            },
+            {
+              "source_axis": "column",
+              "source_index": 1,
+              "source_header": "Point",
+              "target_role": "identity",
+              "canonical_field": "Point",
+              "unit": null,
+              "measurement_semantics": "identity",
+              "decision_state": "confirmed"
+            },
+            {
+              "source_axis": "column",
+              "source_index": 2,
+              "source_header": "Fe",
+              "target_role": "measurement",
+              "canonical_field": null,
+              "unit": "wt.%",
+              "measurement_semantics": "measured",
+              "decision_state": "suggested"
+            }
+          ],
+          "mineral_default": "Phlogopite",
+          "method_default": "WDS",
+          "unresolved_issue_ids": [
+            "fe-form-core"
+          ],
+          "recipe_fragment_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        {
+          "sheet_key": "rim",
+          "physical_sheet_name": "Rim",
+          "included": true,
+          "exclusion_reason": null,
+          "classification": "review_required",
+          "header_row": 2,
+          "orientation": "analyses_in_rows",
+          "blocks": [
+            {
+              "block_id": "rim-1",
+              "start_row": 2,
+              "end_row": 74,
+              "start_column": 0,
+              "end_column": 8
+            }
+          ],
+          "field_mappings": [
+            {
+              "source_axis": "column",
+              "source_index": 0,
+              "source_header": "Sample",
+              "target_role": "identity",
+              "canonical_field": "Sample",
+              "unit": null,
+              "measurement_semantics": "identity",
+              "decision_state": "confirmed"
+            },
+            {
+              "source_axis": "column",
+              "source_index": 1,
+              "source_header": "Point",
+              "target_role": "identity",
+              "canonical_field": "Point",
+              "unit": null,
+              "measurement_semantics": "identity",
+              "decision_state": "confirmed"
+            },
+            {
+              "source_axis": "column",
+              "source_index": 2,
+              "source_header": "Fe",
+              "target_role": "measurement",
+              "canonical_field": null,
+              "unit": "wt.%",
+              "measurement_semantics": "measured",
+              "decision_state": "suggested"
+            }
+          ],
+          "mineral_default": "Phlogopite",
+          "method_default": "WDS",
+          "unresolved_issue_ids": [
+            "fe-form-rim"
+          ],
+          "recipe_fragment_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        {
+          "sheet_key": "la_trace",
+          "physical_sheet_name": "LA trace",
+          "included": true,
+          "exclusion_reason": null,
+          "classification": "clean",
+          "header_row": 1,
+          "orientation": "analyses_in_columns",
+          "blocks": [
+            {
+              "block_id": "la-1",
+              "start_row": 1,
+              "end_row": 64,
+              "start_column": 0,
+              "end_column": 16
+            }
+          ],
+          "field_mappings": [
+            {
+              "source_axis": "row",
+              "source_index": 0,
+              "source_header": "Analysis",
+              "target_role": "identity",
+              "canonical_field": "Analysis",
+              "unit": null,
+              "measurement_semantics": "identity",
+              "decision_state": "confirmed"
+            },
+            {
+              "source_axis": "row",
+              "source_index": 5,
+              "source_header": "Li [ppm]",
+              "target_role": "measurement",
+              "canonical_field": "Li",
+              "unit": "ppm",
+              "measurement_semantics": "measured",
+              "decision_state": "confirmed"
+            }
+          ],
+          "mineral_default": "Phlogopite",
+          "method_default": "LA-ICP-MS",
+          "unresolved_issue_ids": [],
+          "recipe_fragment_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "issue_id": "fe-form-core",
+      "code": "FE_FORM_REQUIRED",
+      "severity": "error",
+      "blocking": true,
+      "source_id": "11111111-1111-4111-8111-111111111111",
+      "sheet_key": "core",
+      "physical_range": {
+        "start_row": 4,
+        "end_row": 128,
+        "start_column": 2,
+        "end_column": 2
+      },
+      "logical_block_id": "core-1",
+      "message_params": {
+        "source_header": "Fe",
+        "source_unit": "wt.%"
+      },
+      "allowed_decisions": [
+        "map_as_feo",
+        "map_as_feot",
+        "map_as_fe2o3",
+        "exclude_field"
+      ],
+      "current_decision": null,
+      "bulk_scope_id": "same-fe-wt-row-sheets"
+    },
+    {
+      "issue_id": "fe-form-rim",
+      "code": "FE_FORM_REQUIRED",
+      "severity": "error",
+      "blocking": true,
+      "source_id": "11111111-1111-4111-8111-111111111111",
+      "sheet_key": "rim",
+      "physical_range": {
+        "start_row": 2,
+        "end_row": 74,
+        "start_column": 2,
+        "end_column": 2
+      },
+      "logical_block_id": "rim-1",
+      "message_params": {
+        "source_header": "Fe",
+        "source_unit": "wt.%"
+      },
+      "allowed_decisions": [
+        "map_as_feo",
+        "map_as_feot",
+        "map_as_fe2o3",
+        "exclude_field"
+      ],
+      "current_decision": null,
+      "bulk_scope_id": "same-fe-wt-row-sheets"
+    }
+  ],
+  "bulk_scopes": [
+    {
+      "bulk_scope_id": "same-fe-wt-row-sheets",
+      "decision_kind": "resolve_fe_form",
+      "targets": [
+        {
+          "source_id": "11111111-1111-4111-8111-111111111111",
+          "sheet_key": "core",
+          "source_axis": "column",
+          "source_index": 2
+        },
+        {
+          "source_id": "11111111-1111-4111-8111-111111111111",
+          "sheet_key": "rim",
+          "source_axis": "column",
+          "source_index": 2
+        }
+      ],
+      "signature": {
+        "normalized_source_header": "fe",
+        "source_unit": "wt.%",
+        "target_role": "measurement",
+        "canonical_field": null,
+        "orientation": "analyses_in_rows",
+        "adapter_version": "excel-general/2"
+      },
+      "scope_summary": "2 sheets with the same Fe header, wt.% unit and row-oriented analysis layout",
+      "source_fingerprints": {
+        "11111111-1111-4111-8111-111111111111": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "draft_revision": 4
+    }
+  ],
+  "plans": [
+    {
+      "source_id": "11111111-1111-4111-8111-111111111111",
+      "status": "invalid",
+      "recipe_fingerprint": null,
+      "plan_fingerprint": null,
+      "planned_analysis_count": 0,
+      "planned_measurement_count": 0
+    }
+  ],
+  "readiness": {
+    "ready_to_commit": false,
+    "blocking_issue_count": 2,
+    "warning_count": 0,
+    "included_source_count": 1,
+    "included_sheet_count": 3,
+    "planned_analysis_count": 0,
+    "planned_measurement_count": 0,
+    "skipped_sheet_count": 0,
+    "blocking_reason_codes": [
+      "FE_FORM_REQUIRED"
+    ]
+  }
+}

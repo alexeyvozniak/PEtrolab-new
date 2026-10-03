@@ -1,9 +1,69 @@
-# Prototype Instructions
+# Инструкции агентам PetroLab
 
-Run the local server yourself and open the preview in the browser available to this environment. Do not give the user server-start instructions when you can run it.
+Этот файл обязателен для любого AI, работающего в репозитории.
 
-Before making substantial visual changes, use the Product Design plugin's `get-context` skill when the visual source is unclear or no longer matches the current goal. When the user gives durable prototype-specific design feedback, preferences, or decisions, record them in `AGENTS.md`.
+## Порядок работы
 
-When implementing from a selected generated mock, treat that image as the source of truth for layout, component anatomy, density, spacing, color, typography, visible content, and hierarchy.
+1. Прочитать `docs/product/PRODUCT_UX_MASTER_SPECIFICATION.md`, `SCIENTIFIC_RULES.md`, `DOMAIN_MODEL.md` и относящийся к задаче ADR.
+2. Найти утверждённый экран и связанные US/AT-сценарии.
+3. Если экран не утверждён — остановиться на спецификации или макете. Не создавать production UI.
+4. Если поведение утверждено — менять минимальный vertical slice и добавить наблюдаемую приёмочную проверку.
+5. QA сравнивает поведение и скриншоты, а не принимает изменение только по unit-тестам.
 
-Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts/prepare-sites-build.mjs`, and `tests/sites-worker.test.mjs` intact so the same local prototype can be handed to Sites. Before a Sites handoff, run `npm run build` and `npm run test:sites`; the build must leave `dist/client/index.html`, `dist/server/index.js`, and `dist/.openai/hosting.json`.
+## Неприкосновенные границы
+
+- React не содержит формул, SQL, правил классификации, импорта и provenance.
+- Tauri не содержит научных сущностей; он отвечает за окно, файловые диалоги и процесс Python.
+- Python core не импортирует React, Tauri и библиотеки виджетов.
+- Persistence не знает о вкладках, компонентах и расположении панелей.
+- Selection не является Filter или Work Group.
+- Generation не выводится из цвета точки.
+- Скрытие точки на графике не удаляет Analysis и не создаёт QC-решение.
+- Измеренные, рассчитанные и интерпретированные данные не смешиваются.
+- Streamlit v1 и его база не изменяются из этого репозитория.
+
+## Научная сохранность данных
+
+- Исходный анализ никогда не изменяется молча и не перезаписывается рассчитанным значением.
+- `<DL` не превращается автоматически в `0`; факт нахождения ниже предела обнаружения должен сохраняться явно.
+- Единицы измерения являются частью данных и валидируются при импорте. Главные компоненты и рассеянные элементы не смешиваются без явного преобразования.
+- Предположения о Fe2+/Fe3+, кислороде, нормировке и выбранной модели пересчёта должны быть воспроизводимыми и сохраняться вместе с результатом.
+- Формулы, классификации, термобарометрия и другие научные расчёты реализуются и тестируются в Python core, а не в React.
+- Предупреждение о выходе за область применимости модели не должно молча менять результат или исходные данные.
+
+## Простота
+
+Новый adapter, bridge, wrapper, compatibility layer или state manager требует ADR с конкретной необходимостью и объяснением, почему существующая граница не подходит. По умолчанию используется одна прямая реализация.
+
+## Работа из VS Code
+
+Открывать нужно корень репозитория `PEtrolab-new`, а не только каталог `desktop`.
+
+Основные проверки доступны через `Terminal -> Run Task`:
+
+- `PetroLab: validate contracts`
+- `PetroLab: Python tests`
+- `PetroLab: UI tests`
+- `PetroLab: Sites tests`
+- `PetroLab: Tauri contract test`
+- `PetroLab: Rust check`
+- `PetroLab: Rust clippy`
+- `PetroLab: Web build`
+- `PetroLab: Full verification`
+
+Перед существенным изменением сначала запускать наиболее узкую связанную проверку. Перед завершением задачи запускать `PetroLab: Full verification`, если изменение затрагивает несколько слоёв приложения.
+
+Не проводить массовое автоформатирование или автоматические исправления по всему репозиторию вместе с функциональной задачей. Форматирование и рефакторинг должны оставаться локальными к изменяемому коду, чтобы diff был проверяемым.
+
+## Definition of Done
+
+Изменение готово только когда:
+
+- обновлён контракт, если изменилось поведение;
+- пройдены `python scripts/validate_contracts.py` и `python -m unittest discover -s tests`;
+- пройдены связанные AT-сценарии;
+- для изменений UI пройдены связанные тесты из `desktop/tests` и выполнена визуальная проверка ключевых состояний;
+- для изменений Tauri/Rust выполнен как минимум `cargo check`, а для нетривиальной Rust-логики также `cargo clippy --all-targets --all-features -- -D warnings`;
+- приложены скриншоты ключевых состояний;
+- проверено отсутствие молчаливого изменения исходных данных;
+- для UI проверено визуальное соответствие утверждённому эталону.

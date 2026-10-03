@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/analysis-template.schema.json",
+  "title": "Analysis Template",
+  "description": "Reusable research layout with compatibility requirements and no concrete Analysis, Source or Dataset identifiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "schema_version", "semantic_fingerprint", "requirements", "table_columns", "panel_templates", "method_templates", "created_at"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 160},
+    "schema_version": {"type": "integer", "minimum": 1},
+    "semantic_fingerprint": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "semantic_domain", "allowed_units", "required"],
+        "properties": {
+          "field": {"type": "string", "minLength": 1},
+          "semantic_domain": {"type": "string", "enum": ["identity", "oxide_wt_percent", "trace_concentration", "apfu", "ratio_or_index", "metadata"]},
+          "allowed_units": {"type": "array", "items": {"type": ["string", "null"]}, "uniqueItems": true},
+          "required": {"type": "boolean"}
+        }
+      }
+    },
+    "table_columns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "order", "visible"],
+        "properties": {
+          "field": {"type": "string", "minLength": 1},
+          "order": {"type": "integer", "minimum": 0},
+          "visible": {"type": "boolean"}
+        }
+      }
+    },
+    "panel_templates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "title", "axes"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["binary", "ternary", "spider", "ree_pattern", "histogram"]},
+          "title": {"type": "string", "minLength": 1},
+          "axes": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "maxItems": 3}
+        }
+      }
+    },
+    "method_templates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["method_id", "method_version", "parameters"],
+        "properties": {
+          "method_id": {"type": "string", "minLength": 1},
+          "method_version": {"type": "string", "minLength": 1},
+          "parameters": {"type": "object"}
+        }
+      }
+    },
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

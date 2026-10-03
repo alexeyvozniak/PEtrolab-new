@@ -1,0 +1,15 @@
+{
+  "$contract": "portable-project-manifest.schema.json",
+  "manifest_version": 1,
+  "project_id": "f269512a-d0db-476f-97bb-de6e827a58d3",
+  "project_schema_version": 1,
+  "scope": "project_sources",
+  "exported_at": "2026-08-30T00:40:00Z",
+  "application_version": "2.0.0-alpha.1",
+  "files": [
+    {"path": "project/project.sqlite3", "sha256": "777788889999aaaabbbbccccddddeeeeffff0000111122223333444455556666", "size_bytes": 245760, "role": "database"},
+    {"path": "sources/mica_epma.xlsx", "sha256": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd", "size_bytes": 193840, "role": "source"}
+  ],
+  "entity_counts": {"sources": 1, "samples": 23, "analyses": 135, "measurements": 2430, "work_groups": 2, "calculation_runs": 1},
+  "omissions": ["Original media assets are excluded by project_sources scope."]
+}

@@ -1,0 +1,85 @@
+.duplicate-review {
+  display: grid;
+  gap: 16px;
+}
+
+.duplicate-review-head,
+.duplicate-review-action {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.duplicate-review-head > div,
+.duplicate-review-action > div {
+  display: grid;
+  gap: 5px;
+}
+
+.duplicate-review-head span,
+.duplicate-review-action span,
+.duplicate-record small,
+.duplicate-record > span {
+  color: var(--muted, #68737d);
+}
+
+.duplicate-review-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  font-weight: 650;
+}
+
+.duplicate-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.duplicate-group {
+  border: 1px solid rgba(147, 107, 34, 0.25);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 248, 230, 0.38);
+}
+
+.duplicate-group > strong {
+  display: block;
+  padding: 10px 13px;
+  border-bottom: 1px solid rgba(147, 107, 34, 0.18);
+}
+
+.duplicate-record {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(150px, 1fr) minmax(220px, 1.6fr);
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 13px;
+  border-bottom: 1px solid rgba(147, 107, 34, 0.11);
+}
+
+.duplicate-record:last-child {
+  border-bottom: 0;
+}
+
+.duplicate-reviewed .duplicate-group {
+  border-color: rgba(43, 119, 82, 0.24);
+  background: rgba(236, 249, 241, 0.45);
+}
+
+.duplicate-review-action {
+  padding-top: 4px;
+}
+
+@media (max-width: 980px) {
+  .duplicate-review-head,
+  .duplicate-review-action {
+    flex-direction: column;
+  }
+
+  .duplicate-record {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

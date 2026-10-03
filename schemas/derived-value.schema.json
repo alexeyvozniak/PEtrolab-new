@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/derived-value.schema.json",
+  "title": "Derived Value",
+  "description": "Versioned calculated value that never overwrites its source Measurements.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "analysis_id", "field", "value", "unit", "method_id", "method_version", "method_definition_fingerprint", "input_measurement_ids", "input_fingerprint", "assumptions", "status", "stale_reasons", "created_at"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "analysis_id": {"type": "string", "format": "uuid"},
+    "field": {"type": "string", "minLength": 1},
+    "value": {"type": ["string", "number", "boolean", "null"]},
+    "unit": {"type": ["string", "null"]},
+    "method_id": {"type": "string", "minLength": 1},
+    "method_version": {"type": "string", "minLength": 1},
+    "method_definition_fingerprint": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "input_measurement_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "minItems": 1, "uniqueItems": true},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "assumptions": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "status": {"type": "string", "enum": ["current", "stale", "failed"]},
+    "stale_reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "$contract": "protocol-envelope.schema.json",
+  "protocol_version": "1.0",
+  "request_id": "6b178581-aa86-4bb1-9742-4fd5324c22ed",
+  "command": "selection.union",
+  "payload": {
+    "analysis_ids": ["019c15f9-5d8a-7e31-89cf-86323913393f"],
+    "expected_revision": 3
+  }
+}
+

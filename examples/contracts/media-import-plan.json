@@ -1,0 +1,30 @@
+{
+  "$contract": "media-import-plan.schema.json",
+  "schema_version": 1,
+  "semantic_fingerprint": "fa4018e703560d73c06a77f08c1604c70a4b59b7fd69e73cc815529e40416471",
+  "items": [
+    {
+      "media_asset_id": "019c15f9-5d8a-7e31-89cf-8632391339a1",
+      "source_path": "D:/PetroLab/KIV-2_BSE_01.tif",
+      "source_fingerprint": "5a4018e703560d73c06a77f08c1604c70a4b59b7fd69e73cc815529e40416471",
+      "display_name": "KIV-2_BSE_01.tif",
+      "ownership_mode": "managed_copy",
+      "media_type": "BSE",
+      "mime_type": "image/tiff",
+      "width_px": 4096,
+      "height_px": 3072,
+      "sample_name": "KIV-2",
+      "thin_section_name": "KIV-2-TS1",
+      "existing_media_asset_id": null,
+      "placements": [
+        {
+          "spatial_annotation_id": "019c15f9-5d8a-7e31-89cf-8632391339a2",
+          "analytical_point_id": "019c15f9-5d8a-7e31-89cf-8632391339a3",
+          "geometry": {"kind": "point", "x_px": 1820.5, "y_px": 941.25},
+          "cross_sample_exception_reason": null
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

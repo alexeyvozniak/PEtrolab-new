@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://petrolab.local/schemas/selection.schema.json",
+  "title": "Selection",
+  "description": "Ephemeral, ordered-independent set of selected Analysis identifiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "analysis_ids", "revision", "updated_at"],
+  "properties": {
+    "session_id": {"type": "string", "format": "uuid"},
+    "analysis_ids": {
+      "type": "array",
+      "items": {"type": "string", "format": "uuid"},
+      "uniqueItems": true
+    },
+    "revision": {"type": "integer", "minimum": 0},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}
+

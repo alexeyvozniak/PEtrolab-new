@@ -1,0 +1,14 @@
+{
+  "$contract": "edit-draft.schema.json",
+  "id": "66666666-6666-4666-8666-666666666666",
+  "project_id": "f269512a-d0db-476f-97bb-de6e827a58d3",
+  "source_id": "67777777-7777-4777-8777-777777777777",
+  "source_fingerprint_at_start": "3333444455556666777788889999aaaabbbbccccddddeeeeffff000011112222",
+  "changes": [
+    {"analysis_id": "11111111-1111-4111-8111-111111111111", "field": "Generation", "old_value": "core", "new_value": "rim", "unit": null}
+  ],
+  "status": "draft",
+  "conflict": {"kind": "none", "detected_at": null, "current_source_fingerprint": null, "current_values": []},
+  "created_at": "2026-08-30T00:35:00Z",
+  "updated_at": "2026-08-30T00:35:00Z"
+}

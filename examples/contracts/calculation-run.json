@@ -1,0 +1,26 @@
+{
+  "$contract": "calculation-run.schema.json",
+  "id": "22222222-2222-4222-8222-222222222222",
+  "project_id": "f269512a-d0db-476f-97bb-de6e827a58d3",
+  "method_id": "statistics.clr",
+  "method_version": "1.0.0",
+  "method_definition_fingerprint": "739ef182c4fa24bd30c5417cc2171c826adc56060bcc54492b1903d033cfa001",
+  "input": {
+    "kind": "analysis_snapshot",
+    "analysis_ids": ["11111111-1111-4111-8111-111111111111"]
+  },
+  "input_measurement_ids": [
+    "31111111-1111-4111-8111-111111111111",
+    "32222222-2222-4222-8222-222222222222",
+    "33333333-3333-4333-8333-333333333333"
+  ],
+  "input_fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "parameters": {"fields": ["SiO2", "TiO2", "Al2O3"], "log_base": "e", "pseudocount": null},
+  "excluded": [],
+  "result_manifest": {"rows": 1, "fields": ["CLR_SiO2", "CLR_TiO2", "CLR_Al2O3"], "benchmark_set_version": "2026.08.1"},
+  "status": "current",
+  "stale_reasons": [],
+  "seed": null,
+  "software_versions": {"python": "3.12", "numpy": "pinned-at-build"},
+  "created_at": "2026-08-30T00:32:00Z"
+}
