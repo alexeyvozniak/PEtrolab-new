@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PetroLab",
+  "version": "0.1.7",
+  "identifier": "org.petrolab.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev:tauri",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "python ../scripts/generate_tauri_icon.py && npm run build",
+    "frontendDist": "../dist/client"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "PetroLab",
+        "width": 1440,
+        "height": 1024,
+        "minWidth": 1180,
+        "minHeight": 800,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico"],
+    "resources": ["binaries/petrolab-service.exe"]
+  }
+}
