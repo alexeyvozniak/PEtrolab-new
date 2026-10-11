@@ -30,13 +30,13 @@ function FormulaParameter({ parameter, method, value, busy, onChange }) {
   </label>;
 }
 
-function Result({ result }) {
+function Result({ result, methodStatus }) {
   if (!result) return null;
   const halogens = (result.used || []).filter(item => ['F', 'Cl'].includes(item.field));
   return <div className="formula-result">
     {(result.errors || []).map(text => <p className="formula-error" key={text}>{text}</p>)}
     {result.warnings?.length > 0 && <details className="formula-result-notes"><summary>Предупреждения · {result.warnings.length}</summary>{result.warnings.map(text => <p className="formula-warning" key={text}>{text}</p>)}</details>}
-    {result.method_status === 'draft' && <p className="formula-scope">Черновой bulk-пересчёт · не определение вида минерала.</p>}
+    {(result.method_status || methodStatus) === 'draft' && <p className="formula-scope">Черновой bulk-пересчёт · не определение вида минерала.</p>}
     {Object.keys(result.values || {}).length > 0 && <table aria-label="Рассчитанные значения"><caption>Рассчитано · не исходные измерения</caption>
       <thead><tr><th>Показатель</th><th>Значение</th><th>Единица</th></tr></thead>
       <tbody>{Object.entries(result.values).sort(([a], [b]) => Number(['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(b)) - Number(['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(a))).map(([field, value]) => <tr key={field}><th>{fieldLabel(field)}{field === 'OH_est_apfu' && <span className="formula-estimate-badge">оценка</span>}</th><td>{format(value)}</td><td>{field === 'oxide_total' ? 'wt.%' : ['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(field) ? 'mol.%' : 'APFU'}</td></tr>)}</tbody>
@@ -77,7 +77,8 @@ export function FormulaPanel({ analysis, databasePath }) {
   }
   function selectMethod(next) {
     setMethod(next);
-    setParameters(Object.fromEntries((next?.parameters || []).map(parameter => [parameter.name, ''])));
+    const preset = next?.quick_presets?.[0]?.parameters || {};
+    setParameters(Object.fromEntries((next?.parameters || []).map(parameter => [parameter.name, preset[parameter.name] || ''])));
     setPreview(null); setMessage(''); setError('');
   }
   useEffect(() => {
@@ -104,12 +105,12 @@ export function FormulaPanel({ analysis, databasePath }) {
     setParameters(current => ({ ...current, [name]: value }));
     setPreview(null); setMessage(''); setError('');
   }
-  async function calculate(save = false, calculationParameters = parameters) {
+  async function calculate(save = false) {
     setBusy(true); setError(''); setMessage('');
     try {
       const payload = { analysis_ids: [analysisId], method_id: method.method_id,
         method_version: method.version,
-        parameters: save ? preview.parameters : calculationParameters };
+        parameters: save ? preview.parameters : parameters };
       if (save) payload.preview_fingerprint = preview.input_fingerprint;
       const result = await request(save ? 'formula.save' : 'formula.preview', payload);
       if (!active.current) return;
@@ -123,8 +124,13 @@ export function FormulaPanel({ analysis, databasePath }) {
     finally { if (active.current) setBusy(false); }
   }
   return <section className="formula-panel" aria-label="Пересчёт формулы">
-    <h3>Формула минерала</h3>
-    <p className="formula-analysis"><strong>{analysis.identity?.Analysis || analysisId}</strong> · {acceptedTarget || 'минерал не принят'}</p>
+    <div className="formula-action-bar">
+      <h3>Формула минерала</h3>
+      <p className="formula-analysis"><strong>{analysis.identity?.Analysis || analysisId}</strong> · {acceptedTarget || 'минерал не принят'}</p>
+      {method && <button type="button" className="primary-button formula-quick-action"
+        disabled={busy || !databasePath || missingParameters.length > 0} onClick={() => calculate()}>{quickPreset?.label || 'Рассчитать формулу'}</button>}
+      {method && missingParameters.length > 0 && <p>Выберите: {missingParameters.map(parameter => parameterLabel(parameter.name)).join(', ')}.</p>}
+    </div>
     {!databasePath && <p>Откройте сохранённый проект для расчёта.</p>}
     {busy && <p role="status">Проверяю данные…</p>}
     {error && <p role="alert" className="formula-error">{error}</p>}
@@ -132,11 +138,7 @@ export function FormulaPanel({ analysis, databasePath }) {
     {!acceptedTarget && !busy && <p className="formula-empty">Сначала примите назначение минерала. До этого метод формулы недоступен.</p>}
     {acceptedTarget && !busy && !error && methods.length === 0 && <p className="formula-empty">Для принятого назначения «{acceptedTarget}» формульный метод пока не подключён.</p>}
     {method && <>
-      {quickPreset && <button type="button" className="primary-button formula-quick-action" disabled={busy} onClick={() => {
-        setParameters(quickPreset.parameters); setPreview(null); setMessage(''); setError('');
-        calculate(false, quickPreset.parameters);
-      }}>{quickPreset.label}</button>}
-      <details className="formula-settings"><summary>Настроить расчёт</summary>
+      <details className="formula-settings"><summary tabIndex={0}>Настроить расчёт</summary>
         {methods.length > 1 && <label>Метод<select aria-label="Метод формулы" value={method.method_id} disabled={busy} onChange={event => selectMethod(methods.find(item => item.method_id === event.target.value))}>{methods.map(item => <option key={item.method_id} value={item.method_id}>{item.name} · v{item.version}</option>)}</select></label>}
         <div className="formula-parameter-grid">{(method.parameters || []).map(parameter => <FormulaParameter
           key={parameter.name}
@@ -146,8 +148,6 @@ export function FormulaPanel({ analysis, databasePath }) {
           busy={busy}
           onChange={setParameter}
         />)}</div>
-        {missingParameters.length > 0 && <p>Выберите: {missingParameters.map(parameter => parameterLabel(parameter.name)).join(', ')}.</p>}
-        <button type="button" className="outline-button" disabled={busy || missingParameters.length > 0} onClick={() => calculate()}>Рассчитать с этими настройками</button>
       </details>
       <details className="formula-method-info"><summary>ⓘ О методе</summary>
         <p><strong>{method.name}</strong></p>
@@ -158,7 +158,7 @@ export function FormulaPanel({ analysis, databasePath }) {
       </details>
     </>}
     {preview && <div aria-label="Предпросмотр формулы"><h4>Предпросмотр · ещё не сохранён</h4>
-      <Result result={preview.results[0]} />
+      <Result result={preview.results[0]} methodStatus={preview.method?.status || method?.status} />
       <button type="button" className="primary-button" disabled={busy || !preview.can_save} onClick={() => calculate(true)}>Сохранить результат формулы</button>
       {!preview.can_save && <p>Сохранение недоступно: исправьте указанные входы или назначение.</p>}
     </div>}
@@ -170,7 +170,7 @@ export function FormulaPanel({ analysis, databasePath }) {
       return <details key={run.id} className="formula-history"><summary>{run.status === 'stale' ? 'Устарел' : 'Сохранён'} · {savedMethod?.name || run.method_id} · v{run.method_version} · {run.created_at}</summary>
         {run.stale_reasons.map(reason => <p className="formula-warning" key={reason}>{reason}</p>)}
         <dl className="formula-parameters">{Object.entries(run.parameters).map(([name, value]) => <div key={name}><dt>{parameterLabel(name)}</dt><dd>{choices[name]?.[value] || value}</dd></div>)}</dl>
-        <Result result={run.result_manifest.results.find(result => result.analysis_id === analysisId)} />
+        <Result result={run.result_manifest.results.find(result => result.analysis_id === analysisId)} methodStatus={savedMethod?.status} />
         <small>Run ID: {run.id}<br />Fingerprint: {run.input_fingerprint}</small>
       </details>;
     })}

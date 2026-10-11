@@ -35,7 +35,7 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check pyinstaller
           python scripts/build_windows_service.py
-          python scripts/qa_amphibole_service.py --executable desktop/src-tauri/binaries/petrolab-service.exe
+          python scripts/qa_amphibole_service.py --all-methods --executable desktop/src-tauri/binaries/petrolab-service.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $request = @{ protocol_version = "1.0"; request_id = [guid]::NewGuid().ToString(); command = "import.inspect_source"; payload = @{ source_path = (Resolve-Path "fixtures/import/m1_1_ambiguous_multisheet.xlsx").Path } } | ConvertTo-Json -Compress
           $response = $request | & .\desktop\src-tauri\binaries\petrolab-service.exe | ConvertFrom-Json

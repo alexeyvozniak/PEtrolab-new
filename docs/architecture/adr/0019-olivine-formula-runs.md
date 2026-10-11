@@ -9,6 +9,12 @@ Approved behaviour: master specification §§11,20.2; AT-31 and AT-35;
 Keep the green three-pane review. Add formula controls to the inspector of one
 explicitly accepted analysis: method/version → explicit Fe mode → preview → save.
 The button names the exact one-analysis scope; focus alone never starts a run.
+The common formula action uses the current explicit parameter values. On opening
+a method, its Python-issued quick preset supplies the initial values; changing
+Fe/OH never lets the main action silently restore that preset. There is one
+calculation button, not a second calculation inside advanced settings. The
+analysis identity and action stay visible while scrolling formula results and
+history. Clearing a required choice disables calculation until it is restored.
 Measured wt.% and derived APFU appear in separate tables. Warnings remain visible.
 Saved history can be reopened; errors do not erase the preview or Fe choice.
 This bounded slice is post-import and single-analysis in UI; batch UI and

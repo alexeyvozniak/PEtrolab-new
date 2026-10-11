@@ -370,6 +370,7 @@ test('real formula path saves APFU, reopens history and invalidates a changed Fe
   expect(fe.value).toBe('all_fe2');
   const calculated = await screen.findByRole('table', { name: 'Рассчитанные значения' });
   expect(within(calculated).getByText('Fo')).toBeTruthy();
+  expect(within(screen.getByLabelText('Предпросмотр формулы')).getByText('Черновой bulk-пересчёт · не определение вида минерала.')).toBeTruthy();
   await user.click(await enabledButton('Сохранить результат формулы'));
   await screen.findByText('Сохранённые расчёты · 1');
   await user.click(await enabledButton('Анализы'));
@@ -379,18 +380,18 @@ test('real formula path saves APFU, reopens history and invalidates a changed Fe
   await user.click(screen.getByText('Настроить расчёт', { selector: 'summary' }));
   const restoredFe = screen.getByRole('combobox', { name: 'Режим железа' });
   await user.selectOptions(restoredFe, 'all_fe2');
-  await user.click(await enabledButton('Рассчитать с этими настройками'));
+  await user.click(await enabledButton('Рассчитать формулу'));
   await enabledButton('Сохранить результат формулы');
   await user.selectOptions(restoredFe, 'reported_split');
   expect(screen.queryByRole('button', { name: 'Сохранить результат формулы' })).toBeNull();
-  await user.click(await enabledButton('Рассчитать с этими настройками'));
+  await user.click(await enabledButton('Рассчитать формулу'));
   await screen.findByText(/Fe2O3: нет пригодного/);
   expect(screen.getByRole('button', { name: 'Сохранить результат формулы' }).disabled).toBe(true);
   expect(requests.filter(r => r.command === 'formula.save')).toHaveLength(1);
   expect(await readFile(second, 'utf8')).toBe(raw);
 }, 60000);
 
-test('real mica formula requires three choices, saves OH provenance and preserves choices after an error', async () => {
+test('real mica main action respects Fe/OH choices, saves provenance and preserves choices after an error', async () => {
   const mica = 'Analysis,Mineral,SiO2 (wt.%),Al2O3 (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%),FeO (wt.%),F (wt.%),Cl (wt.%)\nPhl-1,phlogopite,43.19886687724983,12.218097369947321,28.97803256529596,0,0,11.287489155286707,0,0,0\n';
   await writeFile(second, mica);
   const raw = await readFile(second, 'utf8');
@@ -421,7 +422,9 @@ test('real mica formula requires three choices, saves OH provenance and preserve
   expect(fe.title).toBe('Всё железо как Fe²⁺ (FeO или FeOt)');
   expect(screen.getByText('Идеальная группа O₁₀W₂; нормировка на 22 положительных заряда', { selector: '.formula-parameter-help' })).toBeTruthy();
   await user.selectOptions(oh, 'ideal_2_minus_f_cl');
-  await user.click(await enabledButton('Рассчитать с этими настройками'));
+  const mainCalculate = await enabledButton('Рассчитать формулу');
+  mainCalculate.focus();
+  await user.keyboard('{Enter}');
   await screen.findByText('OH (оценка)');
   expect(screen.getByText('Черновой bulk-пересчёт · не определение вида минерала.')).toBeTruthy();
   expect(screen.getByLabelText('Основание оценки OH').textContent).toContain('F = 0 wt.%');
@@ -444,11 +447,11 @@ test('real mica formula requires three choices, saves OH provenance and preserve
   await user.selectOptions(restoredFe, 'all_fe2');
   await user.selectOptions(restoredBasis, 'ideal_O10_W2');
   await user.selectOptions(restoredOh, 'ideal_2_minus_f_cl');
-  await user.click(await enabledButton('Рассчитать с этими настройками'));
+  await user.click(await enabledButton('Рассчитать формулу'));
   await enabledButton('Сохранить результат формулы');
   await user.selectOptions(restoredFe, 'reported_split');
   expect(screen.queryByRole('button', { name: 'Сохранить результат формулы' })).toBeNull();
-  await user.click(await enabledButton('Рассчитать с этими настройками'));
+  await user.click(await enabledButton('Рассчитать формулу'));
   await screen.findByText(/Fe2O3: нет пригодного/);
   expect(restoredFe.value).toBe('reported_split');
   expect(restoredBasis.value).toBe('ideal_O10_W2');
@@ -568,7 +571,7 @@ test('real amphibole rejects measured F, keeps the Fe choice and never saves an 
   await user.selectOptions(fe, '');
   expect(screen.queryByLabelText('Предпросмотр формулы')).toBeNull();
   await user.selectOptions(fe, 'all_fe2');
-  await user.click(await enabledButton('Рассчитать с этими настройками'));
+  await user.click(await enabledButton('Рассчитать формулу'));
   await screen.findByText(/F: не поддерживается этим методом/);
   expect(fe.value).toBe('all_fe2');
   expect(screen.getByRole('button', { name: 'Сохранить результат формулы' }).disabled).toBe(true);

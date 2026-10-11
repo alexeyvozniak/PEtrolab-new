@@ -16,7 +16,7 @@ METHOD = 'amphibole.oxygen23'
 VERSION = '0.1.0'
 
 
-def verify_service(executable=None):
+def verify_service(executable=None, all_methods=False):
     command = [str(executable.resolve())] if executable else [sys.executable, '-m', 'petrolab.ndjson_service']
     environment = {**os.environ, 'PYTHONUTF8': '1', 'PYTHONIOENCODING': 'utf-8',
                    'PYTHONPATH': str(ROOT / 'src')}
@@ -117,11 +117,107 @@ def verify_service(executable=None):
             with closing(sqlite3.connect(project)) as connection, connection:
                 assert connection.execute('SELECT payload_json FROM formula_run').fetchone()[0] == stored
                 assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+            additional = []
+            if all_methods:
+                # Expectations from stoichiometry/published tables, not production.
+                cases = [
+                    ('olivine_fo50.csv', 'olivine', 'olivine.oxygen4',
+                     {'Si_apfu': 1, 'Mg_apfu': 1, 'Fe2_apfu': 1, 'Fo': 50, 'Fa': 50}, .0001),
+                    ('mica_phlogopite.csv', 'phlogopite', 'mica.charge22',
+                     {'Si_apfu': 3, 'Al_apfu': 1, 'Mg_apfu': 3, 'K_apfu': 1}, .0001),
+                    ('clinopyroxene_e16_085.csv', 'diopside', 'clinopyroxene.oxygen6',
+                     {'Si_apfu': 1.81, 'Mg_apfu': 1.03, 'Ca_apfu': .57,
+                      'Wo': 32.34, 'En': 57.79, 'Fs': 9.87}, .03),
+                    ('orthopyroxene_e17_016.csv', 'enstatite', 'orthopyroxene.oxygen6',
+                     {'Si_apfu': 1.80, 'Mg_apfu': 1.56, 'Ca_apfu': .04,
+                      'Wo': 2.45, 'En': 86.76, 'Fs': 10.79}, .05),
+                ]
+                for name, target, method_id, expected, tolerance in cases:
+                    other_project = Path(folder) / f'{method_id}.sqlite'
+                    source = Path(folder) / name
+                    shutil.copyfile(ROOT / 'fixtures/formula' / name, source)
+                    sources.append((source, source.read_bytes()))
+                    workspace = send('import.workspace.create', {'sources': [{'staged_path': str(source)}]})
+                    send('import.plan.apply', {'project_database_path': str(other_project),
+                         'source_path': str(source), 'recipe': workspace['active']['recipe']})
+                    record = send('project.mineral_identification.list',
+                                  {'project_database_path': str(other_project)})['identifications'][0]
+                    send('project.mineral_assignment.decide', {'project_database_path': str(other_project),
+                         'analysis_id': record['analysis_id'], 'target': target,
+                         'input_fingerprint': record['input_fingerprint'], 'ruleset_version': record['ruleset_version'],
+                         'reason': 'AT-46: independent formula family acceptance'})
+                    methods = send('formula.methods.list', {'accepted_assignment': target})['methods']
+                    assert len(methods) == 1 and methods[0]['method_id'] == method_id, methods
+                    chosen = methods[0]['quick_presets'][0]['parameters']
+                    arguments = {'project_database_path': str(other_project),
+                                 'analysis_ids': [record['analysis_id']], 'method_id': method_id,
+                                 'method_version': methods[0]['version'], 'parameters': chosen}
+                    with closing(sqlite3.connect(other_project)) as connection:
+                        inputs = connection.execute('SELECT * FROM measurement ORDER BY rowid').fetchall()
+                    current = send('formula.preview', arguments)
+                    assert current['can_save'] and current['method']['status'] == 'draft', current
+                    values = current['results'][0]['values']
+                    for field, value in expected.items():
+                        limit = min(tolerance, .011) if field.endswith('_apfu') else tolerance
+                        assert abs(values[field] - value) <= limit, (method_id, field, values[field], value)
+                    commit = {**arguments, 'preview_fingerprint': current['input_fingerprint']}
+                    saved = send('formula.save', commit)
+                    retry = send('formula.save', commit)
+                    assert retry['reused'] and retry['run']['id'] == saved['run']['id']
+                    history = send('formula.runs.list', {'project_database_path': str(other_project),
+                                   'analysis_id': record['analysis_id']})['runs']
+                    assert len(history) == 1 and history[0]['run']['status'] == 'current'
+                    assert history[0]['run']['result_manifest']['results'][0]['values'] == values
+                    assert history[0]['run']['parameters'] == chosen
+                    assert history[0]['run']['result_manifest']['parameter_descriptions'] == current['parameter_descriptions']
+                    used = {m['measurement_id'] for m in current['results'][0]['used']}
+                    assert set(saved['run']['input_measurement_ids']) == used
+                    for value in history[0]['derived_values']:
+                        assert set(value['input_measurement_ids']) == used
+                        unit = 'wt.%' if value['field'] == 'oxide_total' else (
+                            'mol.%' if value['field'] in {'Fo', 'Fa', 'Wo', 'En', 'Fs'} else 'apfu')
+                        assert value['unit'] == unit
+                    invalid_arguments = {**arguments, 'parameters': {**chosen, 'fe_mode': 'reported_split'}}
+                    invalid = send('formula.preview', invalid_arguments)
+                    assert not invalid['can_save'] and invalid['parameters']['fe_mode'] == 'reported_split'
+                    assert not invalid['results'][0]['values']
+                    send('formula.save', {**invalid_arguments, 'preview_fingerprint': invalid['input_fingerprint']},
+                         'FORMULA_INPUT_INVALID')
+                    if method_id == 'mica.charge22':
+                        oh_arguments = {**arguments, 'parameters': {**chosen, 'oh_mode': 'ideal_2_minus_f_cl'}}
+                        oh_preview = send('formula.preview', oh_arguments)
+                        assert oh_preview['can_save'] and abs(oh_preview['results'][0]['values']['OH_est_apfu'] - 2) < 1e-10
+                        send('formula.save', {**oh_arguments, 'preview_fingerprint': current['input_fingerprint']},
+                             'FORMULA_PREVIEW_STALE')
+                        oh_saved = send('formula.save', {**oh_arguments, 'preview_fingerprint': oh_preview['input_fingerprint']})
+                        assert oh_saved['run']['id'] != saved['run']['id']
+                        assert oh_saved['run']['parameters']['oh_mode'] == 'ideal_2_minus_f_cl'
+                    with closing(sqlite3.connect(other_project)) as connection:
+                        assert connection.execute('SELECT * FROM measurement ORDER BY rowid').fetchall() == inputs
+                        assert connection.execute('SELECT count(*) FROM formula_run').fetchone()[0] == (2 if method_id == 'mica.charge22' else 1)
+                        assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+                        stored_runs = connection.execute('SELECT payload_json FROM formula_run ORDER BY rowid').fetchall()
+                        # Deliberate correction in a disposable test database only.
+                        connection.execute("UPDATE measurement SET raw_token='1' WHERE analysis_id=? AND canonical_field='SiO2'",
+                                           (record['analysis_id'],))
+                        connection.commit()
+                    send('formula.save', commit, 'FORMULA_PREVIEW_STALE')
+                    stale_history = send('formula.runs.list', {'project_database_path': str(other_project),
+                                         'analysis_id': record['analysis_id']})['runs']
+                    assert len(stale_history) == len(stored_runs)
+                    assert all(item['run']['status'] == 'stale' and item['run']['stale_reasons'] for item in stale_history)
+                    assert all(value['status'] == 'stale' for item in stale_history for value in item['derived_values'])
+                    original_run = next(item['run'] for item in stale_history if item['run']['id'] == saved['run']['id'])
+                    assert original_run['result_manifest']['results'][0]['values'] == values
+                    with closing(sqlite3.connect(other_project)) as connection:
+                        assert connection.execute('SELECT payload_json FROM formula_run ORDER BY rowid').fetchall() == stored_runs
+                    additional.append(method_id)
             assert all(source.read_bytes() == original for source, original in sources)
             return {'method': f'{METHOD}/{VERSION}', 'checks': ['explicit assignment', 'published APFU',
                     'unsupported F and atomic rejection', 'idempotent save and reopened history',
                     'Measurement provenance and unchanged inputs', 'stale result and immutable history',
-                    'unchanged source files'], 'service': 'packaged' if executable else 'python'}
+                    'unchanged source files'], 'service': 'packaged' if executable else 'python',
+                    'additional_methods': additional}
         finally:
             service.stdin.close()
             try:
@@ -135,5 +231,6 @@ def verify_service(executable=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--executable', type=Path)
+    parser.add_argument('--all-methods', action='store_true', help='Also verify olivine, mica, Cpx and Opx.')
     args = parser.parse_args()
-    print(json.dumps(verify_service(args.executable), ensure_ascii=False, indent=2))
+    print(json.dumps(verify_service(args.executable, args.all_methods), ensure_ascii=False, indent=2))
