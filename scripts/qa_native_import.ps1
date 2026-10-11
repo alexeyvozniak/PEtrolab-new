@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Inspect','Capture','Click','Select','File','Restore','Close','Input','Key','Resize')][string]$Action = 'Inspect',
+    [ValidateSet('Inspect','Capture','Click','Select','File','Restore','Close','Input','Key','Resize','Scroll')][string]$Action = 'Inspect',
     [string]$Name = '', [string]$Value = '', [string]$OutputPath = '', [int]$Index = 0
 )
 $ErrorActionPreference = 'Stop'
@@ -13,6 +13,8 @@ public class PetroLabCapture {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, string text);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
 }
@@ -66,15 +68,21 @@ if ($Action -eq 'Inspect') {
     $elements | ForEach-Object { $entry=$_.Current; if ($entry.Name) { [PSCustomObject]@{ Name=$entry.Name; Type=$entry.ControlType.ProgrammaticName; Enabled=$entry.IsEnabled; Offscreen=$entry.IsOffscreen; Handle=$entry.NativeWindowHandle } } } | ConvertTo-Json -Depth 3
     return
 }
-$matches = @($elements | Where-Object { $_.Current.Name.Trim() -eq $Name.Trim() -and $_.Current.IsEnabled })
+$matches = @($elements | Where-Object { ([string]$_.Current.Name).Trim() -eq $Name.Trim() -and $_.Current.IsEnabled })
 $pattern = if ($Action -eq 'Click') { [System.Windows.Automation.InvokePattern]::Pattern } elseif ($Action -eq 'Input') { [System.Windows.Automation.ValuePattern]::Pattern } else { $null }
-if ($pattern) { $matches = @($matches | Where-Object { (@($_.GetSupportedPatterns().Id) -contains $pattern.Id) -or ($Action -eq 'Click' -and @($_.GetSupportedPatterns().Id) -contains [System.Windows.Automation.TogglePattern]::Pattern.Id) }) }
+if ($pattern) { $matches = @($matches | Where-Object { (@($_.GetSupportedPatterns().Id) -contains $pattern.Id) -or ($Action -eq 'Click' -and (@($_.GetSupportedPatterns().Id) -contains [System.Windows.Automation.TogglePattern]::Pattern.Id -or @($_.GetSupportedPatterns().Id) -contains [System.Windows.Automation.ExpandCollapsePattern]::Pattern.Id)) }) }
 if ($matches.Length -le $Index) { throw "Element not found: $Name" }
 $element = $matches[$Index]
 if ($Action -eq 'Click') {
     if (@($element.GetSupportedPatterns().Id) -contains [System.Windows.Automation.InvokePattern]::Pattern.Id) {
         $element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    } else { $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle() }
+    } elseif (@($element.GetSupportedPatterns().Id) -contains [System.Windows.Automation.TogglePattern]::Pattern.Id) {
+        $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+    } else {
+        $expand = $element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+        if ($expand.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded) { $expand.Collapse() }
+        else { $expand.Expand() }
+    }
 } elseif ($Action -eq 'Select') {
     $element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
     $option = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $Value)))
@@ -84,6 +92,21 @@ if ($Action -eq 'Click') {
     $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Value)
 } elseif ($Action -eq 'Key') {
     Add-Type -AssemblyName System.Windows.Forms
+    $windowHandle = [IntPtr]$window.Current.NativeWindowHandle
+    [void][PetroLabCapture]::SetForegroundWindow($windowHandle)
+    if ([PetroLabCapture]::GetForegroundWindow() -ne $windowHandle) { throw 'QA window did not acquire foreground; no keys were sent' }
     $element.SetFocus()
+    $focusDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    while (-not $element.Current.HasKeyboardFocus -and [DateTime]::UtcNow -lt $focusDeadline) { Start-Sleep -Milliseconds 25 }
+    if (-not $element.Current.HasKeyboardFocus) { throw "Keyboard focus was not acquired: $Name" }
     [System.Windows.Forms.SendKeys]::SendWait($Value)
+} elseif ($Action -eq 'Scroll') {
+    $scrollElement = $element
+    $scrollPattern = $null
+    while ($scrollElement -and -not $scrollElement.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scrollPattern)) {
+        $scrollElement = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($scrollElement)
+    }
+    if (-not $scrollPattern) { throw "No scroll container for: $Name" }
+    $scrollPattern.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, [double]$Value)
+    $scrollPattern.Current | Select-Object HorizontallyScrollable,HorizontalScrollPercent,VerticalScrollPercent | ConvertTo-Json
 }

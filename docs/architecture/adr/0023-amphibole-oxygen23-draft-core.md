@@ -51,5 +51,9 @@ The installed definition pins the SHA-256 of the core implementation.
 Registry/NDJSON preview/save/history, explicit assignment, unchanged source
 bytes, Measurement ID provenance and stale-on-input-change are covered by
 Python tests; a real-service React test covers the one-button user path.
-AT-45 still needs native 1363×936 screenshots, error recovery and keyboard
-checks. Do not call the method validated merely because these benchmarks pass.
+AT-45 has native 1363×936 preview/error/history screenshots and a packaged
+NDJSON acceptance scenario, now required by Windows CI. Native keyboard checks
+remain pending; React/real-service tests cover Enter, parameter invalidation
+and retaining Fe after an error. Evidence and reproduction commands:
+`docs/qa/AMPHIBOLE_FORMULA_2026-10-12.md`.
+Do not call the method validated merely because these benchmarks pass.
