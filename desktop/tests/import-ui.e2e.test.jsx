@@ -951,31 +951,38 @@ test("removing a placement after review preserves the same point on another imag
 });
 
 test("the single image list supports arrow navigation without losing focus", async () => {
+  const user = userEvent.setup();
   render(<App />);
 
-  await screen.findByRole("button", { name: "Изображения" }).then((button) => fireEvent.click(button));
-  fireEvent.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
   await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
 
   const assignmentRows = [...document.querySelectorAll("[data-image-assignment-row]")];
   const [first, second] = assignmentRows;
   expect(document.querySelector(".image-assignment-workspace .image-source-pane")).toBeNull();
   first.focus();
-  fireEvent.keyDown(first, { key: "ArrowDown" });
-  expect(second.getAttribute("aria-current")).toBe("true");
-  expect(document.activeElement).toBe(second);
-  fireEvent.keyDown(second, { key: "Home" });
-  expect(first.getAttribute("aria-current")).toBe("true");
-  expect(document.activeElement).toBe(first);
+  await user.keyboard('{ArrowDown}');
+  await waitFor(() => {
+    expect(second.getAttribute("aria-current")).toBe("true");
+    expect(document.activeElement).toBe(second);
+  });
+  await user.keyboard('{Home}');
+  await waitFor(() => {
+    expect(first.getAttribute("aria-current")).toBe("true");
+    expect(document.activeElement).toBe(first);
+  });
 
   fireEvent.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
   fireEvent.click(screen.getByRole("button", { name: "Продолжить: точки" }));
   const placementFiles = screen.getByRole("navigation", { name: "Изображения для размещения точек" });
   const placementButtons = placementFiles.querySelectorAll("button");
   placementButtons[0].focus();
-  fireEvent.keyDown(placementButtons[0], { key: "ArrowDown" });
-  expect(placementButtons[1].getAttribute("aria-current")).toBe("true");
-  expect(document.activeElement).toBe(placementButtons[1]);
+  await user.keyboard('{ArrowDown}');
+  await waitFor(() => {
+    expect(placementButtons[1].getAttribute("aria-current")).toBe("true");
+    expect(document.activeElement).toBe(placementButtons[1]);
+  });
 });
 
 test("image assignment reveals bulk controls only for multiple selected files", async () => {
