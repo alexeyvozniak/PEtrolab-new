@@ -31,6 +31,8 @@
 .formula-analysis { color: #607067; }
 .formula-quick-action { font-size: 15px; font-weight: 750; }
 .formula-action-bar { position: sticky; top: 0; z-index: 2; padding: 4px 0; background: #fff; border-bottom: 1px solid #dce5de; }
+.formula-structural { padding: 10px; background: #f2f7f3; border-radius: 6px; }
+.formula-structural p { overflow-wrap: anywhere; }
 .formula-panel :is(button, summary, select) { scroll-margin-top: 150px; }
 .formula-settings, .formula-method-info, .formula-result-notes { border-top: 1px solid #dce5de; }
 .formula-method-info > summary, .formula-result-notes > summary { color: #52645a; font-weight: 600; }

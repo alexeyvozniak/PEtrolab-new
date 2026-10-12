@@ -96,6 +96,7 @@ def save_formula(database_path, analysis_ids, method_id, method_version, paramet
             project_id = connection.execute('SELECT project_id FROM formula_project').fetchone()[0]
             timestamp, run_id = _now(), _id()
             method = preview['method']
+            output_units = {item['field']: item['unit'] for item in method['output_fields']}
             measurement_ids = [m['measurement_id'] for record in preview['input_snapshots'] for m in record['measurements']]
             excluded = [
                 {'analysis_id': result['analysis_id'], 'field': item['field'],
@@ -115,11 +116,14 @@ def save_formula(database_path, analysis_ids, method_id, method_version, paramet
             for result in preview['results']:
                 used_ids = [m['measurement_id'] for m in result['used']]
                 for field, value in result['values'].items():
-                    unit = 'mol.%' if field in {'Fo', 'Fa', 'Wo', 'En', 'Fs'} else 'wt.%' if field == 'oxide_total' else 'apfu'
+                    unit = output_units[field]
                     assumptions = list(result['assumptions'])
                     if field == 'OH_est_apfu' and result.get('OH_est_basis'):
                         assumptions.append('OH_est_basis: ' + json.dumps(result['OH_est_basis'],
                                                                           sort_keys=True, ensure_ascii=False))
+                    if result.get('fe_est_basis'):
+                        assumptions.append('fe_est_basis: ' + json.dumps(result['fe_est_basis'],
+                                                                        sort_keys=True, ensure_ascii=False))
                     derived = {'id': _id(), 'analysis_id': result['analysis_id'], 'field': field, 'value': value,
                                'unit': unit, 'method_id': method_id, 'method_version': method_version,
                                'method_definition_fingerprint': method['definition_fingerprint'],

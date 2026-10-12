@@ -523,7 +523,7 @@ test('real amphibole formula keeps 23 O bulk APFU separate from source and histo
   await user.type(screen.getByLabelText('Основание назначения'), 'Проверено как кальциевый амфибол');
   await user.click(await enabledButton('Сохранить ручное назначение'));
   await user.click(await enabledButton('Приняты пользователем 1'));
-  expect(screen.getByText('Настроить расчёт', { selector: 'summary' }).closest('details').open).toBe(false);
+  expect((await screen.findByText('Настроить расчёт', { selector: 'summary' })).closest('details').open).toBe(false);
   expect(screen.getByText('ⓘ О методе', { selector: 'summary' }).closest('details').open).toBe(false);
   const calculate = await enabledButton('Рассчитать формулу');
   calculate.focus();
@@ -542,6 +542,63 @@ test('real amphibole formula keeps 23 O bulk APFU separate from source and histo
   const history = summary.closest('details');
   expect(within(history).getByRole('table', { name: 'Рассчитанные значения' })).toBeTruthy();
   expect(within(history).getByText('Измеренное железо как Fe²⁺; без оценки Fe³⁺')).toBeTruthy();
+  expect(await readFile(second, 'utf8')).toBe(source);
+}, 60000);
+
+test('real garnet keeps structural sites collapsed, estimates explicit and history unchanged after a failed split', async () => {
+  const source = await readFile(resolve(process.cwd(), '../fixtures/formula/garnet_sg1.csv'), 'utf8');
+  await writeFile(second, source);
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+  await user.click(await enabledButton('2 · Проверить минералы'));
+  await user.click(await enabledButton('Сохранить импорт в проект'));
+  await screen.findByRole('heading', { name: 'Анализы' });
+  await user.click(await enabledButton('Минералы'));
+  await user.click(screen.getByText('Назначить другой минерал'));
+  await user.type(screen.getByLabelText('Минерал из справочника'), 'almandine');
+  await user.type(screen.getByLabelText('Основание назначения'), 'AT-47: независимый опубликованный гранат SG1');
+  await user.click(await enabledButton('Сохранить ручное назначение'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  expect((await screen.findByText('Настроить расчёт', { selector: 'summary' })).closest('details').open).toBe(false);
+  await user.click(await enabledButton('Рассчитать формулу'));
+  const formula = await screen.findByLabelText('Структурная формула');
+  expect(formula.textContent).toContain('O12');
+  expect(formula.textContent).toContain('Суммы позиций отличаются');
+  const table = screen.getByRole('table', { name: 'Рассчитанные значения' });
+  for (const label of ['Fe²⁺', 'Fe³⁺']) {
+    expect(within(table).getByText(label).closest('th').textContent).toContain('оценка');
+  }
+  expect(within(table).getByText('Сумма зарядов').closest('tr').textContent).toContain('—');
+  const positions = screen.getByText('Позиции X/Y/Z · оценка', { selector: 'summary' });
+  expect(positions.closest('details').open).toBe(false);
+  // jsdom does not model the closed-details rendering; native QA verifies visibility.
+  expect(positions.closest('details').querySelector('table').getAttribute('aria-label')).toBe('Распределение по позициям');
+  await user.click(positions);
+  const sites = screen.getByRole('table', { name: 'Распределение по позициям' });
+  for (const label of ['Сумма X', 'Сумма Y', 'Сумма Z']) expect(within(sites).getByText(label)).toBeTruthy();
+  await user.click(await enabledButton('Сохранить результат формулы'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  await user.click(await enabledButton('Анализы'));
+  await user.click(await enabledButton('Минералы'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  const summary = await screen.findByText(/Сохранён · Гранат · 12 O · X\/Y\/Z · v0\.1\.0/, { selector: 'summary' });
+  await user.click(summary);
+  const history = summary.closest('details');
+  expect(within(history).getByLabelText('Структурная формула').textContent).toContain('O12');
+  expect(within(history).getByText('12 O / 8 катионов; Fe³⁺ оценено по Droop (1987)')).toBeTruthy();
+  expect(within(history).getByText('Позиции X/Y/Z · оценка', { selector: 'summary' }).closest('details').open).toBe(false);
+  await user.click(screen.getByText('Настроить расчёт', { selector: 'summary' }));
+  const fe = screen.getByRole('combobox', { name: 'Режим железа' });
+  expect(fe.value).toBe('stoichiometric_droop');
+  await user.selectOptions(fe, 'reported_split');
+  await user.click(await enabledButton('Рассчитать формулу'));
+  await screen.findByText(/Fe2O3: нет пригодного обязательного/);
+  expect(fe.value).toBe('reported_split');
+  expect(screen.getByRole('button', { name: 'Сохранить результат формулы' }).disabled).toBe(true);
+  expect(within(history).getByLabelText('Структурная формула')).toBeTruthy();
+  expect(requests.filter(request => request.command === 'formula.save')).toHaveLength(1);
   expect(await readFile(second, 'utf8')).toBe(source);
 }, 60000);
 

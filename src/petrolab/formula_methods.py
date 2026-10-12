@@ -23,6 +23,9 @@ from .orthopyroxene_formula import (ATOMIC_MASSES as OPX_ATOMIC_MASSES,
                                    METHOD_VERSION as OPX_METHOD_VERSION,
                                    OXIDES as OPX_OXIDES, calculate_orthopyroxene)
 from .mineral_verification import reported_target
+from .garnet_formula import (ATOMIC_MASSES as GRT_ATOMIC_MASSES, FE_MODES as GRT_FE_MODES,
+                             METHOD_ID as GRT_METHOD_ID, METHOD_VERSION as GRT_METHOD_VERSION,
+                             OXIDES as GRT_OXIDES, REQUIRED as GRT_REQUIRED, calculate_garnet)
 
 METHOD_ID = 'olivine.oxygen4'
 METHOD_VERSION = '1.0.0'
@@ -31,6 +34,7 @@ MICA_IMPLEMENTATION_SHA256 = '95821d9252d7577ad1d7bf95e64e6fb62a4ea536086c3c8d0c
 CPX_IMPLEMENTATION_SHA256 = '25b876fb9ae8da7603449aa61b046c7ba36edfc10b12515384f938d378b5407d'
 OPX_IMPLEMENTATION_SHA256 = '90e6999502d392087e546ba2f5311b47fc57bc3f590c9292eec3180aa47cf0dd'
 AMP_IMPLEMENTATION_SHA256 = 'e840975a216609ec3deb7a61bb8cc47d4291b7fbafb93b0e4a0419641a0d0727'
+GRT_IMPLEMENTATION_SHA256 = '191cc08a88a13a387f2d9e00a8937841cc096137d7341eb408a1f8ecb806cd09'
 COMPACT_FE_MODE_LABELS = {
     'all_fe2': 'Всё Fe как Fe²⁺ · FeO/FeOt',
     'reported_split': 'Раздельные FeO + Fe₂O₃',
@@ -260,13 +264,58 @@ def _amphibole_definition():
     return definition
 
 
+def _garnet_definition():
+    cations = sorted({oxide[3] for oxide in GRT_OXIDES.values()})
+    apfu_fields = ([name + '_apfu' for name in cations]
+                   + [site + '_' + name + '_apfu' for site in ('X', 'Y', 'Z') for name in cations]
+                   + ['cation_sum', 'X_sum', 'Y_sum', 'Z_sum'])
+    definition = {
+        'method_id': GRT_METHOD_ID, 'version': GRT_METHOD_VERSION,
+        'name': 'Гранат · 12 O · X/Y/Z', 'kind': 'formula', 'status': 'draft',
+        'input_domain': {'semantic_domain': 'oxide_wt_percent',
+                         'required_fields': sorted(GRT_REQUIRED), 'allowed_units': ['wt.%'],
+                         'missing_policy': 'reject_row', 'censored_policy': 'reject_row',
+                         'compositional_domain_policy': 'explicit_subcomposition_required',
+                         'nonpositive_policy': 'not_applicable', 'mixed_unit_policy': 'reject'},
+        'parameters': [{'name': 'fe_mode', 'value_type': 'choice', 'scientifically_significant': True}],
+        'output_fields': ([{'field': field, 'semantic_role': 'derived_value', 'unit': 'apfu'} for field in apfu_fields]
+                          + [{'field': 'oxide_total', 'semantic_role': 'diagnostic', 'unit': 'wt.%'},
+                             {'field': 'charge_sum', 'semantic_role': 'diagnostic', 'unit': None},
+                             {'field': 'structural_formula', 'semantic_role': 'derived_value', 'unit': None}]),
+        'citations': [
+            {'title': 'Grew et al. (2013), Nomenclature of the garnet supergroup',
+             'doi': '10.2138/am.2013.4201', 'url': 'https://doi.org/10.2138/am.2013.4201'},
+            {'title': 'Yavuz & Yildirim (2020), WinGrt, section 2.1 and Table 4 SG1',
+             'doi': '10.3190/jgeosci.303', 'url': 'https://www.jgeosci.org/content/jgeosci.303_Yavuz.pdf'},
+            {'title': 'Droop (1987), stoichiometric Fe3+ estimation',
+             'doi': '10.1180/minmag.1987.051.361.10', 'url': 'https://doi.org/10.1180/minmag.1987.051.361.10'},
+            {'title': 'CIAAW Abridged Standard Atomic Weights 2024',
+             'url': 'https://ciaaw.org/abridged-atomic-weights.htm'}],
+        'assumptions': ['Безводная модель O12, без нормировки суммы wt.% к 100%.',
+                        'Fe: all_fe2, измеренный reported_split или явная оценка stoichiometric_droop.',
+                        'Droop: 8 катионов, Fe³⁺ = 24*(1-8/S); только Fe переменно-валентен.',
+                        'Позиции X/Y/Z модельные; исходные измерения не изменяются.'],
+        'applicability': ['Явно принятый силикатный garnet/Ti-rich garnet; не весь supergroup.',
+                          'Ненулевые F/Cl/H2O и неподдержанные оксиды блокируют этот метод.',
+                          'Не оцениваются Mn3+, неизвестные Li/вакансии/анионы или вид.',
+                          'Отклонения сумм позиций диагностируются без подгонки к 3/2/3.'],
+        'benchmark_ids': ['grt-ideal-endmembers', 'grt-andradite-droop', 'grt-majorite-morimotoite', 'grt-table4-sg1'],
+        'implementation': {'algorithm_id': GRT_METHOD_ID, 'algorithm_version': GRT_METHOD_VERSION,
+                           'implementation_sha256': GRT_IMPLEMENTATION_SHA256},
+        'created_at': '2026-10-12T00:00:00Z',
+    }
+    definition['definition_fingerprint'] = fingerprint(definition)
+    return definition
+
+
 def method_definition(method_id=METHOD_ID, version=None):
     """Return one installed definition without changing existing olivine identity."""
     installed = {METHOD_ID: (METHOD_VERSION, _olivine_definition),
                  MICA_METHOD_ID: (MICA_METHOD_VERSION, _mica_definition),
                  CPX_METHOD_ID: (CPX_METHOD_VERSION, _clinopyroxene_definition),
                  OPX_METHOD_ID: (OPX_METHOD_VERSION, _orthopyroxene_definition),
-                 AMP_METHOD_ID: (AMP_METHOD_VERSION, _amphibole_definition)}
+                 AMP_METHOD_ID: (AMP_METHOD_VERSION, _amphibole_definition),
+                 GRT_METHOD_ID: (GRT_METHOD_VERSION, _garnet_definition)}
     current = installed.get(method_id)
     if current is None or (version is not None and version != current[0]):
         raise KeyError((method_id, version))
@@ -311,6 +360,16 @@ def executable_method(method_id, version):
                                    'description': '23 O; только bulk APFU; без OH и определения вида.',
                                    'parameters': {'fe_mode': 'all_fe2'}}],
                 'calculate': lambda rows, p: calculate_amphibole(rows, p['fe_mode'])}
+    if method_id == GRT_METHOD_ID:
+        return {'definition': definition, 'accepted_targets': {'garnet', 'Ti-rich garnet'},
+                'target_label': 'граната', 'parameter_choices': {'fe_mode': GRT_FE_MODES},
+                'parameter_choice_labels': {'fe_mode': {'all_fe2': 'Всё Fe как Fe²⁺ · 12 O',
+                    'reported_split': 'Раздельные FeO + Fe₂O₃',
+                    'stoichiometric_droop': 'Fe³⁺ по Droop · оценка'}},
+                'quick_presets': [{'id': 'droop_anhydrous', 'label': 'Рассчитать формулу',
+                    'description': 'Безводные 12 O / 8 катионов; Fe³⁺ и X/Y/Z оценены, не измерены.',
+                    'parameters': {'fe_mode': 'stoichiometric_droop'}}],
+                'calculate': lambda rows, p: calculate_garnet(rows, p['fe_mode'])}
     return {'definition': definition,
             'accepted_targets': {'trioctahedral mica', 'dioctahedral mica', 'Li-mica'},
             'target_label': 'слюды',
@@ -335,7 +394,8 @@ def list_methods(accepted_assignment=None):
                                        (MICA_METHOD_ID, MICA_METHOD_VERSION, MICA_ATOMIC_MASSES),
                                        (CPX_METHOD_ID, CPX_METHOD_VERSION, CPX_ATOMIC_MASSES),
                                        (OPX_METHOD_ID, OPX_METHOD_VERSION, OPX_ATOMIC_MASSES),
-                                       (AMP_METHOD_ID, AMP_METHOD_VERSION, AMP_ATOMIC_MASSES)):
+                                       (AMP_METHOD_ID, AMP_METHOD_VERSION, AMP_ATOMIC_MASSES),
+                                       (GRT_METHOD_ID, GRT_METHOD_VERSION, GRT_ATOMIC_MASSES)):
         registration = executable_method(method_id, version)
         if accepted_assignment is not None and accepted_target not in registration['accepted_targets']:
             continue

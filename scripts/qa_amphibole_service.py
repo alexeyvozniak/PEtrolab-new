@@ -131,6 +131,9 @@ def verify_service(executable=None, all_methods=False):
                     ('orthopyroxene_e17_016.csv', 'enstatite', 'orthopyroxene.oxygen6',
                      {'Si_apfu': 1.80, 'Mg_apfu': 1.56, 'Ca_apfu': .04,
                       'Wo': 2.45, 'En': 86.76, 'Fs': 10.79}, .05),
+                    ('garnet_sg1.csv', 'almandine', 'garnet.structural12',
+                     {'Si_apfu': 2.938, 'Al_apfu': 1.972, 'Fe3_apfu': .153,
+                      'Fe2_apfu': 2.358, 'Mg_apfu': .525, 'Mn_apfu': .016, 'Ca_apfu': .039}, .003),
                 ]
                 for name, target, method_id, expected, tolerance in cases:
                     other_project = Path(folder) / f'{method_id}.sqlite'
@@ -174,9 +177,16 @@ def verify_service(executable=None, all_methods=False):
                     assert set(saved['run']['input_measurement_ids']) == used
                     for value in history[0]['derived_values']:
                         assert set(value['input_measurement_ids']) == used
-                        unit = 'wt.%' if value['field'] == 'oxide_total' else (
+                        unit = None if value['field'] in {'structural_formula', 'charge_sum'} else 'wt.%' if value['field'] == 'oxide_total' else (
                             'mol.%' if value['field'] in {'Fo', 'Fa', 'Wo', 'En', 'Fs'} else 'apfu')
                         assert value['unit'] == unit
+                    if method_id == 'garnet.structural12':
+                        result = current['results'][0]
+                        assert result['estimated_fields'] == ['Fe2_apfu', 'Fe3_apfu']
+                        assert isinstance(values['structural_formula'], str) and values['structural_formula'].endswith('O12')
+                        assert abs(values['cation_sum'] - 8) < 1e-10 and abs(values['charge_sum'] - 24) < 1e-10
+                        assert result['sites'] and result['structural_warning']
+                        assert history[0]['run']['result_manifest']['results'][0]['fe_est_basis'] == result['fe_est_basis']
                     invalid_arguments = {**arguments, 'parameters': {**chosen, 'fe_mode': 'reported_split'}}
                     invalid = send('formula.preview', invalid_arguments)
                     assert not invalid['can_save'] and invalid['parameters']['fe_mode'] == 'reported_split'
@@ -231,6 +241,6 @@ def verify_service(executable=None, all_methods=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--executable', type=Path)
-    parser.add_argument('--all-methods', action='store_true', help='Also verify olivine, mica, Cpx and Opx.')
+    parser.add_argument('--all-methods', action='store_true', help='Also verify olivine, mica, Cpx, Opx and garnet.')
     args = parser.parse_args()
     print(json.dumps(verify_service(args.executable, args.all_methods), ensure_ascii=False, indent=2))

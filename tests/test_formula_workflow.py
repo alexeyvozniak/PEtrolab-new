@@ -396,7 +396,7 @@ class MicaFormulaPersistenceTests(unittest.TestCase):
         self.assertEqual([(m['method_id'], m['version']) for m in catalog],
                          [(METHOD_ID, METHOD_VERSION), (MICA_METHOD_ID, MICA_METHOD_VERSION),
                           (CPX_METHOD_ID, CPX_METHOD_VERSION), (OPX_METHOD_ID, OPX_METHOD_VERSION),
-                          (AMP_METHOD_ID, AMP_METHOD_VERSION)])
+                          (AMP_METHOD_ID, AMP_METHOD_VERSION), ('garnet.structural12', '0.1.0')])
         self.assertEqual(method_definition()['definition_fingerprint'],
                          '872567da3c7195d75c64790f14aa979fcf8ba6677a910a0a742eb9f2dcd0ed87')
         root = Path(__file__).parents[1] / 'schemas'

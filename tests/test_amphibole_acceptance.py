@@ -17,4 +17,4 @@ class AmphiboleServiceAcceptanceTests(unittest.TestCase):
         self.assertEqual(report['method'], 'amphibole.oxygen23/0.1.0')
         self.assertEqual(len(report['checks']), 7)
         self.assertEqual(set(report['additional_methods']), {'olivine.oxygen4', 'mica.charge22',
-                         'clinopyroxene.oxygen6', 'orthopyroxene.oxygen6'})
+                         'clinopyroxene.oxygen6', 'orthopyroxene.oxygen6', 'garnet.structural12'})
