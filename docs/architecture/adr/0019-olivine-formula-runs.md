@@ -17,7 +17,8 @@ analysis identity and action stay visible while scrolling formula results and
 history. Clearing a required choice disables calculation until it is restored.
 Measured wt.% and derived APFU appear in separate tables. Warnings remain visible.
 Saved history can be reopened; errors do not erase the preview or Fe choice.
-This bounded slice is post-import and single-analysis in UI; batch UI and
+This original bounded slice is post-import and single-analysis in UI.
+ADR-0026 extends the existing inspector to explicit batches approved 2026-10-13;
 import-time formula previews remain deferred. No mock calculation in production.
 
 ## Method

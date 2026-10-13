@@ -119,11 +119,18 @@ function ReviewPane({ analysis, busy, onDecide, options, databasePath }) {
   </aside>;
 }
 
-export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMore, onAddData, databasePath }) {
+export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMore, onLoadSourceAnalyses, onAddData, databasePath, selectionIds, onSelectionChange }) {
   const analyses = project.analyses || [];
   const [queue, setQueue] = useState("attention");
   const [query, setQuery] = useState("");
   const [focusedId, setFocusedId] = useState("");
+  const [reviewSelectedId, setReviewSelectedId] = useState('');
+  const [reviewError, setReviewError] = useState('');
+  const [localSelection, setLocalSelection] = useState([]);
+  const selectedIds = selectionIds ?? localSelection;
+  const setSelectedIds = onSelectionChange || setLocalSelection;
+  const toggleSelection = id => setSelectedIds(current => current.includes(id)
+    ? current.filter(item => item !== id) : [...current, id]);
   const optionRefs = useRef(new Map());
   const counts = useMemo(() => analyses.reduce((result, analysis) => {
     const status = mineralStatus(analysis);
@@ -162,7 +169,7 @@ export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMo
   };
 
 
-  if (project.total === 0) {
+  if (project.total === 0 && selectedIds.length === 0) {
     return <div className="minerals-empty"><Flask size={48} weight="duotone" /><h2>Сначала добавь анализы</h2><p>Проверка минералов использует импортированные составы и никогда не меняет исходную таблицу.</p><button className="primary-button" type="button" onClick={onAddData}>Добавить данные</button></div>;
   }
 
@@ -183,16 +190,20 @@ export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMo
         <div className="mineral-search"><MagnifyingGlass size={18} /><input aria-label="Поиск в проверке минералов" placeholder="Analysis, Sample, минерал, источник…" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
         <span>Показано {filtered.length} · загружено {analyses.length} из {project.total}</span>
         <button className="outline-button" type="button" onClick={onRefresh} disabled={busy}>Обновить</button>
+        <button className="outline-button" type="button" disabled={!filtered.length}
+          onClick={() => setSelectedIds(current => [...new Set([...current, ...filtered.map(a => a.analysis_id)])])}>Выбрать загруженные · {filtered.length}</button>
       </div>
       <div className="mineral-list-head"><span>Анализ</span><span>В источнике</span><span>Назначение / предложение</span><span>Статус</span></div>
-      <div className="mineral-list" role="listbox" aria-label="Очередь проверки минералов">
+      <div className="mineral-list" role="list" aria-label="Очередь проверки минералов">
         {filtered.map((analysis, index) => {
           const verification = analysis.mineral_verification || {};
           const isFocused = focused?.analysis_id === analysis.analysis_id;
-          return <button
+          return <div className={`mineral-select-row${selectedIds.includes(analysis.analysis_id) ? ' selected' : ''}`} role="listitem" key={analysis.analysis_id}>
+            <input type="checkbox" aria-label={`Выбрать ${mainIdentity(analysis)}`} checked={selectedIds.includes(analysis.analysis_id)} onChange={() => toggleSelection(analysis.analysis_id)} />
+            <button
             type="button"
-            role="option"
-            aria-selected={isFocused}
+            aria-label={`Открыть анализ ${mainIdentity(analysis)}`}
+            aria-current={isFocused ? 'true' : undefined}
             tabIndex={isFocused ? 0 : -1}
             ref={(node) => {
               if (node) optionRefs.current.set(analysis.analysis_id, node);
@@ -207,13 +218,41 @@ export function MineralsWorkspace({ project, busy, onRefresh, onDecide, onLoadMo
             <span>{reportedMineral(analysis) || "—"}</span>
             <span><b>{verification.accepted?.target || verification.prediction || "—"}</b><small>{verification.accepted ? 'принято пользователем' : `предложение · ${mineralConfidenceLabel(verification.confidence)}`}</small></span>
             <span className={`mineral-row-status status-${mineralStatus(analysis)}`}>{mineralStatusLabel(mineralStatus(analysis))}</span>
-          </button>;
+          </button></div>;
         })}
         {filtered.length === 0 && <div className="mineral-no-results"><CheckCircle size={30} /><b>В загруженной части очереди ничего нет</b><span>{project.has_more ? 'Загрузи ещё анализы или смени фильтр.' : 'Смени очередь или сбрось поиск.'}</span></div>}
       </div>
       {project.has_more && <button className="minerals-load-more" type="button" onClick={onLoadMore} disabled={busy}>Загрузить ещё анализы</button>}
     </main>
 
-    <ReviewPane key={focused?.analysis_id} analysis={focused} busy={busy} onDecide={onDecide} options={project.mineral_options || []} databasePath={databasePath} />
+    {selectedIds.length > 0 ? <aside className="mineral-review-pane" aria-label="Групповой пересчёт">
+      <div className="mineral-batch-scope">
+        <strong>Отбор</strong>
+        <button type="button" className="outline-button" onClick={() => { setSelectedIds([]); setReviewSelectedId(''); setReviewError(''); }}>Очистить отбор</button>
+        {selectedIds.some(id => !filtered.some(a => a.analysis_id === id)) && <small>Скрыто фильтром или не загружено: {selectedIds.filter(id => !filtered.some(a => a.analysis_id === id)).length}</small>}
+      </div>
+      {reviewError && <p role="alert">{reviewError}</p>}
+      {selectedIds.includes(reviewSelectedId) && analyses.some(a => a.analysis_id === reviewSelectedId) ? <>
+        <button type="button" className="outline-button" onClick={() => setReviewSelectedId('')}>К групповому пересчёту</button>
+        <ReviewPane key={reviewSelectedId} analysis={analyses.find(a => a.analysis_id === reviewSelectedId)} busy={busy} onDecide={onDecide} options={project.mineral_options || []} databasePath={databasePath} />
+      </> : <section className="mineral-formula-section"><FormulaPanel analysis={focused || { analysis_id: selectedIds[0] }}
+        analysisIds={selectedIds} databasePath={databasePath}
+        analysisNames={Object.fromEntries(analyses.map(a => [a.analysis_id, mainIdentity(a)]))}
+        scopeRevision={JSON.stringify(selectedIds.map(id => {
+          const verification = analyses.find(a => a.analysis_id === id)?.mineral_verification;
+          return [verification?.input_fingerprint, verification?.accepted, verification?.status];
+        }))}
+        onReviewAnalysis={async id => {
+          setReviewError('');
+          try {
+            if (!analyses.some(a => a.analysis_id === id)) {
+              const loaded = await onLoadSourceAnalyses?.([id]);
+              if (!loaded?.some(a => a.analysis_id === id)) throw new Error('Анализ не загружен. Повторите проверку.');
+            }
+            setFocusedId(id); setReviewSelectedId(id);
+          } catch (caught) { setReviewError(caught.message); }
+        }}
+        onExcludeAnalysis={id => setSelectedIds(current => current.filter(item => item !== id))} /></section>}
+    </aside> : <ReviewPane key={focused?.analysis_id} analysis={focused} busy={busy} onDecide={onDecide} options={project.mineral_options || []} databasePath={databasePath} />}
   </div>;
 }

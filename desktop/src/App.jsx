@@ -107,6 +107,7 @@ export function App() {
   const desktopRuntimeAvailable = isPetrolabDesktop();
   const [screen, setScreen] = useState("Импорт");
   const [databasePath, setDatabasePath] = useState("");
+  const [selectionIds, setSelectionIds] = useState([]);
   const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
   const [workspace, setWorkspace] = useState(null);
   const [sourceIssues, setSourceIssues] = useState([]);
@@ -171,7 +172,7 @@ export function App() {
         ...enriched,
         returned: current.returned + enriched.returned,
         mineral_status_counts: mergeStatusCounts(current.mineral_status_counts, enriched.mineral_status_counts),
-        analyses: [...current.analyses, ...enriched.analyses],
+        analyses: mergeAnalysesById(current.analyses, enriched.analyses),
       }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -188,8 +189,11 @@ export function App() {
     setError("");
     try {
       const exact = unwrap(await listProjectAnalyses(databasePath, analysisIds.length, 0, analysisIds));
-      setProject((current) => ({ ...current, analyses: mergeAnalysesById(current.analyses, exact.analyses) }));
-      return exact.analyses;
+      const review = unwrap(await listProjectMineralIdentifications(databasePath, analysisIds.length, 0, analysisIds));
+      const byId = new Map(review.identifications.map(record => [record.analysis_id, record]));
+      const enriched = exact.analyses.map(record => ({ ...record, mineral_verification: byId.get(record.analysis_id) }));
+      setProject((current) => ({ ...current, analyses: mergeAnalysesById(current.analyses, enriched) }));
+      return enriched;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       throw caught;
@@ -923,6 +927,8 @@ export function App() {
 
         {screen === "Анализы" && (
           <AnalysesWorkspace
+            selectionIds={selectionIds}
+            onSelectionChange={setSelectionIds}
             project={project}
             analyticalPoints={mediaPoints}
             operationJournal={operationJournal}
@@ -944,6 +950,9 @@ export function App() {
 
         {screen === "Минералы" && (
           <MineralsWorkspace
+            selectionIds={selectionIds}
+            onSelectionChange={setSelectionIds}
+            onLoadSourceAnalyses={loadSourceAnalyses}
             databasePath={databasePath}
             project={project}
             busy={busy}

@@ -781,13 +781,14 @@ def list_project_analyses(
             connection.close()
 
 
-def list_project_mineral_identifications(database_path: str | Path, limit: int = 500, offset: int = 0) -> dict[str, Any]:
+def list_project_mineral_identifications(database_path: str | Path, limit: int = 500, offset: int = 0,
+                                       analysis_ids: list[str] | None = None) -> dict[str, Any]:
     """Re-evaluate active imported analyses without changing stored source data.
 
     This is an explicit review projection: suggestions are calculated from the
     lossless Measurement rows and never silently become accepted assignments.
     """
-    projection = list_project_analyses(database_path, limit, offset)
+    projection = list_project_analyses(database_path, limit, offset, analysis_ids=analysis_ids)
     from .mineral_verification import mineral_options, verify_record
 
     identifications: list[dict[str, Any]] = []

@@ -274,6 +274,8 @@ function AnalysisDetail({ analysis }) {
 }
 
 export function AnalysesWorkspace({
+  selectionIds,
+  onSelectionChange,
   project,
   analyticalPoints = { total: 0, items: [] },
   operationJournal = { total: 0, items: [] },
@@ -327,7 +329,9 @@ export function AnalysesWorkspace({
   const [mineralStatusFilter, setMineralStatusFilter] = useState("all");
   const [columnFilters, setColumnFilters] = useState({});
   const [visibleColumnIds, setVisibleColumnIds] = useState([]);
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [localSelection, setLocalSelection] = useState([]);
+  const selectedIds = selectionIds ?? localSelection;
+  const setSelectedIds = onSelectionChange || setLocalSelection;
   const [focusedId, setFocusedId] = useState("");
   const [sort, setSort] = useState({ id: "source", direction: "asc" });
   const [pointDialogOpen, setPointDialogOpen] = useState(false);
@@ -344,7 +348,6 @@ export function AnalysesWorkspace({
   }, [availableColumns, defaultColumns]);
 
   useEffect(() => {
-    setSelectedIds((current) => current.filter((id) => analyses.some((analysis) => analysis.analysis_id === id)));
     if (focusedId && !analyses.some((analysis) => analysis.analysis_id === focusedId)) setFocusedId("");
   }, [analyses, focusedId]);
 

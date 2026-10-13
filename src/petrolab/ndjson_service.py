@@ -43,7 +43,7 @@ from .media_import import (
     undo_operation,
 )
 from .formula_methods import list_methods
-from .formula_workflow import preview_formula, save_formula, list_formula_runs
+from .formula_workflow import preview_formula, save_formula, list_formula_runs, list_formula_methods_for_scope
 
 
 PROTOCOL_VERSION = "1.0"
@@ -261,7 +261,8 @@ def _dispatch_project_mineral_identification_list(params: Mapping[str, Any]) -> 
     raw_offset = params.get("offset", 0)
     if not isinstance(raw_limit, int) or not isinstance(raw_offset, int):
         raise ValueError("limit")
-    return {"result": list_project_mineral_identifications(_project_database_path(params), raw_limit, raw_offset)}
+    return {"result": list_project_mineral_identifications(_project_database_path(params), raw_limit, raw_offset,
+                                                          params.get('analysis_ids'))}
 
 
 def _dispatch_project_mineral_assignment_decide(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -406,6 +407,10 @@ def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _dispatch_formula_methods(params: Mapping[str, Any]) -> dict[str, Any]:
+    if 'analysis_ids' in params:
+        if 'accepted_assignment' in params:
+            raise ImportCommandError('FORMULA_ASSIGNMENT_INVALID', 'Передайте либо точный отбор, либо назначение, не оба.')
+        return {'result': list_formula_methods_for_scope(_project_database_path(params), params['analysis_ids'])}
     accepted = params.get('accepted_assignment')
     if accepted is not None and (not isinstance(accepted, str) or not accepted.strip()):
         raise ImportCommandError('FORMULA_ASSIGNMENT_INVALID',

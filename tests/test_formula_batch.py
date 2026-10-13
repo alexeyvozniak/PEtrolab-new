@@ -104,6 +104,38 @@ class FormulaBatchTests(unittest.TestCase):
         self.assertEqual(self.send('formula.preview', analysis_ids=self.ids)['error']['code'], 'FORMULA_SCOPE_INVALID')
         self.assertEqual(self.counts(), (0, 0, 0))
 
+    def test_scope_catalog_uses_actual_assignments_and_never_shrinks_scope(self):
+        catalog = self.send('formula.methods.list')['result']
+        self.assertEqual(catalog['analysis_ids'], self.ids[:100])
+        self.assertEqual([m['method_id'] for m in catalog['methods']], ['olivine.oxygen4'])
+        self.assertEqual(catalog['scope_issues'], [])
+        invalid = self.send('formula.methods.list', analysis_ids=self.ids)
+        self.assertEqual(invalid['error']['code'], 'FORMULA_SCOPE_INVALID')
+        invalid = self.send('formula.methods.list', accepted_assignment='olivine')
+        self.assertEqual(invalid['error']['code'], 'FORMULA_ASSIGNMENT_INVALID')
+        catalog = self.send('formula.methods.list', analysis_ids=[*self.ids[:99], str(uuid.uuid4())])['result']
+        self.assertEqual(catalog['methods'], [])
+        self.assertEqual(len(catalog['scope_issues']), 1)
+        row = next(r for r in list_project_mineral_identifications(self.project)['identifications']
+                   if r['analysis_id'] == self.ids[99])
+        decide_project_mineral_assignment(self.project, row['analysis_id'], 'diopside',
+            row['input_fingerprint'], row['ruleset_version'], 'Explicitly different mineral')
+        catalog = self.send('formula.methods.list')['result']
+        self.assertEqual(catalog['methods'], [])
+        self.assertTrue(catalog['scope_message'])
+        row = next(r for r in list_project_mineral_identifications(self.project)['identifications']
+                   if r['analysis_id'] == self.ids[99])
+        decide_project_mineral_assignment(self.project, row['analysis_id'], None,
+            row['input_fingerprint'], row['ruleset_version'], 'Return to unresolved')
+        catalog = self.send('formula.methods.list')['result']
+        self.assertEqual(catalog['methods'], [])
+        self.assertEqual([r['analysis_id'] for r in catalog['scope_issues']], [self.ids[99]])
+        exact = self.send('project.mineral_identification.list', analysis_ids=[self.ids[99]], limit=1, offset=500)['result']
+        self.assertEqual(exact['returned'], 1)
+        self.assertEqual(exact['identifications'][0]['analysis_id'], self.ids[99])
+        self.assertIsNone(exact['identifications'][0]['accepted'])
+        self.assertEqual(self.counts(), (0, 0, 0))
+
     def test_failure_writing_last_analysis_rolls_back_previous_99(self):
         preview = self.send('formula.preview')['result']
         with closing(open_project(self.project)) as connection:

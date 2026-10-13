@@ -6,6 +6,8 @@ User preference (2026-09-15): simplify the interface aggressively through clear 
 
 User preference (2026-09-22): keep import visually quiet and native. Show one current question and one primary action; collapse advisory text and detailed field settings, and do not repeat the same status or safety explanation across panes.
 
+User-approved mineral batch (2026-10-13): one explicit shared Selection, at most 100 analyses and one common Python method per first slice. One primary calculation action, closed settings, short summary and one current issue. No silent exclusions/chunking or scientific validation claims. Keep the existing green three-pane screen.
+
 Run the local server yourself and open the preview in the browser available to this environment. Do not give the user server-start instructions when you can run it.
 
 Before making substantial visual changes, use the Product Design plugin's `get-context` skill when the visual source is unclear or no longer matches the current goal. When the user gives durable prototype-specific design feedback, preferences, or decisions, record them in `AGENTS.md`.

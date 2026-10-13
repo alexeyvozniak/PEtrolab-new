@@ -19,6 +19,20 @@ Non-blocking XLSX inspection warnings are `HIDDEN_ROWS`, `MERGED_HEADERS`, and `
 
 ## Transport envelope
 
+Formula catalog extension (ADR-0026): `formula.methods.list` supports either
+legacy optional `accepted_assignment` or explicit `project_database_path` plus
+`analysis_ids` (1–100 unique IDs), never both. Scoped response retains exact
+`analysis_ids`, common installed `methods`, `scope_issues` with ID/identity/message/
+`can_review`, and `scope_message` when no common method exists. Accepted targets
+are reread from project truth, not supplied by React. No ID is dropped.
+`formula.preview`/`formula.save` keep the existing atomic whole-scope semantics;
+bad rows are results, not silent exclusions. `FORMULA_SCOPE_INVALID` rejects
+101 IDs; `FORMULA_ASSIGNMENT_INVALID` rejects mixed scoped/label catalog input.
+`project.mineral_identification.list` also accepts optional exact `analysis_ids`
+using the same project projection bound as `project.analyses.list`. Explicit IDs
+override page/offset; an unloaded selected issue can be fetched and reviewed
+with real verification fingerprint/ruleset without clearing Selection.
+
 The Tauri shell sends exactly one UTF-8 JSON object per stdin line to the Python child. Every normal command has `protocol_version: "1.0"`, a UUID `request_id`, `command`, and an object `payload`. The response repeats `protocol_version` and `request_id`, then contains exactly one of `result` or `error`. It has no traceback. Transport errors are `INVALID_REQUEST`, `UNKNOWN_COMMAND`, `PROTOCOL_VERSION_UNSUPPORTED`, and `INTERNAL_ERROR`.
 
 `shutdown` is the one supervisor command outside the import command table. A valid request receives `{ "result": { "status": "shutting_down" } }`, after which the child stops reading. It is not a scientific command and creates no project data.

@@ -2,11 +2,14 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 
-const state = vi.hoisted(() => ({ legacy: false, catalog: null, previewError: false, previewResult: null }));
+const state = vi.hoisted(() => ({ legacy: false, catalog: null, previewError: false, previewResult: null, previewReply: null, scopedIssues: null }));
 vi.mock('../src/desktopApi', () => ({
   invokePetrolab: vi.fn(async (command, payload) => {
+    if (command === 'formula.methods.list' && state.scopedIssues) return { result: { methods: [], scope_issues: state.scopedIssues, scope_message: 'Примите минерал.' } };
     if (command === 'formula.methods.list' && state.catalog) return { result: { methods: [state.catalog] } };
+    if (command === 'formula.preview' && state.previewReply) return state.previewReply(payload);
     if (command === 'formula.preview') return state.previewError
       ? { error: { code: 'TEST_INPUT_ERROR', message: 'Тестовый отказ расчёта' } }
       : { result: { parameters: payload.parameters, input_fingerprint: 'preview', can_save: true,
@@ -34,8 +37,99 @@ vi.mock('../src/desktopApi', () => ({
 
 import { FormulaPanel } from '../src/FormulaPanel';
 import { invokePetrolab } from '../src/desktopApi';
+import { MineralsWorkspace } from '../src/MineralsWorkspace';
 
-afterEach(() => { cleanup(); state.legacy = false; state.catalog = null; state.previewError = false; state.previewResult = null; vi.clearAllMocks(); });
+function batchCatalog() {
+  return { method_id: 'olivine.oxygen4', version: '1.0.0', name: 'Оливин', status: 'draft',
+    parameters: [{ name: 'fe_mode' }], parameter_choices: { fe_mode: { all_fe2: 'Fe2', reported_split: 'Split' } },
+    quick_presets: [{ parameters: { fe_mode: 'all_fe2' } }], citations: [], assumptions: [], applicability: [] };
+}
+
+test('100 explicit IDs show only one failed analysis; removal requires new preview and preserves Fe', async () => {
+  state.catalog = batchCatalog();
+  state.previewReply = async payload => ({ result: { parameters: payload.parameters,
+    input_fingerprint: 'hundred', can_save: false,
+    input_snapshots: payload.analysis_ids.map(id => ({ analysis_id: id, identity: { Analysis: id } })),
+    results: payload.analysis_ids.map((id, index) => ({ analysis_id: id,
+      status: index >= 98 ? 'failed' : 'current', values: { Fo: 50 },
+      errors: index === 98 ? ['First row error', 'Extra reason'] : index === 99 ? ['Second row error'] : [] })) } });
+  const ids = Array.from({ length: 100 }, (_, i) => `analysis-${i+1}`);
+  const onExclude = vi.fn();
+  const user = userEvent.setup();
+  const props = { analysis: { analysis_id: ids[0] }, databasePath: 'project.sqlite', onExcludeAnalysis: onExclude };
+  const view = render(<FormulaPanel {...props} analysisIds={ids} />);
+  const action = await screen.findByRole('button', { name: 'Рассчитать формулы' });
+  await waitFor(() => expect(action.disabled).toBe(false));
+  expect(screen.getByText('Настроить расчёт').closest('details').open).toBe(false);
+  await user.click(screen.getByText('Настроить расчёт'));
+  await user.selectOptions(screen.getByLabelText('Режим железа'), 'reported_split');
+  await user.click(action);
+  await screen.findByText('Готово 98 · Требуют решения 2');
+  expect(screen.getByText('Другие причины · 1').closest('details').open).toBe(false);
+  expect(screen.queryByText('Second row error')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Сохранить 100 результатов' }).disabled).toBe(true);
+  await user.click(screen.getByRole('button', { name: 'Следующая ошибка' }));
+  expect(screen.getByText('Second row error')).toBeTruthy();
+  expect(screen.queryByText('First row error')).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Убрать этот анализ из отбора' }));
+  expect(onExclude).toHaveBeenCalledWith('analysis-100');
+  view.rerender(<FormulaPanel {...props} analysisIds={ids.slice(0,99)} />);
+  expect(screen.queryByLabelText('Предпросмотр формулы')).toBeNull();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Рассчитать формулы' }).disabled).toBe(false));
+  expect(screen.getByLabelText('Режим железа').value).toBe('reported_split');
+  expect(invokePetrolab.mock.calls.filter(([command]) => command === 'formula.preview').at(-1)[1].analysis_ids).toEqual(ids);
+  expect(invokePetrolab.mock.calls.some(([command]) => command === 'formula.save')).toBe(false);
+});
+
+test('late batch preview cannot revive results after the exact scope changes', async () => {
+  state.catalog = batchCatalog();
+  let finish;
+  state.previewReply = () => new Promise(resolve => { finish = resolve; });
+  const user = userEvent.setup();
+  const props = { analysis: { analysis_id: 'analysis-1' }, databasePath: 'project.sqlite' };
+  const view = render(<FormulaPanel {...props} analysisIds={['analysis-1', 'analysis-2']} />);
+  const action = await screen.findByRole('button', { name: 'Рассчитать формулы' });
+  await waitFor(() => expect(action.disabled).toBe(false));
+  await user.click(action);
+  view.rerender(<FormulaPanel {...props} analysisIds={['analysis-1']} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Рассчитать формулы' }).disabled).toBe(false));
+  finish({ result: { parameters: { fe_mode: 'all_fe2' }, input_fingerprint: 'old', can_save: true,
+    results: [{ analysis_id: 'analysis-2', status: 'current', values: { Fo: 99 } }] } });
+  await waitFor(() => expect(screen.queryByLabelText('Предпросмотр формулы')).toBeNull());
+  await user.click(screen.getByText('Настроить расчёт'));
+  expect(screen.queryByRole('button', { name: /Сохранить .*результатов/ })).toBeNull();
+});
+
+test('101 selected IDs explain the bound without truncation or hidden catalog batching', async () => {
+  render(<FormulaPanel analysis={{ analysis_id: 'a' }} databasePath="project.sqlite"
+    analysisIds={Array.from({ length: 101 }, (_, i) => `id-${i}`)} />);
+  await screen.findByText('Выберите не больше 100 анализов. Отбор не будет разделён автоматически.');
+  expect(screen.queryByRole('button', { name: 'Рассчитать формулы' })).toBeNull();
+  expect(invokePetrolab.mock.calls.some(([command]) => command === 'formula.methods.list')).toBe(false);
+});
+
+test('reviewing an unloaded selected mineral fetches its exact ID without clearing Selection', async () => {
+  state.scopedIssues = [{ analysis_id: 'analysis-1', identity: { Analysis: 'A1' }, can_review: true, message: 'Назначение не принято.' }];
+  const record = { analysis_id: 'analysis-1', identity: { Analysis: 'A1' },
+    mineral_verification: { status: 'consistent', prediction: 'olivine', confidence: 'high',
+      input_fingerprint: 'real-input', ruleset_version: 'v1', issues: [], reasons: [], candidates: [] } };
+  const onSelection = vi.fn(); const onDecide = vi.fn(); const loadedIds = vi.fn();
+  function Unloaded() {
+    const [rows, setRows] = useState([]);
+    return <MineralsWorkspace project={{ total: 1, analyses: rows, mineral_options: ['olivine'] }}
+      databasePath="project.sqlite" selectionIds={['analysis-1']} onSelectionChange={onSelection} onDecide={onDecide}
+      onLoadSourceAnalyses={async ids => { loadedIds(ids); setRows([record]); return [record]; }} />;
+  }
+  const user = userEvent.setup(); render(<Unloaded />);
+  await user.click(await screen.findByRole('button', { name: 'Проверить этот анализ' }));
+  expect(loadedIds).toHaveBeenCalledWith(['analysis-1']);
+  await screen.findByRole('button', { name: 'К групповому пересчёту' });
+  await user.click(screen.getByRole('button', { name: 'Принять предложение' }));
+  expect(onDecide.mock.calls[0][0].mineral_verification.input_fingerprint).toBe('real-input');
+  expect(onSelection).not.toHaveBeenCalled();
+});
+
+afterEach(() => { cleanup(); state.legacy = false; state.catalog = null; state.previewError = false; state.previewResult = null; state.previewReply = null; state.scopedIssues = null; vi.clearAllMocks(); });
 
 test('site heading uses Python ordered contract after Tauri alphabetically reorders JSON object keys', async () => {
   state.catalog = { method_id: 'clinopyroxene.structural6', version: '0.1.0', name: 'Cpx', status: 'draft',

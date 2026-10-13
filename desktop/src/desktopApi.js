@@ -145,11 +145,12 @@ export const listProjectAnalyses = (projectDatabasePath, limit = 500, offset = 0
     ...(Array.isArray(analysisIds) ? { analysis_ids: analysisIds } : {}),
   });
 
-export const listProjectMineralIdentifications = (projectDatabasePath, limit = 500, offset = 0) =>
+export const listProjectMineralIdentifications = (projectDatabasePath, limit = 500, offset = 0, analysisIds) =>
   invokePetrolab("project.mineral_identification.list", {
     project_database_path: projectDatabasePath,
     limit,
     offset,
+    ...(analysisIds ? { analysis_ids: analysisIds } : {}),
   });
 
 export const decideProjectMineralAssignment = (projectDatabasePath, analysisId, verification, target, reason) =>

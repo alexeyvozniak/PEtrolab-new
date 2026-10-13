@@ -2,6 +2,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from 'react';
 import { AnalysesWorkspace } from '../src/AnalysesWorkspace';
 import { MineralsWorkspace } from '../src/MineralsWorkspace';
 import { ImportMappingEditor } from '../src/ImportMappingEditor';
@@ -211,7 +212,7 @@ test('automatic matches remain pending and manual decisions require a catalog la
   await user.click(screen.getByRole('button', {name: 'Сохранить ручное назначение'}));
   expect(onDecide).toHaveBeenCalledWith(analysis, 'forsterite', 'Проверено по независимым данным');
   await user.click(screen.getByRole('button', {name: 'Приняты пользователем 0'}));
-  expect(screen.queryByRole('option')).toBeNull();
+  expect(screen.queryByRole('button', { name: /^Открыть анализ / })).toBeNull();
 });
 
 test('mineral queue supports roving keyboard focus', async () => {
@@ -223,17 +224,52 @@ test('mineral queue supports roving keyboard focus', async () => {
   }));
 
   render(<MineralsWorkspace project={{total: 3, analyses, mineral_options: []}} busy={false} onDecide={vi.fn()} />);
-  const options = screen.getAllByRole('option');
+  const options = screen.getAllByRole('button', { name: /^Открыть анализ / });
 
   await user.click(options[0]);
   await user.keyboard('{ArrowDown}');
-  expect(document.activeElement).toBe(screen.getAllByRole('option')[1]);
+  expect(document.activeElement).toBe(screen.getAllByRole('button', { name: /^Открыть анализ / })[1]);
 
   await user.keyboard('{End}');
-  expect(document.activeElement).toBe(screen.getAllByRole('option')[2]);
+  expect(document.activeElement).toBe(screen.getAllByRole('button', { name: /^Открыть анализ / })[2]);
 
   await user.keyboard('{Home}');
-  expect(document.activeElement).toBe(screen.getAllByRole('option')[0]);
+  expect(document.activeElement).toBe(screen.getAllByRole('button', { name: /^Открыть анализ / })[0]);
+});
+
+test('mineral selection survives loading another page, filters and row focus', async () => {
+  const records = ['A1','A2','A3'].map(name => ({ analysis_id: name, identity: { Analysis: name },
+    mineral_verification: { status: 'conflict', issues: [], reasons: [], candidates: [] } }));
+  function Pages() {
+    const [loaded, setLoaded] = useState(2);
+    return <MineralsWorkspace project={{ total: 3, analyses: records.slice(0,loaded), has_more: loaded < 3 }}
+      onLoadMore={() => setLoaded(3)} onDecide={vi.fn()} />;
+  }
+  const user = userEvent.setup();
+  render(<Pages />);
+  await user.click(screen.getByRole('checkbox', { name: 'Выбрать A1' }));
+  await user.click(screen.getByRole('checkbox', { name: 'Выбрать A2' }));
+  await user.click(screen.getByRole('button', { name: 'Загрузить ещё анализы' }));
+  expect(screen.getByRole('checkbox', { name: 'Выбрать A1' }).checked).toBe(true);
+  await user.type(screen.getByLabelText('Поиск в проверке минералов'), 'A3');
+  expect(screen.getByText('Выбрано 2')).toBeTruthy();
+  expect(screen.getByText('Скрыто фильтром или не загружено: 2')).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Открыть анализ A3' }));
+  expect(screen.getByText('Выбрано 2')).toBeTruthy();
+  const checkbox = screen.getByRole('checkbox', { name: 'Выбрать A3' });
+  checkbox.focus(); await user.keyboard(' ');
+  expect(screen.getByText('Выбрано 3')).toBeTruthy();
+  expect(checkbox.checked).toBe(true);
+});
+
+test('a retired Selection can still be explicitly cleared when the active project is empty', async () => {
+  const onSelection = vi.fn();
+  render(<MineralsWorkspace project={{ total: 0, analyses: [] }} selectionIds={['retired-analysis']}
+    onSelectionChange={onSelection} />);
+  const user = userEvent.setup();
+  expect(screen.getByText('Выбрано 1')).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Очистить отбор' }));
+  expect(onSelection).toHaveBeenCalledWith([]);
 });
 
 test('stale decisions and missing inputs are visible even when rule reasons exist', () => {
@@ -1359,7 +1395,7 @@ test("post-import mineral queue keeps source, suggestion and accepted decision s
   const user = userEvent.setup();
   render(<App />);
   await user.click(screen.getByRole("button", { name: "Минералы" }));
-  expect(await screen.findByRole("listbox", { name: "Очередь проверки минералов" })).toBeTruthy();
+  expect(await screen.findByRole("list", { name: "Очередь проверки минералов" })).toBeTruthy();
   expect(screen.getByText("garnet")).toBeTruthy();
   expect(screen.getAllByText("clinopyroxene").length).toBeGreaterThan(0);
   await user.click(screen.getByRole("button", { name: "Принять предложение" }));

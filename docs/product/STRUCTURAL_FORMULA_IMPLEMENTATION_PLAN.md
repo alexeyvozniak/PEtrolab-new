@@ -34,6 +34,33 @@ benchmark -> чистое Python ядро -> registry/NDJSON -> atomic save/stal
 Нет единой "формулы рудных" или общей кислородной нормы для всех фельдшпатоидов.
 `validated` требует независимого научного review, не только зелёных тестов.
 
+## Уточнение запроса 2026-10-13: точность всех семейств
+
+«Более точный метод» означает проверенную применимость, валентности/позиции,
+сопоставление с независимыми опубликованными числами и различимость допущений,
+а не больше знаков после запятой. Один универсальный пересчёт для всех минералов
+не допускается. При недостаточных измерениях точный ответ может быть отказом.
+
+| Семейство | Следующий научный пробел | Доказательство до подключения |
+|---|---|---|
+| Оливин | пределы Fe3/малых компонентов и неопределённость, не слепая новая oxygen4 | природные анализы с независимо известным железом; прежний Fo–Fa не менять |
+| Opx | T/M1/M2, отдельные Fe3/Droop assumptions | позиции/charge/conservation, ferric natural benchmark; новый method ID |
+| Cpx | natural Droop и область идеальной allocation; не выдавать её за физическую Fe–Mg partition | независимый природный ferric эталон именно выбранной модели |
+| Слюды/флогопит | T/M/I/W, oxidation, measured H2O и Li | раздельные anion/Fe модели, эталоны с измеренными F/Cl/H2O; unknown Li/OH не становится measured |
+| Амфиболы | T/C/B/A/W, Fe3, OH/O и разные нормировки | Hawthorne-compatible ограниченная модель, независимые site/ferric/anion benchmarks; bulk23 не заменять |
+| Гранаты | пределы Ti/majorite/hydrogarnet и uncertainty | отдельная применимость и benchmark; не расширять anhydrous модель молча |
+| Полевые шпаты | T/M и An–Ab–Or | albite/anorthite/orthoclase + published natural input; никакого выбора полиморфа по составу |
+| Рудные | отдельные spinel/ilmenite/hematite и elemental sulphides | разные валентные/анионные модели; sulfide wt.% не смешивать с oxides |
+| Перовскит | ABO3 с substitutions/charge limits | ideal + published substituted case с явными valences |
+| Нефелин | framework/excess Si/vacancies | независимый Henderson-compatible natural benchmark |
+| Анальцим/прочие фельдшпатоиды | отдельные framework/anion/water модели | каждый mineral family отдельно; assumed H2O/CO3 не выдавать за measured |
+
+После текущего UI batch-среза первый научный срез — **Opx structural**.
+Если natural ferric reference отсутствует/недостаточен, не называть алгоритм
+завершённым или validated. Затем mica/amphibole; прочие семьи остаются
+обязательным backlog. Массовый UI использует только реально установленные
+совместимые methods из Python, а не обещанные методы этой таблицы.
+
 Точки расширения: `src/petrolab/formula_methods.py`, новые неизменяемые модули
 методов, `tests/test_*_formula.py`, `tests/test_formula_workflow.py`,
 `desktop/tests/import-workspace.integration.test.jsx`, packaged QA и ADR/AT.

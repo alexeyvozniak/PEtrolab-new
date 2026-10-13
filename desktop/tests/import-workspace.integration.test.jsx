@@ -352,6 +352,51 @@ test("real Python mineral review separates conflicts and persists only explicit 
   expect(await readFile(second, "utf8")).toBe(raw);
 }, 20000);
 
+test('real shared Selection calculates one atomic batch and reopens its history after changing screens', async () => {
+  const source = 'Analysis,Mineral,SiO2 (wt.%),Al2O3 (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%),FeO (wt.%)\n'
+    + ['Batch-1','Batch-2','Batch-3'].map(name => `${name},olivine,40,0,50,0,0,0,10\n`).join('');
+  await writeFile(second, source); queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+  await user.click(await enabledButton('2 · Проверить минералы'));
+  await user.click(await enabledButton('Принять группу совпадений'));
+  await user.click(await enabledButton('Сохранить импорт в проект'));
+  await screen.findByRole('heading', { name: 'Анализы' });
+  await user.click(screen.getByRole('checkbox', { name: 'Выбрать Batch-1' }));
+  await user.click(screen.getByRole('checkbox', { name: 'Выбрать Batch-2' }));
+  await user.click(await enabledButton('Минералы'));
+  await screen.findByText('Выбрано 2');
+  await user.click(await enabledButton('Рассчитать формулы'));
+  await screen.findByText('Готово 2 · Требуют решения 0');
+  const preview = requests.filter(r => r.command === 'formula.preview').at(-1);
+  const exactIds = preview.payload.analysis_ids;
+  expect(exactIds).toHaveLength(2);
+  await user.click(await enabledButton('Сохранить 2 результатов'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  await user.click(await enabledButton('Анализы'));
+  expect(screen.getByRole('checkbox', { name: 'Выбрать Batch-1' }).checked).toBe(true);
+  expect(screen.getByRole('checkbox', { name: 'Выбрать Batch-2' }).checked).toBe(true);
+  expect(screen.getByRole('checkbox', { name: 'Выбрать Batch-3' }).checked).toBe(false);
+  await user.click(await enabledButton('Минералы'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  const history = await screen.findByText(/Сохранён · Оливин/, { selector: 'summary' });
+  await user.click(history);
+  expect(within(history.closest('details')).getByRole('table', { name: 'Рассчитанные значения' })).toBeTruthy();
+  expect(within(history.closest('details')).getByText('Состав сохранённого расчёта · 2', { selector: 'summary' }).closest('details').open).toBe(false);
+  for (const id of exactIds) expect(within(history.closest('details')).getByText(`Analysis ID: ${id}`)).toBeTruthy();
+  for (const id of exactIds) {
+    const response = await bridge.invoke('petrolab_command', { envelope: { protocol_version: '1.0',
+      request_id: crypto.randomUUID(), command: 'formula.runs.list', payload: { project_database_path: join(folder,'project.sqlite'), analysis_id: id } } });
+    expect(response.result.runs[0].run.input.analysis_ids).toEqual(exactIds);
+  }
+  const save = requests.filter(r => r.command === 'formula.save');
+  expect(save).toHaveLength(1); expect(save[0].payload.analysis_ids).toEqual(exactIds);
+  await user.click(screen.getByRole('button', { name: 'Очистить отбор' }));
+  expect(screen.queryByLabelText('Групповой пересчёт')).toBeNull();
+  expect(await readFile(second, 'utf8')).toBe(source);
+}, 60000);
+
 test('real formula path saves APFU, reopens history and invalidates a changed Fe preview', async () => {
   await writeFile(second, 'Analysis,Mineral,SiO2 (wt.%),Al2O3 (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%),FeO (wt.%)\nB1,olivine,40,0,50,0,0,0,10\n');
   const raw = await readFile(second, 'utf8');

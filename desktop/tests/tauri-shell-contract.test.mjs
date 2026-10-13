@@ -287,6 +287,8 @@ test("dedicated mineral queue keeps reported, suggested and accepted values sepa
   const api = await read("src/desktopApi.js");
   const styles = await read("src/mineralsWorkspace.css");
   assert.match(app, /<MineralsWorkspace/);
+  assert.match(app, /analyses: mergeAnalysesById\(current\.analyses, enriched\.analyses\)/,
+    'loading a page must not duplicate an analysis previously fetched by exact ID');
   assert.match(workspace, /Требуют решения/);
   assert.match(workspace, /В источнике/);
   assert.match(workspace, /Предложение/);

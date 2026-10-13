@@ -5,7 +5,7 @@ import platform
 from contextlib import closing
 
 from .desktop_workflow import list_project_analyses
-from .formula_methods import executable_method, fingerprint, method_definition
+from .formula_methods import executable_method, fingerprint, method_definition, list_methods
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
 from .mineral_verification import reported_target, verify_record
@@ -34,10 +34,39 @@ def _inputs(connection, database_path, ids):
     return records
 
 
-def _validate(ids, method_id, version, parameters):
+def _validate_scope(ids):
     if (not isinstance(ids, list) or not 1 <= len(ids) <= 100
             or any(not isinstance(i, str) or not i for i in ids) or len(set(ids)) != len(ids)):
         raise ImportCommandError('FORMULA_SCOPE_INVALID', 'Выберите 1–100 различных Analysis ID.')
+
+
+def list_formula_methods_for_scope(database_path, analysis_ids):
+    """Project-derived common catalog; no inferred assignment or hidden scope reduction."""
+    _validate_scope(analysis_ids)
+    with closing(open_project(database_path)) as connection:
+        connection.execute('BEGIN')
+        records = _inputs(connection, database_path, analysis_ids)
+    issues = []
+    for record in records:
+        if record.get('unavailable'):
+            message = 'Анализ отсутствует или импорт отозван.'
+        elif not record.get('assignment'):
+            message = 'Сначала явно примите назначение минерала.'
+        else:
+            continue
+        issues.append({'analysis_id': record['analysis_id'], 'identity': record.get('identity', {}),
+                       'can_review': not record.get('unavailable', False), 'message': message})
+    targets = [reported_target((r.get('assignment') or {}).get('target')) for r in records]
+    methods = [] if issues else [method for method in list_methods()['methods']
+        if all(target in executable_method(method['method_id'], method['version'])['accepted_targets']
+               for target in targets)]
+    return {'analysis_ids': analysis_ids, 'methods': methods, 'scope_issues': issues,
+            'scope_message': '' if methods else
+                'Выберите анализы с принятым минералом и одним общим установленным методом.'}
+
+
+def _validate(ids, method_id, version, parameters):
+    _validate_scope(ids)
     try:
         registration = executable_method(method_id, version)
     except KeyError:
