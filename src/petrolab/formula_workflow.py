@@ -12,14 +12,17 @@ from .mineral_verification import reported_target, verify_record
 
 
 def _inputs(connection, database_path, ids):
+    # One bounded projection in the caller's snapshot, not a project-wide
+    # import summary read for every selected row. SQL order is not scope order.
+    analyses = list_project_analyses(database_path, analysis_ids=ids,
+                                     _connection=connection)['analyses']
+    by_id = {analysis['analysis_id']: analysis for analysis in analyses}
     records = []
     for analysis_id in ids:
-        rows = list_project_analyses(database_path, limit=1, analysis_id=analysis_id,
-                                     _connection=connection)['analyses']
-        if not rows:
+        a = by_id.get(analysis_id)
+        if a is None:
             records.append({'analysis_id': analysis_id, 'unavailable': True})
             continue
-        a = rows[0]
         reported = a.get('reported_mineral') or a.get('source_metadata', {}).get('Mineral')
         verification = verify_record({'preview_id': analysis_id, 'reported_mineral': reported,
                                       'measurements': a['measurement_list']}, a.get('mineral_assignment'))
