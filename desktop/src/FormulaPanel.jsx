@@ -7,7 +7,8 @@ const fieldLabel = field => ({
   cation_sum: 'Сумма катионов', oxide_total: 'Сумма оксидов', Fe2_apfu: 'Fe²⁺', Fe3_apfu: 'Fe³⁺',
   OH_est_apfu: 'OH (оценка)', F_apfu: 'F', Cl_apfu: 'Cl',
   charge_sum: 'Сумма зарядов', X_sum: 'Сумма X', Y_sum: 'Сумма Y', Z_sum: 'Сумма Z',
-}[field] || field.replace(/^([XYZ])_/, '$1 · ').replace('_apfu', '').replace('Fe2', 'Fe²⁺').replace('Fe3', 'Fe³⁺'));
+  T_sum: 'Сумма T', M1_sum: 'Сумма M1', M2_sum: 'Сумма M2',
+}[field] || field.replace(/^(X|Y|Z|T|M1|M2)_/, '$1 · ').replace('_apfu', '').replace('Fe2', 'Fe²⁺').replace('Fe3', 'Fe³⁺'));
 const parameterLabel = name => ({ fe_mode: 'Режим железа', anion_basis: 'Анионный базис', oh_mode: 'Расчёт OH' }[name] || name);
 
 function FormulaParameter({ parameter, method, value, busy, onChange }) {
@@ -48,8 +49,10 @@ function Result({ result, methodDefinition }) {
   if (!result) return null;
   const halogens = (result.used || []).filter(item => ['F', 'Cl'].includes(item.field));
   const entries = Object.entries(result.values || {});
-  const isSiteField = field => /^[XYZ]_(.*_apfu|sum)$/.test(field);
-  const siteEntries = entries.filter(([field]) => isSiteField(field));
+  const siteNames = result.site_order || Object.keys(result.sites || {});
+  const isSiteField = field => siteNames.some(site => field.startsWith(`${site}_`));
+  const siteEntries = entries.filter(([field]) => isSiteField(field)).sort(([a], [b]) =>
+    siteNames.findIndex(site => a.startsWith(`${site}_`)) - siteNames.findIndex(site => b.startsWith(`${site}_`)));
   const mainEntries = entries.filter(([field]) => field !== 'structural_formula' && !isSiteField(field))
     .sort(([a], [b]) => Number(['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(b)) - Number(['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(a)));
   const structural = methodDefinition?.output_fields?.some(field => field.field === 'structural_formula');
@@ -63,7 +66,7 @@ function Result({ result, methodDefinition }) {
     </section>}
     {mainEntries.length > 0 && <ValueTable entries={mainEntries} label="Рассчитанные значения"
       caption="Рассчитано · не исходные измерения" method={methodDefinition} estimatedFields={result.estimated_fields} />}
-    {siteEntries.length > 0 && <details className="formula-result-notes"><summary>Позиции X/Y/Z · оценка</summary>
+    {siteEntries.length > 0 && <details className="formula-result-notes"><summary>Позиции {siteNames.join('/')} · оценка</summary>
       <ValueTable entries={siteEntries} label="Распределение по позициям" caption="Модельные позиции · APFU" method={methodDefinition} />
     </details>}
     {result.OH_est_basis && <section className="formula-basis" aria-label="Основание оценки OH">

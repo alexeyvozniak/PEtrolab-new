@@ -3,14 +3,14 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const state = vi.hoisted(() => ({ legacy: false, catalog: null, previewError: false }));
+const state = vi.hoisted(() => ({ legacy: false, catalog: null, previewError: false, previewResult: null }));
 vi.mock('../src/desktopApi', () => ({
   invokePetrolab: vi.fn(async (command, payload) => {
     if (command === 'formula.methods.list' && state.catalog) return { result: { methods: [state.catalog] } };
     if (command === 'formula.preview') return state.previewError
       ? { error: { code: 'TEST_INPUT_ERROR', message: 'Тестовый отказ расчёта' } }
       : { result: { parameters: payload.parameters, input_fingerprint: 'preview', can_save: true,
-          results: [{ analysis_id: 'analysis-1', values: {} }] } };
+          results: [{ analysis_id: 'analysis-1', values: {}, ...(state.previewResult || {}) }] } };
     if (command === 'formula.methods.list') return { result: { methods: [{
       method_id: 'olivine.oxygen4', version: '2.0.0', name: 'Новый метод', status: 'draft',
       parameters: [{ name: 'fe_mode' }],
@@ -35,7 +35,24 @@ vi.mock('../src/desktopApi', () => ({
 import { FormulaPanel } from '../src/FormulaPanel';
 import { invokePetrolab } from '../src/desktopApi';
 
-afterEach(() => { cleanup(); state.legacy = false; state.catalog = null; state.previewError = false; vi.clearAllMocks(); });
+afterEach(() => { cleanup(); state.legacy = false; state.catalog = null; state.previewError = false; state.previewResult = null; vi.clearAllMocks(); });
+
+test('site heading uses Python ordered contract after Tauri alphabetically reorders JSON object keys', async () => {
+  state.catalog = { method_id: 'clinopyroxene.structural6', version: '0.1.0', name: 'Cpx', status: 'draft',
+    parameters: [{ name: 'fe_mode' }], parameter_choices: { fe_mode: { all_fe2: 'Fe2' } },
+    quick_presets: [{ parameters: { fe_mode: 'all_fe2' } }], citations: [], assumptions: [], applicability: [] };
+  state.previewResult = { sites: { M1: { Mg: 1 }, M2: { Ca: 1 }, T: { Si: 2 } },
+    site_order: ['T', 'M1', 'M2'], values: { M1_Mg_apfu: 1, M2_Ca_apfu: 1, T_Si_apfu: 2 } };
+  const user = userEvent.setup();
+  render(<FormulaPanel analysis={{ analysis_id: 'analysis-1', mineral_verification: { accepted: { target: 'diopside' } } }} databasePath="project.sqlite" />);
+  const button = await screen.findByRole('button', { name: 'Рассчитать формулу' });
+  await waitFor(() => expect(button.disabled).toBe(false));
+  await user.click(button);
+  const positions = await screen.findByText('Позиции T/M1/M2 · оценка', { selector: 'summary' });
+  await user.click(positions);
+  expect(screen.getByRole('table', { name: 'Распределение по позициям' }).querySelector('tbody tr th').textContent).toBe('T · Si');
+  expect(screen.queryByText('Позиции M1/M2/T · оценка', { selector: 'summary' })).toBeNull();
+});
 
 test('formula history uses saved parameter descriptions, not a newer method catalog', async () => {
   const user = userEvent.setup();

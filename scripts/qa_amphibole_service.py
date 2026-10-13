@@ -134,6 +134,9 @@ def verify_service(executable=None, all_methods=False):
                     ('garnet_sg1.csv', 'almandine', 'garnet.structural12',
                      {'Si_apfu': 2.938, 'Al_apfu': 1.972, 'Fe3_apfu': .153,
                       'Fe2_apfu': 2.358, 'Mg_apfu': .525, 'Mn_apfu': .016, 'Ca_apfu': .039}, .003),
+                    ('clinopyroxene_winpyrox_s4.csv', 'hedenbergite', 'clinopyroxene.structural6',
+                     {'Si_apfu': 1.788*12/12.064, 'Fe3_apfu': .237*12/12.064,
+                      'Fe2_apfu': .248*12/12.064, 'M1_Fe2_apfu': .210, 'M2_Fe2_apfu': .037}, .004),
                 ]
                 for name, target, method_id, expected, tolerance in cases:
                     other_project = Path(folder) / f'{method_id}.sqlite'
@@ -150,11 +153,13 @@ def verify_service(executable=None, all_methods=False):
                          'input_fingerprint': record['input_fingerprint'], 'ruleset_version': record['ruleset_version'],
                          'reason': 'AT-46: independent formula family acceptance'})
                     methods = send('formula.methods.list', {'accepted_assignment': target})['methods']
-                    assert len(methods) == 1 and methods[0]['method_id'] == method_id, methods
-                    chosen = methods[0]['quick_presets'][0]['parameters']
+                    expected_ids = ['clinopyroxene.oxygen6', 'clinopyroxene.structural6'] if method_id.startswith('clinopyroxene.') else [method_id]
+                    assert [m['method_id'] for m in methods] == expected_ids, methods
+                    method = next(m for m in methods if m['method_id'] == method_id)
+                    chosen = {'fe_mode': 'reported_split'} if method_id == 'clinopyroxene.structural6' else method['quick_presets'][0]['parameters']
                     arguments = {'project_database_path': str(other_project),
                                  'analysis_ids': [record['analysis_id']], 'method_id': method_id,
-                                 'method_version': methods[0]['version'], 'parameters': chosen}
+                                 'method_version': method['version'], 'parameters': chosen}
                     with closing(sqlite3.connect(other_project)) as connection:
                         inputs = connection.execute('SELECT * FROM measurement ORDER BY rowid').fetchall()
                     current = send('formula.preview', arguments)
@@ -187,9 +192,10 @@ def verify_service(executable=None, all_methods=False):
                         assert abs(values['cation_sum'] - 8) < 1e-10 and abs(values['charge_sum'] - 24) < 1e-10
                         assert result['sites'] and result['structural_warning']
                         assert history[0]['run']['result_manifest']['results'][0]['fe_est_basis'] == result['fe_est_basis']
-                    invalid_arguments = {**arguments, 'parameters': {**chosen, 'fe_mode': 'reported_split'}}
+                    invalid_mode = 'stoichiometric_droop' if method_id == 'clinopyroxene.structural6' else 'reported_split'
+                    invalid_arguments = {**arguments, 'parameters': {**chosen, 'fe_mode': invalid_mode}}
                     invalid = send('formula.preview', invalid_arguments)
-                    assert not invalid['can_save'] and invalid['parameters']['fe_mode'] == 'reported_split'
+                    assert not invalid['can_save'] and invalid['parameters']['fe_mode'] == invalid_mode
                     assert not invalid['results'][0]['values']
                     send('formula.save', {**invalid_arguments, 'preview_fingerprint': invalid['input_fingerprint']},
                          'FORMULA_INPUT_INVALID')

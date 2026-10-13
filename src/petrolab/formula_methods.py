@@ -11,6 +11,9 @@ from .clinopyroxene_formula import (ATOMIC_MASSES as CPX_ATOMIC_MASSES,
                                     FE_MODES as CPX_FE_MODES, METHOD_ID as CPX_METHOD_ID,
                                     METHOD_VERSION as CPX_METHOD_VERSION,
                                     OXIDES as CPX_OXIDES, calculate_clinopyroxene)
+from .clinopyroxene_structural_formula import (ATOMIC_MASSES as CPS_ATOMIC_MASSES,
+    FE_MODES as CPS_FE_MODES, METHOD_ID as CPS_METHOD_ID, METHOD_VERSION as CPS_METHOD_VERSION,
+    OXIDES as CPS_OXIDES, REQUIRED as CPS_REQUIRED, calculate_clinopyroxene_structural)
 from .mica_formula import (ANION_BASES as MICA_ANION_BASES, ATOMIC_MASSES as MICA_ATOMIC_MASSES,
                            FE_MODES as MICA_FE_MODES, METHOD_ID as MICA_METHOD_ID,
                            METHOD_VERSION as MICA_METHOD_VERSION, OH_MODES as MICA_OH_MODES,
@@ -35,6 +38,7 @@ CPX_IMPLEMENTATION_SHA256 = '25b876fb9ae8da7603449aa61b046c7ba36edfc10b12515384f
 OPX_IMPLEMENTATION_SHA256 = '90e6999502d392087e546ba2f5311b47fc57bc3f590c9292eec3180aa47cf0dd'
 AMP_IMPLEMENTATION_SHA256 = 'e840975a216609ec3deb7a61bb8cc47d4291b7fbafb93b0e4a0419641a0d0727'
 GRT_IMPLEMENTATION_SHA256 = '191cc08a88a13a387f2d9e00a8937841cc096137d7341eb408a1f8ecb806cd09'
+CPS_IMPLEMENTATION_SHA256 = 'ffc297d084c065d1faa9fa95cf626f6978e20bf64f9f09114f89ec9fc22d60aa'
 COMPACT_FE_MODE_LABELS = {
     'all_fe2': 'Всё Fe как Fe²⁺ · FeO/FeOt',
     'reported_split': 'Раздельные FeO + Fe₂O₃',
@@ -308,6 +312,49 @@ def _garnet_definition():
     return definition
 
 
+def _clinopyroxene_structural_definition():
+    cations = sorted({oxide[3] for oxide in CPS_OXIDES.values()})
+    fields = ([name + '_apfu' for name in cations]
+              + [site + '_' + name + '_apfu' for site in ('T', 'M1', 'M2') for name in cations]
+              + ['cation_sum', 'T_sum', 'M1_sum', 'M2_sum'])
+    definition = {
+        'method_id': CPS_METHOD_ID, 'version': CPS_METHOD_VERSION,
+        'name': 'Клинопироксен · 6 O · T/M1/M2', 'kind': 'formula', 'status': 'draft',
+        'input_domain': {'semantic_domain': 'oxide_wt_percent', 'required_fields': sorted(CPS_REQUIRED),
+            'allowed_units': ['wt.%'], 'missing_policy': 'reject_row', 'censored_policy': 'reject_row',
+            'compositional_domain_policy': 'explicit_subcomposition_required',
+            'nonpositive_policy': 'not_applicable', 'mixed_unit_policy': 'reject'},
+        'parameters': [{'name': 'fe_mode', 'value_type': 'choice', 'scientifically_significant': True}],
+        'output_fields': ([{'field': field, 'semantic_role': 'derived_value', 'unit': 'apfu'} for field in fields]
+            + [{'field': field, 'semantic_role': 'diagnostic', 'unit': 'mol.%'} for field in ('Wo', 'En', 'Fs')]
+            + [{'field': 'oxide_total', 'semantic_role': 'diagnostic', 'unit': 'wt.%'},
+               {'field': 'charge_sum', 'semantic_role': 'diagnostic', 'unit': None},
+               {'field': 'structural_formula', 'semantic_role': 'derived_value', 'unit': None}]),
+        'citations': [
+            {'title': 'Morimoto et al. (1988), Nomenclature of pyroxenes',
+             'doi': '10.3406/bulmi.1988.8099', 'url': 'https://doi.org/10.3406/bulmi.1988.8099'},
+            {'title': 'Yavuz (2013), WinPyrox, p1339/1348 and Table 5 S4',
+             'doi': '10.2138/am.2013.4292', 'url': 'https://doi.org/10.2138/am.2013.4292'},
+            {'title': 'Droop (1987), stoichiometric Fe3+ estimation',
+             'doi': '10.1180/minmag.1987.051.361.10', 'url': 'https://doi.org/10.1180/minmag.1987.051.361.10'},
+            {'title': 'CIAAW Abridged Standard Atomic Weights 2024', 'url': 'https://ciaaw.org/abridged-atomic-weights.htm'}],
+        'assumptions': ['Безводные 6 O; без нормировки wt.% к 100%.',
+            'Fe: всё Fe2, раздельные измеренные FeO/Fe2O3 или явная оценка Droop на 4 катиона.',
+            'T/M1/M2 по идеальной последовательности Morimoto/WinPyrox, не Nimis Fe-Mg partition.',
+            'Валентности других элементов заданы оксидами; только Fe переоценивается в Droop.'],
+        'applicability': ['Явно принятый Ca-rich, Na-Ca или Na клинопироксен; не определение вида.',
+            'Si > 2 APFU, ненулевые F/Cl/H2O и неподдержанные оксиды блокируют эту версию.',
+            'Суммы позиций диагностируются без подгонки к 2/1/1; нет термобарометрии/неопределённости.',
+            'Wo/En/Fs отсутствуют при нулевом Ca+Mg+Fe2; это не полные конечные члены.'],
+        'benchmark_ids': ['cps-ideal-di-hd-jd-aeg-cats', 'cps-aegirine-droop', 'cps-table5-s4-reference-converted'],
+        'implementation': {'algorithm_id': CPS_METHOD_ID, 'algorithm_version': CPS_METHOD_VERSION,
+                           'implementation_sha256': CPS_IMPLEMENTATION_SHA256},
+        'created_at': '2026-10-12T00:00:00Z',
+    }
+    definition['definition_fingerprint'] = fingerprint(definition)
+    return definition
+
+
 def method_definition(method_id=METHOD_ID, version=None):
     """Return one installed definition without changing existing olivine identity."""
     installed = {METHOD_ID: (METHOD_VERSION, _olivine_definition),
@@ -315,7 +362,8 @@ def method_definition(method_id=METHOD_ID, version=None):
                  CPX_METHOD_ID: (CPX_METHOD_VERSION, _clinopyroxene_definition),
                  OPX_METHOD_ID: (OPX_METHOD_VERSION, _orthopyroxene_definition),
                  AMP_METHOD_ID: (AMP_METHOD_VERSION, _amphibole_definition),
-                 GRT_METHOD_ID: (GRT_METHOD_VERSION, _garnet_definition)}
+                 GRT_METHOD_ID: (GRT_METHOD_VERSION, _garnet_definition),
+                 CPS_METHOD_ID: (CPS_METHOD_VERSION, _clinopyroxene_structural_definition)}
     current = installed.get(method_id)
     if current is None or (version is not None and version != current[0]):
         raise KeyError((method_id, version))
@@ -325,6 +373,16 @@ def method_definition(method_id=METHOD_ID, version=None):
 def executable_method(method_id, version):
     """Resolve domain behavior for workflow dispatch; values are never serialized."""
     definition = method_definition(method_id, version)
+    if method_id == CPS_METHOD_ID:
+        return {'definition': definition,
+                'accepted_targets': {'clinopyroxene', 'Na-clinopyroxene', 'Na-Ca clinopyroxene'},
+                'target_label': 'клинопироксена', 'parameter_choices': {'fe_mode': CPS_FE_MODES},
+                'parameter_choice_labels': {'fe_mode': {'all_fe2': 'Всё Fe как Fe²⁺ · 6 O',
+                    'reported_split': 'Раздельные FeO + Fe₂O₃', 'stoichiometric_droop': 'Fe³⁺ по Droop · оценка'}},
+                'quick_presets': [{'id': 'all_fe2', 'label': 'Рассчитать формулу',
+                    'description': '6 O; всё Fe принято Fe²⁺; T/M1/M2 — идеальные оценки.',
+                    'parameters': {'fe_mode': 'all_fe2'}}],
+                'calculate': lambda rows, p: calculate_clinopyroxene_structural(rows, p['fe_mode'])}
     if method_id == METHOD_ID:
         return {'definition': definition, 'accepted_targets': {'olivine'}, 'target_label': 'оливина',
                 'parameter_choices': {'fe_mode': OLIVINE_FE_MODES},
@@ -395,7 +453,8 @@ def list_methods(accepted_assignment=None):
                                        (CPX_METHOD_ID, CPX_METHOD_VERSION, CPX_ATOMIC_MASSES),
                                        (OPX_METHOD_ID, OPX_METHOD_VERSION, OPX_ATOMIC_MASSES),
                                        (AMP_METHOD_ID, AMP_METHOD_VERSION, AMP_ATOMIC_MASSES),
-                                       (GRT_METHOD_ID, GRT_METHOD_VERSION, GRT_ATOMIC_MASSES)):
+                                       (GRT_METHOD_ID, GRT_METHOD_VERSION, GRT_ATOMIC_MASSES),
+                                       (CPS_METHOD_ID, CPS_METHOD_VERSION, CPS_ATOMIC_MASSES)):
         registration = executable_method(method_id, version)
         if accepted_assignment is not None and accepted_target not in registration['accepted_targets']:
             continue
