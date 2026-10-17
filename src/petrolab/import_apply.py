@@ -7,6 +7,7 @@ import json
 import sqlite3
 import shutil
 import uuid
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -135,6 +136,7 @@ def _section_for_record(recipe: dict[str, Any], record: dict[str, Any]) -> dict[
 
 def _source_metadata_for_record(inspection: Any, recipe: dict[str, Any], record: dict[str, Any]) -> list[dict[str, Any]]:
     """Read source metadata losslessly without promoting it to controlled entities."""
+    from .semantic_import import cell_ignored
     section = _section_for_record(recipe, record)
     sheet = next((item for item in inspection.sheets if item.name == record["sheet_name"]), None)
     if sheet is None:
@@ -148,6 +150,8 @@ def _source_metadata_for_record(inspection: Any, recipe: dict[str, Any], record:
         for mapping in mappings:
             column_index = mapping.get("source_column_index")
             if not isinstance(column_index, int) or column_index < 0:
+                continue
+            if cell_ignored(recipe, record['block_id'], row_number, column_index):
                 continue
             result.append({
                 "canonical_field": mapping.get("canonical_field") or mapping.get("source_header") or "Metadata",
@@ -168,6 +172,8 @@ def _source_metadata_for_record(inspection: Any, recipe: dict[str, Any], record:
         if not isinstance(row_index, int) or row_index < 0 or row_index >= len(sheet.rows):
             continue
         row_number = row_index + 1
+        if cell_ignored(recipe, record['block_id'], row_number, column_index):
+            continue
         result.append({
             "canonical_field": mapping.get("canonical_field") or mapping.get("source_header") or "Metadata",
             "raw_token": _cell_value(sheet.rows[row_index], column_index),
@@ -186,6 +192,11 @@ def open_project(database_path: str | Path) -> sqlite3.Connection:
     connection.execute("CREATE TABLE IF NOT EXISTS schema_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migration")}
     migrations = sorted(MIGRATIONS.glob("*.sql"))
+    pending = [item for item in migrations if int(item.name.split("_", 1)[0]) not in applied]
+    if applied and pending:
+        backup_path = Path(str(database_path) + f".before-v{int(pending[0].name.split('_', 1)[0])}-{_id()}.bak")
+        with closing(sqlite3.connect(backup_path)) as backup:
+            connection.backup(backup)
     for migration in migrations:
         version = int(migration.name.split("_", 1)[0])
         if version in applied:
@@ -284,123 +295,224 @@ def save_import_recipe_revision(database_path: str | Path, source_id: str, recip
         connection.close()
 
 
-def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
-    """Apply a fresh plan atomically; this function never writes the source file."""
+def _prepare_import(source_path: str | Path, recipe: dict[str, Any], display_name: str | None = None) -> dict[str, Any]:
     inspection = inspect_source(source_path)
     plan = create_import_plan(inspection, recipe)
+    blockers = [issue for issue in plan.get("issues", []) if issue.get("blocking")]
+    if blockers:
+        raise ImportCommandError(blockers[0]["code"], blockers[0]["message"], {"issues": blockers})
     _require_non_empty_plan(plan)
     _require_mapping_review(recipe)
     _require_duplicate_review(plan, recipe)
     source_kind = "managed_copy" if recipe["ownership_mode"] == "managed_copy" else "linked_reference"
-    source_id, batch_id = _id(), _id()
-    managed_copy: Path | None = None
-    if source_kind == "managed_copy":
-        managed_copy = _prepare_managed_copy(database_path, source_id, source_path, inspection.fingerprint)
-    connection = open_project(database_path)
-    try:
-        timestamp = _now()
-        metadata_count = 0
-        with connection:
+    return {
+        "source_path": Path(source_path),
+        "display_name": display_name or Path(source_path).name,
+        "recipe": recipe,
+        "inspection": inspection,
+        "plan": plan,
+        "source_kind": source_kind,
+        "source_id": _id(),
+        "import_batch_id": _id(),
+        "managed_copy": None,
+    }
+
+
+def _write_prepared_import(connection: sqlite3.Connection, database_path: str | Path,
+                           prepared: dict[str, Any], timestamp: str,
+                           workspace_commit_id: str | None) -> dict[str, Any]:
+    source_path = prepared["source_path"]
+    inspection = prepared["inspection"]
+    recipe = prepared["recipe"]
+    plan = prepared["plan"]
+    source_kind = prepared["source_kind"]
+    source_id = prepared["source_id"]
+    batch_id = prepared["import_batch_id"]
+    managed_copy = prepared["managed_copy"]
+    metadata_count = 0
+    connection.execute(
+        """INSERT INTO source_file
+        (source_id, source_kind, display_name, source_fingerprint_sha256, linked_path, last_verified_at, state, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'current', ?)""",
+        (source_id, source_kind, prepared["display_name"], inspection.fingerprint,
+         str(source_path.resolve()) if source_kind == "linked_reference" else None, timestamp, timestamp),
+    )
+    if managed_copy is not None:
+        connection.execute(
+            "UPDATE source_file SET managed_relative_path = ? WHERE source_id = ?",
+            (managed_copy.relative_to(Path(database_path).parent).as_posix(), source_id),
+        )
+    recipe_revision_id = _insert_recipe_revision(connection, source_id, recipe, timestamp)
+    if workspace_commit_id is None:
+        connection.execute(
+            """INSERT INTO import_batch
+            (import_batch_id, source_id, recipe_revision_id, source_fingerprint_sha256, status, plan_json, created_at, applied_at)
+            VALUES (?, ?, ?, ?, 'planned', ?, ?, NULL)""",
+            (batch_id, source_id, recipe_revision_id, inspection.fingerprint,
+             json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")), timestamp),
+        )
+    else:
+        connection.execute(
+            """INSERT INTO import_batch
+            (import_batch_id, source_id, recipe_revision_id, source_fingerprint_sha256, status, plan_json,
+             created_at, applied_at, workspace_commit_id)
+            VALUES (?, ?, ?, ?, 'planned', ?, ?, NULL, ?)""",
+            (batch_id, source_id, recipe_revision_id, inspection.fingerprint,
+             json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")), timestamp, workspace_commit_id),
+        )
+    for record in plan["planned_records"]:
+        analysis_id = _id()
+        orientation = record.get("orientation", "rows_are_analyses")
+        connection.execute(
+            """INSERT INTO analysis
+            (analysis_id, import_batch_id, source_id, preview_id, sheet_name, source_row_number, block_id,
+             identity_json, created_at, source_column_number, source_orientation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                analysis_id, batch_id, source_id, record["preview_id"], record["sheet_name"], record["row_number"],
+                record["block_id"], json.dumps(record["identity"], ensure_ascii=False), timestamp,
+                record.get("source_column_number"), orientation,
+            ),
+        )
+        connection.execute(
+            '''INSERT INTO analysis_import_semantics
+               (analysis_id, sample_association_json, reported_mineral_json, mineral_assignment_json,
+                mineral_verification_json, analytical_method_json) VALUES (?, ?, ?, ?, ?, ?)''',
+            (analysis_id, *(json.dumps(record.get(key), ensure_ascii=False, sort_keys=True) for key in
+             ('sample_association', 'reported_mineral', 'mineral_assignment', 'mineral_verification', 'analytical_method'))),
+        )
+        for metadata in _source_metadata_for_record(inspection, recipe, record):
             connection.execute(
-                """INSERT INTO source_file
-                (source_id, source_kind, display_name, source_fingerprint_sha256, linked_path, last_verified_at, state, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'current', ?)""",
-                (source_id, source_kind, Path(source_path).name, inspection.fingerprint,
-                 str(Path(source_path).resolve()) if source_kind == "linked_reference" else None, timestamp, timestamp),
+                """INSERT INTO analysis_source_metadata
+                (analysis_source_metadata_id, analysis_id, import_batch_id, canonical_field, raw_token,
+                 source_header, source_row_number, source_column_index, source_cell, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    _id(), analysis_id, batch_id, metadata["canonical_field"], metadata["raw_token"],
+                    metadata["source_header"], metadata["source_row_number"], metadata["source_column_index"],
+                    metadata["source_cell"], timestamp,
+                ),
             )
-            if managed_copy is not None:
-                connection.execute(
-                    "UPDATE source_file SET managed_relative_path = ? WHERE source_id = ?",
-                    (managed_copy.relative_to(Path(database_path).parent).as_posix(), source_id),
-                )
-            recipe_revision_id = _insert_recipe_revision(connection, source_id, recipe, timestamp)
+            metadata_count += 1
+        for measurement in record["measurements"]:
             connection.execute(
-                """INSERT INTO import_batch
-                (import_batch_id, source_id, recipe_revision_id, source_fingerprint_sha256, status, plan_json, created_at, applied_at)
-                VALUES (?, ?, ?, ?, 'planned', ?, ?, NULL)""",
-                (batch_id, source_id, recipe_revision_id, inspection.fingerprint,
-                 json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")), timestamp),
+                """INSERT INTO measurement
+                (measurement_id, analysis_id, canonical_field, unit, raw_token, qualifier, detection_limit,
+                 source_column_name, source_column_index, created_at, source_row_number,
+                 physical_source_column_index, source_cell, measurement_set, method,
+                 value_status, reported_fe_form, fe_handling)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    _id(), analysis_id, measurement["field"], measurement["unit"], measurement["raw_token"],
+                    measurement["qualifier"], measurement["detection_limit"], measurement["source_header"],
+                    measurement["source_column_index"], timestamp, measurement["physical_source_row_number"],
+                    measurement["physical_source_column_index"], measurement["source_cell"],
+                    measurement.get("measurement_set"), measurement.get("method"),
+                    measurement["value_status"], measurement["reported_fe_form"], measurement["fe_handling"],
+                ),
             )
-            for record in plan["planned_records"]:
-                analysis_id = _id()
-                orientation = record.get("orientation", "rows_are_analyses")
+            if orientation == "rows_are_analyses":
                 connection.execute(
-                    """INSERT INTO analysis
-                    (analysis_id, import_batch_id, source_id, preview_id, sheet_name, source_row_number, block_id,
-                     identity_json, created_at, source_column_number, source_orientation)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    """INSERT INTO source_row_provenance
+                    (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token,
+                     normalized_token, qualifier, analysis_id, value_status)
+                    VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)""",
                     (
-                        analysis_id, batch_id, source_id, record["preview_id"], record["sheet_name"], record["row_number"],
-                        record["block_id"], json.dumps(record["identity"], ensure_ascii=False), timestamp,
-                        record.get("source_column_number"), orientation,
+                        _id(), batch_id, record["sheet_name"], measurement["physical_source_row_number"],
+                        measurement["source_header"], measurement["raw_token"], measurement["qualifier"], analysis_id, measurement["value_status"],
                     ),
                 )
-                for metadata in _source_metadata_for_record(inspection, recipe, record):
+            connection.execute(
+                """INSERT INTO source_cell_provenance
+                (provenance_id, import_batch_id, analysis_id, sheet_name, source_row_number,
+                 source_column_index, source_cell, source_header, raw_token, qualifier, value_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    _id(), batch_id, analysis_id, record["sheet_name"], measurement["physical_source_row_number"],
+                    measurement["physical_source_column_index"], measurement["source_cell"],
+                    measurement["source_header"], measurement["raw_token"], measurement["qualifier"],
+                    measurement["value_status"],
+                ),
+            )
+    connection.execute("UPDATE import_batch SET status = 'applied', applied_at = ? WHERE import_batch_id = ?", (timestamp, batch_id))
+    return {
+        "import_batch_id": batch_id,
+        "source_id": source_id,
+        "recipe_revision_id": recipe_revision_id,
+        "analysis_count": plan["summary"]["planned_analysis_count"],
+        "measurement_count": plan["summary"]["planned_measurement_count"],
+        "source_metadata_count": metadata_count,
+        "warnings": plan["warnings"],
+    }
+
+
+def apply_import_workspace(database_path: str | Path, sources: list[dict[str, Any]], *,
+                           workspace_id: str | None = None, draft_revision: int = 0) -> dict[str, Any]:
+    """Commit every included source in one SQLite transaction and one provenance scope."""
+    if not isinstance(sources, list) or not sources:
+        raise ImportCommandError("NO_INCLUDED_SOURCES", "Import workspace has no included sources.")
+    prepared = [
+        _prepare_import(item["source_path"], item["recipe"], item.get("display_name"))
+        for item in sources
+    ]
+    workspace_commit_id = _id()
+    managed_copies: list[Path] = []
+    try:
+        for item in prepared:
+            if item["source_kind"] == "managed_copy":
+                item["managed_copy"] = _prepare_managed_copy(
+                    database_path, item["source_id"], item["source_path"], item["inspection"].fingerprint
+                )
+                managed_copies.append(item["managed_copy"])
+        connection = open_project(database_path)
+        try:
+            timestamp = _now()
+            has_workspace_schema = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'import_workspace_commit'"
+            ).fetchone() is not None
+            if not has_workspace_schema and len(prepared) > 1:
+                raise ImportCommandError('RECIPE_SCHEMA_INCOMPATIBLE', 'Atomic multi-source import requires the current project schema.')
+            persisted_commit_id = workspace_commit_id if has_workspace_schema else None
+            with connection:
+                if has_workspace_schema:
                     connection.execute(
-                        """INSERT INTO analysis_source_metadata
-                        (analysis_source_metadata_id, analysis_id, import_batch_id, canonical_field, raw_token,
-                         source_header, source_row_number, source_column_index, source_cell, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            _id(), analysis_id, batch_id, metadata["canonical_field"], metadata["raw_token"],
-                            metadata["source_header"], metadata["source_row_number"], metadata["source_column_index"],
-                            metadata["source_cell"], timestamp,
-                        ),
+                        """INSERT INTO import_workspace_commit
+                        (workspace_commit_id, source_count, draft_revision, status, created_at, applied_at)
+                        VALUES (?, ?, ?, 'planned', ?, NULL)""",
+                        (workspace_commit_id, len(prepared), draft_revision, timestamp),
                     )
-                    metadata_count += 1
-                for measurement in record["measurements"]:
+                results = [
+                    _write_prepared_import(connection, database_path, item, timestamp, persisted_commit_id)
+                    for item in prepared
+                ]
+                if has_workspace_schema:
                     connection.execute(
-                        """INSERT INTO measurement
-                        (measurement_id, analysis_id, canonical_field, unit, raw_token, qualifier, detection_limit,
-                         source_column_name, source_column_index, created_at, source_row_number,
-                         physical_source_column_index, source_cell, measurement_set, method)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            _id(), analysis_id, measurement["field"], measurement["unit"], measurement["raw_token"],
-                            measurement["qualifier"], measurement["detection_limit"], measurement["source_header"],
-                            measurement["source_column_index"], timestamp, measurement["physical_source_row_number"],
-                            measurement["physical_source_column_index"], measurement["source_cell"],
-                            measurement.get("measurement_set"), measurement.get("method"),
-                        ),
+                        "UPDATE import_workspace_commit SET status = 'applied', applied_at = ? WHERE workspace_commit_id = ?",
+                        (timestamp, workspace_commit_id),
                     )
-                    if orientation == "rows_are_analyses":
-                        connection.execute(
-                            """INSERT INTO source_row_provenance
-                            (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token,
-                             normalized_token, qualifier, analysis_id)
-                            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)""",
-                            (
-                                _id(), batch_id, record["sheet_name"], measurement["physical_source_row_number"],
-                                measurement["source_header"], measurement["raw_token"], measurement["qualifier"], analysis_id,
-                            ),
-                        )
-                    connection.execute(
-                        """INSERT INTO source_cell_provenance
-                        (provenance_id, import_batch_id, analysis_id, sheet_name, source_row_number,
-                         source_column_index, source_cell, source_header, raw_token, qualifier)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            _id(), batch_id, analysis_id, record["sheet_name"], measurement["physical_source_row_number"],
-                            measurement["physical_source_column_index"], measurement["source_cell"],
-                            measurement["source_header"], measurement["raw_token"], measurement["qualifier"],
-                        ),
-                    )
-            connection.execute("UPDATE import_batch SET status = 'applied', applied_at = ? WHERE import_batch_id = ?", (timestamp, batch_id))
-        return {
-            "import_batch_id": batch_id,
-            "source_id": source_id,
-            "recipe_revision_id": recipe_revision_id,
-            "analysis_count": plan["summary"]["planned_analysis_count"],
-            "measurement_count": plan["summary"]["planned_measurement_count"],
-            "source_metadata_count": metadata_count,
-            "warnings": plan["warnings"],
-        }
+                if workspace_id and has_workspace_schema:
+                    connection.execute("DELETE FROM import_workspace_draft WHERE workspace_id = ?", (workspace_id,))
+        finally:
+            connection.close()
     except Exception:
-        if managed_copy is not None:
-            managed_copy.unlink(missing_ok=True)
+        for path in managed_copies:
+            path.unlink(missing_ok=True)
         raise
-    finally:
-        connection.close()
+    return {
+        "workspace_commit_id": workspace_commit_id,
+        "source_count": len(results),
+        "analysis_count": sum(item["analysis_count"] for item in results),
+        "measurement_count": sum(item["measurement_count"] for item in results),
+        "source_metadata_count": sum(item["source_metadata_count"] for item in results),
+        "import_batches": results,
+        "warnings": [warning for item in results for warning in item["warnings"]],
+    }
+
+
+def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
+    """Apply one fresh plan through the same atomic workspace path."""
+    result = apply_import_workspace(database_path, [{"source_path": source_path, "recipe": recipe}])
+    return {**result["import_batches"][0], "workspace_commit_id": result["workspace_commit_id"]}
 
 
 def check_linked_source(database_path: str | Path, source_id: str) -> dict[str, Any]:
@@ -430,32 +542,52 @@ def check_linked_source(database_path: str | Path, source_id: str) -> dict[str, 
 def retract_latest_import(database_path: str | Path, reason: str = "user_retracted") -> dict[str, Any]:
     connection = open_project(database_path)
     try:
-        row = connection.execute(
-            """SELECT b.import_batch_id, b.source_id, b.applied_at, s.display_name,
-                      COUNT(a.analysis_id) AS analysis_count
+        latest = connection.execute(
+            """SELECT b.import_batch_id, b.workspace_commit_id
                FROM import_batch b
-               JOIN source_file s ON s.source_id = b.source_id
-               LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
                LEFT JOIN import_batch_retraction r ON r.import_batch_id = b.import_batch_id
                WHERE b.status = 'applied' AND r.import_batch_id IS NULL
-               GROUP BY b.import_batch_id, b.source_id, b.applied_at, s.display_name
                ORDER BY b.applied_at DESC, b.rowid DESC
                LIMIT 1"""
         ).fetchone()
-        if row is None:
+        if latest is None:
             raise ImportCommandError("INVALID_ASSIGNMENT", "There is no active applied import to retract.")
+        if latest["workspace_commit_id"]:
+            rows = connection.execute(
+                """SELECT b.import_batch_id, b.source_id, s.display_name, COUNT(a.analysis_id) AS analysis_count
+                   FROM import_batch b
+                   JOIN source_file s ON s.source_id = b.source_id
+                   LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
+                   LEFT JOIN import_batch_retraction r ON r.import_batch_id = b.import_batch_id
+                   WHERE b.workspace_commit_id = ? AND b.status = 'applied' AND r.import_batch_id IS NULL
+                   GROUP BY b.import_batch_id, b.source_id, s.display_name
+                   ORDER BY b.rowid""",
+                (latest["workspace_commit_id"],),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """SELECT b.import_batch_id, b.source_id, s.display_name, COUNT(a.analysis_id) AS analysis_count
+                   FROM import_batch b JOIN source_file s ON s.source_id = b.source_id
+                   LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
+                   WHERE b.import_batch_id = ? GROUP BY b.import_batch_id, b.source_id, s.display_name""",
+                (latest["import_batch_id"],),
+            ).fetchall()
         timestamp = _now()
         with connection:
-            connection.execute(
-                """INSERT INTO import_batch_retraction (retraction_id, import_batch_id, reason, created_at)
-                   VALUES (?, ?, ?, ?)""",
-                (_id(), row["import_batch_id"], reason or "user_retracted", timestamp),
+            connection.executemany(
+                "INSERT INTO import_batch_retraction (retraction_id, import_batch_id, reason, created_at) VALUES (?, ?, ?, ?)",
+                [(_id(), row["import_batch_id"], reason or "user_retracted", timestamp) for row in rows],
             )
+        source_names = [row["display_name"] for row in rows]
         return {
-            "import_batch_id": row["import_batch_id"],
-            "source_id": row["source_id"],
-            "source_name": row["display_name"],
-            "analysis_count": row["analysis_count"],
+            "import_batch_id": rows[0]["import_batch_id"],
+            "import_batch_ids": [row["import_batch_id"] for row in rows],
+            "workspace_commit_id": latest["workspace_commit_id"],
+            "source_id": rows[0]["source_id"],
+            "source_name": source_names[0] if len(source_names) == 1 else f"{len(source_names)} источника",
+            "source_names": source_names,
+            "source_count": len(source_names),
+            "analysis_count": sum(row["analysis_count"] for row in rows),
             "retracted_at": timestamp,
         }
     finally:
