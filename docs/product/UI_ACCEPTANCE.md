@@ -113,12 +113,18 @@ T/M1/M2, split/Droop provenance и неизменность входов. Про
 Fe3, избыток Si, отсутствие/censored Mn/Ca/Na, дубликаты, единицы и анионы:
 нет молчаливой подгонки/отбрасывания. WinPyrox S1 — только generic En-or-Cen
 reference с явно преобразованным базисом, не доказательство Opx-применимости.
+Дополнительный природный Tariat-эталон (14 core/natural tests): полный исходный
+total-Fe состав и отдельно опубликованный производный Fe-split не смешиваются.
+Воспроизводятся опубликованные bulk APFU, а не физическая Fe-Mg заселённость.
+Droop на исходном total-Fe остаётся оценкой, не подгоняется к независимо
+измеренной доле Fe3=0.15. Mn/Ni/сумма исходных оксидов сохраняются, даже если
+сокращённая формула или напечатанный TOTAL отличаются.
 Новый method ID **не выдаётся** `formula.methods.list`; семь старых definitions
 и Opx default неизменны. Проверка наблюдаема через
 `python -m unittest discover -s tests -p test_orthopyroxene_structural_formula.py -v`.
 
-До полной приёмки получить отдельный полный природный ferric Opx эталон и
-научный review, установить versioned definition и проверить в существующем
+До полной приёмки завершить научный review применимости и provenance
+производного Fe-базиса, установить versioned definition и проверить в существующем
 инспекторе: old/new выбор, явные Fe-параметры, одна кнопка, closed sites,
 100-analysis scope, atomic refusal при ошибке, save/restart/history/stale,
 неизменность источников, 1363x936 screenshots, Tab/Enter и сохранение выбора

@@ -12,8 +12,9 @@ Prepare a direct, separately frozen Python implementation with intended ID
 `orthopyroxene.structural6/0.1.0`, without changing or importing the scientific
 implementation of `orthopyroxene.oxygen6` or `clinopyroxene.structural6`.
 The existing seven installed definitions/fingerprints/defaults remain intact.
-Do not add it to the catalog until a suitable independently published Opx
-ferric/basis benchmark and integration acceptance are obtained.
+Do not add it to the catalog until the independent Opx ferric/basis benchmark,
+reviewed applicability and integration acceptance are obtained. The natural
+benchmark below is now checked, but does not replace product/native acceptance.
 
 ## Bounded algorithm
 
@@ -26,6 +27,9 @@ zeros retain Measurement IDs. Non-compositional trace exclusions retain IDs.
 
 `all_fe2`: six oxide oxygens, exactly one FeO/FeOt, Fe3 not measured or estimated.
 `reported_split`: separate FeO/Fe2O3 with compatible reported forms, six O.
+This numerical basis does not determine whether oxides were measured directly
+or recast from independent measurements. Retain their actual provenance;
+the core must not relabel authors' derived oxide split as direct measurement.
 `stoichiometric_droop`: total Fe as FeO, initial six-O cation sum S, scale 4/S,
 Fe3 = 12*(1-4/S), residual Fe2; only Fe variable-valent, only oxygen anions,
 four occupied cation positions. Impossible estimates reject, not clamp. Only
@@ -64,15 +68,21 @@ not species; no mass total normalization or assumed uncertainty.
 - Published experimental E17-016 Opx lacks Mn and Fe3. The untouched input
   rejects the stricter structural contract. A clearly synthetic Mn=0 extension
   checks printed bulk values only; it is not an original measured composition.
-- [Ejima et al. 2018 section 5.1](https://doi.org/10.3390/min8050204) supplies an
-  independent natural Opx ferric/occupancy candidate. Its Mössbauer Fe split
-  and occupancy are distinct from charge-balance and ideal allocation. Before
-  use, obtain/inspect complete Table 1, units, measurement uncertainty and
-  original Fe provenance. Do not reconstruct missing oxides from its formula
-  and call those reconstructed inputs independent measured data.
+- [Ejima et al. 2018 Table 1 / section 5.1](https://doi.org/10.3390/min8050204)
+  now supplies the separate natural Opx reference (14 total structural/natural
+  tests), independently transcribed from visually checked PDF v3 pp5/11/12.
+  Complete original mean oxides and standard deviations, n=22, plus separately
+  published Mossbauer-derived recast FeO/Fe2O3 are in the JSON fixture; no
+  inversion of published APFU. The original rounded oxide sum99.84 differs
+  from printed99.83; preserve both. Measured ferric fraction0.15(1) is matched
+  on the published recast basis. Stoichiometric Droop on original total Fe
+  gives fraction<.001, an independent **counterexample** to using this estimate
+  as measured Fe3, not a numerical defect to repair. Ideal Mg-first positions
+  differ from physical Fe-Mg occupancy. Printed abbreviated formula omits Ni
+  and has Mn inconsistent with Table1: retain actual input atoms, do not fit.
 
-No scientific validation promotion. Required before installation: trustworthy
-complete natural Opx reference inputs, independently checked basis/Fe results,
-reviewed applicability, separate Scientific Method Definition/implementation
+No scientific validation promotion. Required before installation: reviewed
+applicability and explicit treatment of literature-derived Fe inputs,
+separate Scientific Method Definition/implementation
 pin, old-method coexistence, NDJSON atomic save/stale/history and existing
 1363x936 inspector/native screenshots/keyboard plus bounded batch checks.

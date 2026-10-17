@@ -1,0 +1,54 @@
+{
+  "reference_id": "opx-tariat-ejima2018-xenolith-mean",
+  "citation": {
+    "authors": "Ejima et al.",
+    "year": 2018,
+    "doi": "10.3390/min8050204",
+    "url": "https://mdpi-res.com/d_attachment/minerals/minerals-08-00204/article_deploy/minerals-08-00204-v3.pdf?version=1526551017",
+    "pdf_sha256": "9731cce739581d572d5bac300995d14a1282c3970ca6e03b64b3cf51fca8e269",
+    "locations": ["Table 1, printed page 5, Xenolith/Orthopyroxene", "Section 5.1, printed pages 11-12"]
+  },
+  "scope": "Natural enstatite mean, n=22; not a single analysis or validated method",
+  "oxide_unit": "wt.%",
+  "original_mean_oxides": {
+    "SiO2": 55.06, "TiO2": 0.12, "Al2O3": 4.67, "Cr2O3": 0.40,
+    "FeOt": 5.97, "MnO": 0.16, "NiO": 0.05, "MgO": 32.56, "CaO": 0.66, "Na2O": 0.19
+  },
+  "original_mean_standard_deviation": {
+    "SiO2": 0.33, "TiO2": 0.02, "Al2O3": 0.08, "Cr2O3": 0.03,
+    "FeOt": 0.09, "MnO": 0.05, "NiO": 0.01, "MgO": 0.54, "CaO": 0.04, "Na2O": 0.03
+  },
+  "printed_original_total_wt_percent": 99.83,
+  "sum_of_printed_original_oxides_wt_percent": 99.84,
+  "original_table1_bulk_apfu_all_fe2": {
+    "Si": 1.902, "Ti": 0.003, "Al": 0.190, "Cr": 0.011, "Fe2": 0.172,
+    "Mn": 0.005, "Ni": 0.001, "Mg": 1.677, "Ca": 0.024, "Na": 0.013
+  },
+  "independent_iron_measurement": {
+    "method": "57Fe Mossbauer spectroscopy",
+    "Fe3_fraction_of_total_Fe": 0.15,
+    "Fe3_fraction_standard_deviation": 0.01
+  },
+  "published_recast_iron_oxides": {
+    "FeO": 5.07, "Fe2O3": 1.00
+  },
+  "recast_iron_provenance": {
+    "kind": "published_derived_from_EPMA_total_Fe_and_Mossbauer_ratio",
+    "source": "Section 5.1, printed page 11",
+    "not_direct_measurement_of_separate_oxides": true,
+    "procedure": "Use authors' published recast FeO and Fe2O3; retain every other Table 1 oxide. Do not derive oxides from printed APFU."
+  },
+  "published_section51_bulk_apfu_split": {
+    "Si": 1.899, "Ti": 0.003, "Al": 0.190, "Cr": 0.011,
+    "Fe2": 0.146, "Fe3": 0.026, "Mg": 1.674, "Ca": 0.024, "Na": 0.013
+  },
+  "published_section51_site_Fe2": {"M1": 0.046, "M2": 0.100},
+  "bulk_reference_tolerance_apfu": 0.001,
+  "limits": [
+    "The original printed oxide total differs from the sum by 0.01; do not repair the measurements.",
+    "Bulk APFU comparison only; ideal Mg-first ordering must not be fitted to physical Mossbauer Fe-Mg site occupancy.",
+    "Section 5.1 formula prints Mn=0.003 and omits Ni; Table 1 supplies MnO=0.16 and NiO=0.05. Retain both inputs and their calculated atoms; do not tune them to the abbreviated formula.",
+    "This sample independently demonstrates that stoichiometric Fe3 estimation does not reproduce measured Fe3. Near-zero estimated Fe3 is not measured zero.",
+    "No method validation, automatic mineral assignment, inferred K/F/Cl/H2O zeros or source transformation is performed by this test fixture."
+  ]
+}

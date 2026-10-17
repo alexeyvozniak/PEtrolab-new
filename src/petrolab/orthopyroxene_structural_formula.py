@@ -1,8 +1,10 @@
 """Unregistered draft Opx core: ideal allocation, NOT physical site occupancy.
 
 Frozen independently from Cpx and the existing Opx oxygen6 method. A published
-ferric En-or-Cen reference tests the generic ideal pyroxene model only; it does
-not establish orthorhombic symmetry or validate this method for natural Opx.
+ferric En-or-Cen reference tests the generic ideal pyroxene model only.
+The independent natural Tariat reference checks bulk APFU and demonstrates
+limits of stoichiometric Fe3 estimates and ideal Fe/Mg ordering. Neither
+reference establishes symmetry or scientifically validates the method.
 """
 import math
 
@@ -27,7 +29,7 @@ OXIDES = {'SiO2': ('Si', 1, 2, 'Si', 4), 'TiO2': ('Ti', 1, 2, 'Ti', 4),
 REQUIRED = {'SiO2', 'Al2O3', 'MgO', 'MnO', 'CaO', 'Na2O'}
 ZERO_ANIONS = {'F', 'Cl', 'H2O'}
 FE_MODES = {'all_fe2': '6 O; всё измеренное Fe принято Fe²⁺, Fe³⁺ не оценено',
-            'reported_split': '6 O; раздельные измеренные FeO и Fe₂O₃',
+            'reported_split': '6 O; раздельные FeO и Fe₂O₃ из входных данных',
             'stoichiometric_droop': '6 O / 4 катиона; Fe³⁺ оценено по Droop (1987)'}
 ROUNDING_TOLERANCE = 1e-10
 
@@ -178,8 +180,9 @@ def calculate_orthopyroxene_structural(measurements, fe_mode):
                                   'input_measurement_ids': [m['measurement_id'] for m in used if m.get('measurement_id')]}
         result['estimated_fields'] = ['Fe2_apfu', 'Fe3_apfu']
         assumptions.append('Droop: только Fe переменно-валентен, только O анион, четыре занятые катионные позиции.')
+        warnings.append('Стехиометрическая оценка Fe³⁺ не заменяет независимое измерение железа.')
     else:
-        assumptions.append('Fe²⁺/Fe³⁺ взяты из раздельных измерений.' if fe_mode == 'reported_split' else
+        assumptions.append('Fe²⁺/Fe³⁺ взяты из входных FeO/Fe₂O₃; происхождение и преобразования должны быть указаны в provenance.' if fe_mode == 'reported_split' else
                            'Всё измеренное Fe принято Fe²⁺; отсутствие Fe³⁺ в результате не является его измерением.')
     if cations['Si'] > 2 + ROUNDING_TOLERANCE:
         errors.append('Si > 2 APFU: избыточный Si не может быть молча отброшен в этой модели T/M1/M2.')
