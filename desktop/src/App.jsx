@@ -74,6 +74,7 @@ async function attachMineralIdentifications(path, project) {
   return {
     ...project,
     mineral_status_counts: review.status_counts || {},
+    mineral_options: review.mineral_options || [],
     analyses: project.analyses.map((analysis) => ({
       ...analysis,
       mineral_verification: byId.get(analysis.analysis_id) || analysis.mineral_verification,

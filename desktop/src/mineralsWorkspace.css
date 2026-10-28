@@ -1,4 +1,4 @@
-.minerals-workspace { min-width: 0; min-height: calc(100vh - 76px); display: grid; grid-template-columns: 180px minmax(360px, 1fr) 350px; overflow: hidden; background: #f5f7f4; }
+.minerals-workspace { min-width: 0; height: calc(100vh - 76px); min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr) 370px; overflow: hidden; background: #f5f7f4; }
 .mineral-queues, .mineral-list-pane, .mineral-review-pane { min-width: 0; min-height: 0; background: #fff; }
 .mineral-queues { overflow: auto; border-right: 1px solid #dde3de; }
 .mineral-pane-title { min-height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid #e4e8e4; }
@@ -8,7 +8,7 @@
 .mineral-queues > button:not(:has(svg)) { grid-template-columns: minmax(0, 1fr) auto; padding-left: 37px; }
 .mineral-queues > button:hover { background: #f5f8f5; }
 .mineral-queues > button.active { border-left-color: #35664b; background: #edf4ee; color: #284b38; }
-.mineral-queues button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.mineral-queues button span { overflow-wrap: anywhere; font-size: 14px; }
 .mineral-queue-divider { padding: 18px 14px 7px; font-size: 9px; }
 .mineral-queue-note { display: flex; align-items: flex-start; gap: 8px; margin: 18px 12px; padding: 12px; border-radius: 8px; background: #f2f6f2; color: #627068; }
 .mineral-queue-note p { margin: 0; font-size: 11px; line-height: 1.45; }
@@ -16,7 +16,7 @@
 .mineral-list-pane { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; background: #f7f8f6; }
 .mineral-toolbar { min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #dde3de; background: #fff; }
 .mineral-toolbar > span { color: #6d7771; font-size: 11px; white-space: nowrap; }
-.mineral-search { flex: 1; min-width: 220px; min-height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #cfd7d1; border-radius: 8px; background: #f9faf9; }
+.mineral-search { flex: 1; min-width: 180px; min-height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #cfd7d1; border-radius: 8px; background: #f9faf9; }
 .mineral-search:focus-within { border-color: #5e876d; box-shadow: 0 0 0 2px #e0ece3; }
 .mineral-search input { width: 100%; border: 0; outline: 0; background: transparent; font-size: 12px; }
 .mineral-list-head, .mineral-list > button { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .72fr) minmax(0, 1fr) 88px; gap: 10px; align-items: center; }
@@ -31,7 +31,9 @@
 .mineral-row-status, .mineral-status-badge { width: fit-content; padding: 4px 8px; border-radius: 999px; background: #eef2ef; color: #58645c; font-size: 10px !important; font-weight: 750; }
 .status-conflict, .status-unrecognized_reported { background: #fce9e5; color: #8a4038; }
 .status-missing_reported, .status-low_confidence, .status-insufficient_input, .status-not_checked, .status-reported_only { background: #fff1d7; color: #825c1f; }
-.status-consistent, .status-verified { background: #e7f2e9; color: #316346; }
+.status-verified, .status-manually_assigned { background: #e7f2e9; color: #316346; }
+.status-consistent { background: #eef2f5; color: #445765; }
+.status-stale_assignment, .status-manual_unresolved { background: #fce9e5; color: #8a4038; }
 .mineral-no-results { min-height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #728078; }
 .mineral-no-results b { margin-top: 10px; color: #405047; }
 .mineral-no-results span { margin-top: 4px; font-size: 11px; }
@@ -69,6 +71,27 @@
 .minerals-empty p { max-width: 580px; margin: 0 0 18px; color: #77807a; line-height: 1.5; }
 
 @media (max-width: 1280px) {
-  .minerals-workspace { grid-template-columns: 170px minmax(340px, 1fr) 320px; }
-  .mineral-toolbar .outline-button { display: none; }
+  .minerals-workspace { grid-template-columns: 190px minmax(0, 1fr) 340px; }
+}
+.mineral-toolbar { flex-wrap: wrap; }
+.mineral-toolbar > span { white-space: normal; }
+.mineral-scope-note { margin: 12px; color: #526359; font-size: 12px; line-height: 1.5; }
+.mineral-manual-form summary { cursor: pointer; font-size: 14px; padding: 8px 0; }
+.mineral-manual-form label { display: grid; gap: 5px; margin: 10px 0; font-size: 14px; }
+.mineral-manual-form input, .mineral-manual-form textarea { box-sizing: border-box; width: 100%; min-height: 40px; border: 1px solid #bdcbbf; border-radius: 6px; padding: 8px; font: inherit; }
+.mineral-manual-form button { width: 100%; }
+.mineral-review-pane > footer { position: static; }
+.minerals-workspace :is(button, input, textarea, summary):focus-visible { outline: 3px solid #3e7353; outline-offset: 2px; }
+.mineral-list > button > span { font-size: 14px; white-space: normal; overflow-wrap: anywhere; }
+.mineral-list > button small, .mineral-review-pane :is(p, small), .mineral-decision-state dt, .mineral-candidate-list small { font-size: 12px; }
+.mineral-decision-state dd, .mineral-candidate-list span, .mineral-search input { font-size: 14px; }
+@media (max-width: 960px) {
+  .minerals-workspace { height: auto; min-height: calc(100vh - 76px); grid-template-columns: 180px minmax(0, 1fr); overflow: visible; }
+  .mineral-review-pane { grid-column: 1 / -1; border-top: 1px solid #dde3de; }
+}
+@media (max-width: 620px) {
+  .minerals-workspace { display: block; }
+  .mineral-queues { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mineral-pane-title, .mineral-queue-divider, .mineral-queue-note, .mineral-scope-note { grid-column: 1 / -1; }
+  .mineral-list-head, .mineral-list > button { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

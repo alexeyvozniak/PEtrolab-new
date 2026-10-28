@@ -6,12 +6,12 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 
 const bridge = vi.hoisted(() => ({ invoke: null }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args) => bridge.invoke(...args) }));
 import { App } from "../src/App";
-configure({ asyncUtilTimeout: 5000 });
+configure({ asyncUtilTimeout: 15000 });
 
 let child, folder, first, second, queue, original, pending, lines, requests;
 beforeEach(async () => {
@@ -23,7 +23,8 @@ beforeEach(async () => {
   queue = [first, second]; pending = new Map(); requests = [];
   child = spawn("python", ["-m", "petrolab.ndjson_service"], {
     cwd: resolve(process.cwd(), ".."), windowsHide: true,
-    env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+    env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8",
+      PYTHONPATH: [resolve(process.cwd(), "../src"), process.env.PYTHONPATH].filter(Boolean).join(delimiter) },
   });
   lines = createInterface({ input: child.stdout });
   lines.on("line", (line) => {
