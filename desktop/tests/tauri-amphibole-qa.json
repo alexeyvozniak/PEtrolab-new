@@ -1,0 +1,6 @@
+{
+  "identifier": "org.petrolab.amphibole-qa",
+  "app": {
+    "windows": [{ "label": "main", "title": "PetroLab · Amphibole QA", "width": 1363, "height": 936 }]
+  }
+}

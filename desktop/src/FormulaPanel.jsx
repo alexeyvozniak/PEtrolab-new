@@ -1,0 +1,272 @@
+import { useEffect, useRef, useState } from 'react';
+import { invokePetrolab } from './desktopApi';
+import './formulaPanel.css';
+
+const format = value => typeof value === 'number' ? value.toLocaleString('ru', { maximumFractionDigits: 5 }) : String(value ?? '—');
+const fieldLabel = field => ({
+  cation_sum: 'Сумма катионов', oxide_total: 'Сумма оксидов', Fe2_apfu: 'Fe²⁺', Fe3_apfu: 'Fe³⁺',
+  OH_est_apfu: 'OH (оценка)', F_apfu: 'F', Cl_apfu: 'Cl',
+  charge_sum: 'Сумма зарядов', X_sum: 'Сумма X', Y_sum: 'Сумма Y', Z_sum: 'Сумма Z',
+  T_sum: 'Сумма T', M1_sum: 'Сумма M1', M2_sum: 'Сумма M2',
+}[field] || field.replace(/^(X|Y|Z|T|M1|M2)_/, '$1 · ').replace('_apfu', '').replace('Fe2', 'Fe²⁺').replace('Fe3', 'Fe³⁺'));
+const parameterLabel = name => ({ fe_mode: 'Режим железа', anion_basis: 'Анионный базис', oh_mode: 'Расчёт OH' }[name] || name);
+
+function FormulaParameter({ parameter, method, value, busy, onChange }) {
+  const choices = method.parameter_choices?.[parameter.name] || {};
+  const compactLabels = method.parameter_choice_labels?.[parameter.name] || {};
+  const explanation = choices[value] || '';
+  const helpId = `formula-${parameter.name}-help`;
+  return <label>{parameterLabel(parameter.name)}
+    <select
+      aria-label={parameterLabel(parameter.name)}
+      aria-describedby={explanation ? helpId : undefined}
+      title={explanation}
+      value={value || ''}
+      disabled={busy}
+      onChange={event => onChange(parameter.name, event.target.value)}
+    >
+      <option value="">Выберите явно</option>
+      {Object.entries(choices).map(([key, text]) => <option key={key} value={key}>{compactLabels[key] || text}</option>)}
+    </select>
+    {explanation && <small className="formula-parameter-help" id={helpId}>{explanation}</small>}
+  </label>;
+}
+
+function ValueTable({ entries, label, caption, method, estimatedFields = [] }) {
+  const units = Object.fromEntries((method?.output_fields || []).map(field => [field.field, field.unit]));
+  return <table aria-label={label}><caption>{caption}</caption>
+    <thead><tr><th>Показатель</th><th>Значение</th><th>Единица</th></tr></thead>
+    <tbody>{entries.map(([field, value]) => {
+      const unit = Object.hasOwn(units, field) ? units[field]
+        : field === 'oxide_total' ? 'wt.%' : ['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(field) ? 'mol.%' : 'apfu';
+      return <tr key={field}><th>{fieldLabel(field)}{(field === 'OH_est_apfu' || estimatedFields.includes(field)) && <span className="formula-estimate-badge">оценка</span>}</th>
+        <td>{format(value)}</td><td>{unit === 'apfu' ? 'APFU' : unit || '—'}</td></tr>;
+    })}</tbody>
+  </table>;
+}
+
+function Result({ result, methodDefinition, compactErrors = false }) {
+  if (!result) return null;
+  const halogens = (result.used || []).filter(item => ['F', 'Cl'].includes(item.field));
+  const entries = Object.entries(result.values || {});
+  const siteNames = result.site_order || Object.keys(result.sites || {});
+  const isSiteField = field => siteNames.some(site => field.startsWith(`${site}_`));
+  const siteEntries = entries.filter(([field]) => isSiteField(field)).sort(([a], [b]) =>
+    siteNames.findIndex(site => a.startsWith(`${site}_`)) - siteNames.findIndex(site => b.startsWith(`${site}_`)));
+  const mainEntries = entries.filter(([field]) => field !== 'structural_formula' && !isSiteField(field))
+    .sort(([a], [b]) => Number(['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(b)) - Number(['Fo', 'Fa', 'Wo', 'En', 'Fs'].includes(a)));
+  const structural = methodDefinition?.output_fields?.some(field => field.field === 'structural_formula');
+  return <div className="formula-result">
+    {(compactErrors ? (result.errors || []).slice(0, 1) : result.errors || []).map(text => <p className="formula-error" key={text}>{text}</p>)}
+    {compactErrors && result.errors?.length > 1 && <details><summary>Другие причины · {result.errors.length - 1}</summary>{result.errors.slice(1).map(text => <p className="formula-error" key={text}>{text}</p>)}</details>}
+    {result.warnings?.length > 0 && <details className="formula-result-notes"><summary>Предупреждения · {result.warnings.length}</summary>{result.warnings.map(text => <p className="formula-warning" key={text}>{text}</p>)}</details>}
+    {(result.method_status || methodDefinition?.status) === 'draft' && <p className="formula-scope">{structural ? 'Черновая структурная модель · не определение вида минерала.' : 'Черновой bulk-пересчёт · не определение вида минерала.'}</p>}
+    {result.values?.structural_formula && <section className="formula-structural" aria-label="Структурная формула">
+      <strong>Структурная формула · модель</strong><p>{result.values.structural_formula}</p>
+      {result.structural_warning && <p className="formula-warning">{result.structural_warning}</p>}
+    </section>}
+    {mainEntries.length > 0 && <ValueTable entries={mainEntries} label="Рассчитанные значения"
+      caption="Рассчитано · не исходные измерения" method={methodDefinition} estimatedFields={result.estimated_fields} />}
+    {siteEntries.length > 0 && <details className="formula-result-notes"><summary>Позиции {siteNames.join('/')} · оценка</summary>
+      <ValueTable entries={siteEntries} label="Распределение по позициям" caption="Модельные позиции · APFU" method={methodDefinition} />
+    </details>}
+    {result.OH_est_basis && <section className="formula-basis" aria-label="Основание оценки OH">
+      <strong>Как получена оценка OH</strong>
+      <p><code>{result.OH_est_basis.formula}</code> · базис {result.OH_est_basis.anion_basis} · нормировка {result.OH_est_basis.normalization}.</p>
+      <p>{halogens.length ? `Использованы: ${halogens.map(item => `${item.field} = ${item.raw_token} wt.%`).join('; ')}.` : 'Пригодные измерения F и Cl не найдены.'}</p>
+    </section>}
+    {((result.assumptions || []).length > 0 || result.unmeasured?.length > 0 || result.excluded?.length > 0) && <details className="formula-result-notes"><summary>ⓘ Допущения и полнота данных</summary>
+      {(result.assumptions || []).map(text => <p key={text}>{text}</p>)}
+      {result.fe_est_basis && <p>Оценка железа: {result.fe_est_basis.formula}; S = {format(result.fe_est_basis.S)}.</p>}
+      {result.unmeasured?.length > 0 && <p>Нет входных измерений: {result.unmeasured.join(', ')}.</p>}
+      {result.excluded?.length > 0 && <p>Исключены: {result.excluded.map(item => `${item.field}: ${item.reason}`).join('; ')}</p>}
+    </details>}
+    {result.used?.length > 0 && <details><summary>Использованные измерения · wt.%</summary><table aria-label="Исходные измерения">
+      <thead><tr><th>Оксид</th><th>Исходное значение</th></tr></thead><tbody>{result.used.map(m => <tr key={m.measurement_id || m.field}><th>{m.field}</th><td>{m.raw_token}</td></tr>)}</tbody>
+    </table></details>}
+  </div>;
+}
+
+export function FormulaPanel({ analysis, databasePath, analysisIds, scopeRevision = '', analysisNames = {}, onExcludeAnalysis, onReviewAnalysis }) {
+  const acceptedTarget = analysis.mineral_verification?.accepted?.target || analysis.mineral_assignment?.target || '';
+  const [methods, setMethods] = useState([]);
+  const [method, setMethod] = useState(null);
+  const [parameters, setParameters] = useState({});
+  const [preview, setPreview] = useState(null);
+  const [runs, setRuns] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const [scopeMessage, setScopeMessage] = useState('');
+  const [scopeIssues, setScopeIssues] = useState([]);
+  const [scopeIssueIndex, setScopeIssueIndex] = useState(0);
+  const [catalogContext, setCatalogContext] = useState('');
+  const [resultIndex, setResultIndex] = useState(0);
+  const active = useRef(false);
+  const batch = Boolean(analysisIds);
+  const ids = analysisIds || [analysis.analysis_id];
+  const analysisId = ids[0];
+  const contextKey = JSON.stringify([databasePath, ids, scopeRevision, batch ? '' : acceptedTarget]);
+  const context = useRef(contextKey);
+  context.current = contextKey;
+  const chosen = useRef(null);
+  chosen.current = method;
+  const visiblePreview = preview?.ui_context === contextKey ? preview : null;
+  async function request(command, payload = {}) {
+    const response = await invokePetrolab(command, { project_database_path: databasePath, ...payload });
+    if (response.error) throw Object.assign(new Error(response.error.message), { code: response.error.code });
+    return response.result;
+  }
+  function selectMethod(next) {
+    setMethod(next);
+    const preset = next?.quick_presets?.[0]?.parameters || {};
+    setParameters(Object.fromEntries((next?.parameters || []).map(parameter => [parameter.name, preset[parameter.name] || ''])));
+    setPreview(null); setMessage(''); setError('');
+  }
+  useEffect(() => {
+    active.current = true;
+    let cancelled = false;
+    if (!databasePath) return () => { active.current = false; };
+    setBusy(true); setError('');
+    setPreview(null); setMessage(''); setResultIndex(0);
+    const catalogRequest = batch
+      ? ids.length <= 100 ? request('formula.methods.list', { analysis_ids: ids })
+        : Promise.resolve({ methods: [], scope_message: 'Выберите не больше 100 анализов. Отбор не будет разделён автоматически.' })
+      : acceptedTarget
+      ? request('formula.methods.list', { accepted_assignment: acceptedTarget })
+      : Promise.resolve({ methods: [] });
+    Promise.all([catalogRequest, request('formula.runs.list', { analysis_id: analysisId })])
+      .then(([catalog, history]) => {
+        if (cancelled) return;
+        setMethods(catalog.methods);
+        const retained = catalog.methods.find(item => item.method_id === chosen.current?.method_id && item.version === chosen.current?.version);
+        if (retained) setMethod(retained);
+        else selectMethod(catalog.methods[0] || null);
+        setScopeMessage(catalog.scope_message || '');
+        setScopeIssues(catalog.scope_issues || []); setScopeIssueIndex(0);
+        setRuns(history.runs);
+        setCatalogContext(contextKey);
+      })
+      .catch(e => { if (!cancelled) setError(e.message); })
+      .finally(() => { if (!cancelled) setBusy(false); });
+    return () => { cancelled = true; active.current = false; };
+  }, [contextKey, reloadKey]);
+  const missingParameters = (method?.parameters || []).filter(parameter => !parameters[parameter.name]);
+  const quickPreset = method?.quick_presets?.[0];
+  function setParameter(name, value) {
+    setParameters(current => ({ ...current, [name]: value }));
+    setPreview(null); setMessage(''); setError('');
+  }
+  async function calculate(save = false) {
+    if (!method || catalogContext !== contextKey || (save && !visiblePreview?.can_save)) return;
+    const requestedContext = contextKey;
+    const stillCurrent = () => active.current && context.current === requestedContext;
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const payload = { analysis_ids: ids, method_id: method.method_id,
+        method_version: method.version,
+        parameters: save ? visiblePreview.parameters : parameters };
+      if (save) payload.preview_fingerprint = visiblePreview.input_fingerprint;
+      const result = await request(save ? 'formula.save' : 'formula.preview', payload);
+      if (!stillCurrent()) return;
+      if (save) {
+        setMessage(result.reused ? 'Этот результат уже сохранён.' : 'Результат сохранён отдельно от измерений.');
+        setPreview(null);
+        const history = await request('formula.runs.list', { analysis_id: analysisId });
+        if (stillCurrent()) setRuns(history.runs);
+      } else {
+        setPreview({ ...result, ui_context: requestedContext });
+        const firstIssue = result.results.findIndex(row => row.status !== 'current');
+        setResultIndex(Math.max(0, firstIssue));
+      }
+    } catch (e) { if (stillCurrent()) { setError(e.message); if (e.code === 'FORMULA_PREVIEW_STALE') setPreview(null); } }
+    finally { if (stillCurrent()) setBusy(false); }
+  }
+  const failed = visiblePreview?.results.filter(row => row.status !== 'current') || [];
+  const currentResult = visiblePreview?.results[resultIndex] || visiblePreview?.results[0];
+  const resultIdentity = id => {
+    const snapshot = visiblePreview?.input_snapshots?.find(row => row.analysis_id === id);
+    return snapshot?.identity?.Analysis || snapshot?.identity?.Point || id;
+  };
+  return <section className="formula-panel" aria-label="Пересчёт формулы">
+    <div className="formula-action-bar">
+      <h3>{batch ? 'Формулы отбора' : 'Формула минерала'}</h3>
+      <p className="formula-analysis">{batch ? `Выбрано ${ids.length}` : <><strong>{analysis.identity?.Analysis || analysisId}</strong> · {acceptedTarget || 'минерал не принят'}</>}</p>
+      {method && <button type="button" className="primary-button formula-quick-action"
+        disabled={busy || catalogContext !== contextKey || !databasePath || missingParameters.length > 0} onClick={() => calculate()}>{batch ? 'Рассчитать формулы' : quickPreset?.label || 'Рассчитать формулу'}</button>}
+      {method && missingParameters.length > 0 && <p>Выберите: {missingParameters.map(parameter => parameterLabel(parameter.name)).join(', ')}.</p>}
+    </div>
+    {!databasePath && <p>Откройте сохранённый проект для расчёта.</p>}
+    {busy && <p role="status">Проверяю данные…</p>}
+    {error && <p role="alert" className="formula-error">{error}</p>}
+    {error && (!method || catalogContext !== contextKey) && <button type="button" className="outline-button" disabled={busy} onClick={() => setReloadKey(key => key + 1)}>Повторить загрузку методов</button>}
+    {!batch && !acceptedTarget && !busy && <p className="formula-empty">Сначала примите назначение минерала. До этого метод формулы недоступен.</p>}
+    {!batch && acceptedTarget && !busy && !error && methods.length === 0 && <p className="formula-empty">Для принятого назначения «{acceptedTarget}» формульный метод пока не подключён.</p>}
+    {batch && !busy && scopeMessage && <p className="formula-empty">{scopeMessage}</p>}
+    {batch && catalogContext === contextKey && scopeIssues.length > 0 && <section aria-label="Проблема отбора">
+      <p>Требуют решения {scopeIssues.length} · {scopeIssues[scopeIssueIndex]?.identity?.Analysis || scopeIssues[scopeIssueIndex]?.analysis_id}</p>
+      <p className="formula-error">{scopeIssues[scopeIssueIndex]?.message}</p>
+      {onReviewAnalysis && scopeIssues[scopeIssueIndex]?.can_review && <button type="button" className="outline-button" onClick={() => onReviewAnalysis(scopeIssues[scopeIssueIndex].analysis_id)}>Проверить этот анализ</button>}
+      {onExcludeAnalysis && !scopeIssues[scopeIssueIndex]?.can_review && <button type="button" className="outline-button" onClick={() => onExcludeAnalysis(scopeIssues[scopeIssueIndex].analysis_id)}>Убрать недоступный анализ из отбора</button>}
+      {scopeIssues.length > 1 && <button type="button" className="outline-button" onClick={() => setScopeIssueIndex((scopeIssueIndex + 1) % scopeIssues.length)}>Следующая проблема</button>}
+    </section>}
+    {method && <>
+      <details className="formula-settings"><summary tabIndex={0}>Настроить расчёт</summary>
+        {methods.length > 1 && <label>Метод<select aria-label="Метод формулы" value={method.method_id} disabled={busy} onChange={event => selectMethod(methods.find(item => item.method_id === event.target.value))}>{methods.map(item => <option key={item.method_id} value={item.method_id}>{item.name} · v{item.version}</option>)}</select></label>}
+        <div className="formula-parameter-grid">{(method.parameters || []).map(parameter => <FormulaParameter
+          key={parameter.name}
+          parameter={parameter}
+          method={method}
+          value={parameters[parameter.name]}
+          busy={busy}
+          onChange={setParameter}
+        />)}</div>
+      </details>
+      <details className="formula-method-info"><summary>ⓘ О методе</summary>
+        <p><strong>{method.name}</strong></p>
+        <p>Версия {method.version} · статус {method.status}. {method.applicability?.[0]}</p>
+        {quickPreset && <p>Быстрый режим: {quickPreset.description}</p>}
+        {method.citations.map(c => <p key={c.url}><a href={c.url} target="_blank" rel="noreferrer">{c.title}</a></p>)}
+        {method.assumptions.map(a => <p key={a}>{a}</p>)}
+      </details>
+    </>}
+    {visiblePreview && <div aria-label="Предпросмотр формулы"><h4>Предпросмотр · ещё не сохранён</h4>
+      {batch && <>
+        <p role="status">Готово {visiblePreview.results.length - failed.length} · Требуют решения {failed.length}</p>
+        <p><strong>{resultIdentity(currentResult.analysis_id)}</strong></p>
+        {currentResult.status !== 'current' && <Result result={currentResult} methodDefinition={visiblePreview.method || method} compactErrors />}
+        <div className="formula-batch-navigation">
+          {failed.length > 1 ? <button type="button" className="outline-button" onClick={() => {
+            const next = failed[(failed.findIndex(row => row.analysis_id === currentResult.analysis_id) + 1) % failed.length];
+            setResultIndex(visiblePreview.results.indexOf(next));
+          }}>Следующая ошибка</button> : failed.length === 0 && visiblePreview.results.length > 1 && <button type="button" className="outline-button" onClick={() => setResultIndex((resultIndex + 1) % visiblePreview.results.length)}>Следующий анализ</button>}
+          {currentResult.status !== 'current' && onExcludeAnalysis && <button type="button" className="outline-button" onClick={() => onExcludeAnalysis(currentResult.analysis_id)}>Убрать этот анализ из отбора</button>}
+        </div>
+        <details><summary>Состав отбора · {ids.length}</summary>{visiblePreview.results.map((row, index) => <button key={row.analysis_id} type="button" className="outline-button" onClick={() => setResultIndex(index)}>{resultIdentity(row.analysis_id)} · {row.status === 'current' ? 'готов' : 'ошибка'}</button>)}</details>
+      </>}
+      {(!batch || currentResult.status === 'current') && <Result result={currentResult} methodDefinition={visiblePreview.method || method} compactErrors={batch} />}
+      <button type="button" className="primary-button" disabled={busy || !visiblePreview.can_save} onClick={() => calculate(true)}>{batch ? `Сохранить ${ids.length} результатов` : 'Сохранить результат формулы'}</button>
+      {!visiblePreview.can_save && <p>Сохранение недоступно: исправьте указанные входы или назначение.</p>}
+    </div>}
+    {message && <p role="status">{message}</p>}
+    {batch && runs.length > 0 && catalogContext === contextKey && <p className="formula-analysis">История · {runs[0]?.run.result_manifest?.input_snapshots?.find(row => row.analysis_id === analysisId)?.identity?.Analysis || analysisNames[analysisId] || 'первый участник отбора'}</p>}
+    {(!batch || (catalogContext === contextKey && runs.length > 0)) && <h4>Сохранённые расчёты · {catalogContext === contextKey ? runs.length : 0}</h4>}
+    {(catalogContext === contextKey ? runs : []).map(({ run }) => {
+      const savedMethod = run.result_manifest?.method;
+      const choices = run.result_manifest?.parameter_descriptions || {};
+      return <details key={run.id} className="formula-history"><summary>{run.status === 'stale' ? 'Устарел' : 'Сохранён'} · {savedMethod?.name || run.method_id} · v{run.method_version} · {run.created_at}</summary>
+        {run.stale_reasons.map(reason => <p className="formula-warning" key={reason}>{reason}</p>)}
+        <dl className="formula-parameters">{Object.entries(run.parameters).map(([name, value]) => <div key={name}><dt>{parameterLabel(name)}</dt><dd>{choices[name]?.[value] || value}</dd></div>)}</dl>
+        <Result result={run.result_manifest.results.find(result => result.analysis_id === analysisId)} methodDefinition={savedMethod} />
+        {run.input?.analysis_ids?.length > 1 && <details><summary>Состав сохранённого расчёта · {run.input.analysis_ids.length}</summary>
+          <ul>{run.input.analysis_ids.map(id => <li key={id}>
+            {run.result_manifest.input_snapshots?.find(row => row.analysis_id === id)?.identity?.Analysis || id}
+            <small>Analysis ID: {id}</small>
+          </li>)}</ul>
+        </details>}
+        <small>Run ID: {run.id}<br />Fingerprint: {run.input_fingerprint}</small>
+      </details>;
+    })}
+  </section>;
+}

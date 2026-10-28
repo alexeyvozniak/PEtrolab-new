@@ -123,6 +123,13 @@ File names, sheet names, instrument labels and previous user habits are not sema
 
 The client submits `bulk_scope_id + decision`. The service revalidates the scope against current source and recipe fingerprints before applying it. Stale or widened scopes are rejected.
 
+The same rule applies when a confidently recognized unit is wrong. Python may
+issue a `measurement_unit_override` scope only for one current unit,
+orientation, source fingerprint and compatible Fe semantic group. React shows
+the exact field and sheet counts and submits `unit_override`; it never computes
+or widens the meaning of “all”. The revision changes recipe semantics only and
+does not convert or overwrite source values.
+
 ### 7. Fast and detailed modes share the same shell
 
 `clean_table_fast` is a presentation state of Import Workspace:
@@ -195,6 +202,7 @@ Restore is rejected or downgraded to a new inspection when a required source fin
 Implement the workspace through versioned scientific-service commands:
 
 - `import.workspace.create`;
+- `import.workspace.restore`;
 - `import.workspace.add_sources`;
 - `import.workspace.get`;
 - `import.workspace.preview_window`;
@@ -224,6 +232,16 @@ Architecture is not complete until automated contracts prove:
 10. clean fast presentation and detailed review produce the same plan fingerprint when no decision changes;
 11. React cannot enable commit when Python reports a blocker;
 12. draft restore is rejected on incompatible fingerprint or schema version.
+
+## Implemented workspace extension (2026-09-23)
+
+The service persists each accepted workspace revision as a project draft.
+Restore checks the draft schema and every staged source fingerprint before
+replanning. Commit validates all included sources and writes their batches,
+analyses, measurements, metadata and provenance in one SQLite transaction under
+one workspace commit ID. If a write fails, the transaction rolls back, prepared
+managed copies are removed, and the draft remains available for retry. A
+successful commit removes the draft. Retraction covers the entire commit.
 
 ## Consequences
 

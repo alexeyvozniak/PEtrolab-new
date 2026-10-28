@@ -32,7 +32,7 @@ class ImportHardeningTests(unittest.TestCase):
                     connection.execute('INSERT INTO sample (sample_id, sample_name, created_at) VALUES (?, ?, ?)', ('old-sample', 'Keep original label', '2026-09-01T00:00:00Z'))
                     connection.commit()
             with closing(open_project(database)) as connection:
-                self.assertEqual(connection.execute('SELECT project_schema_version FROM project_meta').fetchone()[0], 10)
+                self.assertEqual(connection.execute('SELECT project_schema_version FROM project_meta').fetchone()[0], 15)
                 self.assertEqual(connection.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
                 self.assertEqual(connection.execute('SELECT sample_name FROM sample WHERE sample_id = ?', ('old-sample',)).fetchone()[0], 'Keep original label')
             backups = list(folder.glob('old.sqlite.before-v9-*.bak'))
@@ -111,6 +111,35 @@ class ImportHardeningTests(unittest.TestCase):
                 apply_import_plan(database, source, recipe)
                 with closing(open_project(database)) as connection:
                     self.assertEqual(connection.execute('SELECT reported_fe_form FROM measurement LIMIT 1').fetchone()[0], expected)
+
+    def test_explicit_ambiguous_fe_mapping_records_reported_form_without_conversion(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / 'iron.csv'
+            original = b'Analysis,Fe (wt.%)\nA1,10\nA2,11\n'
+            source.write_bytes(original)
+            recipe = suggest_import_recipe(source)['recipe']
+            initial = create_import_plan(inspect_source(source), recipe)
+            warning = next(item for item in initial['warnings'] if item['code'] == 'FE_STRICTLY_REPORTED')
+            self.assertTrue(warning['blocking'])
+
+            section = recipe['sections'][0]
+            iron = next(item for item in section['mappings'] if item['canonical_field'] == 'Fe')
+            revised = revise_import_mappings(source, recipe, [{
+                'block_id': section['block_id'],
+                'source_axis': iron.get('source_axis', 'column'),
+                'source_index': iron['source_column_index'],
+                'target': 'Measurement',
+                'canonical_field': 'FeOt',
+                'unit': 'wt.%',
+            }])['recipe']
+            plan = create_import_plan(inspect_source(source), revised)
+            self.assertFalse(any(item['code'] == 'FE_STRICTLY_REPORTED' for item in plan['warnings']))
+            value = plan['planned_records'][0]['measurements'][0]
+            self.assertEqual(value['field'], 'FeOt')
+            self.assertEqual(value['reported_fe_form'], 'FeOt')
+            self.assertEqual(value['fe_handling'], 'strictly_as_reported_no_conversion')
+            self.assertEqual(value['raw_token'], '10')
+            self.assertEqual(source.read_bytes(), original)
 
     def test_nonfinite_is_not_numeric(self):
         for token in ['NaN', 'Infinity', '-inf']:

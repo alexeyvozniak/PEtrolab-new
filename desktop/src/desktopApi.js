@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 export const PROTOCOL_VERSION = "1.0";
 
 export const createImportWorkspace = (sources, projectDatabasePath) => invokePetrolab("import.workspace.create", { sources, project_database_path: projectDatabasePath });
+export const restoreImportWorkspace = (projectDatabasePath) => invokePetrolab("import.workspace.restore", { project_database_path: projectDatabasePath });
 export const previewSemanticExtension = (workspaceId, sourceId, decision) => invokePetrolab("import.workspace.preview_window", { workspace_id: workspaceId, source_id: sourceId, semantic_extension: decision });
 export const addWorkspaceSources = (workspaceId, revision, sources) =>
   invokePetrolab("import.workspace.add_sources", { workspace_id: workspaceId, expected_revision: revision, sources });
@@ -13,6 +14,8 @@ export const applyWorkspaceDecision = (workspaceId, revision, sourceId, decision
   });
 export const discardImportWorkspace = (workspaceId, revision) =>
   invokePetrolab("import.workspace.discard", { workspace_id: workspaceId, expected_revision: revision });
+export const commitImportWorkspace = (workspaceId, revision) =>
+  invokePetrolab("import.workspace.commit", { workspace_id: workspaceId, expected_revision: revision });
 export const previewWorkspaceWindow = (workspaceId, sourceId, sheetName, startRow, rowCount = 30, startColumn = 0, columnCount = 24) =>
   invokePetrolab("import.workspace.preview_window", { workspace_id: workspaceId, source_id: sourceId,
     sheet_name: sheetName, start_row: startRow, row_count: rowCount, start_column: startColumn, column_count: columnCount });
@@ -40,6 +43,9 @@ export async function invokePetrolab(command, payload) {
 }
 
 export const pickImportFile = () => desktopInvoke("pick_import_file");
+
+export const pickMediaFiles = () => desktopInvoke("pick_media_files");
+export const pickMediaFolder = () => desktopInvoke("pick_media_folder");
 export const stageImportFile = (sourcePath) => desktopInvoke("stage_import_file", { sourcePath });
 export const clearImportStaging = (stagedPath) => desktopInvoke("clear_import_staging", { stagedPath });
 export const getProjectDatabasePath = () => desktopInvoke("project_database_path");
@@ -131,18 +137,30 @@ export const applyImportPlan = (projectDatabasePath, sourcePath, recipe) =>
     recipe,
   });
 
-export const listProjectAnalyses = (projectDatabasePath, limit = 500, offset = 0) =>
+export const listProjectAnalyses = (projectDatabasePath, limit = 500, offset = 0, analysisIds = null) =>
   invokePetrolab("project.analyses.list", {
     project_database_path: projectDatabasePath,
     limit,
     offset,
+    ...(Array.isArray(analysisIds) ? { analysis_ids: analysisIds } : {}),
   });
 
-export const listProjectMineralIdentifications = (projectDatabasePath, limit = 500, offset = 0) =>
+export const listProjectMineralIdentifications = (projectDatabasePath, limit = 500, offset = 0, analysisIds) =>
   invokePetrolab("project.mineral_identification.list", {
     project_database_path: projectDatabasePath,
     limit,
     offset,
+    ...(analysisIds ? { analysis_ids: analysisIds } : {}),
+  });
+
+export const decideProjectMineralAssignment = (projectDatabasePath, analysisId, verification, target, reason) =>
+  invokePetrolab("project.mineral_assignment.decide", {
+    project_database_path: projectDatabasePath,
+    analysis_id: analysisId,
+    input_fingerprint: verification.input_fingerprint,
+    ruleset_version: verification.ruleset_version,
+    target,
+    reason,
   });
 
 export const retractLastImport = (projectDatabasePath, reason = "user_retracted") =>
@@ -153,6 +171,25 @@ export const retractLastImport = (projectDatabasePath, reason = "user_retracted"
 
 export const inspectMediaSources = (sourcePaths) =>
   invokePetrolab("media.inspect_sources", { source_paths: sourcePaths });
+
+export const listMediaAssets = (projectDatabasePath, query = null, sampleName = null, limit = 500, offset = 0) =>
+  invokePetrolab("media.list", {
+    project_database_path: projectDatabasePath,
+    query,
+    sample_name: sampleName,
+    limit,
+    offset,
+  });
+
+export const getMediaPreview = (sourcePath, maxWidthPx = 1600, maxHeightPx = 1200) =>
+  invokePetrolab("media.preview", {
+    source_path: sourcePath,
+    max_width_px: maxWidthPx,
+    max_height_px: maxHeightPx,
+  });
+
+export const listAnalyticalPoints = (projectDatabasePath) =>
+  invokePetrolab("analytical_point.list", { project_database_path: projectDatabasePath });
 
 export const createMediaImportPlan = (projectDatabasePath, assignments) =>
   invokePetrolab("media.import.plan", {
@@ -173,4 +210,56 @@ export const createAnalyticalPoint = (projectDatabasePath, sampleName, pointName
     point_name: pointName,
     analysis_ids: analysisIds,
     link_type: linkType,
+  });
+
+export const retireAnalyticalPoint = (projectDatabasePath, point, reason) =>
+  invokePetrolab("analytical_point.retire", {
+    project_database_path: projectDatabasePath,
+    analytical_point_id: point.analytical_point_id,
+    expected_analysis_ids: point.analysis_ids || [],
+    expected_spatial_annotation_ids: (point.placements || []).map((placement) => placement.spatial_annotation_id),
+    reason,
+  });
+
+export const addAnalysisToAnalyticalPoint = (projectDatabasePath, point, analysisId, linkType, reason) =>
+  invokePetrolab("analytical_point.analysis.add", {
+    project_database_path: projectDatabasePath,
+    analytical_point_id: point.analytical_point_id,
+    expected_analysis_ids: point.analysis_ids || [],
+    expected_spatial_annotation_ids: (point.placements || []).map((placement) => placement.spatial_annotation_id),
+    analysis_id: analysisId,
+    link_type: linkType,
+    reason,
+  });
+
+export const removeAnalysisFromAnalyticalPoint = (projectDatabasePath, point, analysisId, reason) =>
+  invokePetrolab("analytical_point.analysis.remove", {
+    project_database_path: projectDatabasePath,
+    analytical_point_id: point.analytical_point_id,
+    expected_analysis_ids: point.analysis_ids || [],
+    expected_spatial_annotation_ids: (point.placements || []).map((placement) => placement.spatial_annotation_id),
+    analysis_id: analysisId,
+    reason,
+  });
+
+export const removeSpatialAnnotationFromAnalyticalPoint = (projectDatabasePath, point, spatialAnnotationId, reason) =>
+  invokePetrolab("analytical_point.annotation.remove", {
+    project_database_path: projectDatabasePath,
+    analytical_point_id: point.analytical_point_id,
+    expected_analysis_ids: point.analysis_ids || [],
+    expected_spatial_annotation_ids: (point.placements || []).map((placement) => placement.spatial_annotation_id),
+    spatial_annotation_id: spatialAnnotationId,
+    reason,
+  });
+
+export const listOperationJournal = (projectDatabasePath, limit = 50) =>
+  invokePetrolab("operation_journal.list", {
+    project_database_path: projectDatabasePath,
+    limit,
+  });
+
+export const undoOperation = (projectDatabasePath, operationId) =>
+  invokePetrolab("operation_journal.undo", {
+    project_database_path: projectDatabasePath,
+    operation_id: operationId,
   });

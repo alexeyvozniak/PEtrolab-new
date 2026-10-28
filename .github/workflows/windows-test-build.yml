@@ -35,6 +35,8 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check pyinstaller
           python scripts/build_windows_service.py
+          python scripts/qa_amphibole_service.py --all-methods --executable desktop/src-tauri/binaries/petrolab-service.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $request = @{ protocol_version = "1.0"; request_id = [guid]::NewGuid().ToString(); command = "import.inspect_source"; payload = @{ source_path = (Resolve-Path "fixtures/import/m1_1_ambiguous_multisheet.xlsx").Path } } | ConvertTo-Json -Compress
           $response = $request | & .\desktop\src-tauri\binaries\petrolab-service.exe | ConvertFrom-Json
           if ($null -eq $response.result.source_fingerprint) { throw "Packaged service did not return import inspection." }
@@ -78,6 +80,12 @@ jobs:
           npm run test:sites
           npm run test:tauri-contract
           npm run test:ui
+      - name: Test Tauri shell
+        working-directory: desktop
+        run: |
+          python ../scripts/generate_tauri_icon.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path src-tauri/Cargo.toml
       - name: Build Windows installer
         working-directory: desktop
         run: npm run tauri build

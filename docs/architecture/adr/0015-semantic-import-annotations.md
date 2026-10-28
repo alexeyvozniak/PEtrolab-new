@@ -53,5 +53,7 @@ range conflict/undo/fill boundaries, source/revision rejection, classifier input
 gates and separation of reported/predicted/accepted minerals. Native screenshots
 must demonstrate selection actions with the raw physical table still central.
 
-The current multi-source review queue still has no atomic batch commit or disk
-draft restore; these ADR 0014 capabilities must not be simulated by per-file apply.
+The import workspace now commits every included source through one SQLite
+transaction and restores a project draft only when staged source fingerprints
+and the draft schema match. These ADR 0014 capabilities use the existing
+Python service boundary and do not change semantic import decisions.
