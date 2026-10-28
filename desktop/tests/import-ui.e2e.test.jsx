@@ -125,10 +125,34 @@ vi.mock("../src/desktopApi", () => {
       measurements: { SiO2: { raw_token: "39.8", unit: "wt.%", source_cell: "C3" } },
     }],
   };
-  return {
+  const api = {
     isPetrolabDesktop: () => true,
     getProjectDatabasePath: vi.fn().mockResolvedValue("C:/PetroLab/project.sqlite"),
     listProjectAnalyses: vi.fn().mockImplementation(async () => ({ result: uiState.imported ? importedProject : emptyProject })),
+    listProjectMineralIdentifications: vi.fn().mockImplementation(async () => {
+      const analyses = uiState.imported ? importedProject.analyses : [];
+      return { result: {
+        total: analyses.length,
+        returned: analyses.length,
+        offset: 0,
+        has_more: false,
+        identifications: analyses.map((analysis) => ({
+          analysis_id: analysis.analysis_id,
+          source_id: "source-ui",
+          source_name: analysis.source_name,
+          sheet_name: analysis.sheet_name,
+          source_row_number: analysis.source_row_number,
+          status: "not_checked",
+          prediction: null,
+          confidence: "insufficient_input",
+          accepted: null,
+          candidates: [],
+          reasons: [],
+          ruleset_version: "test-ruleset",
+        })),
+        status_counts: analyses.length ? { not_checked: analyses.length } : {},
+      } };
+    }),
     pickImportFile: vi.fn().mockImplementation(async () => uiState.mode === "clean" ? "C:/fixtures/ui-clean-table.csv" : "C:/fixtures/complex-workbook.xlsx"),
     stageImportFile: vi.fn().mockImplementation(async (path) => ({ local_path: `C:/PetroLab/staging/${path.split("/").pop()}`, original_path: path })),
     clearImportStaging: vi.fn().mockResolvedValue(undefined),
@@ -173,9 +197,52 @@ vi.mock("../src/desktopApi", () => {
     reviseImportMappings: vi.fn(),
     retractLastImport: vi.fn(),
   };
+  let sourceDescriptor;
+  let revision = 0;
+  let selectedBlock = "";
+  const projectWorkspace = async () => {
+    const classification = (await api.classifyCleanTable()).result;
+    const currentRecipe = uiState.mode === "clean" ? recipe : currentComplexRecipe();
+    const currentPlan = (await api.createImportPlan()).result;
+    const source = { source_id: "source-1", ...sourceDescriptor, included: true, sheets: [] };
+    const problems = [...(currentPlan.issues || []), ...(currentPlan.warnings || []),
+      ...(uiState.mode === "clean" ? [] : complexCleanReasons),
+      ...(uiState.mode === "clean" ? [] : complexWarnings.filter(w => w.code === "UNIT_REQUIRES_REVIEW" ? !uiState.unitApplied : uiState.detailsEnabled))];
+    return { result: {
+      session: { workspace_id: "workspace-1", draft_revision: revision, active_source_id: "source-1",
+        active_block_id: selectedBlock || currentRecipe.sections[0].block_id, sources: [source],
+        issues: problems.map((item, index) => ({ issue_id: String(index), code: item.code, source_id: "source-1", message_params: item, blocking: item.blocking || false })),
+        readiness: { ready_to_commit: currentPlan.ready_to_commit !== false && (uiState.mode === "clean" || (uiState.unitApplied && !uiState.detailsEnabled && uiState.duplicatesReviewed)) },
+      },
+      active: { source_id: "source-1", inspection: (await api.inspectImportSource()).result, recipe: currentRecipe,
+        plan: currentPlan, classification, issues: problems, decisions: [],
+        bulk_unit_scopes: uiState.mode === "clean" ? [] : (await api.getImportBulkUnitScopes()).result.scopes,
+        bulk_ignore_scopes: uiState.mode === "clean" ? [] : (await api.getImportBulkIgnoreScopes()).result.scopes,
+      },
+    } };
+  };
+  api.createImportWorkspace = vi.fn(async (sources) => {
+    sourceDescriptor = sources[0]; revision = 0; selectedBlock = "";
+    return projectWorkspace();
+  });
+  api.addWorkspaceSources = vi.fn();
+  api.getImportWorkspace = vi.fn(projectWorkspace);
+  api.discardImportWorkspace = vi.fn(async () => ({ result: { staged_paths: [sourceDescriptor.staged_path] } }));
+  api.previewWorkspaceWindow = vi.fn(async (_workspace, _source, sheetName, startRow, rows, column, columns) =>
+    api.previewImportWindow(sourceDescriptor.staged_path, sheetName, startRow, rows, column, columns));
+  api.applyWorkspaceDecision = vi.fn(async (_workspace, _revision, _source, decision) => {
+    if (decision.kind === "sections") await api.reviseImportSections(null, null, decision.decisions);
+    if (decision.kind === "unit") await api.applyImportBulkUnit();
+    if (decision.kind === "duplicates") await api.reviewImportDuplicates();
+    if (decision.kind === "activate") selectedBlock = decision.block_id || selectedBlock;
+    revision += 1;
+    return projectWorkspace();
+  });
+  return api;
+
 });
 
-import { applyImportPlan, pickImportFile } from "../src/desktopApi";
+import { applyImportPlan, pickImportFile, createImportPlan } from "../src/desktopApi";
 import { App } from "../src/App";
 
 afterEach(() => {
@@ -236,10 +303,28 @@ test("complex import always shows the source table and groups repeated structura
 
   expect(screen.getByText("Исходная таблица")).toBeTruthy();
   const sourceTable = screen.getByRole("table");
-  expect(within(sourceTable).getByText("Analysis")).toBeTruthy();
-  expect(within(sourceTable).getByText("SiO2")).toBeTruthy();
+  expect(within(sourceTable).getByLabelText("Ячейка 1:1").textContent).toBe("Analysis");
+  expect(within(sourceTable).getByLabelText("Ячейка 1:2").textContent).toBe("SiO2");
   expect(within(sourceTable).getByText("Sigma")).toBeTruthy();
   expect(screen.getByText("Колонка с данными не имеет заголовка · 3 мест")).toBeTruthy();
+});
+
+test("Python identity blocker is visible, navigable and prevents saving", async () => {
+  uiState.mode = "complex";
+  createImportPlan.mockResolvedValueOnce({ result: {
+    ready_to_commit: false,
+    summary: { planned_analysis_count: 1, planned_measurement_count: 1, enabled_block_count: 1, duplicate_candidate_groups: 0 },
+    planned_records: [], warnings: [],
+    issues: [{ code: "ANALYSIS_IDENTITY_REQUIRED", blocking: true, sheet_name: "Summary", block_id: "summary-main", row_number: 3, source_column_index: 0 }],
+  } });
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Выбрать файл" }));
+  const issue = await screen.findByRole("button", { name: /Нет идентичности Analysis/ });
+  await user.click(issue);
+  expect(screen.getByText("Исходная таблица")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Импортировать после проверки" }).disabled).toBe(true);
+  expect(applyImportPlan).not.toHaveBeenCalled();
 });
 
 test("user resolves a repeated complex workbook with sheet-level and grouped decisions", async () => {
@@ -252,6 +337,7 @@ test("user resolves a repeated complex workbook with sheet-level and grouped dec
 
   expect(screen.getByRole("button", { name: /Не импортировать лист Details/ })).toBeTruthy();
   expect(screen.getAllByText("Details").length).toBe(1);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Не импортировать лист Details" }).disabled).toBe(false));
   await user.click(screen.getByRole("button", { name: "Не импортировать лист Details" }));
   await waitFor(() => expect(uiState.detailsEnabled).toBe(false));
 

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import "./importMapping.css";
 
-const TARGETS = ["Ignore", "Analysis", "Sample", "Point", "Mineral", "Generation", "Rock", "Source", "Comment", "Position", "Photo number", "Size (µm)", "Measurement"];
-const UNITS = ["wt.%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon"];
+const TARGETS = ["Ignore", "Analysis", "Sample", "Sample name", "Point", "Mineral", "Method", "Generation", "Rock", "Source", "Comment", "Position", "Photo number", "Size (µm)", "Measurement"];
+const UNITS = ["wt.%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon", "permil"];
 
 function mappingAxis(mapping) {
   return mapping.source_axis || (Number.isInteger(mapping.source_column_index) ? "column" : "row");
@@ -41,7 +41,7 @@ const keyForMapping = (blockId, mapping) => keyFor(blockId, mappingAxis(mapping)
 function targetFromMapping(mapping) {
   if (mapping.target_role === "measurement") return "Measurement";
   if (mapping.target_role === "identity" && ["Analysis", "Sample", "Point"].includes(mapping.canonical_field)) return mapping.canonical_field;
-  if (mapping.target_role === "metadata" && ["Mineral", "Generation", "Rock", "Source", "Comment", "Position", "Photo number", "Size (µm)"].includes(mapping.canonical_field)) return mapping.canonical_field;
+  if (mapping.target_role === "metadata" && TARGETS.includes(mapping.canonical_field)) return mapping.canonical_field;
   return "Ignore";
 }
 
@@ -163,13 +163,8 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
     setShowAll(false);
   }, [recipe, warnings]);
 
-  const applied = useMemo(() => {
-    const result = {};
-    for (const section of recipe.sections) {
-      for (const mapping of section.mappings) result[keyForMapping(section.block_id, mapping)] = appliedState(mapping);
-    }
-    return result;
-  }, [recipe]);
+  // Service suggestions are initial display state, not unapplied user edits.
+  const applied = useMemo(() => buildDraft(recipe, warnings), [recipe, warnings]);
 
   const dirtyKeys = useMemo(() => Object.keys(draft).filter((key) => !statesEqual(draft[key], applied[key])), [draft, applied]);
   const invalidCount = useMemo(
@@ -198,7 +193,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
   };
 
   const resetDraft = () => {
-    setDraft(buildDraft(recipe, []));
+    setDraft(buildDraft(recipe, warnings));
     setBlockUnits({});
   };
 
@@ -257,7 +252,8 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
           {(() => {
             const unresolvedCount = section.mappings.filter((mapping) => {
               const value = draft[keyForMapping(section.block_id, mapping)] || appliedState(mapping);
-              return value.target === "Ignore" && value.reviewDecision !== "explicit_ignore";
+              return (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore")
+                || (value.target === "Measurement" && (!value.field.trim() || !value.unit));
             }).length;
             const shownMappings = showAll ? section.mappings : section.mappings.filter((mapping) => {
               const value = draft[keyForMapping(section.block_id, mapping)] || appliedState(mapping);
@@ -285,7 +281,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
                   Назначить полям без единицы
                 </button>
               </div>
-              {unresolvedCount > 0 && <button className="mapping-ignore-all" onClick={() => explicitlyIgnoreUnresolved(section)} disabled={busy}>Не импортировать {unresolvedCount} нераспознанных полей</button>}
+              {section.mappings.some((mapping) => { const value = draft[keyForMapping(section.block_id, mapping)]; return value?.target === 'Ignore' && value.reviewDecision !== 'explicit_ignore'; }) && <button className="mapping-ignore-all" onClick={() => explicitlyIgnoreUnresolved(section)} disabled={busy}>Не импортировать нераспознанные поля</button>}
             </div>
             <div className="mapping-review-list">
               {shownMappings.length ? shownMappings.map((mapping) => (
@@ -306,7 +302,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
 
       <div className="mapping-actions">
         <button className="outline-button" onClick={resetDraft} disabled={busy || dirtyKeys.length === 0}>Сбросить изменения</button>
-        <button className="primary-button" onClick={submit} disabled={busy || dirtyKeys.length === 0 || invalidCount > 0}>
+        <button className="primary-button" onClick={submit} disabled={busy || dirtyKeys.length === 0 || dirtyKeys.some((key) => draft[key].target === 'Measurement' && (!draft[key].field.trim() || !draft[key].unit))}>
           Применить сопоставление ({dirtyKeys.length})
         </button>
       </div>

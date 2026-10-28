@@ -11,6 +11,7 @@ import {
 import { ImportBlockReview } from "./ImportBlockReview";
 import { ImportDuplicateReview } from "./ImportDuplicateReview";
 import { ImportMappingEditor } from "./ImportMappingEditor";
+import { MineralVerificationPanel } from './MineralVerificationPanel';
 import "./importWorkspace.css";
 
 const REPEATABLE_ISSUE_CODES = new Set([
@@ -28,6 +29,12 @@ const REPEATABLE_ISSUE_CODES = new Set([
 
 function warningLabel(item) {
   const labels = {
+    ANALYSIS_IDENTITY_REQUIRED: "Нет идентичности Analysis — назначьте заполненное поле",
+    DUPLICATE_REVIEW_REQUIRED: "Проверьте возможные совпадения Analysis",
+    IMPORT_PLAN_EMPTY: "Нет записей для импорта — проверьте блок и сопоставления",
+    SOURCE_FINGERPRINT_MISMATCH: "Рабочая копия файла изменилась — добавьте исходник заново",
+    FE_STRICTLY_REPORTED: "Форма Fe не определена — только исходная запись, без пересчёта",
+    EMBEDDED_DRAWINGS_NOT_PREVIEWED: "Изображения листа не показаны в табличном просмотре",
     CLEAN_TABLE_NO_DATA_ROWS: "На листе нет строк данных",
     CLEAN_TABLE_BLANK_HEADER: "Колонка с данными не имеет заголовка",
     CLEAN_TABLE_DUPLICATE_HEADER: "Повторяющийся заголовок",
@@ -62,6 +69,7 @@ function issueDetail(item) {
 
 function issueKey(item, index) {
   return [
+    item.source_id,
     item.code,
     item.block_id || item.sheet_name,
     item.source_axis,
@@ -74,7 +82,7 @@ function issueKey(item, index) {
 
 function issueGroupKey(item) {
   if (REPEATABLE_ISSUE_CODES.has(item.code)) {
-    return `${item.code}::${item.block_id || item.sheet_name || "source"}`;
+    return `${item.source_id || ""}::${item.code}::${item.block_id || item.sheet_name || "source"}`;
   }
   return issueKey(item, 0);
 }
@@ -212,6 +220,14 @@ function ResultPreview({ plan, sourceName, onClose }) {
 }
 
 export function ImportWorkspace({
+  workspace,
+  focusedIssueKey = "",
+  semanticTools = { actions: [], analytes: [] },
+  onSemanticDecision,
+  onVerifyMinerals,
+  onAcceptMineral,
+  onSelectSource,
+  onToggleSource,
   sourceName,
   sourceDisplayPath,
   inspection,
@@ -243,10 +259,16 @@ export function ImportWorkspace({
   onChooseOther,
 }) {
   const sections = recipe.sections || [];
-  const [activeBlockId, setActiveBlockId] = useState(sections.find((item) => item.enabled !== false)?.block_id || sections[0]?.block_id || "");
-  const [selectedIssueKey, setSelectedIssueKey] = useState("");
+  const [localBlockId, setActiveBlockId] = useState(sections.find((item) => item.enabled !== false)?.block_id || sections[0]?.block_id || "");
+  const activeBlockId = workspace?.active_block_id || localBlockId;
+  const selectBlock = (blockId) => workspace ? onSelectSource(workspace.active_source_id, blockId) : setActiveBlockId(blockId);
+  const [selectedIssueKey, setSelectedIssueKey] = useState(focusedIssueKey);
   const [bulkUnits, setBulkUnits] = useState({});
   const [showResultPreview, setShowResultPreview] = useState(false);
+  const [mineralReview, setMineralReview] = useState(Boolean(recipe.global_decisions.mineral_verification_enabled));
+  const [mineralFocus, setMineralFocus] = useState(null);
+  useEffect(() => { setMineralReview(Boolean(recipe.global_decisions.mineral_verification_enabled)); setMineralFocus(null); }, [recipe.global_decisions.mineral_verification_enabled, workspace?.active_source_id]);
+  useEffect(() => { setSelectedIssueKey(focusedIssueKey); }, [focusedIssueKey, workspace?.active_source_id]);
 
   const sheetGroups = useMemo(() => {
     const groups = new Map();
@@ -265,10 +287,12 @@ export function ImportWorkspace({
   }, [activeBlockId, sections]);
 
   const issues = useMemo(() => {
+    if (workspace) return workspace.issues.map((item) => ({ ...item.message_params, source_id: item.source_id, issue_id: item.issue_id, code: item.code, blocking: item.blocking }));
     const raw = [
       ...(cleanClassification?.mode === "raw_review" ? cleanClassification.reasons || [] : []),
       ...(recipeWarnings || []),
       ...(plan.warnings || []),
+      ...(plan.issues || []),
     ];
     const seen = new Set();
     return raw.filter((item) => {
@@ -277,32 +301,38 @@ export function ImportWorkspace({
       seen.add(key);
       return true;
     });
-  }, [cleanClassification, plan.warnings, recipeWarnings]);
+  }, [workspace, cleanClassification, plan.warnings, plan.issues, recipeWarnings]);
 
-  const issueGroups = useMemo(() => groupIssues(issues), [issues]);
-  const selectedGroup = issueGroups.find((entry) => entry.key === selectedIssueKey) || issueGroups[0] || null;
+  const issueGroups = useMemo(() => groupIssues(issues).sort((left, right) => Number(right.item.source_id === workspace?.active_source_id) - Number(left.item.source_id === workspace?.active_source_id)), [issues, workspace?.active_source_id]);
+  const selectedGroup = issueGroups.find((entry) => entry.key === selectedIssueKey && (!workspace || entry.item.source_id === workspace.active_source_id)) || issueGroups.find((entry) => !workspace || entry.item.source_id === workspace.active_source_id) || null;
   const selectedIssue = selectedGroup?.item || null;
   const activeSection = sections.find((item) => item.block_id === activeBlockId) || sections[0];
   const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview;
-  const blockingCount = (blockDraftDirty ? 1 : 0)
+  const blockingCount = workspace ? workspace.issues.filter((item) => item.blocking).length + Number(blockDraftDirty) + Number(mappingDraftDirty) : (blockDraftDirty ? 1 : 0)
+    + (plan.issues || []).filter((item) => item.blocking).length
     + (mappingDraftDirty ? 1 : 0)
     + (duplicateReviewRequired ? 1 : 0)
     + (unresolvedReviewCount > 0 ? 1 : 0)
     + (plannedMeasurementCount === 0 ? 1 : 0);
 
   const selectIssue = (entry) => {
+    setMineralFocus(null);
     setSelectedIssueKey(entry.key);
+    if (workspace && entry.item.source_id !== workspace.active_source_id) {
+      onSelectSource(entry.item.source_id, entry.item.block_id, entry.key);
+      return;
+    }
     const matching = sections.find((section) => (
       (entry.item.block_id && section.block_id === entry.item.block_id)
       || (!entry.item.block_id && entry.item.sheet_name && section.sheet_name === entry.item.sheet_name)
     ));
-    if (matching) setActiveBlockId(matching.block_id);
+    if (matching) selectBlock(matching.block_id);
   };
 
   const selectSheet = (group) => {
     const current = group.sections.find((section) => section.block_id === activeBlockId);
     const next = current || group.sections.find((section) => section.enabled !== false) || group.sections[0];
-    if (next) setActiveBlockId(next.block_id);
+    if (next) selectBlock(next.block_id);
   };
 
   const toggleSheet = (group) => {
@@ -320,12 +350,12 @@ export function ImportWorkspace({
           <File size={25} weight="duotone" />
           <div>
             <h1>Импорт таблиц</h1>
-            <p>{cleanFast ? "Таблица готова к импорту" : issueGroups.length ? `Файл требует внимания: ${issueGroups.length} ${issueGroups.length === 1 ? "тип вопроса" : "типов вопросов"}` : "Подробная проверка"}</p>
+            <p>{cleanFast ? "Таблица готова к импорту" : issueGroups.length ? `${workspace?.sources.length > 1 ? 'Очередь' : 'Файл'} требует внимания: ${issueGroups.length} ${issueGroups.length === 1 ? "тип вопроса" : "типов вопросов"}` : "Подробная проверка"}</p>
           </div>
         </div>
         <div className="import-workspace-head-actions">
           <span title={sourceDisplayPath}>{sourceName} · {inspection.source_format.toUpperCase()} · SHA-256 {inspection.source_fingerprint.slice(0, 12)}…</span>
-          <button className="outline-button" type="button" onClick={onChooseOther} disabled={busy}><Plus size={17} /> Другой файл</button>
+          <button className="outline-button" type="button" onClick={onChooseOther} disabled={busy || blockDraftDirty || mappingDraftDirty}><Plus size={17} /> Добавить файл</button>
           <button className="outline-button" type="button" onClick={onCancel} disabled={busy}>Отменить</button>
         </div>
       </header>
@@ -333,13 +363,27 @@ export function ImportWorkspace({
       <div className="import-workspace-body">
         <aside className="import-source-pane">
           <div className="import-pane-label">Файл и листы</div>
+          {workspace && <div className="workspace-source-queue" aria-label="Очередь источников">
+            {workspace.sources.map((source) => {
+              const count = workspace.issues.filter((issue) => issue.source_id === source.source_id && issue.blocking).length;
+              const name = source.original_display_path.split(/[\\/]/).pop();
+              return <div key={source.source_id} className={source.source_id === workspace.active_source_id ? "queue-source active" : "queue-source"}>
+                <button type="button" aria-label={`Открыть источник ${name}`} aria-pressed={source.source_id === workspace.active_source_id} onClick={() => onSelectSource(source.source_id)} disabled={busy || blockDraftDirty || mappingDraftDirty}>
+                  <File size={17} /><span><b>{name}</b><small>{!source.included ? source.exclusion_reason : count ? `${count} обязательных вопросов` : "Нет обязательных вопросов"}</small></span>
+                </button>
+                <button className="queue-source-inclusion" type="button" onClick={() => onToggleSource(source)} disabled={busy || blockDraftDirty || mappingDraftDirty} aria-label={`${source.included ? "Пропустить" : "Включить"} источник ${name}`}>{source.included ? "Пропустить" : "Включить"}</button>
+                {source.source_id !== workspace.active_source_id && source.sheets.map((sheet) => <button className="queue-sheet" type="button" key={sheet.sheet_key} disabled={busy || blockDraftDirty || mappingDraftDirty || !sheet.blocks.length} onClick={() => onSelectSource(source.source_id, sheet.blocks[0]?.block_id)}>{sheet.physical_sheet_name} · {sheet.included ? `${sheet.blocks.length} табл.` : sheet.exclusion_reason}</button>)}
+              </div>;
+            })}
+          </div>}
           <div className="import-source-file">
             <File size={19} weight="duotone" />
-            <div><b>{sourceName}</b><span>{inspection.sheets.length} листов</span></div>
+            <div><b>{workspace ? 'Листы выбранного файла' : sourceName}</b><span>{inspection.sheets.length} листов</span></div>
           </div>
           <div className="import-sheet-list">
             {sheetGroups.map((group) => {
-              const count = group.sections.reduce((total, section) => total + sectionIssueCount(section, issues), 0);
+              const sourceIssues = workspace ? issues.filter((item) => item.source_id === workspace.active_source_id) : issues;
+              const count = group.sections.reduce((total, section) => total + sectionIssueCount(section, sourceIssues), 0);
               const active = group.sections.some((section) => section.block_id === activeBlockId);
               const enabledCount = group.sections.filter((section) => section.enabled !== false).length;
               const disabled = enabledCount === 0;
@@ -347,11 +391,11 @@ export function ImportWorkspace({
               return (
                 <div className={`import-sheet-group${active ? " active" : ""}${disabled ? " excluded" : ""}`} key={group.sheet_name}>
                   <div className="import-sheet-group-main">
-                    <button className="import-sheet-row" type="button" onClick={() => selectSheet(group)}>
+                    <button className="import-sheet-row" type="button" onClick={() => selectSheet(group)} disabled={busy || blockDraftDirty || mappingDraftDirty}>
                       <span className="import-sheet-check">{disabled ? "—" : count ? <Warning size={15} weight="fill" /> : <CheckCircle size={15} weight="fill" />}</span>
                       <span className="import-sheet-copy">
                         <b>{group.sheet_name}</b>
-                        <small>{group.sections.length === 1 ? sectionSubtitle(group.sections[0]) : `${group.sections.length} таблиц · включено ${enabledCount}`}</small>
+                        <small title={disabled ? group.sections[0].exclusion_reason : undefined}>{disabled ? group.sections[0].exclusion_reason || "Исключено пользователем" : group.sections.length === 1 ? sectionSubtitle(group.sections[0]) : `${group.sections.length} таблиц · включено ${enabledCount}`}</small>
                       </span>
                       <span className={`import-sheet-status${count ? " warning" : ""}`}>
                         {disabled ? "Пропущен" : count ? `${count} типов` : "Готов"}
@@ -362,7 +406,7 @@ export function ImportWorkspace({
                       className={`import-sheet-toggle${disabled ? " disabled-sheet" : ""}`}
                       type="button"
                       onClick={() => toggleSheet(group)}
-                      disabled={busy || (!disabled && !otherEnabled)}
+                      disabled={busy || blockDraftDirty || mappingDraftDirty || (!disabled && !otherEnabled)}
                       aria-label={disabled ? `Импортировать лист ${group.sheet_name}` : `Не импортировать лист ${group.sheet_name}`}
                       title={disabled ? "Включить все таблицы листа" : !otherEnabled ? "Нельзя исключить последний импортируемый лист" : "Не импортировать все таблицы листа"}
                     >
@@ -372,13 +416,14 @@ export function ImportWorkspace({
                   {active && group.sections.length > 1 && (
                     <div className="import-block-list" aria-label={`Таблицы листа ${group.sheet_name}`}>
                       {group.sections.map((section, index) => {
-                        const blockIssues = sectionIssueCount(section, issues);
+                        const blockIssues = sectionIssueCount(section, sourceIssues);
                         return (
                           <button
                             className={`import-block-row${section.block_id === activeBlockId ? " active" : ""}${section.enabled === false ? " excluded" : ""}`}
                             type="button"
                             key={section.block_id}
-                            onClick={() => setActiveBlockId(section.block_id)}
+                            onClick={() => selectBlock(section.block_id)}
+                            disabled={busy || blockDraftDirty || mappingDraftDirty}
                           >
                             <span>Таблица {index + 1}</span>
                             <small>{section.enabled === false ? "пропущена" : blockIssues ? `${blockIssues} типов` : "готова"}</small>
@@ -406,11 +451,13 @@ export function ImportWorkspace({
             <CleanReadyPreview classification={cleanClassification} plan={plan} onDetailed={onOpenDetailed} busy={busy} />
           ) : (
             <ImportBlockReview
+              semanticTools={semanticTools}
+              onSemanticDecision={onSemanticDecision}
               recipe={recipe}
               previews={blockPreviews}
               activeBlockId={activeBlockId}
-              focusedIssue={selectedIssue}
-              busy={busy}
+              focusedIssue={mineralFocus || selectedIssue}
+              busy={busy || mappingDraftDirty}
               onApply={onApplySections}
               onDirtyChange={onBlockDirtyChange}
             />
@@ -418,6 +465,8 @@ export function ImportWorkspace({
         </main>
 
         <aside className="import-inspector-pane">
+          {onVerifyMinerals && <div className="import-stage-tabs"><button type="button" onClick={() => setMineralReview(false)} disabled={busy}>1 · Структура</button><button type="button" disabled={busy || blockDraftDirty || mappingDraftDirty || plan.ready_to_commit === false} onClick={() => recipe.global_decisions.mineral_verification_enabled ? setMineralReview(true) : onVerifyMinerals()}>2 · Проверить минералы</button></div>}
+          {mineralReview ? <MineralVerificationPanel records={plan.planned_records || []} scopes={semanticTools.mineralScopes || []} busy={busy} onAccept={onAcceptMineral} onReveal={(record) => { setMineralFocus({ ...record, source_column_index: (record.source_column_number || 1) - 1 }); selectBlock(record.block_id); }} /> : <>
           <div className="import-pane-label">Вопросы · {issueGroups.length} типов · {issues.length} мест</div>
           {issueGroups.length > 0 ? (
             <div className="import-issue-list">
@@ -427,9 +476,10 @@ export function ImportWorkspace({
                   type="button"
                   key={entry.key}
                   onClick={() => selectIssue(entry)}
+                  disabled={busy || blockDraftDirty || mappingDraftDirty}
                 >
                   <Warning size={16} weight="fill" />
-                  <span><b>{warningLabel(entry.item)}{entry.items.length > 1 ? ` · ${entry.items.length} мест` : ""}</b><small>{issueDetail(entry.item) || "Нажми, чтобы перейти к соответствующему листу"}</small></span>
+                  <span><b>{warningLabel(entry.item)}{entry.items.length > 1 ? ` · ${entry.items.length} мест` : ""}</b><small>{workspace?.sources.find((s) => s.source_id === entry.item.source_id)?.original_display_path.split(/[\\/]/).pop()} · {issueDetail(entry.item) || "Открыть контекст источника"}</small></span>
                 </button>
               ))}
             </div>
@@ -488,6 +538,7 @@ export function ImportWorkspace({
               onKeepAll={onKeepAllDuplicates}
             />
           )}
+          </>}
         </aside>
       </div>
 
@@ -506,6 +557,9 @@ export function ImportWorkspace({
             {cleanFast ? "Импортировать таблицу" : canSaveImport ? "Сохранить импорт в проект" : "Импортировать после проверки"}
           </button>
         </div>
+        {(blockDraftDirty || mappingDraftDirty || workspace?.sources.length > 1) && <div className="workspace-commit-note" role="status">
+          {blockDraftDirty || mappingDraftDirty ? "Примените правки перед переключением источника или экрана." : "Очередь для проверки: сохранение нескольких файлов пока недоступно. Решения хранятся до закрытия приложения."}
+        </div>}
       </footer>
       {showResultPreview && <ResultPreview plan={plan} sourceName={sourceName} onClose={() => setShowResultPreview(false)} />}
     </div>

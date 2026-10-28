@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle, Eye, Warning } from "@phosphor-icons/react";
-import { previewImportWindow } from "./desktopApi";
+import { previewImportWindow, previewWorkspaceWindow, previewSemanticExtension } from "./desktopApi";
+import { SemanticRangeActions } from './SemanticRangeActions';
 import "./importBlockReview.css";
 
 const PREVIEW_ROW_COUNT = 30;
@@ -87,7 +88,19 @@ function issueCoordinates(issue) {
   return { row, column };
 }
 
-function RawPreview({ preview, state, loading, error, onNavigate, focusIssue }) {
+function RawPreview({ preview, state, loading, error, onNavigate, focusIssue, section, semanticTools, annotations = [], onSemanticDecision }) {
+  const [selection, setSelection] = useState(null);
+  const [contextMenu, setContextMenu] = useState(false);
+  const [requestedRole, setRequestedRole] = useState(null);
+  const anchor = useRef(null);
+  const dragging = useRef(false);
+  const actionsRef = useRef(null);
+  const selectCell = (row, column, extend = false) => {
+    const start = extend && anchor.current ? anchor.current : { row, column };
+    anchor.current = start;
+    setSelection({ start_row: Math.min(start.row, row), end_row: Math.max(start.row, row), start_column: Math.min(start.column, column), end_column: Math.max(start.column, column) });
+  };
+  useEffect(() => { const stop = () => { dragging.current = false; }; window.addEventListener('pointerup', stop); return () => window.removeEventListener('pointerup', stop); }, []);
   const [jumpRow, setJumpRow] = useState(preview?.start_row || 1);
   const [jumpColumn, setJumpColumn] = useState(Number(preview?.start_column || 0) + 1);
 
@@ -191,6 +204,7 @@ function RawPreview({ preview, state, loading, error, onNavigate, focusIssue }) 
         </div>
       </div>
       {error && <div className="raw-preview-error"><Warning size={16} weight="fill" /> {error}</div>}
+      {(preview.warnings || []).some((item) => item.code === 'EMBEDDED_DRAWINGS_NOT_PREVIEWED') && <div className="raw-drawing-note" role="note"><Warning size={16} /><span>На листе есть рисунки или встроенные изображения. Здесь показаны только значения ячеек: изображения не отображаются и не превращаются в измерения. Оригинал сохранён без изменений.</span></div>}
       {loading && <div className="raw-preview-loading-line">Читаю другой участок листа…</div>}
       <div className="raw-preview-wrap" aria-label={`Исходная таблица ${preview.sheet_name || "Excel"}`}>
         <table className="raw-preview-table">
@@ -199,7 +213,8 @@ function RawPreview({ preview, state, loading, error, onNavigate, focusIssue }) 
               <th className="raw-row-number">#</th>
               {(preview.column_labels || []).map((label, index) => {
                 const physicalColumn = Number(preview.start_column || 0) + index;
-                return <th className={focused.column === physicalColumn ? "raw-focused-column" : ""} key={`${label}-${physicalColumn}`}>{label}</th>;
+                const field = section?.mappings.find((mapping) => mapping.source_column_index === physicalColumn);
+              return <th className={focused.column === physicalColumn ? "raw-focused-column" : ""} key={`${label}-${physicalColumn}`}><button type="button" aria-label={`Выделить колонку ${label}`} onClick={() => setSelection({ start_row: 1, end_row: totalRows, start_column: physicalColumn, end_column: physicalColumn })} disabled={loading}>{label}</button>{field && <small className="semantic-column-role" title="Интерпретация PetroLab; исходный заголовок ниже не изменён">{field.canonical_field || field.suggested_canonical_field || (field.review_decision === 'explicit_ignore' ? 'Не импортируется' : 'Нужно решить')}{field.unit ? ` · ${field.unit}` : ''}</small>}</th>;
               })}
             </tr>
           </thead>
@@ -211,11 +226,22 @@ function RawPreview({ preview, state, loading, error, onNavigate, focusIssue }) 
               const rowClass = [isHeader ? "raw-header-row" : isData ? "raw-data-row" : "", isFocusedRow ? "raw-focused-row" : ""].filter(Boolean).join(" ");
               return (
                 <tr key={row.row_number} className={rowClass}>
-                  <th className="raw-row-number">{row.row_number}</th>
-                  {(row.values || []).map((value, index) => {
+                  <th className="raw-row-number"><button type="button" aria-label={`Выделить строку ${row.row_number}`} onClick={(event) => { const start = event.shiftKey && selection ? selection.start_row : row.row_number; setSelection({ start_row: Math.min(start, row.row_number), end_row: Math.max(start, row.row_number), start_column: 0, end_column: totalColumns - 1 }); }} disabled={loading}>{row.row_number}</button></th>
+                  {(row.values || []).slice(0, preview.column_labels.length).map((value, index) => {
                     const physicalColumn = Number(preview.start_column || 0) + index;
                     const focusedCell = focused.column === physicalColumn && (!focused.row || focused.row === row.row_number);
-                    return <td className={focusedCell ? "raw-focused-cell" : focused.column === physicalColumn ? "raw-focused-column" : ""} key={`${row.row_number}-${physicalColumn}`}>{value ?? ""}</td>;
+                    const selected = selection && row.row_number >= selection.start_row && row.row_number <= selection.end_row && physicalColumn >= selection.start_column && physicalColumn <= selection.end_column;
+                    const annotation = annotations.find((a) => row.row_number >= a.range.start_row && row.row_number <= a.range.end_row && physicalColumn >= a.range.start_column && physicalColumn <= a.range.end_column);
+                    const mapping = section?.mappings.find((f) => state.orientation === 'columns_are_analyses' ? f.source_row_index === row.row_number - 1 : f.source_column_index === physicalColumn);
+                    const evidence = mapping?.recognition;
+                    const title = [mapping?.source_header, mapping?.canonical_field, mapping?.unit, evidence?.confidence, annotation && `${annotation.role}: ${annotation.value} (${annotation.origin})`].filter(Boolean).join(' → ');
+                    return <td title={title} tabIndex={0} aria-label={`Ячейка ${row.row_number}:${physicalColumn + 1}`} aria-selected={Boolean(selected)} className={[focusedCell ? 'raw-focused-cell' : focused.column === physicalColumn ? 'raw-focused-column' : '', selected ? 'semantic-selected' : '', annotation ? 'semantic-annotated' : ''].join(' ')} key={`${row.row_number}-${physicalColumn}`}
+                      onPointerDown={(event) => { if (event.button !== 0 || loading) return; event.preventDefault(); dragging.current = true; selectCell(row.row_number, physicalColumn, event.shiftKey); }}
+                      onPointerEnter={() => { if (dragging.current) selectCell(row.row_number, physicalColumn, true); }}
+                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectCell(row.row_number, physicalColumn, event.shiftKey); } }}
+                      onContextMenu={(event) => { event.preventDefault(); if (loading) return; if (!selected) selectCell(row.row_number, physicalColumn); setContextMenu(true); actionsRef.current?.scrollIntoView?.({ block: 'nearest' }); }}>
+                      {value ?? ''}{annotation && row.row_number === annotation.range.end_row && physicalColumn === annotation.range.end_column && <button className="semantic-fill-handle" aria-label="Протянуть семантическое назначение" title="Протяните диапазон, затем проверьте и подтвердите расширение" onPointerDown={(event) => { event.stopPropagation(); anchor.current = { row: annotation.range.start_row, column: annotation.range.start_column }; dragging.current = true; setSelection(annotation.range); }} />}
+                    </td>;
                   })}
                 </tr>
               );
@@ -223,11 +249,16 @@ function RawPreview({ preview, state, loading, error, onNavigate, focusIssue }) 
           </tbody>
         </table>
       </div>
+      {semanticTools?.actions.length > 0 && <div className="semantic-tool-panel" ref={actionsRef}>
+        {contextMenu && <div className="semantic-context-menu" role="menu" aria-label="Назначить выделению">{semanticTools.actions.map((action) => <button type="button" role="menuitem" key={action.role} onClick={() => { setRequestedRole(action.role); setContextMenu(false); const control = actionsRef.current.querySelector('select'); control?.focus(); }}>{action.label}</button>)}<button type="button" onClick={() => setContextMenu(false)}>Закрыть меню</button></div>}
+        <SemanticRangeActions records={semanticTools.records || []} requestedRole={requestedRole} selection={selection} setSelection={setSelection} actions={semanticTools.actions} analytes={semanticTools.analytes} annotations={annotations} blockId={section.block_id} busy={loading}
+          onDecision={onSemanticDecision} onPreview={async (decision) => previewResult(await previewSemanticExtension(preview.workspace_id, preview.source_id, decision))} />
+      </div>}
     </div>
   );
 }
 
-function BlockCard({ section, index, preview, value, busy, onChange, focusIssue }) {
+function BlockCard({ section, index, preview, value, busy, onChange, focusIssue, semanticTools, annotations, onSemanticDecision }) {
   const transposed = value.orientation === "columns_are_analyses";
   const context = section.unit_context;
   const invalid = invalidState(value);
@@ -258,7 +289,9 @@ function BlockCard({ section, index, preview, value, busy, onChange, focusIssue 
     setPreviewLoading(true);
     setPreviewError("");
     try {
-      const response = await previewImportWindow(
+      const response = preview?.workspace_id
+        ? await previewWorkspaceWindow(preview.workspace_id, preview.source_id, section.sheet_name, startRow, PREVIEW_ROW_COUNT, startColumn, PREVIEW_COLUMN_COUNT)
+        : await previewImportWindow(
         sourcePath,
         section.sheet_name,
         startRow,
@@ -266,7 +299,7 @@ function BlockCard({ section, index, preview, value, busy, onChange, focusIssue 
         startColumn,
         PREVIEW_COLUMN_COUNT,
       );
-      setLivePreview(previewResult(response));
+      setLivePreview({ ...previewResult(response), workspace_id: preview?.workspace_id, source_id: preview?.source_id });
     } catch (caught) {
       setPreviewError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -331,9 +364,10 @@ function BlockCard({ section, index, preview, value, busy, onChange, focusIssue 
       </div>
 
       <RawPreview
+        section={section} semanticTools={semanticTools} annotations={annotations} onSemanticDecision={onSemanticDecision}
         preview={livePreview}
         state={value}
-        loading={previewLoading}
+        loading={previewLoading || busy}
         error={previewError}
         onNavigate={fetchPreview}
         focusIssue={focusIssue}
@@ -373,7 +407,7 @@ function BlockCard({ section, index, preview, value, busy, onChange, focusIssue 
   );
 }
 
-export function ImportBlockReview({ recipe, previews = {}, activeBlockId = null, busy, onApply, onDirtyChange, focusedIssue = null }) {
+export function ImportBlockReview({ recipe, previews = {}, activeBlockId = null, busy, onApply, onDirtyChange, focusedIssue = null, semanticTools, onSemanticDecision }) {
   const [draft, setDraft] = useState(() => Object.fromEntries(recipe.sections.map((section) => [section.block_id, stateFor(section)])));
   const timers = useRef(new Map());
 
@@ -438,6 +472,8 @@ export function ImportBlockReview({ recipe, previews = {}, activeBlockId = null,
       <div className="block-card-list">
         {visibleSections.map((section) => (
           <BlockCard
+            semanticTools={semanticTools} onSemanticDecision={onSemanticDecision}
+            annotations={(recipe.global_decisions.semantic_annotations || []).filter((a) => a.block_id === section.block_id)}
             key={section.block_id}
             section={section}
             index={recipe.sections.findIndex((item) => item.block_id === section.block_id)}
