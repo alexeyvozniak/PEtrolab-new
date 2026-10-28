@@ -6,14 +6,19 @@ changes source pixels, and it deliberately does not know about viewport zoom.
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import json
+import re
 import shutil
 import sqlite3
 import struct
 import uuid
 from pathlib import Path
 from typing import Any, Iterable
+
+from PIL import Image, UnidentifiedImageError
 
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
@@ -42,6 +47,30 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _filename_suggestions(path: Path) -> dict[str, Any]:
+    """Return conservative, review-only assignments inferred from a filename."""
+    stem = path.stem.strip()
+    modality = re.search(r"(?:^|[_\-\s])(BSE|PPL|XPL)(?=$|[_\-\s])", stem, re.IGNORECASE)
+    media_type = modality.group(1).upper() if modality else None
+    prefix = stem[:modality.start()].rstrip("_- ") if modality else ""
+    parts = [part for part in re.split(r"[_\s]+", prefix) if part]
+    sample_name = parts[0] if parts else None
+    thin_section_name = "-".join(parts) if len(parts) >= 2 else None
+    basis: list[str] = []
+    if media_type:
+        basis.append("filename_modality_token")
+    if sample_name:
+        basis.append("filename_prefix")
+    if thin_section_name:
+        basis.append("filename_section_prefix")
+    return {
+        "suggested_media_type": media_type,
+        "suggested_sample_name": sample_name,
+        "suggested_thin_section_name": thin_section_name,
+        "suggestion_basis": basis,
+    }
 
 
 def _png_dimensions(path: Path) -> tuple[int, int]:
@@ -142,6 +171,7 @@ def inspect_media_source(source_path: str | Path) -> dict[str, Any]:
         "format": format_name,
         "width_px": width,
         "height_px": height,
+        **_filename_suggestions(path),
     }
 
 
@@ -155,6 +185,40 @@ def inspect_media_sources(source_paths: Iterable[str | Path]) -> dict[str, Any]:
         by_fingerprint.setdefault(item["source_fingerprint"], []).append(item["source_path"])
     duplicate_groups = [group for group in by_fingerprint.values() if len(group) > 1]
     return {"items": items, "duplicate_groups": duplicate_groups}
+
+
+def create_media_preview(source_path: str | Path, max_width_px: int = 1600, max_height_px: int = 1200) -> dict[str, Any]:
+    """Return a bounded PNG preview without changing source pixels or orientation.
+
+    The preview intentionally preserves the source pixel axes.  EXIF orientation
+    is not applied because manual placements are persisted in those source axes.
+    """
+    if not isinstance(max_width_px, int) or not isinstance(max_height_px, int):
+        _fail("INVALID_PREVIEW_SIZE", "Preview dimensions must be integers.")
+    if not (128 <= max_width_px <= 2400 and 128 <= max_height_px <= 2400):
+        _fail("INVALID_PREVIEW_SIZE", "Preview dimensions must be between 128 and 2400 pixels.")
+    inspection = inspect_media_source(source_path)
+    try:
+        with Image.open(inspection["source_path"]) as source:
+            source.load()
+            preview = source.copy()
+    except (OSError, UnidentifiedImageError) as error:
+        _fail("MEDIA_UNREADABLE", "Image pixels cannot be decoded for preview.", path=inspection["source_path"], reason=str(error))
+    preview.thumbnail((max_width_px, max_height_px), Image.Resampling.LANCZOS)
+    if preview.mode not in {"RGB", "RGBA"}:
+        preview = preview.convert("RGB")
+    buffer = io.BytesIO()
+    preview.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return {
+        "source_path": inspection["source_path"],
+        "source_fingerprint": inspection["source_fingerprint"],
+        "source_width_px": inspection["width_px"],
+        "source_height_px": inspection["height_px"],
+        "preview_width_px": preview.width,
+        "preview_height_px": preview.height,
+        "preview_data_url": f"data:image/png;base64,{encoded}",
+    }
 
 
 def _text(value: Any, field: str, max_length: int = 200) -> str:
@@ -181,6 +245,72 @@ def _read_connection(database_path: str | Path) -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     return connection
+
+
+def _method_label(raw: Any) -> str | None:
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if isinstance(value, dict) and isinstance(value.get("value"), str) and value["value"].strip():
+        return value["value"].strip()
+    return None
+
+
+def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
+    """Project Analytical Points for manual media placement.
+
+    Returned rows keep stable IDs and imported analysis evidence.  The UI may
+    filter by Sample, but a cross-Sample candidate is never hidden from the
+    service and never becomes linked without the explicit reason enforced by
+    ``create_media_import_plan``.
+    """
+    connection = _read_connection(database_path)
+    try:
+        rows = connection.execute(
+            """SELECT ap.analytical_point_id, ap.point_name, s.sample_id, s.sample_name,
+                      apa.analysis_id, ais.analytical_method_json
+               FROM analytical_point ap
+               JOIN sample s ON s.sample_id = ap.sample_id
+               LEFT JOIN analytical_point_analysis apa ON apa.analytical_point_id = ap.analytical_point_id
+               LEFT JOIN analysis_import_semantics ais ON ais.analysis_id = apa.analysis_id
+               ORDER BY lower(s.sample_name), lower(ap.point_name), apa.analysis_id"""
+        ).fetchall()
+        placement_counts = {
+            row["analytical_point_id"]: row["placement_count"]
+            for row in connection.execute(
+                """SELECT analytical_point_id, COUNT(*) AS placement_count
+                   FROM analytical_point_annotation GROUP BY analytical_point_id"""
+            )
+        }
+        by_id: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            item = by_id.setdefault(row["analytical_point_id"], {
+                "analytical_point_id": row["analytical_point_id"],
+                "point_name": row["point_name"],
+                "sample_id": row["sample_id"],
+                "sample_name": row["sample_name"],
+                "analysis_ids": [],
+                "methods": [],
+                "placement_count": placement_counts.get(row["analytical_point_id"], 0),
+            })
+            if row["analysis_id"] is not None:
+                item["analysis_ids"].append(row["analysis_id"])
+            method = _method_label(row["analytical_method_json"])
+            if method and method not in item["methods"]:
+                item["methods"].append(method)
+        items = list(by_id.values())
+        return {
+            "total": len(items),
+            "sample_names": sorted({item["sample_name"] for item in items}, key=str.casefold),
+            "items": items,
+        }
+    finally:
+        connection.close()
 
 
 def create_analytical_point(
@@ -307,7 +437,7 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                     _fail("INVALID_ASSIGNMENT", "An Analytical Point may be placed only once on one image.", analytical_point_id=point_id)
                 seen_points.add(point_id)
                 point = connection.execute(
-                    """SELECT ap.analytical_point_id, s.sample_name FROM analytical_point ap
+                    """SELECT ap.analytical_point_id, ap.point_name, s.sample_name FROM analytical_point ap
                     JOIN sample s ON s.sample_id = ap.sample_id WHERE ap.analytical_point_id = ?""", (point_id,)
                 ).fetchone()
                 if point is None:
@@ -329,12 +459,19 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                 planned_placements.append({
                     "spatial_annotation_id": _id(),
                     "analytical_point_id": point_id,
+                    "point_name": point["point_name"],
+                    "point_sample_name": point["sample_name"],
                     "geometry": _validate_geometry(placement["geometry"], inspection["width_px"], inspection["height_px"]),
                     "cross_sample_exception_reason": reason,
                 })
             plan_items.append({
                 "media_asset_id": existing["media_asset_id"] if existing else _id(),
-                **inspection,
+                "source_path": inspection["source_path"],
+                "source_fingerprint": inspection["source_fingerprint"],
+                "display_name": inspection["display_name"],
+                "mime_type": inspection["mime_type"],
+                "width_px": inspection["width_px"],
+                "height_px": inspection["height_px"],
                 "ownership_mode": ownership,
                 "media_type": media_type,
                 "sample_name": sample_name,
@@ -342,7 +479,6 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                 "existing_media_asset_id": existing["media_asset_id"] if existing else None,
                 "placements": planned_placements,
             })
-            plan_items[-1].pop("format")
         plan = {"schema_version": 1, "semantic_fingerprint": "", "items": plan_items, "warnings": warnings}
         plan["semantic_fingerprint"] = _plan_fingerprint(plan)
         return plan

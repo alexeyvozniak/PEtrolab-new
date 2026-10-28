@@ -40,6 +40,9 @@ export async function invokePetrolab(command, payload) {
 }
 
 export const pickImportFile = () => desktopInvoke("pick_import_file");
+
+export const pickMediaFiles = () => desktopInvoke("pick_media_files");
+export const pickMediaFolder = () => desktopInvoke("pick_media_folder");
 export const stageImportFile = (sourcePath) => desktopInvoke("stage_import_file", { sourcePath });
 export const clearImportStaging = (stagedPath) => desktopInvoke("clear_import_staging", { stagedPath });
 export const getProjectDatabasePath = () => desktopInvoke("project_database_path");
@@ -153,6 +156,16 @@ export const retractLastImport = (projectDatabasePath, reason = "user_retracted"
 
 export const inspectMediaSources = (sourcePaths) =>
   invokePetrolab("media.inspect_sources", { source_paths: sourcePaths });
+
+export const getMediaPreview = (sourcePath, maxWidthPx = 1600, maxHeightPx = 1200) =>
+  invokePetrolab("media.preview", {
+    source_path: sourcePath,
+    max_width_px: maxWidthPx,
+    max_height_px: maxHeightPx,
+  });
+
+export const listAnalyticalPoints = (projectDatabasePath) =>
+  invokePetrolab("analytical_point.list", { project_database_path: projectDatabasePath });
 
 export const createMediaImportPlan = (projectDatabasePath, assignments) =>
   invokePetrolab("media.import.plan", {

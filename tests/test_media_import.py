@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
 import sqlite3
 import struct
@@ -21,8 +22,10 @@ from petrolab.media_import import (  # noqa: E402
     apply_media_import_plan,
     create_analytical_point,
     create_media_import_plan,
+    create_media_preview,
     inspect_media_source,
     inspect_media_sources,
+    list_analytical_points,
 )
 from test_import_preview import FIXTURE, fixture_recipe  # noqa: E402
 
@@ -97,6 +100,43 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(len(result["items"]), 2)
             self.assertEqual(len(result["duplicate_groups"]), 1)
 
+    def test_filename_suggestions_are_review_only_and_keep_the_source_name(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            image = Path(directory_name) / "KIV-2_A_BSE_01.png"
+            write_png(image)
+            result = inspect_media_source(image)
+            self.assertEqual(result["display_name"], "KIV-2_A_BSE_01.png")
+            self.assertEqual(result["suggested_sample_name"], "KIV-2")
+            self.assertEqual(result["suggested_thin_section_name"], "KIV-2-A")
+            self.assertEqual(result["suggested_media_type"], "BSE")
+            self.assertEqual(
+                result["suggestion_basis"],
+                ["filename_modality_token", "filename_prefix", "filename_section_prefix"],
+            )
+
+    def test_preview_is_bounded_and_does_not_change_the_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            image = Path(directory_name) / "large.png"
+            write_png(image, width=1200, height=800)
+            source_hash = hashlib.sha256(image.read_bytes()).hexdigest()
+            result = create_media_preview(image, max_width_px=300, max_height_px=300)
+            self.assertEqual((result["source_width_px"], result["source_height_px"]), (1200, 800))
+            self.assertEqual((result["preview_width_px"], result["preview_height_px"]), (300, 200))
+            self.assertTrue(result["preview_data_url"].startswith("data:image/png;base64,"))
+            self.assertTrue(base64.b64decode(result["preview_data_url"].split(",", 1)[1]).startswith(b"\x89PNG"))
+            self.assertEqual(hashlib.sha256(image.read_bytes()).hexdigest(), source_hash)
+
+    def test_analytical_point_projection_keeps_stable_ids_and_sample_groups(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, first, second = self._project_with_points(Path(directory_name))
+            result = list_analytical_points(database)
+            by_id = {item["analytical_point_id"]: item for item in result["items"]}
+            self.assertEqual(result["sample_names"], ["KIV-2", "OTHER"])
+            self.assertEqual(by_id[first["analytical_point_id"]]["point_name"], "P-07")
+            self.assertEqual(len(by_id[first["analytical_point_id"]]["analysis_ids"]), 2)
+            self.assertEqual(by_id[second["analytical_point_id"]]["sample_name"], "OTHER")
+            self.assertEqual(by_id[first["analytical_point_id"]]["placement_count"], 0)
+
     def test_windows_batch_file_is_not_treated_as_an_image(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             script = Path(directory_name) / "images.bat"
@@ -114,6 +154,7 @@ class MediaImportTests(unittest.TestCase):
             source_hash = hashlib.sha256(image.read_bytes()).hexdigest()
             plan = create_media_import_plan(database, [self._assignment(image, point["analytical_point_id"])])
             self.assertEqual(plan["items"][0]["media_type"], "BSE")
+            self.assertNotIn("suggested_media_type", plan["items"][0])
             result = apply_media_import_plan(database, plan)
             copied = directory / "media" / f"{plan['items'][0]['media_asset_id']}.png"
             self.assertTrue(copied.is_file())
