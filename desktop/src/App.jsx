@@ -388,7 +388,7 @@ export function App() {
       const paths = await pickMediaFolder();
       if (!paths) return;
       if (!paths.length) {
-        throw new Error("В выбранной папке и вложенных папках нет PNG, JPEG, TIFF или BMP.");
+        throw new Error("В выбранной папке и её вложенных папках нет PNG, JPEG, TIFF или BMP.");
       }
       await inspectImageBatch(paths);
     } catch (caught) {
@@ -619,7 +619,7 @@ export function App() {
             plan={mediaPlan}
             points={mediaPoints}
             busy={busy}
-            onChooseFiles={chooseImages}
+            onChoose={chooseImages}
             onChooseFolder={chooseImageFolder}
             onRemove={removeImagesFromBatch}
             onPreview={loadMediaPreview}
