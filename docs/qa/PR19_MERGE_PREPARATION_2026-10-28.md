@@ -44,6 +44,18 @@ Commands: `PYTHONPATH=src python scripts/validate_contracts.py`,
 
 ## Still required
 
+### Follow-up from the new Windows run
+
+Run `40730052016` on `a66b9b6` passed Python, packaged scientific service and
+the repaired frontend/UI gate. It then failed in `Test Tauri shell`: the clean
+runner had no `src-tauri/icons/icon.ico`. `cargo test` invokes tauri-build without
+the CLI's beforeBuildCommand, where the icon was previously generated.
+The workflow now runs the existing deterministic icon generator and checks its
+exit status before cargo test, matching the already working #22 workflow.
+No Rust logic, icon design or test assertion is changed. Icon generation and
+Pillow decoding of the resulting 256×256 ICO/PNG were checked locally. Native
+Rust compilation/testing remains the Windows CI gate.
+
 Windows CI must run on the new exact head, including installer build and launch.
 No Windows/native picker, real-project image transaction, narrow/wide visual
 walkthrough or new screenshot is claimed by this Linux verification. The local
