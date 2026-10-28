@@ -25,8 +25,36 @@ def _reported_text(reported):
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def reported_target(reported):
+    """Resolve reported text to a controlled target without changing the text."""
+    text = _reported_text(reported)
+    return REPORTED_TARGETS.get(text.casefold()) if text else None
+
+
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def _decision_input(record):
+    """Return the scientific evidence only, independent of transport shape.
+
+    Planned records and persisted project projections carry different source
+    coordinates and display metadata.  Those fields must not make a valid
+    mineral decision appear stale after a lossless database round-trip.
+    """
+    evidence = []
+    for measurement in record.get('measurements') or []:
+        if not isinstance(measurement, dict):
+            evidence.append(measurement)
+            continue
+        evidence.append({
+            key: measurement.get(key)
+            for key in (
+                'field', 'unit', 'raw_token', 'qualifier', 'detection_limit',
+                'value_status', 'reported_fe_form', 'fe_handling',
+            )
+        })
+    return [evidence, _reported_text(record.get('reported_mineral')), EXTENDED_RULESET_VERSION, INPUT_GATE_VERSION]
 
 
 def verify_record(record, accepted=None):
@@ -62,8 +90,7 @@ def verify_record(record, accepted=None):
         problems.append('incomplete_major_element_input')
     if len({'FeO', 'FeOt'} & inputs.keys()) > 1 or len({'Fe2O3', 'Fe2O3t'} & inputs.keys()) > 1:
         problems.append('overlapping_iron_basis')
-    input_hash = fingerprint([evidence, record.get('reported_mineral'), record.get('mineral_assignment'),
-                              EXTENDED_RULESET_VERSION, INPUT_GATE_VERSION])
+    input_hash = fingerprint(_decision_input(record))
     reported = record.get('reported_mineral')
     reported_text = _reported_text(reported)
     result = {'preview_id': record['preview_id'], 'reported_mineral': reported_text,
@@ -77,14 +104,14 @@ def verify_record(record, accepted=None):
                       candidates=[asdict(candidate) for candidate in prediction.candidates],
                       reasons=list(prediction.reasons), reference_version=prediction.reference_version,
                       catalog_hash=prediction.catalog_hash)
-        reported_target = REPORTED_TARGETS.get((reported_text or '').strip().casefold())
+        controlled_reported_target = reported_target(reported)
         if not prediction.target or prediction.confidence != 'high':
             result['status'] = 'low_confidence'
         elif not reported_text:
             result['status'] = 'missing_reported'
-        elif reported_target == prediction.target:
+        elif controlled_reported_target == prediction.target:
             result['status'] = 'consistent'
-        elif reported_target:
+        elif controlled_reported_target:
             result['status'] = 'conflict'
         else:
             result['status'] = 'unrecognized_reported'
@@ -94,13 +121,17 @@ def verify_record(record, accepted=None):
             result['status'] = 'verified'
         else:
             result['issues'].append('accepted_assignment_stale')
+    result['reported_target'] = reported_target(reported)
     return result
 
 
 def add_verification(records, recipe):
     accepted = recipe['global_decisions'].get('mineral_acceptances', {})
     for record in records:
-        record['mineral_verification'] = verify_record(record, accepted.get(record['preview_id']))
+        verification = verify_record(record, accepted.get(record['preview_id']))
+        record['mineral_verification'] = verification
+        if verification.get('accepted'):
+            record['mineral_assignment'] = verification['accepted']
 
 
 def acceptance_scopes(plan, recipe):

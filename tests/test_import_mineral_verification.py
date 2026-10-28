@@ -8,6 +8,7 @@ import unittest
 from petrolab.import_workspace import ImportWorkspaceStore
 from petrolab.import_preview import ImportCommandError
 from petrolab.import_apply import apply_import_plan, open_project
+from petrolab.desktop_workflow import decide_project_mineral_assignment, list_project_analyses, list_project_mineral_identifications
 from petrolab.mineral_verification import verify_record
 from petrolab.mineral_recognition_extended import recognize_mineral_extended
 
@@ -82,6 +83,81 @@ class ImportMineralVerificationTests(unittest.TestCase):
         result = verify_record(changed, accepted)
         self.assertEqual(result['status'], 'conflict')
         self.assertIn('accepted_assignment_stale', result['issues'])
+
+    def test_post_import_decision_is_append_only_stale_safe_and_reversible(self):
+        self.decide(kind='verify_minerals')
+        database = Path(self.temp.name) / 'project.sqlite'
+        apply_import_plan(database, self.path, self.current['active']['recipe'])
+        review = list_project_mineral_identifications(database)
+        conflict = next(item for item in review['identifications'] if item['status'] == 'conflict')
+
+        decided = decide_project_mineral_assignment(
+            database,
+            conflict['analysis_id'],
+            conflict['prediction'],
+            conflict['input_fingerprint'],
+            conflict['ruleset_version'],
+            'Принято после проверки конфликта',
+        )
+        self.assertEqual(decided['verification']['status'], 'verified')
+        projected = list_project_analyses(database, analysis_id=conflict['analysis_id'])['analyses'][0]
+        self.assertEqual(projected['mineral_assignment']['target'], conflict['prediction'])
+        self.assertEqual(projected['reported_mineral']['value'], 'garnet')
+
+        with self.assertRaises(ImportCommandError) as stale:
+            decide_project_mineral_assignment(
+                database, conflict['analysis_id'], conflict['prediction'], 'stale',
+                conflict['ruleset_version'], 'Устаревшее решение',
+            )
+        self.assertEqual(stale.exception.code, 'STALE_MINERAL_INPUT')
+
+        cleared = decide_project_mineral_assignment(
+            database,
+            conflict['analysis_id'],
+            None,
+            conflict['input_fingerprint'],
+            conflict['ruleset_version'],
+            'Вернуть в очередь проверки',
+        )
+        self.assertIsNone(cleared['decision'])
+        with closing(open_project(database)) as connection:
+            rows = connection.execute(
+                'SELECT decision_kind, target FROM mineral_assignment_decision WHERE analysis_id = ? ORDER BY rowid',
+                (conflict['analysis_id'],),
+            ).fetchall()
+        self.assertEqual([(row[0], row[1]) for row in rows], [('accept_suggestion', conflict['prediction']), ('clear', None)])
+        self.assertEqual(list_project_mineral_identifications(database)['status_counts']['conflict'], 1)
+
+    def test_post_import_clear_overrides_an_assignment_accepted_during_import(self):
+        self.decide(kind='verify_minerals')
+        accepted_scope = self.current['active']['mineral_acceptance_scopes'][0]
+        self.decide(kind='accept_mineral', scope_id=accepted_scope['scope_id'])
+        database = Path(self.temp.name) / 'accepted.sqlite'
+        apply_import_plan(database, self.path, self.current['active']['recipe'])
+        review = list_project_mineral_identifications(database)
+        self.assertTrue(
+            any(item['status'] == 'verified' for item in review['identifications']),
+            review['identifications'],
+        )
+        verified = next(item for item in review['identifications'] if item['status'] == 'verified')
+
+        decide_project_mineral_assignment(
+            database,
+            verified['analysis_id'],
+            None,
+            verified['input_fingerprint'],
+            verified['ruleset_version'],
+            'Снять ранее принятое решение',
+        )
+
+        projected = list_project_analyses(database, analysis_id=verified['analysis_id'])['analyses'][0]
+        self.assertNotIn('mineral_assignment', projected)
+        refreshed = next(
+            item for item in list_project_mineral_identifications(database)['identifications']
+            if item['analysis_id'] == verified['analysis_id']
+        )
+        self.assertEqual(refreshed['status'], 'consistent')
+        self.assertIsNone(refreshed['accepted'])
 
     def test_project_alias_requires_confirmation_and_is_project_scoped(self):
         database = Path(self.temp.name) / 'aliases.sqlite'

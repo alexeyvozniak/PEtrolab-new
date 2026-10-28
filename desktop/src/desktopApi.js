@@ -145,6 +145,16 @@ export const listProjectMineralIdentifications = (projectDatabasePath, limit = 5
     offset,
   });
 
+export const decideProjectMineralAssignment = (projectDatabasePath, analysisId, verification, target, reason) =>
+  invokePetrolab("project.mineral_assignment.decide", {
+    project_database_path: projectDatabasePath,
+    analysis_id: analysisId,
+    input_fingerprint: verification.input_fingerprint,
+    ruleset_version: verification.ruleset_version,
+    target,
+    reason,
+  });
+
 export const retractLastImport = (projectDatabasePath, reason = "user_retracted") =>
   invokePetrolab("project.last_import.retract", {
     project_database_path: projectDatabasePath,

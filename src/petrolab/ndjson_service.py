@@ -10,7 +10,7 @@ from typing import Any, TextIO
 
 from .clean_table import classify_clean_table
 from .import_workspace import ImportWorkspaceStore
-from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe
+from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, decide_project_mineral_assignment, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe
 from .import_apply import (
     apply_import_plan,
     check_linked_source,
@@ -232,6 +232,20 @@ def _dispatch_project_mineral_identification_list(params: Mapping[str, Any]) -> 
     return {"result": list_project_mineral_identifications(_project_database_path(params), raw_limit, raw_offset)}
 
 
+def _dispatch_project_mineral_assignment_decide(params: Mapping[str, Any]) -> dict[str, Any]:
+    target = params.get("target")
+    if target is not None and (not isinstance(target, str) or not target):
+        raise ValueError("target")
+    return {"result": decide_project_mineral_assignment(
+        _project_database_path(params),
+        _string(params, "analysis_id"),
+        target,
+        _string(params, "input_fingerprint"),
+        _string(params, "ruleset_version"),
+        _string(params, "reason"),
+    )}
+
+
 def _dispatch_project_last_import_retract(params: Mapping[str, Any]) -> dict[str, Any]:
     reason = params.get("reason", "user_retracted")
     if not isinstance(reason, str) or not reason:
@@ -293,6 +307,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.plan.apply": _dispatch_plan_apply,
     "project.analyses.list": _dispatch_project_analyses_list,
     "project.mineral_identification.list": _dispatch_project_mineral_identification_list,
+    "project.mineral_assignment.decide": _dispatch_project_mineral_assignment_decide,
     "project.last_import.retract": _dispatch_project_last_import_retract,
     "source.check_linked": _dispatch_linked_source_check,
     "import.batch.rollback": _dispatch_batch_rollback,

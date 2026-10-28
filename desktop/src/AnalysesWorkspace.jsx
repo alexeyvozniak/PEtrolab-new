@@ -10,6 +10,13 @@ import {
   SquaresFour,
   X,
 } from "@phosphor-icons/react";
+import {
+  MINERAL_STATUS_LABELS,
+  mineralConfidenceLabel,
+  mineralReasonLabel,
+  mineralStatus,
+  reportedMineral,
+} from "./mineralUi";
 import "./analysesWorkspace.css";
 
 function originLabel(analysis) {
@@ -28,43 +35,13 @@ function columnId(kind, field) {
   return `${kind}:${field}`;
 }
 
-const MINERAL_STATUS_LABELS = {
-  consistent: "совпадает",
-  verified: "принято",
-  conflict: "конфликт",
-  missing_reported: "нет названия",
-  low_confidence: "неоднозначно",
-  insufficient_input: "мало данных",
-  unrecognized_reported: "нужно проверить",
-  not_checked: "не проверен",
-  reported_only: "только исходное название",
-};
-
-const MINERAL_CONFIDENCE_LABELS = {
-  high: "высокая",
-  medium: "средняя",
-  ambiguous: "неоднозначная",
-  unresolved: "не определена",
-  insufficient_input: "недостаточно данных",
-};
-
 function confidenceLabel(value) {
-  return MINERAL_CONFIDENCE_LABELS[value] || value || "—";
-}
-
-function reportedMineral(analysis) {
-  const value = analysis.reported_mineral;
-  if (value && typeof value === "object") return value.value || "";
-  return value || analysis.source_metadata?.Mineral || "";
+  return mineralConfidenceLabel(value);
 }
 
 function mineralLabel(analysis) {
   const verification = analysis.mineral_verification;
   return verification?.accepted?.target || verification?.prediction || reportedMineral(analysis) || "Не определён";
-}
-
-function mineralStatus(analysis) {
-  return analysis.mineral_verification?.status || (reportedMineral(analysis) ? "reported_only" : "not_checked");
 }
 
 function valueFor(analysis, column) {
@@ -146,11 +123,11 @@ function AnalysisMineralReview({ analysis }) {
     </dl>
     {(verification.candidates || []).length > 0 && <div className="analysis-mineral-candidates">
       <b>Кандидаты</b>
-      {verification.candidates.slice(0, 5).map((candidate) => <div key={candidate.target}><span>{candidate.target}</span><small>{candidate.score}</small></div>)}
+      {verification.candidates.slice(0, 5).map((candidate) => <div key={candidate.target}><span>{candidate.target}</span><small>{candidate.score} баллов</small></div>)}
     </div>}
     {evidence.length > 0 && <details>
       <summary>Почему так</summary>
-      {evidence.map((reason) => <p key={reason}>{reason}</p>)}
+      {evidence.map((reason) => <p key={reason}>{mineralReasonLabel(reason)}</p>)}
     </details>}
     <small className="analysis-mineral-version">Правила: {verification.ruleset_version || "—"}</small>
   </section>;

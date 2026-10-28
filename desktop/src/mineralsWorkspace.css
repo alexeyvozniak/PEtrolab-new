@@ -1,0 +1,74 @@
+.minerals-workspace { min-width: 0; min-height: calc(100vh - 76px); display: grid; grid-template-columns: 180px minmax(360px, 1fr) 350px; overflow: hidden; background: #f5f7f4; }
+.mineral-queues, .mineral-list-pane, .mineral-review-pane { min-width: 0; min-height: 0; background: #fff; }
+.mineral-queues { overflow: auto; border-right: 1px solid #dde3de; }
+.mineral-pane-title { min-height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid #e4e8e4; }
+.mineral-pane-title span, .mineral-queue-divider { color: #69736d; font-size: 11px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.mineral-pane-title b, .mineral-queues button b { min-width: 25px; padding: 3px 7px; border-radius: 999px; background: #edf3ed; color: #315d45; font-size: 10px; text-align: center; }
+.mineral-queues > button { width: 100%; min-height: 44px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 12px; border: 0; border-left: 3px solid transparent; border-bottom: 1px solid #f0f2f0; background: #fff; color: #3a463f; text-align: left; }
+.mineral-queues > button:not(:has(svg)) { grid-template-columns: minmax(0, 1fr) auto; padding-left: 37px; }
+.mineral-queues > button:hover { background: #f5f8f5; }
+.mineral-queues > button.active { border-left-color: #35664b; background: #edf4ee; color: #284b38; }
+.mineral-queues button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.mineral-queue-divider { padding: 18px 14px 7px; font-size: 9px; }
+.mineral-queue-note { display: flex; align-items: flex-start; gap: 8px; margin: 18px 12px; padding: 12px; border-radius: 8px; background: #f2f6f2; color: #627068; }
+.mineral-queue-note p { margin: 0; font-size: 11px; line-height: 1.45; }
+
+.mineral-list-pane { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; background: #f7f8f6; }
+.mineral-toolbar { min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #dde3de; background: #fff; }
+.mineral-toolbar > span { color: #6d7771; font-size: 11px; white-space: nowrap; }
+.mineral-search { flex: 1; min-width: 220px; min-height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #cfd7d1; border-radius: 8px; background: #f9faf9; }
+.mineral-search:focus-within { border-color: #5e876d; box-shadow: 0 0 0 2px #e0ece3; }
+.mineral-search input { width: 100%; border: 0; outline: 0; background: transparent; font-size: 12px; }
+.mineral-list-head, .mineral-list > button { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .72fr) minmax(0, 1fr) 88px; gap: 10px; align-items: center; }
+.mineral-list-head { min-height: 38px; padding: 0 14px; border-bottom: 1px solid #dfe5e0; background: #f4f6f4; color: #667169; font-size: 10px; font-weight: 750; text-transform: uppercase; }
+.mineral-list { min-height: 0; overflow: auto; padding: 8px; }
+.mineral-list > button { width: 100%; min-height: 60px; padding: 9px 8px 9px 11px; border: 0; border-bottom: 1px solid #e8ece9; border-left: 3px solid transparent; background: #fff; color: #344139; text-align: left; }
+.mineral-list > button:hover { background: #f6f9f6; }
+.mineral-list > button.focused { border-left-color: #3e7353; background: #edf5ee; }
+.mineral-list > button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.mineral-list > button b, .mineral-list > button small { display: block; overflow: hidden; text-overflow: ellipsis; }
+.mineral-list > button small { margin-top: 3px; color: #7d8981; font-size: 9px; font-weight: 400; }
+.mineral-row-status, .mineral-status-badge { width: fit-content; padding: 4px 8px; border-radius: 999px; background: #eef2ef; color: #58645c; font-size: 10px !important; font-weight: 750; }
+.status-conflict, .status-unrecognized_reported { background: #fce9e5; color: #8a4038; }
+.status-missing_reported, .status-low_confidence, .status-insufficient_input, .status-not_checked, .status-reported_only { background: #fff1d7; color: #825c1f; }
+.status-consistent, .status-verified { background: #e7f2e9; color: #316346; }
+.mineral-no-results { min-height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #728078; }
+.mineral-no-results b { margin-top: 10px; color: #405047; }
+.mineral-no-results span { margin-top: 4px; font-size: 11px; }
+.minerals-load-more { min-height: 38px; margin: 0 8px 8px; border: 1px solid #cbd5cd; border-radius: 8px; background: #fff; color: #315d45; font-weight: 700; }
+
+.mineral-review-pane { overflow: auto; border-left: 1px solid #dde3de; }
+.mineral-review-pane.empty { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 28px; color: #77827b; text-align: center; }
+.mineral-review-pane > header { padding: 16px; border-bottom: 1px solid #e2e7e3; background: #fafbfa; }
+.mineral-review-pane > header > span { color: #758078; font-size: 9px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.mineral-review-pane > header h2 { margin: 6px 0 4px; font-size: 18px; }
+.mineral-review-pane > header p { margin: 0; color: #6f7b73; font-size: 10px; line-height: 1.45; }
+.mineral-review-pane > section { padding: 14px 16px; border-bottom: 1px solid #e7ece8; }
+.mineral-review-pane h3 { margin: 10px 0 9px; color: #59665e; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+.mineral-decision-state > .mineral-status-badge { margin-bottom: 12px; }
+.mineral-decision-state dl { margin: 0; }
+.mineral-decision-state dl > div { display: grid; grid-template-columns: 105px minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid #eef1ef; }
+.mineral-decision-state dl > div.accepted { margin: 5px -8px 0; padding: 10px 8px; border-bottom: 0; border-radius: 7px; background: #f2f7f3; }
+.mineral-decision-state dt { color: #748078; font-size: 10px; }
+.mineral-decision-state dd { margin: 0; color: #2f3a34; font-size: 12px; font-weight: 650; text-align: right; overflow-wrap: anywhere; }
+.mineral-decision-state dd small { display: block; margin-top: 3px; color: #87918b; font-size: 9px; font-weight: 400; }
+.mineral-candidate-list > div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eef1ef; }
+.mineral-candidate-list span { display: flex; gap: 8px; align-items: center; font-size: 11px; }
+.mineral-candidate-list span b { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; background: #edf3ed; color: #315d45; font-size: 9px; }
+.mineral-candidate-list small { color: #758078; font-size: 9px; }
+.mineral-evidence-list p { margin: 0 0 7px; padding-left: 12px; position: relative; color: #4d5a52; font-size: 10px; line-height: 1.45; }
+.mineral-evidence-list p::before { content: ""; position: absolute; left: 0; top: .55em; width: 4px; height: 4px; border-radius: 50%; background: #6e927b; }
+.mineral-ruleset { margin: 12px 0 0; color: #8b948e; font-size: 9px; overflow-wrap: anywhere; }
+.mineral-review-pane .muted { margin: 0; color: #7f8982; font-size: 10px; }
+.mineral-review-pane > footer { position: sticky; bottom: 0; display: grid; gap: 8px; padding: 14px 16px; border-top: 1px solid #dfe6e0; background: rgba(255,255,255,.97); }
+.mineral-review-pane > footer button { justify-content: center; min-height: 38px; }
+.mineral-clear-button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0; background: transparent; color: #6f4c45; font-size: 11px; text-decoration: underline; }
+.mineral-review-pane > footer small { color: #77827b; font-size: 9px; line-height: 1.4; text-align: center; }
+.minerals-empty { min-height: calc(100vh - 76px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px; background: #fff; color: #405047; text-align: center; }
+.minerals-empty h2 { margin: 14px 0 7px; }
+.minerals-empty p { max-width: 580px; margin: 0 0 18px; color: #77807a; line-height: 1.5; }
+
+@media (max-width: 1280px) {
+  .minerals-workspace { grid-template-columns: 170px minmax(340px, 1fr) 320px; }
+  .mineral-toolbar .outline-button { display: none; }
+}
