@@ -1,0 +1,68 @@
+name: Native desktop E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "src/**"
+      - "scripts/build_windows_service.py"
+      - ".github/workflows/desktop-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-native-flow:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+      PETROLAB_PYTHONPATH: ${{ github.workspace }}\\src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Enable Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Install matching Microsoft Edge WebDriver
+        run: |
+          cargo install --git https://github.com/chippers/msedgedriver-tool
+          & "$HOME/.cargo/bin/msedgedriver-tool.exe"
+          $PWD.Path >> $env:GITHUB_PATH
+      - name: Build packaged scientific service
+        run: |
+          python -m pip install --disable-pip-version-check pyinstaller
+          python scripts/build_windows_service.py
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Install Tauri WebDriver bridge
+        run: cargo install tauri-driver --locked
+      - name: Install native E2E dependencies
+        working-directory: desktop/e2e
+        run: npm install --no-package-lock
+      - name: Build real Tauri debug executable
+        working-directory: desktop
+        run: npm run tauri -- build --debug --no-bundle
+      - name: Click through import and analyses in the native window
+        working-directory: desktop/e2e
+        run: npm test
+      - name: Upload native E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-desktop-e2e-evidence
+          path: desktop/e2e/artifacts
+          if-no-files-found: warn
+          retention-days: 14
