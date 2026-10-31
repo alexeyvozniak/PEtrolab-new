@@ -1,0 +1,482 @@
+{
+  "catalog": {
+    "methods": [
+      {
+        "method_id": "mica.charge22",
+        "version": "0.1.0",
+        "name": "Слюды · 22 заряда · bulk APFU",
+        "status": "draft",
+        "parameters": [
+          {
+            "name": "fe_mode",
+            "value_type": "choice",
+            "scientifically_significant": true
+          },
+          {
+            "name": "anion_basis",
+            "value_type": "choice",
+            "scientifically_significant": true
+          },
+          {
+            "name": "oh_mode",
+            "value_type": "choice",
+            "scientifically_significant": true
+          }
+        ],
+        "parameter_choices": {
+          "fe_mode": {
+            "all_fe2": "Всё железо как Fe²⁺ (FeO или FeOt)",
+            "reported_split": "Раздельные FeO и Fe₂O₃ из измерений"
+          },
+          "anion_basis": {
+            "ideal_O10_W2": "Идеальная группа O₁₀W₂; нормировка на 22 положительных заряда"
+          },
+          "oh_mode": {
+            "not_calculated": "Не рассчитывать OH",
+            "ideal_2_minus_f_cl": "Оценить OH = 2 − F − Cl по измеренным F и Cl"
+          }
+        },
+        "citations": [
+          {
+            "title": "Rieder et al. (1998), Nomenclature of the Micas",
+            "url": "https://minsocam.org/msa/ima/ima98%2810%29.pdf"
+          },
+          {
+            "title": "CIAAW Abridged Standard Atomic Weights 2024",
+            "url": "https://ciaaw.org/abridged-atomic-weights.htm"
+          }
+        ],
+        "assumptions": [
+          "Идеальная анионная группа O10W2; нормировка на 22 положительных заряда.",
+          "OH_est = 2 - F - Cl только по пригодным измеренным F и Cl и явному выбору.",
+          "Без нормировки суммы wt.% к 100%, распределения по позициям и номенклатуры.",
+          "Fe3+, Li, вакансии и неопределённость не оцениваются автоматически."
+        ],
+        "applicability": [
+          "Только явно принятая слюда из trioctahedral, dioctahedral или Li-mica target.",
+          "Варианты с измеренным H2O и окисленный базис 22+z не поддерживаются.",
+          "Пригодность состава проверяется независимо от назначения.",
+          "Метод draft: внешняя проверка на природных составах ещё требуется."
+        ],
+        "quick_presets": [
+          {
+            "id": "all_fe2_no_oh",
+            "label": "Рассчитать формулу",
+            "description": "Всё железо принимается как Fe²⁺; базис O₁₀W₂; OH не рассчитывается.",
+            "parameters": {
+              "fe_mode": "all_fe2",
+              "anion_basis": "ideal_O10_W2",
+              "oh_mode": "not_calculated"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "preview": {
+    "parameters": {
+      "fe_mode": "all_fe2",
+      "anion_basis": "ideal_O10_W2",
+      "oh_mode": "ideal_2_minus_f_cl"
+    },
+    "input_fingerprint": "5b5140a746ff805a1259e97c6722ed702fbe6083f226d937bf51cf6c26780365",
+    "results": [
+      {
+        "analysis_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+        "method_id": "mica.charge22",
+        "method_version": "0.1.0",
+        "method_status": "draft",
+        "status": "current",
+        "errors": [],
+        "warnings": [
+          "Неизмеренные дополнительные компоненты перечислены отдельно; APFU относится к доступному составу.",
+          "Li не измерен; Li-содержащие слюды могут иметь неполную формулу.",
+          "Метод draft: независимая проверка на природных составах ещё не выполнена."
+        ],
+        "values": {
+          "Si_apfu": 3.0000000000000004,
+          "Al_apfu": 1,
+          "Mg_apfu": 3,
+          "Ca_apfu": 0,
+          "Na_apfu": 0,
+          "K_apfu": 1,
+          "Fe2_apfu": 0,
+          "F_apfu": 0,
+          "Cl_apfu": 0,
+          "OH_est_apfu": 2,
+          "cation_sum": 8,
+          "oxide_total": 95.68248596777981
+        },
+        "used": [
+          {
+            "measurement_id": "2a7e78cb-322f-44f5-b437-66f15327fd04",
+            "field": "SiO2",
+            "raw_token": "43.19886687724983"
+          },
+          {
+            "measurement_id": "cc2e4e95-709e-4114-beb9-91343ac8ad55",
+            "field": "Al2O3",
+            "raw_token": "12.218097369947321"
+          },
+          {
+            "measurement_id": "2729eef8-9c06-4259-86c5-dd7b76ac2f4a",
+            "field": "MgO",
+            "raw_token": "28.97803256529596"
+          },
+          {
+            "measurement_id": "fc4bde69-4b2e-4be0-9bc6-5cf6281f8963",
+            "field": "CaO",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "529a359d-5bfb-418e-b526-6f59d60af07c",
+            "field": "Na2O",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "857076ab-a98c-4883-bf29-b5523a9d8252",
+            "field": "K2O",
+            "raw_token": "11.287489155286707"
+          },
+          {
+            "measurement_id": "5daccb77-4c0f-43ce-a4ab-23112d127481",
+            "field": "FeO",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "8e48cb3d-59e1-47e2-8438-f8f4d8c4517a",
+            "field": "F",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "08cc82a4-5d4a-4606-b608-ee386891b337",
+            "field": "Cl",
+            "raw_token": "0"
+          }
+        ],
+        "excluded": [],
+        "unmeasured": [
+          "BaO",
+          "Cr2O3",
+          "Li2O",
+          "MnO",
+          "NiO",
+          "TiO2"
+        ],
+        "assumptions": [
+          "Идеальная анионная группа O₁₀W₂, W = OH/F/Cl; 22 положительных заряда.",
+          "Сумма wt.% не нормировалась к 100%; F/Cl не входят в сумму катионных зарядов.",
+          "Без распределения по позициям, оценки вакансий, Li, номенклатуры и неопределённости.",
+          "Всё железо принято Fe²⁺; Fe³⁺ не определён.",
+          "OH оценён по идеальной группе, не измерен."
+        ],
+        "parameters": {
+          "fe_mode": "all_fe2",
+          "anion_basis": "ideal_O10_W2",
+          "oh_mode": "ideal_2_minus_f_cl"
+        },
+        "OH_est_basis": {
+          "formula": "2 - F_apfu - Cl_apfu",
+          "anion_basis": "ideal_O10_W2",
+          "normalization": "22 positive charges",
+          "input_measurement_ids": [
+            "2a7e78cb-322f-44f5-b437-66f15327fd04",
+            "cc2e4e95-709e-4114-beb9-91343ac8ad55",
+            "2729eef8-9c06-4259-86c5-dd7b76ac2f4a",
+            "fc4bde69-4b2e-4be0-9bc6-5cf6281f8963",
+            "529a359d-5bfb-418e-b526-6f59d60af07c",
+            "857076ab-a98c-4883-bf29-b5523a9d8252",
+            "5daccb77-4c0f-43ce-a4ab-23112d127481",
+            "8e48cb3d-59e1-47e2-8438-f8f4d8c4517a",
+            "08cc82a4-5d4a-4606-b608-ee386891b337"
+          ]
+        }
+      }
+    ],
+    "can_save": true
+  },
+  "saved": {
+    "reused": false,
+    "run": {
+      "id": "35efdc66-4f6b-499f-bc67-cf1f5f9be9ad",
+      "method_id": "mica.charge22",
+      "method_version": "0.1.0",
+      "parameters": {
+        "fe_mode": "all_fe2",
+        "anion_basis": "ideal_O10_W2",
+        "oh_mode": "ideal_2_minus_f_cl"
+      },
+      "status": "current",
+      "stale_reasons": [],
+      "created_at": "2026-09-14T09:58:14Z",
+      "input_fingerprint": "5b5140a746ff805a1259e97c6722ed702fbe6083f226d937bf51cf6c26780365"
+    }
+  },
+  "invalid": {
+    "parameters": {
+      "fe_mode": "reported_split",
+      "anion_basis": "ideal_O10_W2",
+      "oh_mode": "ideal_2_minus_f_cl"
+    },
+    "input_fingerprint": "e7101d5deb89fdafcf9583e3e418b077348b53a0935cca48b3bd8e193d134eff",
+    "results": [
+      {
+        "analysis_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+        "method_id": "mica.charge22",
+        "method_version": "0.1.0",
+        "method_status": "draft",
+        "status": "failed",
+        "errors": [
+          "Fe2O3: нет пригодного обязательного измерения (явный ноль допустим)."
+        ],
+        "warnings": [],
+        "values": {},
+        "used": [
+          {
+            "measurement_id": "2a7e78cb-322f-44f5-b437-66f15327fd04",
+            "field": "SiO2",
+            "raw_token": "43.19886687724983"
+          },
+          {
+            "measurement_id": "cc2e4e95-709e-4114-beb9-91343ac8ad55",
+            "field": "Al2O3",
+            "raw_token": "12.218097369947321"
+          },
+          {
+            "measurement_id": "2729eef8-9c06-4259-86c5-dd7b76ac2f4a",
+            "field": "MgO",
+            "raw_token": "28.97803256529596"
+          },
+          {
+            "measurement_id": "fc4bde69-4b2e-4be0-9bc6-5cf6281f8963",
+            "field": "CaO",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "529a359d-5bfb-418e-b526-6f59d60af07c",
+            "field": "Na2O",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "857076ab-a98c-4883-bf29-b5523a9d8252",
+            "field": "K2O",
+            "raw_token": "11.287489155286707"
+          },
+          {
+            "measurement_id": "5daccb77-4c0f-43ce-a4ab-23112d127481",
+            "field": "FeO",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "8e48cb3d-59e1-47e2-8438-f8f4d8c4517a",
+            "field": "F",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "08cc82a4-5d4a-4606-b608-ee386891b337",
+            "field": "Cl",
+            "raw_token": "0"
+          }
+        ],
+        "excluded": [],
+        "unmeasured": [
+          "BaO",
+          "Cr2O3",
+          "Li2O",
+          "MnO",
+          "NiO",
+          "TiO2"
+        ],
+        "assumptions": [],
+        "parameters": {
+          "fe_mode": "reported_split",
+          "anion_basis": "ideal_O10_W2",
+          "oh_mode": "ideal_2_minus_f_cl"
+        }
+      }
+    ],
+    "can_save": false
+  },
+  "no_oh": {
+    "parameters": {
+      "fe_mode": "all_fe2",
+      "anion_basis": "ideal_O10_W2",
+      "oh_mode": "not_calculated"
+    },
+    "input_fingerprint": "b160be17e8316ffa311aa158bdeb9821980bcb6ddd51f9eed1b736f2f9a1c7c2",
+    "results": [
+      {
+        "analysis_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+        "method_id": "mica.charge22",
+        "method_version": "0.1.0",
+        "method_status": "draft",
+        "status": "current",
+        "errors": [],
+        "warnings": [
+          "Неизмеренные дополнительные компоненты перечислены отдельно; APFU относится к доступному составу.",
+          "Li не измерен; Li-содержащие слюды могут иметь неполную формулу.",
+          "Метод draft: независимая проверка на природных составах ещё не выполнена."
+        ],
+        "values": {
+          "Si_apfu": 3.0000000000000004,
+          "Al_apfu": 1,
+          "Mg_apfu": 3,
+          "Ca_apfu": 0,
+          "Na_apfu": 0,
+          "K_apfu": 1,
+          "Fe2_apfu": 0,
+          "F_apfu": 0,
+          "Cl_apfu": 0,
+          "cation_sum": 8,
+          "oxide_total": 95.68248596777981
+        },
+        "used": [
+          {
+            "measurement_id": "2a7e78cb-322f-44f5-b437-66f15327fd04",
+            "field": "SiO2",
+            "raw_token": "43.19886687724983"
+          },
+          {
+            "measurement_id": "cc2e4e95-709e-4114-beb9-91343ac8ad55",
+            "field": "Al2O3",
+            "raw_token": "12.218097369947321"
+          },
+          {
+            "measurement_id": "2729eef8-9c06-4259-86c5-dd7b76ac2f4a",
+            "field": "MgO",
+            "raw_token": "28.97803256529596"
+          },
+          {
+            "measurement_id": "fc4bde69-4b2e-4be0-9bc6-5cf6281f8963",
+            "field": "CaO",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "529a359d-5bfb-418e-b526-6f59d60af07c",
+            "field": "Na2O",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "857076ab-a98c-4883-bf29-b5523a9d8252",
+            "field": "K2O",
+            "raw_token": "11.287489155286707"
+          },
+          {
+            "measurement_id": "5daccb77-4c0f-43ce-a4ab-23112d127481",
+            "field": "FeO",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "8e48cb3d-59e1-47e2-8438-f8f4d8c4517a",
+            "field": "F",
+            "raw_token": "0"
+          },
+          {
+            "measurement_id": "08cc82a4-5d4a-4606-b608-ee386891b337",
+            "field": "Cl",
+            "raw_token": "0"
+          }
+        ],
+        "excluded": [],
+        "unmeasured": [
+          "BaO",
+          "Cr2O3",
+          "Li2O",
+          "MnO",
+          "NiO",
+          "TiO2"
+        ],
+        "assumptions": [
+          "Идеальная анионная группа O₁₀W₂, W = OH/F/Cl; 22 положительных заряда.",
+          "Сумма wt.% не нормировалась к 100%; F/Cl не входят в сумму катионных зарядов.",
+          "Без распределения по позициям, оценки вакансий, Li, номенклатуры и неопределённости.",
+          "Всё железо принято Fe²⁺; Fe³⁺ не определён.",
+          "OH не рассчитывался; неизвестные F/Cl не заменялись нулём."
+        ],
+        "parameters": {
+          "fe_mode": "all_fe2",
+          "anion_basis": "ideal_O10_W2",
+          "oh_mode": "not_calculated"
+        }
+      }
+    ],
+    "can_save": true
+  },
+  "analysis": {
+    "reported_mineral": {
+      "column": 1,
+      "confidence": "explicit_column",
+      "origin": "explicitly_reported",
+      "raw_header": "Mineral",
+      "raw_token": "phlogopite",
+      "row": 2,
+      "sheet_name": "mica",
+      "source_fingerprint": "92659976e1bb805c7c417d64376513d6b5290d2bb120a77d2c10b8cab4f47a26",
+      "value": "phlogopite"
+    },
+    "mineral_assignment": {
+      "decision_id": "f28ad587-2736-43ea-9339-5c85e0306ac1",
+      "target": "phlogopite",
+      "origin": "user_accepted_after_import",
+      "decision_kind": "manual_assignment",
+      "decided_at": "2026-09-14T09:58:14Z",
+      "input_fingerprint": "830492b1a99f514cf591fbe8f282421af6f2744ff6913faf948d38501e32d5f8",
+      "ruleset_version": "2026.08.5+alkaline-2026.08.1",
+      "reason": "Независимая проверка слюды"
+    },
+    "mineral_verification": {
+      "analysis_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+      "source_id": "db15f1b8-f295-4f86-a400-5b4d0ed8526c",
+      "source_name": "mica.csv",
+      "sheet_name": "mica",
+      "source_row_number": 2,
+      "source_column_number": null,
+      "preview_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+      "reported_mineral": "phlogopite",
+      "prediction": "trioctahedral mica",
+      "confidence": "high",
+      "candidates": [
+        {
+          "target": "trioctahedral mica",
+          "score": 9,
+          "reasons": [
+            "K-dominant Mg-Fe mica chemistry"
+          ]
+        }
+      ],
+      "input_fingerprint": "830492b1a99f514cf591fbe8f282421af6f2744ff6913faf948d38501e32d5f8",
+      "ruleset_version": "2026.08.5+alkaline-2026.08.1",
+      "input_gate_version": "import-wt-percent-complete-core-2",
+      "accepted": {
+        "decision_id": "f28ad587-2736-43ea-9339-5c85e0306ac1",
+        "target": "phlogopite",
+        "origin": "user_accepted_after_import",
+        "decision_kind": "manual_assignment",
+        "decided_at": "2026-09-14T09:58:14Z",
+        "input_fingerprint": "830492b1a99f514cf591fbe8f282421af6f2744ff6913faf948d38501e32d5f8",
+        "ruleset_version": "2026.08.5+alkaline-2026.08.1",
+        "reason": "Независимая проверка слюды"
+      },
+      "label_version": "mineral-labels-2026-09-11",
+      "missing_components": [],
+      "excluded_inputs": [],
+      "issues": [],
+      "status": "verified",
+      "reasons": [
+        "K-dominant Mg-Fe mica chemistry"
+      ],
+      "reference_version": "2026.08.2",
+      "catalog_hash": "7250afe9e91316cb42bdb27abf0c3e73f6b42254fcc62b535487618012cbdcf8",
+      "reported_target": "trioctahedral mica"
+    },
+    "analysis_id": "cfb71f1b-d9c5-44f1-93af-24e6ee6adc1d",
+    "source_name": "mica.csv",
+    "sheet_name": "mica",
+    "source_row_number": 2,
+    "source_column_number": null,
+    "source_orientation": "rows_are_analyses",
+    "identity": {
+      "Analysis": "Phl-1"
+    }
+  }
+}

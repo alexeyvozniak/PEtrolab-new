@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args) => bridge.invoke(...a
 import { App } from "../src/App";
 configure({ asyncUtilTimeout: 15000 });
 
-let child, folder, first, second, queue, original, pending, lines, requests;
+let child, folder, first, second, queue, original, pending, lines, requests, stopService;
 beforeEach(async () => {
   folder = await mkdtemp(join(tmpdir(), "petrolab-workspace-ui-"));
   first = join(folder, "first.csv"); second = join(folder, "second.csv");
@@ -26,13 +26,25 @@ beforeEach(async () => {
     env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8",
       PYTHONPATH: [resolve(process.cwd(), "../src"), process.env.PYTHONPATH].filter(Boolean).join(delimiter) },
   });
+  const service = child;
+  const callbacks = pending;
+  let closingService = false;
+  let stderr = '';
+  service.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); });
+  const rejectPending = error => {
+    for (const callback of callbacks.values()) callback.reject(error);
+    callbacks.clear();
+  };
+  service.on('error', rejectPending);
+  service.stdin.on('error', rejectPending);
+  service.on('exit', code => rejectPending(new Error(`Python service exited (${code}): ${stderr}`)));
+  stopService = () => { closingService = true; service.stdin.end(); };
   lines = createInterface({ input: child.stdout });
   lines.on("line", (line) => {
     const response = JSON.parse(line);
-    const callback = pending.get(response.request_id);
-    if (callback) { pending.delete(response.request_id); callback(response); }
+    const callback = callbacks.get(response.request_id);
+    if (callback) { callbacks.delete(response.request_id); callback.resolve(response); }
   });
-  child.on("error", (error) => { throw error; });
   bridge.invoke = async (command, args) => {
     if (command === "project_database_path") return join(folder, "project.sqlite");
     if (command === "pick_import_file") return queue.shift() || null;
@@ -40,17 +52,23 @@ beforeEach(async () => {
     if (command === "clear_import_staging") return;
     if (command !== "petrolab_command") throw new Error(command);
     requests.push(args.envelope);
-    return new Promise((resolve) => {
-      pending.set(args.envelope.request_id, resolve);
-      child.stdin.write(JSON.stringify(args.envelope) + "\n");
+    if (closingService || service.exitCode !== null) throw new Error('Python service is closed');
+    return new Promise((resolve, reject) => {
+      callbacks.set(args.envelope.request_id, { resolve, reject });
+      service.stdin.write(JSON.stringify(args.envelope) + "\n", error => {
+        if (error) { callbacks.delete(args.envelope.request_id); reject(error); }
+      });
     });
   };
   window.__TAURI_INTERNALS__ = { invoke: () => {} };
-});
+  // Wait for scientific imports/startup before timing user interactions on Windows.
+  await bridge.invoke('petrolab_command', { envelope: { protocol_version: '1.0',
+    request_id: crypto.randomUUID(), command: 'formula.methods.list', payload: {} } });
+}, 60000);
 
 afterEach(async () => {
   cleanup();
-  child.stdin.end();
+  stopService();
   await new Promise((resolve) => { if (child.exitCode !== null) resolve(); else child.once("exit", resolve); });
   lines.close();
   delete window.__TAURI_INTERNALS__;
@@ -164,3 +182,101 @@ test("real Python mineral review separates conflicts and persists only explicit 
   expect(screen.getAllByText("garnet").length).toBeGreaterThan(0);
   expect(await readFile(second, "utf8")).toBe(raw);
 }, 20000);
+
+test('real formula path saves APFU, reopens history and invalidates a changed Fe preview', async () => {
+  await writeFile(second, 'Analysis,Mineral,SiO2 (wt.%),Al2O3 (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%),FeO (wt.%)\nB1,olivine,40,0,50,0,0,0,10\n');
+  const raw = await readFile(second, 'utf8');
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+  await user.click(await enabledButton('2 · Проверить минералы'));
+  await user.click(await enabledButton('Принять группу совпадений'));
+  await user.click(await enabledButton('Сохранить импорт в проект'));
+  await screen.findByRole('heading', { name: 'Анализы' });
+  await user.click(await enabledButton('Минералы'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  await user.click(await enabledButton('Рассчитать формулу'));
+  const fe = screen.getByRole('combobox', { name: 'Режим железа', hidden: true });
+  expect(fe.value).toBe('all_fe2');
+  const calculated = await screen.findByRole('table', { name: 'Рассчитанные значения' });
+  expect(within(calculated).getByText('Fo')).toBeTruthy();
+  await user.click(await enabledButton('Сохранить результат формулы'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  await user.click(await enabledButton('Анализы'));
+  await user.click(await enabledButton('Минералы'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  await user.click(screen.getByText('Настроить расчёт', { selector: 'summary' }));
+  const restoredFe = screen.getByRole('combobox', { name: 'Режим железа' });
+  await user.selectOptions(restoredFe, 'all_fe2');
+  await user.click(await enabledButton('Рассчитать с этими настройками'));
+  await enabledButton('Сохранить результат формулы');
+  await user.selectOptions(restoredFe, 'reported_split');
+  expect(screen.queryByRole('button', { name: 'Сохранить результат формулы' })).toBeNull();
+  await user.click(await enabledButton('Рассчитать с этими настройками'));
+  await screen.findByText(/Fe2O3: нет пригодного/);
+  expect(screen.getByRole('button', { name: 'Сохранить результат формулы' }).disabled).toBe(true);
+  expect(requests.filter(r => r.command === 'formula.save')).toHaveLength(1);
+  expect(await readFile(second, 'utf8')).toBe(raw);
+}, 60000);
+
+test('real mica formula requires three choices, saves OH provenance and preserves choices after an error', async () => {
+  const mica = 'Analysis,Mineral,SiO2 (wt.%),Al2O3 (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%),FeO (wt.%),F (wt.%),Cl (wt.%)\nPhl-1,phlogopite,43.19886687724983,12.218097369947321,28.97803256529596,0,0,11.287489155286707,0,0,0\n';
+  await writeFile(second, mica);
+  const raw = await readFile(second, 'utf8');
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+  await user.click(await enabledButton('2 · Проверить минералы'));
+  await user.click(await enabledButton('Принять группу совпадений'));
+  await user.click(await enabledButton('Сохранить импорт в проект'));
+  await screen.findByRole('heading', { name: 'Анализы' });
+  await user.click(await enabledButton('Минералы'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  await user.click(await enabledButton('Рассчитать формулу'));
+  const quickResult = await screen.findByRole('table', { name: 'Рассчитанные значения' });
+  expect(within(quickResult).queryByText('OH (оценка)')).toBeNull();
+  await user.click(screen.getByText('Настроить расчёт', { selector: 'summary' }));
+  expect(screen.queryByRole('combobox', { name: 'Метод формулы' })).toBeNull();
+  const fe = screen.getByRole('combobox', { name: 'Режим железа' });
+  const basis = screen.getByRole('combobox', { name: 'Анионный базис' });
+  const oh = screen.getByRole('combobox', { name: 'Расчёт OH' });
+  expect(fe.value).toBe('all_fe2');
+  expect(basis.value).toBe('ideal_O10_W2');
+  expect(oh.value).toBe('not_calculated');
+  await user.selectOptions(oh, 'ideal_2_minus_f_cl');
+  await user.click(await enabledButton('Рассчитать с этими настройками'));
+  await screen.findByText('OH (оценка)');
+  expect(screen.getByLabelText('Основание оценки OH').textContent).toContain('F = 0 wt.%');
+  expect(screen.getByLabelText('Основание оценки OH').textContent).toContain('Cl = 0 wt.%');
+  await user.click(await enabledButton('Сохранить результат формулы'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  await user.click(await enabledButton('Анализы'));
+  await user.click(await enabledButton('Минералы'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  const historySummary = await screen.findByText(/Сохранён · Слюды · 22 заряда · bulk APFU · v0\.1\.0/, { selector: 'summary' });
+  await user.click(historySummary);
+  const history = historySummary.closest('details');
+  expect(within(history).getByText('Идеальная группа O₁₀W₂; нормировка на 22 положительных заряда')).toBeTruthy();
+  expect(within(history).getByText('Оценить OH = 2 − F − Cl по измеренным F и Cl')).toBeTruthy();
+  await user.click(screen.getByText('Настроить расчёт', { selector: 'summary' }));
+  const restoredFe = screen.getByRole('combobox', { name: 'Режим железа' });
+  const restoredBasis = screen.getByRole('combobox', { name: 'Анионный базис' });
+  const restoredOh = screen.getByRole('combobox', { name: 'Расчёт OH' });
+  await user.selectOptions(restoredFe, 'all_fe2');
+  await user.selectOptions(restoredBasis, 'ideal_O10_W2');
+  await user.selectOptions(restoredOh, 'ideal_2_minus_f_cl');
+  await user.click(await enabledButton('Рассчитать с этими настройками'));
+  await enabledButton('Сохранить результат формулы');
+  await user.selectOptions(restoredFe, 'reported_split');
+  expect(screen.queryByRole('button', { name: 'Сохранить результат формулы' })).toBeNull();
+  await user.click(await enabledButton('Рассчитать с этими настройками'));
+  await screen.findByText(/Fe2O3: нет пригодного/);
+  expect(restoredFe.value).toBe('reported_split');
+  expect(restoredBasis.value).toBe('ideal_O10_W2');
+  expect(restoredOh.value).toBe('ideal_2_minus_f_cl');
+  expect(await readFile(second, 'utf8')).toBe(raw);
+}, 60000);
