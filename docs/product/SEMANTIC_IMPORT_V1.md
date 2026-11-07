@@ -41,5 +41,5 @@ their absence in this cell-only preview is not interpreted as missing chemistry.
 
 Delivery boundary: v1 retains reported Sample labels, suggestions and source
 evidence but does not yet offer an existing-physical-Sample picker. These records
-remain explicitly unlinked. Multi-source atomic commit and disk draft restoration
-remain outside ADR 0014 v1. Neither is simulated by silently committing per source.
+remain explicitly unlinked. The later ADR 0014 workspace extension saves all
+included sources in one transaction and restores fingerprint-bound project drafts.

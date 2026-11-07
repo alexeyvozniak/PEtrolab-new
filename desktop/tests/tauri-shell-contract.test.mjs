@@ -59,6 +59,47 @@ test("desktop stages selected files locally before the scientific service reads 
   assert.match(workspace, /Отменить/);
 });
 
+test("desktop image import selects a batch with only supported raster extensions", async () => {
+  const shell = await read("src-tauri/src/lib.rs");
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/ImagesWorkspace.jsx");
+  assert.match(shell, /fn pick_media_files/);
+  assert.match(shell, /SUPPORTED_MEDIA_EXTENSIONS[^=]*= \["png", "jpg", "jpeg", "tif", "tiff", "bmp"\]/);
+  assert.match(shell, /\.pick_files\(\)/);
+  assert.match(api, /pick_media_files/);
+  assert.match(app, /inspectMediaSources\(paths\)/);
+  assert.match(api, /analytical_point\.list/);
+  assert.match(api, /media\.preview/);
+  assert.match(app, /listAnalyticalPoints\(databasePath\)/);
+  assert.match(workspace, /Подтвердить предложения/);
+  assert.match(workspace, /Подтвердить это назначение/);
+  assert.match(workspace, /Point ·/);
+  assert.match(workspace, /Rectangle/);
+  assert.match(workspace, /Square/);
+  assert.match(workspace, /Причина межобразцового исключения/);
+  assert.match(workspace, /Завершить импорт изображений/);
+  assert.match(workspace, /Исходные файлы не изменяются/);
+});
+
+test("desktop image import can collect a folder recursively without following links or accepting batch scripts", async () => {
+  const shell = await read("src-tauri/src/lib.rs");
+  const api = await read("src/desktopApi.js");
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/ImagesWorkspace.jsx");
+  assert.match(shell, /async fn pick_media_folder/);
+  assert.match(shell, /fn collect_media_folder/);
+  assert.match(shell, /file_type\.is_symlink\(\)/);
+  assert.match(shell, /pending\.push\(entry\.path\(\)\)/);
+  assert.match(shell, /MAX_MEDIA_BATCH_FILES/);
+  assert.match(shell, /supported_media_path/);
+  assert.doesNotMatch(shell.match(/SUPPORTED_MEDIA_EXTENSIONS[^;]+/)?.[0] || "", /bat/i);
+  assert.match(api, /pick_media_folder/);
+  assert.match(app, /pickMediaFolder\(\)/);
+  assert.match(workspace, /Выбрать папку/);
+  assert.match(workspace, /вложенными папками/);
+});
+
 test("adding import is transactional and keeps the existing queue on failure", async () => {
   const app = await read("src/App.jsx");
   assert.match(app, /newlyStaged && !accepted/);
@@ -79,7 +120,7 @@ test("Clean Table fast path is classified by Python and skips raw review by defa
   assert.match(workspace, /Таблица готова к импорту/);
   assert.match(workspace, /Импортировать таблицу/);
   assert.match(workspace, /Открыть подробную проверку/);
-  assert.match(workspace, /требует внимания/);
+  assert.match(workspace, /countNoun\(blockingIssueGroups\.length/);
   assert.match(workspace, /Clean Table v/);
 });
 
@@ -90,8 +131,9 @@ test("approved import workspace keeps source list, physical table, issue inspect
   const styles = await read("src/importWorkspace.css");
   assert.match(app, /<ImportWorkspace/);
   assert.match(workspace, /Файл и листы/);
-  assert.match(workspace, /Вопросы · \{issueGroups\.length\} типов/);
-  assert.match(workspace, /Исходный файл не изменится/);
+  assert.match(workspace, /blockingIssueGroups/);
+  assert.match(workspace, /import-advisories/);
+  assert.match(workspace, /import-field-settings/);
   assert.match(workspace, /activeBlockId/);
   assert.match(workspace, /focusedIssue=\{mineralFocus \|\| selectedIssue\}/);
   assert.match(workspace, /ImportMappingEditor/);
@@ -99,6 +141,18 @@ test("approved import workspace keeps source list, physical table, issue inspect
   assert.match(review, /Таблица не отображается/);
   assert.match(styles, /grid-template-columns: 210px minmax\(520px, 1fr\) 330px/);
   assert.match(styles, /import-workspace-footer/);
+});
+
+test("blocking import decisions are presented one at a time", async () => {
+  const workspace = await read("src/ImportWorkspace.jsx");
+  const editor = await read("src/ImportMappingEditor.jsx");
+  assert.match(workspace, /import-current-question/);
+  assert.doesNotMatch(workspace, /import-question-queue/);
+  assert.match(workspace, /blockingIssueGroups\.length === 0 && advisoryIssueGroups/);
+  assert.match(workspace, /blockingIssueGroups\.length === 0 && plan\.summary\.duplicate_candidate_groups/);
+  assert.match(editor, /guided = false/);
+  assert.match(editor, /focusedOnly = guided/);
+  assert.match(editor, /mapping-manual-toggle/);
 });
 
 test("raw block review precedes field mapping and supports transposed orientation", async () => {
@@ -115,7 +169,8 @@ test("raw block review precedes field mapping and supports transposed orientatio
   assert.match(workspace, /activeBlockId/);
   assert.match(workspace, /ImportMappingEditor/);
   assert.match(workspace, /анализы по столбцам/);
-  assert.match(workspace, /исходная таблица всегда должна быть видна в центре/);
+  assert.match(workspace, /import-table-pane/);
+  assert.match(review, /raw-preview-table/);
   assert.match(review, /По столбцам \(инвертировано\)/);
   assert.match(review, /STRUCTURE_DEBOUNCE_MS/);
   assert.match(review, /Изменения структуры применяются автоматически/);
@@ -126,9 +181,16 @@ test("raw block review precedes field mapping and supports transposed orientatio
   assert.match(review, /invalidState/);
 });
 
+test("Windows CI prepares icons before direct Cargo tests", async () => {
+  const workflow = await read("../.github/workflows/windows-test-build.yml");
+  const step = workflow.split("- name: Test Tauri shell")[1]?.split("- name:")[0];
+  assert.ok(step, "Cargo test step must exist");
+  assert.match(step, /python \.\.\/scripts\/generate_tauri_icon\.py[\s\S]*cargo test/);
+});
+
 test("mapping review exposes physical fields including blank headers", async () => {
   const editor = await read("src/ImportMappingEditor.jsx");
-  assert.match(editor, /Здесь показаны все физические поля выбранного блока/);
+  assert.match(editor, /showAll \? section\.mappings/);
   assert.match(editor, /Без заголовка/);
   assert.match(editor, /columnLetters/);
   assert.match(editor, /колонка \$\{index \+ 1\}/);
@@ -150,6 +212,9 @@ test("mapping edits are applied once in bulk per logical block", async () => {
   assert.match(editor, /source_index/);
   assert.match(editor, /at\.%/);
   assert.match(editor, /UNIT_REQUIRES_REVIEW/);
+  assert.match(editor, /FE_STRICTLY_REPORTED/);
+  assert.match(editor, /Форма железа/);
+  assert.match(editor, /исходные значения без пересчёта/);
   assert.match(editor, /Mineral/);
   assert.match(editor, /Generation/);
   assert.match(editor, /measurement_set/);
@@ -169,13 +234,22 @@ test("raw review groups repetitive issues and gets server-issued bulk unit scope
   assert.match(api, /import\.recipe\.bulk_ignore_scopes/);
   assert.match(api, /import\.recipe\.apply_bulk_ignore/);
   assert.match(app, /active.bulk_unit_scopes/);
+  assert.match(app, /active.bulk_unit_override_scopes/);
   assert.match(app, /kind: "unit", bulk_scope_id/);
+  assert.match(app, /kind: "unit_override", bulk_scope_id/);
   assert.match(app, /kind: "ignore", bulk_scope_id/);
-  assert.match(workspace, /Групповые решения/);
+  assert.match(workspace, /item\.bulk_scope_id/);
+  assert.match(workspace, /Какая единица у этих измерений/);
+  assert.match(workspace, /Автоопределение единицы неверно/);
+  assert.match(workspace, /Какая единица правильная/);
+  assert.match(workspace, /groupedUnitTargets/);
   assert.match(workspace, /REPEATABLE_ISSUE_CODES/);
   assert.match(workspace, /groupIssues/);
-  assert.match(workspace, /одинаковой физической структурой/);
-  assert.match(workspace, /Не импортировать все нераспознанные поля/);
+  assert.match(workspace, /import-advisories/);
+  assert.match(workspace, /activeBulkIgnoreScopes/);
+  assert.match(workspace, /Что делать с нераспознанными полями/);
+  assert.match(workspace, /Не импортировать \{countNoun\(scope\.field_count/);
+  assert.doesNotMatch(workspace, /Не импортировать все нераспознанные поля/);
 });
 
 test("analyses view exposes source metadata, method context and truthful physical origin", async () => {
@@ -205,6 +279,26 @@ test("analyses view exposes mineral identification status and evidence", async (
   assert.match(workspace, /ruleset_version/);
   assert.match(workspace, /mineralStatusFilter/);
   assert.match(styles, /analysis-mineral-review/);
+});
+
+test("dedicated mineral queue keeps reported, suggested and accepted values separate", async () => {
+  const app = await read("src/App.jsx");
+  const workspace = await read("src/MineralsWorkspace.jsx");
+  const api = await read("src/desktopApi.js");
+  const styles = await read("src/mineralsWorkspace.css");
+  assert.match(app, /<MineralsWorkspace/);
+  assert.match(app, /analyses: mergeAnalysesById\(current\.analyses, enriched\.analyses\)/,
+    'loading a page must not duplicate an analysis previously fetched by exact ID');
+  assert.match(workspace, /Требуют решения/);
+  assert.match(workspace, /В источнике/);
+  assert.match(workspace, /Предложение/);
+  assert.match(workspace, /Принято/);
+  assert.match(workspace, /Принять предложение/);
+  assert.match(workspace, /Оставить исходное/);
+  assert.match(workspace, /Сбросить решение/);
+  assert.match(api, /project\.mineral_assignment\.decide/);
+  assert.match(styles, /grid-template-columns: \d+px minmax\(0, 1fr\) \d+px/);
+  assert.match(styles, /\.mineral-review-pane \{ overflow: auto/);
 });
 
 test("duplicate candidates require explicit keep-all review before save", async () => {
@@ -249,10 +343,17 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
   assert.match(api, /isPetrolabDesktop/);
   assert.match(api, /preview предназначен только для проверки интерфейса/);
   assert.match(api, /media\.inspect_sources/);
+  assert.match(api, /media\.list/);
   assert.match(api, /project\.mineral_identification\.list/);
+  assert.match(api, /project\.mineral_assignment\.decide/);
   assert.match(api, /media\.import\.plan/);
   assert.match(api, /media\.import\.apply/);
   assert.match(api, /analytical_point\.create/);
+  assert.match(api, /analytical_point\.retire/);
+  assert.match(api, /analytical_point\.analysis\.add/);
+  assert.match(api, /analytical_point\.analysis\.remove/);
+  assert.match(api, /operation_journal\.list/);
+  assert.match(api, /operation_journal\.undo/);
 });
 
 test("Windows release gate installs and launches the packaged application", async () => {
@@ -262,18 +363,20 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(workflow, /Install and launch packaged Windows app/);
   assert.match(workflow, /smoke_windows_installer\.ps1/);
   assert.match(workflow, /npm run test:ui/);
+  assert.match(workflow, /Test Tauri shell/);
+  assert.match(workflow, /cargo test --manifest-path src-tauri\/Cargo\.toml/);
   assert.match(smoke, /msiexec\.exe/);
   assert.match(smoke, /MainWindowHandle/);
   assert.match(smoke, /petrolab-service/);
   assert.match(smoke, /petrolab-v2\.sqlite/);
   assert.match(smoke, /Installed PetroLab smoke test passed/);
   assert.match(uiSmoke, /user clicks through Clean Table import/);
-  assert.match(uiSmoke, /complex import always shows the source table/);
+  assert.match(uiSmoke, /complex import keeps the source table visible beside one current question/);
   assert.match(uiSmoke, /Выбрать файл/);
   assert.match(uiSmoke, /Импортировать таблицу/);
   assert.match(uiSmoke, /UI-1/);
   assert.match(uiSmoke, /Windows UI smoke/);
-  assert.match(uiSmoke, /applyImportPlan/);
+  assert.match(uiSmoke, /commitImportWorkspace/);
 });
 
 test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {
@@ -287,7 +390,26 @@ test("Tauri config keeps the approved desktop minimum window size and version al
   assert.equal(config.app.windows[0].minHeight, 800);
   assert.deepEqual(config.bundle.resources, ["binaries/petrolab-service.exe"]);
   assert.deepEqual(config.bundle.icon, ["icons/icon.ico"]);
+  assert.match(config.build.beforeDevCommand, /generate_tauri_icon\.py/);
+  assert.match(config.build.beforeDevCommand, /npm run dev:tauri/);
   assert.match(config.build.beforeBuildCommand, /generate_tauri_icon\.py/);
+});
+
+test("locked Cargo Tauri family stays on the npm API major/minor", async () => {
+  const cargo = await read("src-tauri/Cargo.toml");
+  const cargoLock = await read("src-tauri/Cargo.lock");
+  const lock = JSON.parse(await read("package-lock.json"));
+  const apiVersion = lock.packages["node_modules/@tauri-apps/api"].version;
+  const apiMajorMinor = apiVersion.split(".").slice(0, 2).join(".");
+  const rustVersion = cargo.match(/^tauri = \{ version = "~(\d+\.\d+)\.0"/m)?.[1];
+  assert.equal(rustVersion, apiMajorMinor,
+    "Cargo must constrain tauri to the same major/minor as the locked @tauri-apps/api");
+  const resolved = new Map([...cargoLock.matchAll(/\[\[package\]\]\s*name = "([^"]+)"\s*version = "([^"]+)"/g)]
+    .map(([, name, version]) => [name, version]));
+  for (const name of ["tauri", "tauri-runtime", "tauri-runtime-wry"]) {
+    assert.equal(resolved.get(name)?.split(".").slice(0, 2).join("."), apiMajorMinor,
+      `${name} in Cargo.lock must stay on the npm API major/minor`);
+  }
 });
 
 test("compact import reserves space for physical rows and accessible range actions", async () => {

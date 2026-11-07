@@ -9,6 +9,7 @@ All M1.1 commands are read-only. `source_fingerprint` is SHA-256 of the exact in
 | `import.plan.create` | immutable planned Analysis/Measurement counts, source-row provenance, warnings, exact duplicate candidates | any blocking validation error; ambiguous column mapped twice; invalid sample/point assignment | excluded blank rows; values below detection limit retained with qualifier; rows awaiting user assignment |
 | `import.recipe.bulk_scopes` | service-issued groups of unresolved measurement fields with an identical physical-field signature | invalid recipe or source fingerprint | no source or project write |
 | `import.recipe.apply_bulk_unit` | revised immutable recipe after one explicit unit decision for one scope | `STALE_BULK_SCOPE`; unknown unit; recipe/source mismatch | no project write; scope is recomputed before application |
+| `import.workspace.apply_bulk_decision` with `unit_override` | revised workspace recipe for an exact service-issued group that shares the current unit, orientation and compatible Fe semantics | `STALE_BULK_SCOPE`; unknown unit; recipe/source mismatch | no source/project write; exact field and sheet counts are projected before confirmation |
 | `import.recipe.bulk_ignore_scopes` | service-issued exact set of all currently unresolved unrecognized fields; measurement candidates are excluded | invalid recipe or source fingerprint | no source or project write |
 | `import.recipe.apply_bulk_ignore` | revised immutable recipe after one explicit exclude decision for one exact repeated group | `STALE_BULK_SCOPE`; recipe/source mismatch | no project write; source values remain in the immutable source file |
 
@@ -17,6 +18,20 @@ Stable error codes: `SOURCE_UNREADABLE`, `SOURCE_FINGERPRINT_MISMATCH`, `WORKBOO
 Non-blocking XLSX inspection warnings are `HIDDEN_ROWS`, `MERGED_HEADERS`, and `FORMULA_WITHOUT_CACHED_VALUE`. Each names the affected sheet and exact rows, ranges or cell addresses so the UI can route the user to the decision without guessing.
 
 ## Transport envelope
+
+Formula catalog extension (ADR-0026): `formula.methods.list` supports either
+legacy optional `accepted_assignment` or explicit `project_database_path` plus
+`analysis_ids` (1–100 unique IDs), never both. Scoped response retains exact
+`analysis_ids`, common installed `methods`, `scope_issues` with ID/identity/message/
+`can_review`, and `scope_message` when no common method exists. Accepted targets
+are reread from project truth, not supplied by React. No ID is dropped.
+`formula.preview`/`formula.save` keep the existing atomic whole-scope semantics;
+bad rows are results, not silent exclusions. `FORMULA_SCOPE_INVALID` rejects
+101 IDs; `FORMULA_ASSIGNMENT_INVALID` rejects mixed scoped/label catalog input.
+`project.mineral_identification.list` also accepts optional exact `analysis_ids`
+using the same project projection bound as `project.analyses.list`. Explicit IDs
+override page/offset; an unloaded selected issue can be fetched and reviewed
+with real verification fingerprint/ruleset without clearing Selection.
 
 The Tauri shell sends exactly one UTF-8 JSON object per stdin line to the Python child. Every normal command has `protocol_version: "1.0"`, a UUID `request_id`, `command`, and an object `payload`. The response repeats `protocol_version` and `request_id`, then contains exactly one of `result` or `error`. It has no traceback. Transport errors are `INVALID_REQUEST`, `UNKNOWN_COMMAND`, `PROTOCOL_VERSION_UNSUPPORTED`, and `INTERNAL_ERROR`.
 

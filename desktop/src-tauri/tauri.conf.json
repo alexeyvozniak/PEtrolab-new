@@ -4,7 +4,7 @@
   "version": "0.1.7",
   "identifier": "org.petrolab.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev:tauri",
+    "beforeDevCommand": "python ../scripts/generate_tauri_icon.py && npm run dev:tauri",
     "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "python ../scripts/generate_tauri_icon.py && npm run build",
     "frontendDist": "../dist/client"

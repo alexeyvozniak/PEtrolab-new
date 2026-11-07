@@ -6,14 +6,19 @@ changes source pixels, and it deliberately does not know about viewport zoom.
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import json
+import re
 import shutil
 import sqlite3
 import struct
 import uuid
 from pathlib import Path
 from typing import Any, Iterable
+
+from PIL import Image, UnidentifiedImageError
 
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
@@ -42,6 +47,30 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _filename_suggestions(path: Path) -> dict[str, Any]:
+    """Return conservative, review-only assignments inferred from a filename."""
+    stem = path.stem.strip()
+    modality = re.search(r"(?:^|[_\-\s])(BSE|PPL|XPL)(?=$|[_\-\s])", stem, re.IGNORECASE)
+    media_type = modality.group(1).upper() if modality else None
+    prefix = stem[:modality.start()].rstrip("_- ") if modality else ""
+    parts = [part for part in re.split(r"[_\s]+", prefix) if part]
+    sample_name = parts[0] if parts else None
+    thin_section_name = "-".join(parts) if len(parts) >= 2 else None
+    basis: list[str] = []
+    if media_type:
+        basis.append("filename_modality_token")
+    if sample_name:
+        basis.append("filename_prefix")
+    if thin_section_name:
+        basis.append("filename_section_prefix")
+    return {
+        "suggested_media_type": media_type,
+        "suggested_sample_name": sample_name,
+        "suggested_thin_section_name": thin_section_name,
+        "suggestion_basis": basis,
+    }
 
 
 def _png_dimensions(path: Path) -> tuple[int, int]:
@@ -142,6 +171,7 @@ def inspect_media_source(source_path: str | Path) -> dict[str, Any]:
         "format": format_name,
         "width_px": width,
         "height_px": height,
+        **_filename_suggestions(path),
     }
 
 
@@ -155,6 +185,40 @@ def inspect_media_sources(source_paths: Iterable[str | Path]) -> dict[str, Any]:
         by_fingerprint.setdefault(item["source_fingerprint"], []).append(item["source_path"])
     duplicate_groups = [group for group in by_fingerprint.values() if len(group) > 1]
     return {"items": items, "duplicate_groups": duplicate_groups}
+
+
+def create_media_preview(source_path: str | Path, max_width_px: int = 1600, max_height_px: int = 1200) -> dict[str, Any]:
+    """Return a bounded PNG preview without changing source pixels or orientation.
+
+    The preview intentionally preserves the source pixel axes.  EXIF orientation
+    is not applied because manual placements are persisted in those source axes.
+    """
+    if not isinstance(max_width_px, int) or not isinstance(max_height_px, int):
+        _fail("INVALID_PREVIEW_SIZE", "Preview dimensions must be integers.")
+    if not (128 <= max_width_px <= 2400 and 128 <= max_height_px <= 2400):
+        _fail("INVALID_PREVIEW_SIZE", "Preview dimensions must be between 128 and 2400 pixels.")
+    inspection = inspect_media_source(source_path)
+    try:
+        with Image.open(inspection["source_path"]) as source:
+            source.load()
+            preview = source.copy()
+    except (OSError, UnidentifiedImageError) as error:
+        _fail("MEDIA_UNREADABLE", "Image pixels cannot be decoded for preview.", path=inspection["source_path"], reason=str(error))
+    preview.thumbnail((max_width_px, max_height_px), Image.Resampling.LANCZOS)
+    if preview.mode not in {"RGB", "RGBA"}:
+        preview = preview.convert("RGB")
+    buffer = io.BytesIO()
+    preview.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return {
+        "source_path": inspection["source_path"],
+        "source_fingerprint": inspection["source_fingerprint"],
+        "source_width_px": inspection["width_px"],
+        "source_height_px": inspection["height_px"],
+        "preview_width_px": preview.width,
+        "preview_height_px": preview.height,
+        "preview_data_url": f"data:image/png;base64,{encoded}",
+    }
 
 
 def _text(value: Any, field: str, max_length: int = 200) -> str:
@@ -183,15 +247,341 @@ def _read_connection(database_path: str | Path) -> sqlite3.Connection:
     return connection
 
 
+def _method_label(raw: Any) -> str | None:
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if isinstance(value, dict) and isinstance(value.get("value"), str) and value["value"].strip():
+        return value["value"].strip()
+    return None
+
+
+def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
+    return connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+    ).fetchone() is not None
+
+
+def _point_scope(connection: sqlite3.Connection, point_id: str) -> dict[str, list[str]]:
+    point = connection.execute(
+        "SELECT 1 FROM analytical_point WHERE analytical_point_id = ?", (point_id,)
+    ).fetchone()
+    if point is None:
+        _fail("POINT_NOT_FOUND", "Analytical Point does not exist.", analytical_point_id=point_id)
+    analysis_ids = sorted(row[0] for row in connection.execute(
+        "SELECT analysis_id FROM analytical_point_analysis WHERE analytical_point_id = ?", (point_id,)
+    ))
+    placements = connection.execute(
+        """SELECT apa.spatial_annotation_id, sa.media_asset_id
+           FROM analytical_point_annotation apa
+           JOIN spatial_annotation sa ON sa.spatial_annotation_id = apa.spatial_annotation_id
+           WHERE apa.analytical_point_id = ?
+           ORDER BY apa.spatial_annotation_id""",
+        (point_id,),
+    ).fetchall()
+    return {
+        "analytical_point_ids": [point_id],
+        "analysis_ids": analysis_ids,
+        "spatial_annotation_ids": [row["spatial_annotation_id"] for row in placements],
+        "media_asset_ids": sorted({row["media_asset_id"] for row in placements}),
+    }
+
+
+def _write_journal_entry(
+    connection: sqlite3.Connection,
+    action_kind: str,
+    actor: str,
+    scope: dict[str, list[str]],
+    parameters: dict[str, Any],
+    inverse_action_kind: str | None,
+    inverse_payload: dict[str, Any] | None,
+    timestamp: str,
+    outcome: str = "applied",
+) -> dict[str, Any]:
+    operation_id = _id()
+    connection.execute(
+        """INSERT INTO operation_journal_entry
+           (operation_id, action_kind, actor, entity_type, entity_ids_json,
+            parameters_json, outcome, inverse_action_kind, inverse_payload_json,
+            undone_by_operation_id, created_at)
+           VALUES (?, ?, ?, 'analytical_point', ?, ?, ?, ?, ?, NULL, ?)""",
+        (
+            operation_id,
+            action_kind,
+            actor,
+            json.dumps(scope, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            json.dumps(parameters, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            outcome,
+            inverse_action_kind,
+            json.dumps(inverse_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")) if inverse_payload is not None else None,
+            timestamp,
+        ),
+    )
+    return {
+        "operation_id": operation_id,
+        "action_kind": action_kind,
+        "actor": actor,
+        "entity_type": "analytical_point",
+        "entity_ids": scope,
+        "parameters": parameters,
+        "outcome": outcome,
+        "inverse_action_kind": inverse_action_kind,
+        "inverse_payload": inverse_payload,
+        "undone_by_operation_id": None,
+        "created_at": timestamp,
+    }
+
+
+def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
+    """Project Analytical Points for manual media placement.
+
+    Returned rows keep stable IDs and imported analysis evidence.  The UI may
+    filter by Sample, but a cross-Sample candidate is never hidden from the
+    service and never becomes linked without the explicit reason enforced by
+    ``create_media_import_plan``.
+    """
+    connection = _read_connection(database_path)
+    try:
+        active_clause = """
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM analytical_point_retraction apr
+                   WHERE apr.analytical_point_id = ap.analytical_point_id
+               )""" if _table_exists(connection, "analytical_point_retraction") else ""
+        rows = connection.execute(
+            f"""SELECT ap.analytical_point_id, ap.point_name, ap.created_at,
+                      s.sample_id, s.sample_name, apa.analysis_id, apa.link_type,
+                      ais.analytical_method_json, a.sheet_name, a.source_row_number,
+                      a.source_column_number, a.source_orientation,
+                      sf.display_name AS source_name
+               FROM analytical_point ap
+               JOIN sample s ON s.sample_id = ap.sample_id
+               LEFT JOIN analytical_point_analysis apa ON apa.analytical_point_id = ap.analytical_point_id
+               LEFT JOIN analysis a ON a.analysis_id = apa.analysis_id
+               LEFT JOIN source_file sf ON sf.source_id = a.source_id
+               LEFT JOIN analysis_import_semantics ais ON ais.analysis_id = apa.analysis_id
+               {active_clause}
+               ORDER BY lower(s.sample_name), lower(ap.point_name), apa.analysis_id"""
+        ).fetchall()
+        placement_counts = {
+            row["analytical_point_id"]: row["placement_count"]
+            for row in connection.execute(
+                """SELECT analytical_point_id, COUNT(*) AS placement_count
+                   FROM analytical_point_annotation GROUP BY analytical_point_id"""
+            )
+        }
+        by_id: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            item = by_id.setdefault(row["analytical_point_id"], {
+                "analytical_point_id": row["analytical_point_id"],
+                "point_name": row["point_name"],
+                "sample_id": row["sample_id"],
+                "sample_name": row["sample_name"],
+                "analysis_ids": [],
+                "analysis_members": [],
+                "methods": [],
+                "link_types": [],
+                "placement_count": placement_counts.get(row["analytical_point_id"], 0),
+                "placements": [],
+                "created_at": row["created_at"],
+            })
+            if row["analysis_id"] is not None:
+                item["analysis_ids"].append(row["analysis_id"])
+                method = _method_label(row["analytical_method_json"])
+                item["analysis_members"].append({
+                    "analysis_id": row["analysis_id"],
+                    "method": method,
+                    "source_name": row["source_name"],
+                    "sheet_name": row["sheet_name"],
+                    "source_row_number": row["source_row_number"],
+                    "source_column_number": row["source_column_number"],
+                    "source_orientation": row["source_orientation"],
+                })
+                if method and method not in item["methods"]:
+                    item["methods"].append(method)
+            if row["link_type"] and row["link_type"] not in item["link_types"]:
+                item["link_types"].append(row["link_type"])
+        items = list(by_id.values())
+        for item in items:
+            item["link_types"].sort()
+        for row in connection.execute(
+            """SELECT apa.analytical_point_id, apa.spatial_annotation_id,
+                      apa.cross_sample_exception, apa.exception_reason,
+                      apa.created_at AS linked_at,
+                      sa.media_asset_id, sa.geometry_kind, sa.x_px, sa.y_px,
+                      sa.width_px, sa.height_px, sa.image_width_px,
+                      sa.image_height_px, ma.display_name, ma.media_type,
+                      ts.thin_section_id, ts.thin_section_name
+               FROM analytical_point_annotation apa
+               JOIN spatial_annotation sa ON sa.spatial_annotation_id = apa.spatial_annotation_id
+               JOIN media_asset ma ON ma.media_asset_id = sa.media_asset_id
+               JOIN thin_section ts ON ts.thin_section_id = sa.thin_section_id
+               ORDER BY lower(ma.display_name), apa.spatial_annotation_id"""
+        ):
+            point = by_id.get(row["analytical_point_id"])
+            if point is None:
+                continue
+            geometry = {
+                "kind": row["geometry_kind"],
+                "x_px": row["x_px"],
+                "y_px": row["y_px"],
+            }
+            if row["geometry_kind"] != "point":
+                geometry.update({"width_px": row["width_px"], "height_px": row["height_px"]})
+            point["placements"].append({
+                "spatial_annotation_id": row["spatial_annotation_id"],
+                "media_asset_id": row["media_asset_id"],
+                "media_display_name": row["display_name"],
+                "media_type": row["media_type"],
+                "thin_section_id": row["thin_section_id"],
+                "thin_section_name": row["thin_section_name"],
+                "geometry": geometry,
+                "image_width_px": row["image_width_px"],
+                "image_height_px": row["image_height_px"],
+                "cross_sample_exception": bool(row["cross_sample_exception"]),
+                "exception_reason": row["exception_reason"],
+                "linked_at": row["linked_at"],
+            })
+        return {
+            "total": len(items),
+            "sample_names": sorted({item["sample_name"] for item in items}, key=str.casefold),
+            "items": items,
+        }
+    finally:
+        connection.close()
+
+
+def _media_library_filter(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value.strip()) > 200:
+        _fail("INVALID_FILTER", f"{field} must be text of at most 200 characters.", field=field)
+    return value.strip() or None
+
+
+def _media_asset_availability(project_root: Path, asset: sqlite3.Row) -> str:
+    """Describe whether an asset can be opened without exposing local paths."""
+    if asset["source_kind"] == "managed_copy":
+        relative_path = asset["managed_relative_path"]
+        if not isinstance(relative_path, str) or not relative_path:
+            return "managed_missing"
+        try:
+            managed_path = (project_root / relative_path).resolve()
+            if not managed_path.is_relative_to(project_root.resolve()):
+                return "managed_missing"
+        except OSError:
+            return "managed_missing"
+        return "available" if managed_path.is_file() else "managed_missing"
+    if asset["source_kind"] == "linked_reference":
+        linked_path = asset["linked_path"]
+        return "available" if isinstance(linked_path, str) and Path(linked_path).is_file() else "external_missing"
+    return "source_unknown"
+
+
+def list_media_assets(
+    database_path: str | Path,
+    query: str | None = None,
+    sample_name: str | None = None,
+    limit: int = 500,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """List the persisted image library without returning filesystem locations.
+
+    Availability is evaluated at read time: a managed copy should be inside the
+    project media directory, while a linked reference may disappear outside the
+    project.  Callers receive an actionable state, never a raw source path.
+    """
+    query = _media_library_filter(query, "query")
+    sample_name = _media_library_filter(sample_name, "sample_name")
+    if not isinstance(limit, int) or not 1 <= limit <= 500:
+        _fail("INVALID_FILTER", "limit must be an integer between 1 and 500.", field="limit")
+    if not isinstance(offset, int) or offset < 0:
+        _fail("INVALID_FILTER", "offset must be a non-negative integer.", field="offset")
+
+    connection = _read_connection(database_path)
+    try:
+        if not _table_exists(connection, "media_asset"):
+            return {"total": 0, "returned": 0, "offset": offset, "has_more": False, "sample_names": [], "items": []}
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if query:
+            escaped_query = query.casefold().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            clauses.append("lower(ma.display_name) LIKE ? ESCAPE '\\'")
+            parameters.append(f"%{escaped_query}%")
+        if sample_name:
+            clauses.append("lower(s.sample_name) = lower(?)")
+            parameters.append(sample_name)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        total = connection.execute(
+            f"""SELECT COUNT(*) FROM media_asset ma
+                 JOIN sample s ON s.sample_id = ma.sample_id
+                 {where}""",
+            parameters,
+        ).fetchone()[0]
+        rows = connection.execute(
+            f"""SELECT ma.media_asset_id, ma.source_kind, ma.display_name,
+                       ma.linked_path, ma.managed_relative_path, ma.media_type,
+                       ma.mime_type, ma.width_px, ma.height_px, ma.created_at,
+                       s.sample_id, s.sample_name,
+                       ts.thin_section_id, ts.thin_section_name,
+                       (SELECT COUNT(*) FROM spatial_annotation sa
+                        WHERE sa.media_asset_id = ma.media_asset_id) AS placement_count
+                FROM media_asset ma
+                JOIN sample s ON s.sample_id = ma.sample_id
+                JOIN thin_section ts ON ts.thin_section_id = ma.thin_section_id
+                {where}
+                ORDER BY lower(ma.display_name), ma.media_asset_id
+                LIMIT ? OFFSET ?""",
+            [*parameters, limit, offset],
+        ).fetchall()
+        items = [{
+            "media_asset_id": row["media_asset_id"],
+            "display_name": row["display_name"],
+            "storage_mode": "managed_copy" if row["source_kind"] == "managed_copy" else "linked_external",
+            "availability": _media_asset_availability(Path(database_path).resolve().parent, row),
+            "media_type": row["media_type"],
+            "mime_type": row["mime_type"],
+            "width_px": row["width_px"],
+            "height_px": row["height_px"],
+            "sample_id": row["sample_id"],
+            "sample_name": row["sample_name"],
+            "thin_section_id": row["thin_section_id"],
+            "thin_section_name": row["thin_section_name"],
+            "placement_count": row["placement_count"],
+            "created_at": row["created_at"],
+        } for row in rows]
+        sample_names = [row[0] for row in connection.execute(
+            """SELECT DISTINCT s.sample_name FROM media_asset ma
+               JOIN sample s ON s.sample_id = ma.sample_id
+               ORDER BY lower(s.sample_name)"""
+        )]
+        return {
+            "total": total,
+            "returned": len(items),
+            "offset": offset,
+            "has_more": offset + len(items) < total,
+            "sample_names": sample_names,
+            "items": items,
+        }
+    finally:
+        connection.close()
+
+
 def create_analytical_point(
     database_path: str | Path,
     sample_name: str,
     point_name: str,
     analysis_ids: list[str],
     link_type: str,
+    actor: str = "local-desktop-user",
 ) -> dict[str, Any]:
     sample_name = _text(sample_name, "sample_name")
     point_name = _text(point_name, "point_name")
+    actor = _text(actor, "actor")
     if link_type not in LINK_TYPES:
         _fail("INVALID_ASSIGNMENT", "Analytical Point link type is unsupported.", link_type=link_type)
     if len(set(analysis_ids)) < 2 or len(set(analysis_ids)) != len(analysis_ids):
@@ -219,7 +609,532 @@ def create_analytical_point(
                 "INSERT INTO analytical_point_analysis (analytical_point_id, analysis_id, link_type, created_at) VALUES (?, ?, ?, ?)",
                 [(point_id, analysis_id, link_type, timestamp) for analysis_id in normalized_ids],
             )
-        return {"analytical_point_id": point_id, "sample_id": sample_id, "sample_name": sample_name, "point_name": point_name, "analysis_ids": normalized_ids, "link_type": link_type}
+            scope = _point_scope(connection, point_id)
+            operation = _write_journal_entry(
+                connection,
+                "analytical_point.create",
+                actor,
+                scope,
+                {"sample_name": sample_name, "point_name": point_name, "link_type": link_type},
+                "analytical_point.retire",
+                {
+                    "analytical_point_id": point_id,
+                    "expected_analysis_ids": scope["analysis_ids"],
+                    "expected_spatial_annotation_ids": scope["spatial_annotation_ids"],
+                },
+                timestamp,
+            )
+        return {"analytical_point_id": point_id, "sample_id": sample_id, "sample_name": sample_name, "point_name": point_name, "analysis_ids": normalized_ids, "link_type": link_type, "operation": operation}
+    finally:
+        connection.close()
+
+
+def _expected_uuid_list(value: Any, field: str) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        _fail("INVALID_ASSIGNMENT", f"{field} must be an array of UUIDs.", field=field)
+    normalized = [_uuid(item, field) for item in value]
+    if len(normalized) != len(set(normalized)):
+        _fail("INVALID_ASSIGNMENT", f"{field} cannot contain duplicates.", field=field)
+    return sorted(normalized)
+
+
+def retire_analytical_point(
+    database_path: str | Path,
+    analytical_point_id: str,
+    expected_analysis_ids: list[str],
+    expected_spatial_annotation_ids: list[str],
+    reason: str,
+    actor: str = "local-desktop-user",
+) -> dict[str, Any]:
+    point_id = _uuid(analytical_point_id, "analytical_point_id")
+    expected_analyses = _expected_uuid_list(expected_analysis_ids, "expected_analysis_ids")
+    expected_annotations = _expected_uuid_list(expected_spatial_annotation_ids, "expected_spatial_annotation_ids")
+    reason = _text(reason, "reason", 500)
+    actor = _text(actor, "actor")
+    connection = open_project(database_path)
+    try:
+        point = connection.execute(
+            """SELECT ap.point_name, s.sample_name
+               FROM analytical_point ap JOIN sample s ON s.sample_id = ap.sample_id
+               WHERE ap.analytical_point_id = ?""",
+            (point_id,),
+        ).fetchone()
+        if point is None:
+            _fail("POINT_NOT_FOUND", "Analytical Point does not exist.", analytical_point_id=point_id)
+        if connection.execute(
+            "SELECT 1 FROM analytical_point_retraction WHERE analytical_point_id = ?", (point_id,)
+        ).fetchone():
+            _fail("POINT_ALREADY_RETRACTED", "Analytical Point link is already retracted.", analytical_point_id=point_id)
+        scope = _point_scope(connection, point_id)
+        if scope["analysis_ids"] != expected_analyses or scope["spatial_annotation_ids"] != expected_annotations:
+            _fail(
+                "POINT_REVISION_CONFLICT",
+                "Analytical Point membership or placement changed after review.",
+                analytical_point_id=point_id,
+                current_analysis_ids=scope["analysis_ids"],
+                current_spatial_annotation_ids=scope["spatial_annotation_ids"],
+            )
+        timestamp = _now()
+        with connection:
+            operation = _write_journal_entry(
+                connection,
+                "analytical_point.retire",
+                actor,
+                scope,
+                {"reason": reason, "sample_name": point["sample_name"], "point_name": point["point_name"]},
+                "analytical_point.restore",
+                {"analytical_point_id": point_id, "expected_scope": scope},
+                timestamp,
+            )
+            connection.execute(
+                "INSERT INTO analytical_point_retraction (analytical_point_id, operation_id, reason, created_at) VALUES (?, ?, ?, ?)",
+                (point_id, operation["operation_id"], reason, timestamp),
+            )
+        return {
+            "analytical_point_id": point_id,
+            "sample_name": point["sample_name"],
+            "point_name": point["point_name"],
+            "operation": operation,
+        }
+    finally:
+        connection.close()
+
+
+def _active_point_metadata(connection: sqlite3.Connection, point_id: str) -> sqlite3.Row:
+    point = connection.execute(
+        """SELECT ap.point_name, s.sample_name
+           FROM analytical_point ap JOIN sample s ON s.sample_id = ap.sample_id
+           WHERE ap.analytical_point_id = ?""",
+        (point_id,),
+    ).fetchone()
+    if point is None:
+        _fail("POINT_NOT_FOUND", "Analytical Point does not exist.", analytical_point_id=point_id)
+    if connection.execute(
+        "SELECT 1 FROM analytical_point_retraction WHERE analytical_point_id = ?", (point_id,)
+    ).fetchone():
+        _fail("POINT_ALREADY_RETRACTED", "Analytical Point link is retracted.", analytical_point_id=point_id)
+    return point
+
+
+def _verify_point_revision(
+    connection: sqlite3.Connection,
+    point_id: str,
+    expected_analysis_ids: list[str],
+    expected_spatial_annotation_ids: list[str],
+) -> dict[str, list[str]]:
+    expected_analyses = _expected_uuid_list(expected_analysis_ids, "expected_analysis_ids")
+    expected_annotations = _expected_uuid_list(expected_spatial_annotation_ids, "expected_spatial_annotation_ids")
+    scope = _point_scope(connection, point_id)
+    if scope["analysis_ids"] != expected_analyses or scope["spatial_annotation_ids"] != expected_annotations:
+        _fail(
+            "POINT_REVISION_CONFLICT",
+            "Analytical Point membership or placement changed after review.",
+            analytical_point_id=point_id,
+            current_analysis_ids=scope["analysis_ids"],
+            current_spatial_annotation_ids=scope["spatial_annotation_ids"],
+        )
+    return scope
+
+
+def add_analysis_to_analytical_point(
+    database_path: str | Path,
+    analytical_point_id: str,
+    expected_analysis_ids: list[str],
+    expected_spatial_annotation_ids: list[str],
+    analysis_id: str,
+    link_type: str,
+    reason: str,
+    actor: str = "local-desktop-user",
+) -> dict[str, Any]:
+    point_id = _uuid(analytical_point_id, "analytical_point_id")
+    target_analysis_id = _uuid(analysis_id, "analysis_id")
+    if link_type not in LINK_TYPES:
+        _fail("INVALID_ASSIGNMENT", "Analytical Point link type is unsupported.", link_type=link_type)
+    reason = _text(reason, "reason", 500)
+    actor = _text(actor, "actor")
+    connection = open_project(database_path)
+    try:
+        point = _active_point_metadata(connection, point_id)
+        before_scope = _verify_point_revision(
+            connection, point_id, expected_analysis_ids, expected_spatial_annotation_ids
+        )
+        if connection.execute("SELECT 1 FROM analysis WHERE analysis_id = ?", (target_analysis_id,)).fetchone() is None:
+            _fail("ANALYSIS_NOT_FOUND", "Analysis does not exist.", analysis_id=target_analysis_id)
+        if target_analysis_id in before_scope["analysis_ids"]:
+            _fail("ANALYSIS_ALREADY_LINKED", "Analysis is already linked to this Analytical Point.", analysis_id=target_analysis_id)
+        timestamp = _now()
+        with connection:
+            connection.execute(
+                "INSERT INTO analytical_point_analysis (analytical_point_id, analysis_id, link_type, created_at) VALUES (?, ?, ?, ?)",
+                (point_id, target_analysis_id, link_type, timestamp),
+            )
+            scope = _point_scope(connection, point_id)
+            operation = _write_journal_entry(
+                connection,
+                "analytical_point.analysis.add",
+                actor,
+                scope,
+                {
+                    "analysis_id": target_analysis_id,
+                    "link_type": link_type,
+                    "reason": reason,
+                    "sample_name": point["sample_name"],
+                    "point_name": point["point_name"],
+                    "before_analysis_ids": before_scope["analysis_ids"],
+                },
+                "analytical_point.analysis.remove",
+                {"analytical_point_id": point_id, "analysis_id": target_analysis_id, "expected_scope": scope},
+                timestamp,
+            )
+        return {
+            "analytical_point_id": point_id,
+            "analysis_id": target_analysis_id,
+            "analysis_ids": scope["analysis_ids"],
+            "link_type": link_type,
+            "effect": "analysis_added",
+            "operation": operation,
+        }
+    finally:
+        connection.close()
+
+
+def remove_analysis_from_analytical_point(
+    database_path: str | Path,
+    analytical_point_id: str,
+    expected_analysis_ids: list[str],
+    expected_spatial_annotation_ids: list[str],
+    analysis_id: str,
+    reason: str,
+    actor: str = "local-desktop-user",
+) -> dict[str, Any]:
+    point_id = _uuid(analytical_point_id, "analytical_point_id")
+    target_analysis_id = _uuid(analysis_id, "analysis_id")
+    reason = _text(reason, "reason", 500)
+    actor = _text(actor, "actor")
+    connection = open_project(database_path)
+    try:
+        point = _active_point_metadata(connection, point_id)
+        before_scope = _verify_point_revision(
+            connection, point_id, expected_analysis_ids, expected_spatial_annotation_ids
+        )
+        relation = connection.execute(
+            "SELECT link_type FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+            (point_id, target_analysis_id),
+        ).fetchone()
+        if relation is None:
+            _fail("ANALYSIS_NOT_LINKED", "Analysis is not linked to this Analytical Point.", analysis_id=target_analysis_id)
+        if len(before_scope["analysis_ids"]) <= 2:
+            _fail("POINT_MINIMUM_ANALYSES", "Analytical Point must keep at least two Analyses.", analytical_point_id=point_id)
+        timestamp = _now()
+        with connection:
+            connection.execute(
+                "DELETE FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+                (point_id, target_analysis_id),
+            )
+            scope = _point_scope(connection, point_id)
+            operation = _write_journal_entry(
+                connection,
+                "analytical_point.analysis.remove",
+                actor,
+                scope,
+                {
+                    "analysis_id": target_analysis_id,
+                    "link_type": relation["link_type"],
+                    "reason": reason,
+                    "sample_name": point["sample_name"],
+                    "point_name": point["point_name"],
+                    "before_analysis_ids": before_scope["analysis_ids"],
+                },
+                "analytical_point.analysis.add",
+                {
+                    "analytical_point_id": point_id,
+                    "analysis_id": target_analysis_id,
+                    "link_type": relation["link_type"],
+                    "expected_scope": scope,
+                },
+                timestamp,
+            )
+        return {
+            "analytical_point_id": point_id,
+            "analysis_id": target_analysis_id,
+            "analysis_ids": scope["analysis_ids"],
+            "link_type": relation["link_type"],
+            "effect": "analysis_removed",
+            "operation": operation,
+        }
+    finally:
+        connection.close()
+
+
+def remove_spatial_annotation_from_analytical_point(
+    database_path: str | Path,
+    analytical_point_id: str,
+    expected_analysis_ids: list[str],
+    expected_spatial_annotation_ids: list[str],
+    spatial_annotation_id: str,
+    reason: str,
+    actor: str = "local-desktop-user",
+) -> dict[str, Any]:
+    point_id = _uuid(analytical_point_id, "analytical_point_id")
+    annotation_id = _uuid(spatial_annotation_id, "spatial_annotation_id")
+    reason = _text(reason, "reason", 500)
+    actor = _text(actor, "actor")
+    connection = open_project(database_path)
+    try:
+        point = _active_point_metadata(connection, point_id)
+        before_scope = _verify_point_revision(
+            connection, point_id, expected_analysis_ids, expected_spatial_annotation_ids
+        )
+        relation = connection.execute(
+            """SELECT apa.cross_sample_exception, apa.exception_reason, apa.created_at,
+                      sa.media_asset_id
+               FROM analytical_point_annotation apa
+               JOIN spatial_annotation sa ON sa.spatial_annotation_id = apa.spatial_annotation_id
+               WHERE apa.analytical_point_id = ? AND apa.spatial_annotation_id = ?""",
+            (point_id, annotation_id),
+        ).fetchone()
+        if relation is None:
+            _fail(
+                "SPATIAL_LINK_NOT_FOUND",
+                "Spatial Annotation is not linked to this Analytical Point.",
+                spatial_annotation_id=annotation_id,
+            )
+        timestamp = _now()
+        with connection:
+            connection.execute(
+                "DELETE FROM analytical_point_annotation WHERE analytical_point_id = ? AND spatial_annotation_id = ?",
+                (point_id, annotation_id),
+            )
+            scope = _point_scope(connection, point_id)
+            operation = _write_journal_entry(
+                connection,
+                "analytical_point.annotation.remove",
+                actor,
+                scope,
+                {
+                    "spatial_annotation_id": annotation_id,
+                    "media_asset_id": relation["media_asset_id"],
+                    "cross_sample_exception": bool(relation["cross_sample_exception"]),
+                    "exception_reason": relation["exception_reason"],
+                    "link_created_at": relation["created_at"],
+                    "reason": reason,
+                    "sample_name": point["sample_name"],
+                    "point_name": point["point_name"],
+                    "before_spatial_annotation_ids": before_scope["spatial_annotation_ids"],
+                },
+                "analytical_point.annotation.restore",
+                {
+                    "analytical_point_id": point_id,
+                    "spatial_annotation_id": annotation_id,
+                    "expected_scope": scope,
+                },
+                timestamp,
+            )
+        return {
+            "analytical_point_id": point_id,
+            "spatial_annotation_id": annotation_id,
+            "media_asset_id": relation["media_asset_id"],
+            "spatial_annotation_ids": scope["spatial_annotation_ids"],
+            "effect": "annotation_link_removed",
+            "operation": operation,
+        }
+    finally:
+        connection.close()
+
+
+def list_operation_journal(database_path: str | Path, limit: int = 50) -> dict[str, Any]:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        _fail("INVALID_ASSIGNMENT", "Journal limit must be an integer from 1 to 100.", limit=limit)
+    connection = _read_connection(database_path)
+    try:
+        if not _table_exists(connection, "operation_journal_entry"):
+            return {"total": 0, "items": []}
+        total = connection.execute("SELECT COUNT(*) FROM operation_journal_entry").fetchone()[0]
+        rows = connection.execute(
+            """SELECT operation_id, action_kind, actor, entity_type,
+                      entity_ids_json, parameters_json, outcome,
+                      inverse_action_kind, inverse_payload_json,
+                      undone_by_operation_id, created_at
+               FROM operation_journal_entry
+               ORDER BY created_at DESC, rowid DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return {
+            "total": total,
+            "items": [{
+                "operation_id": row["operation_id"],
+                "action_kind": row["action_kind"],
+                "actor": row["actor"],
+                "entity_type": row["entity_type"],
+                "entity_ids": json.loads(row["entity_ids_json"]),
+                "parameters": json.loads(row["parameters_json"]),
+                "outcome": row["outcome"],
+                "inverse_action_kind": row["inverse_action_kind"],
+                "inverse_payload": json.loads(row["inverse_payload_json"]) if row["inverse_payload_json"] else None,
+                "undone_by_operation_id": row["undone_by_operation_id"],
+                "created_at": row["created_at"],
+            } for row in rows],
+        }
+    finally:
+        connection.close()
+
+
+def undo_operation(
+    database_path: str | Path,
+    operation_id: str,
+    actor: str = "local-desktop-user",
+) -> dict[str, Any]:
+    target_id = _uuid(operation_id, "operation_id")
+    actor = _text(actor, "actor")
+    connection = open_project(database_path)
+    try:
+        target = connection.execute(
+            """SELECT operation_id, action_kind, entity_ids_json, parameters_json,
+                      outcome, undone_by_operation_id
+               FROM operation_journal_entry WHERE operation_id = ?""",
+            (target_id,),
+        ).fetchone()
+        if target is None:
+            _fail("OPERATION_NOT_FOUND", "Operation Journal entry does not exist.", operation_id=target_id)
+        if target["outcome"] != "applied" or target["undone_by_operation_id"] is not None:
+            _fail("OPERATION_ALREADY_UNDONE", "Operation has already been undone.", operation_id=target_id)
+        if target["action_kind"] not in {
+            "analytical_point.create",
+            "analytical_point.retire",
+            "analytical_point.analysis.add",
+            "analytical_point.analysis.remove",
+            "analytical_point.annotation.remove",
+        }:
+            _fail("UNDO_UNSUPPORTED", "This operation does not have a supported inverse action.", operation_id=target_id)
+        scope = json.loads(target["entity_ids_json"])
+        parameters = json.loads(target["parameters_json"])
+        point_ids = scope.get("analytical_point_ids") if isinstance(scope, dict) else None
+        if not isinstance(point_ids, list) or len(point_ids) != 1:
+            _fail("JOURNAL_CORRUPT", "Operation Journal scope is invalid.", operation_id=target_id)
+        point_id = _uuid(point_ids[0], "analytical_point_id")
+        current_scope = _point_scope(connection, point_id)
+        if current_scope != scope:
+            _fail("POINT_REVISION_CONFLICT", "Analytical Point changed after the journalled operation.", analytical_point_id=point_id)
+        retraction = connection.execute(
+            "SELECT operation_id FROM analytical_point_retraction WHERE analytical_point_id = ?", (point_id,)
+        ).fetchone()
+        if target["action_kind"] == "analytical_point.retire":
+            if retraction is None or retraction["operation_id"] != target_id:
+                _fail("POINT_REVISION_CONFLICT", "Analytical Point retraction state changed after review.", analytical_point_id=point_id)
+            effect = "restored"
+            inverse_action = "analytical_point.retire"
+        elif target["action_kind"] == "analytical_point.create":
+            if retraction is not None:
+                _fail("POINT_REVISION_CONFLICT", "Analytical Point is no longer active.", analytical_point_id=point_id)
+            effect = "retracted"
+            inverse_action = "analytical_point.restore"
+        elif target["action_kind"] in {"analytical_point.analysis.add", "analytical_point.analysis.remove"}:
+            if retraction is not None:
+                _fail("POINT_REVISION_CONFLICT", "Analytical Point is no longer active.", analytical_point_id=point_id)
+            target_analysis_id = _uuid(parameters.get("analysis_id"), "analysis_id")
+            link_type = parameters.get("link_type")
+            if link_type not in LINK_TYPES:
+                _fail("JOURNAL_CORRUPT", "Operation Journal link type is invalid.", operation_id=target_id)
+            relation = connection.execute(
+                "SELECT link_type FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+                (point_id, target_analysis_id),
+            ).fetchone()
+            if target["action_kind"] == "analytical_point.analysis.add":
+                if relation is None or relation["link_type"] != link_type or len(current_scope["analysis_ids"]) <= 2:
+                    _fail("POINT_REVISION_CONFLICT", "Analytical Point membership changed after review.", analytical_point_id=point_id)
+                effect = "analysis_removed"
+                inverse_action = "analytical_point.analysis.add"
+            else:
+                if relation is not None or connection.execute(
+                    "SELECT 1 FROM analysis WHERE analysis_id = ?", (target_analysis_id,)
+                ).fetchone() is None:
+                    _fail("POINT_REVISION_CONFLICT", "Analytical Point membership changed after review.", analytical_point_id=point_id)
+                effect = "analysis_added"
+                inverse_action = "analytical_point.analysis.remove"
+        else:
+            if retraction is not None:
+                _fail("POINT_REVISION_CONFLICT", "Analytical Point is no longer active.", analytical_point_id=point_id)
+            annotation_id = _uuid(parameters.get("spatial_annotation_id"), "spatial_annotation_id")
+            media_asset_id = _uuid(parameters.get("media_asset_id"), "media_asset_id")
+            cross_sample_exception = parameters.get("cross_sample_exception")
+            exception_reason = parameters.get("exception_reason")
+            link_created_at = parameters.get("link_created_at")
+            if (
+                not isinstance(cross_sample_exception, bool)
+                or not isinstance(link_created_at, str)
+                or not link_created_at
+                or (cross_sample_exception and (not isinstance(exception_reason, str) or not exception_reason.strip()))
+                or (not cross_sample_exception and exception_reason is not None)
+            ):
+                _fail("JOURNAL_CORRUPT", "Operation Journal spatial-link provenance is invalid.", operation_id=target_id)
+            annotation = connection.execute(
+                "SELECT media_asset_id FROM spatial_annotation WHERE spatial_annotation_id = ?", (annotation_id,)
+            ).fetchone()
+            relation = connection.execute(
+                "SELECT 1 FROM analytical_point_annotation WHERE analytical_point_id = ? AND spatial_annotation_id = ?",
+                (point_id, annotation_id),
+            ).fetchone()
+            if annotation is None or annotation["media_asset_id"] != media_asset_id or relation is not None:
+                _fail("POINT_REVISION_CONFLICT", "Spatial link changed after the journalled operation.", analytical_point_id=point_id)
+            effect = "annotation_link_restored"
+            inverse_action = "analytical_point.annotation.remove"
+        timestamp = _now()
+        with connection:
+            if target["action_kind"] == "analytical_point.retire":
+                connection.execute("DELETE FROM analytical_point_retraction WHERE analytical_point_id = ?", (point_id,))
+            elif target["action_kind"] == "analytical_point.create":
+                connection.execute(
+                    "INSERT INTO analytical_point_retraction (analytical_point_id, operation_id, reason, created_at) VALUES (?, ?, ?, ?)",
+                    (point_id, target_id, "Undo analytical_point.create", timestamp),
+                )
+            elif target["action_kind"] == "analytical_point.analysis.add":
+                connection.execute(
+                    "DELETE FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
+                    (point_id, target_analysis_id),
+                )
+            elif target["action_kind"] == "analytical_point.analysis.remove":
+                connection.execute(
+                    "INSERT INTO analytical_point_analysis (analytical_point_id, analysis_id, link_type, created_at) VALUES (?, ?, ?, ?)",
+                    (point_id, target_analysis_id, link_type, timestamp),
+                )
+            else:
+                connection.execute(
+                    """INSERT INTO analytical_point_annotation
+                       (analytical_point_id, spatial_annotation_id, cross_sample_exception, exception_reason, created_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (point_id, annotation_id, int(cross_sample_exception), exception_reason, link_created_at),
+                )
+            resulting_scope = _point_scope(connection, point_id)
+            undo_entry = _write_journal_entry(
+                connection,
+                "operation.undo",
+                actor,
+                resulting_scope,
+                {
+                    "target_operation_id": target_id,
+                    "target_action_kind": target["action_kind"],
+                    "sample_name": parameters.get("sample_name"),
+                    "point_name": parameters.get("point_name"),
+                },
+                inverse_action,
+                {"analytical_point_id": point_id, "expected_scope": resulting_scope},
+                timestamp,
+            )
+            if target["action_kind"] == "analytical_point.create":
+                connection.execute(
+                    "UPDATE analytical_point_retraction SET operation_id = ? WHERE analytical_point_id = ?",
+                    (undo_entry["operation_id"], point_id),
+                )
+            connection.execute(
+                "UPDATE operation_journal_entry SET outcome = 'undone', undone_by_operation_id = ? WHERE operation_id = ?",
+                (undo_entry["operation_id"], target_id),
+            )
+        return {
+            "target_operation_id": target_id,
+            "analytical_point_id": point_id,
+            "effect": effect,
+            "operation": undo_entry,
+        }
     finally:
         connection.close()
 
@@ -307,8 +1222,10 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                     _fail("INVALID_ASSIGNMENT", "An Analytical Point may be placed only once on one image.", analytical_point_id=point_id)
                 seen_points.add(point_id)
                 point = connection.execute(
-                    """SELECT ap.analytical_point_id, s.sample_name FROM analytical_point ap
-                    JOIN sample s ON s.sample_id = ap.sample_id WHERE ap.analytical_point_id = ?""", (point_id,)
+                    """SELECT ap.analytical_point_id, ap.point_name, s.sample_name FROM analytical_point ap
+                    JOIN sample s ON s.sample_id = ap.sample_id
+                    WHERE ap.analytical_point_id = ?
+                      AND NOT EXISTS (SELECT 1 FROM analytical_point_retraction apr WHERE apr.analytical_point_id = ap.analytical_point_id)""", (point_id,)
                 ).fetchone()
                 if point is None:
                     _fail("INVALID_ASSIGNMENT", "Analytical Point does not exist.", analytical_point_id=point_id)
@@ -329,12 +1246,19 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                 planned_placements.append({
                     "spatial_annotation_id": _id(),
                     "analytical_point_id": point_id,
+                    "point_name": point["point_name"],
+                    "point_sample_name": point["sample_name"],
                     "geometry": _validate_geometry(placement["geometry"], inspection["width_px"], inspection["height_px"]),
                     "cross_sample_exception_reason": reason,
                 })
             plan_items.append({
                 "media_asset_id": existing["media_asset_id"] if existing else _id(),
-                **inspection,
+                "source_path": inspection["source_path"],
+                "source_fingerprint": inspection["source_fingerprint"],
+                "display_name": inspection["display_name"],
+                "mime_type": inspection["mime_type"],
+                "width_px": inspection["width_px"],
+                "height_px": inspection["height_px"],
                 "ownership_mode": ownership,
                 "media_type": media_type,
                 "sample_name": sample_name,
@@ -342,7 +1266,6 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                 "existing_media_asset_id": existing["media_asset_id"] if existing else None,
                 "placements": planned_placements,
             })
-            plan_items[-1].pop("format")
         plan = {"schema_version": 1, "semantic_fingerprint": "", "items": plan_items, "warnings": warnings}
         plan["semantic_fingerprint"] = _plan_fingerprint(plan)
         return plan
@@ -422,7 +1345,12 @@ def apply_media_import_plan(database_path: str | Path, plan: Any) -> dict[str, A
                     )
                     created_assets += 1
                 for placement in item["placements"]:
-                    point = connection.execute("SELECT sample_id FROM analytical_point WHERE analytical_point_id = ?", (placement["analytical_point_id"],)).fetchone()
+                    point = connection.execute(
+                        """SELECT sample_id FROM analytical_point ap
+                           WHERE analytical_point_id = ?
+                             AND NOT EXISTS (SELECT 1 FROM analytical_point_retraction apr WHERE apr.analytical_point_id = ap.analytical_point_id)""",
+                        (placement["analytical_point_id"],),
+                    ).fetchone()
                     if point is None:
                         _fail("INVALID_ASSIGNMENT", "Analytical Point disappeared after planning.", analytical_point_id=placement["analytical_point_id"])
                     is_cross_sample = point["sample_id"] != sample_id

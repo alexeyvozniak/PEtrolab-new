@@ -1,4 +1,4 @@
-"""Transient ADR-0014 review sessions. No batch commit or disk draft persistence."""
+"""ADR-0014 import workspace sessions with atomic commit and project drafts."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -11,8 +11,9 @@ from uuid import uuid4
 from contextlib import closing
 
 from .clean_table import classify_clean_table
-from .desktop_workflow import (suggest_import_recipe, bulk_unit_scopes, bulk_ignore_scopes,
-                               apply_bulk_unit_scope, apply_bulk_ignore_scope)
+from .desktop_workflow import (suggest_import_recipe, bulk_unit_scopes, bulk_unit_override_scopes,
+                               bulk_ignore_scopes, apply_bulk_unit_scope,
+                               apply_bulk_unit_override_scope, apply_bulk_ignore_scope)
 from .import_apply import _require_mapping_review, _require_duplicate_review, _require_non_empty_plan
 from .import_preview import (ImportCommandError, inspect_source, create_import_plan,
                              preview_source_window, semantic_fingerprint)
@@ -44,6 +45,72 @@ class ImportWorkspaceStore:
         if source is None:
             raise ImportCommandError('WORKSPACE_SOURCE_NOT_FOUND', 'Источник не найден в этой очереди.')
         return source
+
+    def _persist(self, session):
+        database_path = session.get('database_path')
+        if not database_path:
+            return
+        from .import_apply import open_project
+        fingerprints = {source['source_id']: source['sha256'] for source in session['sources']}
+        snapshot = json.dumps(session, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+        with closing(open_project(database_path)) as connection, connection:
+            connection.execute(
+                '''INSERT INTO import_workspace_draft
+                   (workspace_id, schema_version, draft_revision, draft_json, source_fingerprints_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(workspace_id) DO UPDATE SET
+                     schema_version = excluded.schema_version,
+                     draft_revision = excluded.draft_revision,
+                     draft_json = excluded.draft_json,
+                     source_fingerprints_json = excluded.source_fingerprints_json,
+                     updated_at = excluded.updated_at''',
+                (session['workspace_id'], session.get('schema_version', 1), session['draft_revision'], snapshot,
+                 json.dumps(fingerprints, sort_keys=True), session['created_at'], session['updated_at']),
+            )
+
+    def _delete_draft(self, session):
+        if not session.get('database_path'):
+            return
+        from .import_apply import open_project
+        with closing(open_project(session['database_path'])) as connection, connection:
+            connection.execute('DELETE FROM import_workspace_draft WHERE workspace_id = ?', (session['workspace_id'],))
+
+    def _restore_latest(self, database_path):
+        if not isinstance(database_path, str) or not database_path:
+            raise ValueError('project_database_path')
+        from .import_apply import open_project
+        with closing(open_project(database_path)) as connection:
+            row = connection.execute(
+                'SELECT * FROM import_workspace_draft ORDER BY updated_at DESC LIMIT 1'
+            ).fetchone()
+        if row is None:
+            return {'restore_status': 'empty'}
+        if row['schema_version'] != 1:
+            raise ImportCommandError('DRAFT_SCHEMA_INCOMPATIBLE', 'Черновик создан другой версией PetroLab и не был восстановлен.',
+                                     {'workspace_id': row['workspace_id'], 'schema_version': row['schema_version']})
+        try:
+            session = json.loads(row['draft_json'])
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ImportCommandError('DRAFT_SCHEMA_INCOMPATIBLE', 'Черновик импорта повреждён и не был восстановлен.',
+                                     {'workspace_id': row['workspace_id']}) from error
+        if session.get('workspace_id') != row['workspace_id'] or session.get('draft_revision') != row['draft_revision']:
+            raise ImportCommandError('DRAFT_SCHEMA_INCOMPATIBLE', 'Ревизия черновика не совпадает с сохранённым индексом.',
+                                     {'workspace_id': row['workspace_id']})
+        session['database_path'] = database_path
+        mismatches = []
+        for source in session.get('sources', []):
+            path = Path(source.get('staged_path', ''))
+            if not path.is_file():
+                mismatches.append({'source_id': source.get('source_id'), 'reason': 'unavailable'})
+                continue
+            inspection = inspect_source(path)
+            if inspection.fingerprint != source.get('sha256'):
+                mismatches.append({'source_id': source.get('source_id'), 'reason': 'fingerprint_mismatch'})
+        if mismatches:
+            raise ImportCommandError('DRAFT_SOURCE_MISMATCH', 'Один или несколько файлов черновика изменились или недоступны. Черновик не восстановлен.',
+                                     {'workspace_id': row['workspace_id'], 'sources': mismatches})
+        self.sessions[session['workspace_id']] = session
+        return {'restore_status': 'restored', **self._project(session)}
 
     def _check(self, source):
         inspection = inspect_source(source['staged_path'])
@@ -91,9 +158,11 @@ class ImportWorkspaceStore:
             session['active_source_id'] = source['source_id']
 
     def command(self, operation, params):
+        if operation == 'restore':
+            return self._restore_latest(params.get('project_database_path'))
         if operation == 'create':
             timestamp = now()
-            session = {'workspace_id': str(uuid4()), 'draft_revision': 0,
+            session = {'workspace_id': str(uuid4()), 'schema_version': 1, 'draft_revision': 0,
                        'created_at': timestamp, 'updated_at': timestamp, 'sources': [], 'active_source_id': None}
             session['database_path'] = params.get('project_database_path')
             session['project_aliases'] = {}
@@ -102,6 +171,10 @@ class ImportWorkspaceStore:
                 with closing(open_project(session['database_path'])) as connection:
                     session['project_aliases'] = {row['normalized_header']: json.loads(row['alias_json']) for row in connection.execute('SELECT * FROM project_analyte_alias')}
             self._add(session, params.get('sources'))
+            if session['database_path']:
+                from .import_apply import open_project
+                with closing(open_project(session['database_path'])) as connection, connection:
+                    connection.execute('DELETE FROM import_workspace_draft')
         else:
             stored = self.sessions.get(params.get('workspace_id'))
             if stored is None:
@@ -112,7 +185,25 @@ class ImportWorkspaceStore:
                 if type(expected) is not int or expected != session['draft_revision']:
                     raise ImportCommandError('STALE_WORKSPACE_REVISION', 'Очередь уже изменилась. Обновите состояние перед повтором.',
                                              {'expected_revision': expected, 'current_revision': session['draft_revision']})
+            if operation == 'commit':
+                projected = self._project(session)
+                if not projected['session']['readiness']['ready_to_commit']:
+                    raise ImportCommandError('WORKSPACE_NOT_READY', 'Сначала ответьте на обязательные вопросы импорта.',
+                                             {'blocking_reason_codes': projected['session']['readiness']['blocking_reason_codes']})
+                if not session.get('database_path'):
+                    raise ImportCommandError('PROJECT_REQUIRED', 'Выберите проект для сохранения импорта.')
+                from .import_apply import apply_import_workspace
+                included = [source for source in session['sources'] if source['included']]
+                result = apply_import_workspace(
+                    session['database_path'],
+                    [{'source_path': source['staged_path'], 'display_name': Path(source['original_display_path']).name,
+                      'recipe': source['recipe']} for source in included],
+                    workspace_id=session['workspace_id'], draft_revision=session['draft_revision'],
+                )
+                del self.sessions[session['workspace_id']]
+                return {**result, 'status': 'applied', 'staged_paths': [source['staged_path'] for source in session['sources']]}
             if operation == 'discard':
+                self._delete_draft(session)
                 del self.sessions[session['workspace_id']]
                 return {'workspace_id': session['workspace_id'], 'status': 'discarded',
                         'staged_paths': [s['staged_path'] for s in session['sources']]}
@@ -142,6 +233,8 @@ class ImportWorkspaceStore:
                     scope_id = scope_id[len(prefix):]
                     if kind == 'unit':
                         revised = apply_bulk_unit_scope(source['staged_path'], source['recipe'], scope_id, decision['unit'])
+                    elif kind == 'unit_override':
+                        revised = apply_bulk_unit_override_scope(source['staged_path'], source['recipe'], scope_id, decision['unit'])
                     elif kind == 'ignore':
                         revised = apply_bulk_ignore_scope(source['staged_path'], source['recipe'], scope_id)
                     else:
@@ -228,6 +321,7 @@ class ImportWorkspaceStore:
         result = self._project(session)
         if operation != 'get':
             self.sessions[session['workspace_id']] = session
+            self._persist(session)
         return result
 
     def _remember_alias(self, session, source, key, alias):
@@ -244,7 +338,7 @@ class ImportWorkspaceStore:
         source['recipe']['semantic_fingerprint'] = semantic_fingerprint(source['recipe'])
 
     def _review(self, source):
-        plan, issues, units, ignores = empty_plan(), [], [], []
+        plan, issues, units, unit_overrides, ignores = empty_plan(), [], [], [], []
         try:
             inspection = self._check(source)
             plan = create_import_plan(inspection, source['recipe'])
@@ -264,12 +358,19 @@ class ImportWorkspaceStore:
                         issues.append({'code': 'UNIT_REQUIRES_REVIEW' if field.get('suggested_target') == 'measurement' else 'UNMAPPED_FIELD_REQUIRES_REVIEW',
                                        'severity': 'error', 'blocking': True, 'sheet_name': section['sheet_name'],
                                        'block_id': section['block_id'], 'row_number': section['header_row'], **field})
+            mapping_blocked = any(item.get('blocking') and item.get('code') in {
+                'UNIT_REQUIRES_REVIEW', 'UNMAPPED_FIELD_REQUIRES_REVIEW'
+            } for item in issues)
             for check, args in [(_require_non_empty_plan, (plan,)), (_require_duplicate_review, (plan, source['recipe']))]:
                 try:
                     check(*args)
                 except ImportCommandError as error:
-                    issues.append({'code': error.code, 'message': error.message, 'severity': 'error', 'blocking': True})
+                    derived_empty_plan = error.code == 'IMPORT_PLAN_EMPTY' and mapping_blocked
+                    issues.append({'code': error.code, 'message': error.message,
+                                   'severity': 'info' if derived_empty_plan else 'error',
+                                   'blocking': not derived_empty_plan})
             units = bulk_unit_scopes(source['staged_path'], source['recipe'])['scopes']
+            unit_overrides = bulk_unit_override_scopes(source['staged_path'], source['recipe'])['scopes']
             ignores = bulk_ignore_scopes(source['staged_path'], source['recipe'])['scopes']
         except ImportCommandError as error:
             issues.append({'code': error.code, 'message': error.message, 'severity': 'error', 'blocking': True})
@@ -279,18 +380,21 @@ class ImportWorkspaceStore:
         plan['ready_to_commit'] = ready
         return {'inspection': source['inspection'], 'recipe': source['recipe'], 'plan': plan,
                 'classification': source['classification'], 'issues': issues,
-                'bulk_unit_scopes': units, 'bulk_ignore_scopes': ignores, 'ready': ready,
+                'bulk_unit_scopes': units, 'bulk_unit_override_scopes': unit_overrides,
+                'bulk_ignore_scopes': ignores, 'ready': ready,
                 'decisions': source['decisions'], 'source_id': source['source_id']}
 
     def _project(self, state):
         sources, issues, plans, reviews, scopes = [], [], [], {}, []
         for source in state['sources']:
             review = self._review(source)
+            scope_by_target = {}
             for scope in review['bulk_unit_scopes'] + review['bulk_ignore_scopes']:
                 scope['bulk_scope_id'] = f"{state['draft_revision']}:{source['source_id']}:{scope['bulk_scope_id']}"
                 targets = []
                 for target in scope['targets']:
                     section = next(s for s in source['recipe']['sections'] if s['block_id'] == target['block_id'])
+                    scope_by_target[(target['block_id'], target['source_axis'], target['source_index'])] = scope['bulk_scope_id']
                     targets.append({'source_id': source['source_id'], 'sheet_key': f"{source['source_id']}:{section['sheet_name']}",
                                     'source_axis': target['source_axis'], 'source_index': target['source_index']})
                 scopes.append({'bulk_scope_id': scope['bulk_scope_id'], 'decision_kind': scope['decision_kind'], 'targets': targets,
@@ -300,19 +404,37 @@ class ImportWorkspaceStore:
                                              'adapter_version': source['adapter_version']},
                                'scope_summary': f"{scope['field_count']} полей в одном источнике",
                                'source_fingerprints': {source['source_id']: source['sha256']}, 'draft_revision': state['draft_revision']})
+            for scope in review['bulk_unit_override_scopes']:
+                scope['bulk_scope_id'] = f"{state['draft_revision']}:{source['source_id']}:{scope['bulk_scope_id']}"
+                targets = []
+                for target in scope['targets']:
+                    section = next(s for s in source['recipe']['sections'] if s['block_id'] == target['block_id'])
+                    targets.append({'source_id': source['source_id'], 'sheet_key': f"{source['source_id']}:{section['sheet_name']}",
+                                    'source_axis': target['source_axis'], 'source_index': target['source_index']})
+                scopes.append({'bulk_scope_id': scope['bulk_scope_id'], 'decision_kind': scope['decision_kind'], 'targets': targets,
+                               'signature': {'normalized_source_header': '|'.join(scope['fields']), 'source_unit': scope['current_unit'],
+                                             'target_role': 'measurement', 'canonical_field': None,
+                                             'orientation': 'analyses_in_columns' if scope.get('orientation') == 'columns_are_analyses' else 'analyses_in_rows',
+                                             'adapter_version': source['adapter_version']},
+                               'scope_summary': f"{scope['field_count']} полей с единицей {scope['current_unit']}",
+                               'source_fingerprints': {source['source_id']: source['sha256']}, 'draft_revision': state['draft_revision']})
             reviews[source['source_id']] = review
             recipe = source['recipe']
             for item in review['issues']:
                 section = next((s for s in recipe['sections'] if s['block_id'] == item.get('block_id')), None)
                 row = item.get('row_number') or (item.get('source_row_index', -1) + 1) or (section['header_row'] if section else None)
                 column = item.get('source_column_index', 0)
+                axis = item.get('source_axis', 'column')
+                index = item.get('source_column_index') if axis == 'column' else item.get('source_row_index')
+                bulk_scope_id = scope_by_target.get((item.get('block_id'), axis, index))
                 issues.append({
                     'issue_id': digest([source['source_id'], item['code'], item.get('sheet_name'), item.get('block_id'), row, column, item.get('source_header')]),
                     'code': item['code'], 'severity': item.get('severity', 'warning'), 'blocking': bool(item.get('blocking')),
                     'source_id': source['source_id'], 'sheet_key': f"{source['source_id']}:{item['sheet_name']}" if item.get('sheet_name') else None,
                     'physical_range': {'start_row': row, 'end_row': row, 'start_column': column, 'end_column': column} if row else None,
                     'logical_block_id': item.get('block_id'), 'message_params': {k: v for k, v in item.items() if isinstance(v, (str, int, float, bool)) or v is None},
-                    'allowed_decisions': ['mappings', 'sections', 'source_inclusion'], 'current_decision': None, 'bulk_scope_id': None,
+                    'allowed_decisions': ['mappings', 'sections', 'source_inclusion'], 'current_decision': None,
+                    'bulk_scope_id': bulk_scope_id,
                 })
             source_issues = [i for i in issues if i['source_id'] == source['source_id']]
             sheets = []
@@ -344,12 +466,10 @@ class ImportWorkspaceStore:
         section = next(s for s in active['recipe']['sections'] if s['block_id'] == active['active_block_id'])
         blockers = [i for i in issues if i['blocking']]
         reasons = sorted({i['code'] for i in blockers})
-        if len(sources) > 1:
-            reasons.append('MULTI_SOURCE_COMMIT_UNAVAILABLE')
         if not any(s['included'] for s in sources):
             reasons.append('NO_INCLUDED_SOURCES')
         session = {k: state[k] for k in ('workspace_id', 'draft_revision', 'created_at', 'updated_at', 'active_source_id')}
-        session.update({'schema_version': 1, 'active_sheet_key': f"{active['source_id']}:{section['sheet_name']}",
+        session.update({'schema_version': state.get('schema_version', 1), 'active_sheet_key': f"{active['source_id']}:{section['sheet_name']}",
                         'active_block_id': active['active_block_id'], 'sources': sources, 'issues': issues, 'bulk_scopes': scopes, 'plans': plans,
                         'readiness': {'ready_to_commit': not reasons, 'blocking_issue_count': len(blockers),
                                       'warning_count': len(issues) - len(blockers), 'included_source_count': sum(s['included'] for s in sources),

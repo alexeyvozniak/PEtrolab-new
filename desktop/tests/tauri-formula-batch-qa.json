@@ -1,0 +1,6 @@
+{
+  "identifier": "org.petrolab.formula-batch-qa",
+  "app": {
+    "windows": [{ "label": "main", "title": "PetroLab · Formula Batch QA", "width": 1363, "height": 936 }]
+  }
+}

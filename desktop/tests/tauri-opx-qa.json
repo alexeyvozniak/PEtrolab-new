@@ -1,0 +1,6 @@
+{
+  "identifier": "org.petrolab.opx-qa-20261108",
+  "app": {
+    "windows": [{ "label": "main", "title": "PetroLab · Opx QA", "width": 1347, "height": 897 }]
+  }
+}

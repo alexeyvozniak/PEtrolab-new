@@ -23,7 +23,6 @@
   background: #f7faf7;
 }
 
-.block-review-intro > div { display: grid; gap: 2px; }
 .block-review-intro b { color: #314239; font-size: 11px; }
 .block-review-intro span,
 .block-review-actions span { font-size: 10px; color: #67736d; }
@@ -319,7 +318,6 @@
 /* Keep actual data and range actions visible at the supported 800px window height. */
 @media (max-height: 850px) {
   .block-review-intro { min-height: 30px; padding: 5px 10px; }
-  .block-review-intro > div > span { display: none; }
   .raw-preview-nav { gap: 4px; padding: 5px 10px; }
   .raw-preview-nav > div:first-child > span { display: none; }
   .raw-drawing-note { padding: 5px 10px; font-size: 10px; }

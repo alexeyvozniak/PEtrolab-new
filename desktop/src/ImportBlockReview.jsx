@@ -204,7 +204,7 @@ function RawPreview({ preview, state, loading, error, onNavigate, focusIssue, se
         </div>
       </div>
       {error && <div className="raw-preview-error"><Warning size={16} weight="fill" /> {error}</div>}
-      {(preview.warnings || []).some((item) => item.code === 'EMBEDDED_DRAWINGS_NOT_PREVIEWED') && <div className="raw-drawing-note" role="note"><Warning size={16} /><span>На листе есть рисунки или встроенные изображения. Здесь показаны только значения ячеек: изображения не отображаются и не превращаются в измерения. Оригинал сохранён без изменений.</span></div>}
+      {(preview.warnings || []).some((item) => item.code === 'EMBEDDED_DRAWINGS_NOT_PREVIEWED') && <div className="raw-drawing-note" role="note"><Warning size={16} /><span>Встроенные рисунки не показаны; импортируются только значения ячеек.</span></div>}
       {loading && <div className="raw-preview-loading-line">Читаю другой участок листа…</div>}
       <div className="raw-preview-wrap" aria-label={`Исходная таблица ${preview.sheet_name || "Excel"}`}>
         <table className="raw-preview-table">
@@ -463,11 +463,8 @@ export function ImportBlockReview({ recipe, previews = {}, activeBlockId = null,
   return (
     <div className="block-review">
       <div className="block-review-intro">
-        <div>
-          <b>Исходная таблица</b>
-          <span>Сначала смотри на Excel. Настройки структуры спрятаны ниже таблицы и нужны только если автоматическое распознавание ошиблось.</span>
-        </div>
-        <span>Включено: <b>{enabledCount}</b> из {recipe.sections.length}</span>
+        <b>Исходная таблица</b>
+        <span title="Импортируемые таблицы">{enabledCount} из {recipe.sections.length}</span>
       </div>
       <div className="block-card-list">
         {visibleSections.map((section) => (
@@ -494,13 +491,11 @@ export function ImportBlockReview({ recipe, previews = {}, activeBlockId = null,
           </div>
         )}
       </div>
-      <div className="block-review-actions">
+      {(invalidCount > 0 || dirtyBlocks.length > 0) && <div className="block-review-actions">
         <span>{invalidCount > 0
           ? `Проверь границы: некорректных блоков ${invalidCount}`
-          : dirtyBlocks.length
-            ? `Изменения структуры применяются автоматически… (${dirtyBlocks.length})`
-            : "Таблица отображается · структура синхронизирована"}</span>
-      </div>
+          : `Изменения структуры применяются автоматически… (${dirtyBlocks.length})`}</span>
+      </div>}
     </div>
   );
 }
