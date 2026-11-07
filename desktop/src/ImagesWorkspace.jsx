@@ -118,7 +118,10 @@ function SourcePane({ items, assignments, activePath, setActivePath, phase }) {
 function AssignmentStep({ items, inspection, assignments, setAssignments, selected, setSelected, activeItem, activeAssignment, setActivePath, busy, lastExcludedCount, onChoose, onChooseFolder, onExcludeSelected, onRestoreExcluded, onCancel, onInvalidatePlan, onContinue }) {
   const duplicatePaths = useMemo(() => {
     const activePaths = new Set(items.map((item) => item.source_path));
-    return new Set((inspection?.duplicate_groups || []).flat().filter((path) => activePaths.has(path)));
+    return new Set((inspection?.duplicate_groups || []).flatMap((group) => {
+      const remaining = group.filter((path) => activePaths.has(path));
+      return remaining.length > 1 ? remaining : [];
+    }));
   }, [inspection, items]);
   const readyCount = items.filter((item) => assignmentReady(assignments[item.source_path])).length;
   const selectedItems = items.filter((item) => selected.has(item.source_path));
@@ -126,6 +129,10 @@ function AssignmentStep({ items, inspection, assignments, setAssignments, select
   const selectedSuggestionsReady = selectedItems.length > 0 && selectedItems.every((item) => (
     item.suggested_media_type && item.suggested_sample_name && item.suggested_thin_section_name
   ));
+  const selectedAssignmentsReady = selectedItems.length > 0 && selectedItems.every((item) => {
+    const assignment = assignments[item.source_path];
+    return assignment?.media_type.trim() && assignment.sample_name.trim() && assignment.thin_section_name.trim();
+  });
   const canContinue = items.length > 0 && readyCount === items.length && duplicatePaths.size === 0;
   const pendingCount = items.length - readyCount;
   const wouldEmptyBatch = selectedDuplicateItems.length === items.length;
@@ -157,19 +164,37 @@ function AssignmentStep({ items, inspection, assignments, setAssignments, select
       return next;
     });
   };
-  const applyActiveToSelection = () => {
-    if (!activeAssignment) return;
-    const shared = {
-      media_type: activeAssignment.media_type.trim(),
-      sample_name: activeAssignment.sample_name.trim(),
-      thin_section_name: activeAssignment.thin_section_name.trim(),
-      ownership_mode: activeAssignment.ownership_mode,
-    };
-    if (!shared.media_type || !shared.sample_name || !shared.thin_section_name) return;
+  const confirmAssignments = () => {
+    if (!selectedAssignmentsReady) return;
     onInvalidatePlan();
     setAssignments((current) => {
       const next = { ...current };
-      selectedItems.forEach((item) => { next[item.source_path] = { ...next[item.source_path], ...shared, confirmed: true }; });
+      selectedItems.forEach((item) => { next[item.source_path] = { ...next[item.source_path], confirmed: true }; });
+      return next;
+    });
+  };
+  const applyActiveToSelection = () => {
+    if (!activeAssignment) return;
+    const shared = {
+      sample_name: activeAssignment.sample_name.trim(),
+      thin_section_name: activeAssignment.thin_section_name.trim(),
+    };
+    if (!shared.sample_name || !shared.thin_section_name) return;
+    onInvalidatePlan();
+    setAssignments((current) => {
+      const next = { ...current };
+      selectedItems.forEach((item) => { next[item.source_path] = { ...next[item.source_path], ...shared, confirmed: false }; });
+      return next;
+    });
+  };
+
+  const applyTypeToSelection = () => {
+    const mediaType = activeAssignment?.media_type.trim();
+    if (!mediaType) return;
+    onInvalidatePlan();
+    setAssignments((current) => {
+      const next = { ...current };
+      selectedItems.forEach((item) => { next[item.source_path] = { ...next[item.source_path], media_type: mediaType, confirmed: false }; });
       return next;
     });
   };
@@ -186,6 +211,7 @@ function AssignmentStep({ items, inspection, assignments, setAssignments, select
       <div className="image-bulk-toolbar">
         <label><input type="checkbox" checked={selected.size === items.length} onChange={() => setSelected(selected.size === items.length ? new Set() : new Set(items.map((item) => item.source_path)))} /> Выбрано: {selected.size} из {items.length}</label>
         <button type="button" onClick={confirmSuggestions} disabled={busy || !selectedSuggestionsReady}><CheckCircle size={17} /> Подтвердить предложения</button>
+        <button type="button" onClick={confirmAssignments} disabled={busy || !selectedAssignmentsReady}><CheckCircle size={17} /> Подтвердить назначения</button>
       </div>
       {lastExcludedCount > 0 && <div className="image-batch-undo" role="status"><Info size={17} /><span>Исключено из временного пакета: {lastExcludedCount}. Исходные файлы не изменены.</span><button type="button" onClick={onRestoreExcluded} disabled={busy}>Вернуть в пакет</button></div>}
       <div className="image-batch-summary" aria-label="Сводка пакета изображений" aria-live="polite">
@@ -220,6 +246,7 @@ function AssignmentStep({ items, inspection, assignments, setAssignments, select
         <label>Тип изображения<input aria-label="Тип изображения" list="image-media-type-options" value={activeAssignment?.media_type || ""} onChange={(event) => patchAssignment(activeItem.source_path, { media_type: event.target.value })} placeholder="BSE, PPL, XPL или свой тип" /><datalist id="image-media-type-options">{MEDIA_TYPES.map((type) => <option value={type} key={type} />)}</datalist></label>
         <label>Хранение<select value={activeAssignment?.ownership_mode || "managed_copy"} onChange={(event) => patchAssignment(activeItem.source_path, { ownership_mode: event.target.value })}><option value="managed_copy">Копия внутри проекта</option><option value="linked_external">Ссылка на исходный файл</option></select></label>
         <button className="outline-button image-bulk-apply" type="button" onClick={applyActiveToSelection} disabled={busy || selected.size === 0}><Copy size={17} /> Применить к выбранным ({selected.size})</button>
+        <button className="outline-button image-bulk-apply" type="button" onClick={applyTypeToSelection} disabled={busy || selected.size === 0 || !activeAssignment?.media_type?.trim()}><Copy size={17} /> Применить тип к выбранным ({selected.size})</button>
       </section>
       <div className="image-next-note"><Info size={18} /><p><b>Дальше — точки на изображении.</b><br />Можно разместить их вручную или явно завершить импорт без точек.</p></div>
     </aside>
@@ -449,7 +476,7 @@ function PlacementStep({ items, assignments, setAssignments, points, activeItem,
       <aside className="image-point-inspector">
         <header><span>Точка</span><h2>{selectedPoint?.point_name || "не выбрана"}</h2>{selectedPoint && <p>Sample {selectedPoint.sample_name}</p>}</header>
         {selectedPoint ? <>
-          <section><h3>Связанные Analyses</h3><div className="point-analysis-list">{selectedPoint.analysis_ids.map((id, index) => <div key={id}><span>{selectedPoint.methods[index] || `Analysis ${index + 1}`}</span><b title={id}>{shortenId(id)}</b></div>)}</div></section>
+          <section><h3>Связанные Analyses</h3><div className="point-analysis-list">{selectedPoint.analysis_ids.map((id, index) => <div key={id}><span>{selectedPoint.analysis_methods?.[index] || `Analysis ${index + 1}`}</span><b title={id}>{shortenId(id)}</b></div>)}</div></section>
           {crossSample && <section className="cross-sample-warning"><Warning size={19} weight="fill" /><div><b>Точка другого Sample</b><span>Изображение: {activeAssignment.sample_name}<br />Точка: {selectedPoint.sample_name}</span></div></section>}
           {draft && <section className="placement-draft"><h3>Предпросмотр размещения</h3><p>{geometryLabel(draft.geometry)}</p>{crossSample && <><label>Причина исключения<select aria-label="Причина межобразцового исключения" value={reasonCode} onChange={(event) => setReasonCode(event.target.value)}><option value="">Выбери причину</option>{Object.entries(CROSS_SAMPLE_REASONS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Комментарий<textarea value={reasonComment} onChange={(event) => setReasonComment(event.target.value)} maxLength={500} placeholder="Дополнительное обоснование (необязательно)" /></label></>}<button className="primary-button inspector-action" type="button" onClick={saveDraft} disabled={busy || (crossSample && !reasonCode)}>Сохранить привязку</button></section>}
           {!draft && !selectedPlacement && <section className="point-instruction"><Info size={18} /><p>Выбери Point, Rectangle или Square и укажи место на изображении. Положение останется preview до сохранения.</p></section>}
@@ -526,15 +553,25 @@ export function ImagesWorkspace({ inspection, plan, points = { items: [] }, busy
   const [previewLoading, setPreviewLoading] = useState(() => new Set());
   const [previewError, setPreviewError] = useState({});
   const requestedPreviews = useRef(new Set());
-  const previewBatchRef = useRef(inspection);
+  const previewBatchRef = useRef(null);
+  const previousItemsRef = useRef([]);
 
   useEffect(() => {
+    const previousFingerprints = new Map(previousItemsRef.current.map((item) => [item.source_path, item.source_fingerprint]));
+    const currentPaths = new Set(inspectedItems.map((item) => item.source_path));
+    previousItemsRef.current = inspectedItems;
     previewBatchRef.current = inspection;
-    setExcludedPaths(new Set());
-    setLastExcludedPaths([]);
-    setAssignments(Object.fromEntries(inspectedItems.map((item) => [item.source_path, initialAssignment(item)])));
-    setSelected(new Set(inspectedItems.map((item) => item.source_path)));
-    setActivePath(inspectedItems[0]?.source_path || "");
+    setExcludedPaths((current) => new Set([...current].filter((path) => currentPaths.has(path))));
+    setLastExcludedPaths((current) => current.filter((path) => currentPaths.has(path)));
+    setAssignments((current) => Object.fromEntries(inspectedItems.map((item) => [item.source_path,
+      previousFingerprints.has(item.source_path) && previousFingerprints.get(item.source_path) === item.source_fingerprint && current[item.source_path]
+        ? current[item.source_path] : initialAssignment(item),
+    ])));
+    setSelected((current) => new Set(inspectedItems.filter((item) =>
+      current.has(item.source_path) || !previousFingerprints.has(item.source_path),
+    ).map((item) => item.source_path)));
+    setActivePath((current) => currentPaths.has(current) && !excludedPaths.has(current)
+      ? current : inspectedItems.find((item) => !excludedPaths.has(item.source_path))?.source_path || "");
     requestedPreviews.current.clear();
     setPreviews({}); setPreviewError({}); setPreviewLoading(new Set()); setPhase("assignment");
   }, [inspection]);
@@ -596,6 +633,7 @@ export function ImagesWorkspace({ inspection, plan, points = { items: [] }, busy
     }
   }, [onPreview]);
 
+  if (previewBatchRef.current !== inspection) return null;
   if (items.length === 0) {
     return <section className="images-empty"><Images size={52} weight="duotone" /><h1>Добавить изображения</h1><p>Выбери отдельные файлы или целую папку с сериями BSE, PPL, XPL и фотографиями. PetroLab проверит каждый файл и предложит назначения из имён.</p><div className="images-empty-actions"><button className="primary-button large" type="button" onClick={onChoose} disabled={busy}><Plus size={20} /> Выбрать файлы</button><button className="outline-button large" type="button" onClick={onChooseFolder} disabled={busy}><FolderOpen size={20} /> Выбрать папку</button></div><small>PNG, JPEG, TIFF и BMP. Папка сканируется вместе с вложенными папками; исходники не изменяются.</small></section>;
   }

@@ -137,6 +137,33 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(by_id[second["analytical_point_id"]]["sample_name"], "OTHER")
             self.assertEqual(by_id[first["analytical_point_id"]]["placement_count"], 0)
 
+    def test_analysis_methods_remain_aligned_with_ids_when_method_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, first, _ = self._project_with_points(Path(directory_name))
+            ids = sorted(first["analysis_ids"])
+            with closing(sqlite3.connect(database)) as connection:
+                connection.execute("UPDATE analysis_import_semantics SET analytical_method_json = ? WHERE analysis_id = ?", (json.dumps(None), ids[0]))
+                connection.execute("UPDATE analysis_import_semantics SET analytical_method_json = ? WHERE analysis_id = ?", (json.dumps("EPMA"), ids[1]))
+                connection.commit()
+            point = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == first["analytical_point_id"])
+            self.assertEqual(point["analysis_ids"], ids)
+            self.assertEqual(point["analysis_methods"], [None, "EPMA"])
+            self.assertEqual(point["methods"], ["EPMA"])
+
+    def test_analysis_methods_keep_duplicate_labels_bound_to_their_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            database, _, _ = self._project_with_points(Path(directory_name))
+            with closing(sqlite3.connect(database)) as connection:
+                ids = [row[0] for row in connection.execute("SELECT analysis_id FROM analysis ORDER BY analysis_id LIMIT 3")]
+                for analysis_id, method in zip(ids, ["EPMA", "EPMA", "LA-ICP-MS"]):
+                    connection.execute("UPDATE analysis_import_semantics SET analytical_method_json = ? WHERE analysis_id = ?", (json.dumps(method), analysis_id))
+                connection.commit()
+            created = create_analytical_point(database, "KIV-2", "P-09", ids, "same_point")
+            point = next(item for item in list_analytical_points(database)["items"] if item["analytical_point_id"] == created["analytical_point_id"])
+            self.assertEqual(point["analysis_ids"], ids)
+            self.assertEqual(point["analysis_methods"], ["EPMA", "EPMA", "LA-ICP-MS"])
+            self.assertEqual(point["methods"], ["EPMA", "LA-ICP-MS"])
+
     def test_windows_batch_file_is_not_treated_as_an_image(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             script = Path(directory_name) / "images.bat"

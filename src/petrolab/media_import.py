@@ -267,7 +267,9 @@ def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
     Returned rows keep stable IDs and imported analysis evidence.  The UI may
     filter by Sample, but a cross-Sample candidate is never hidden from the
     service and never becomes linked without the explicit reason enforced by
-    ``create_media_import_plan``.
+    ``create_media_import_plan``. ``analysis_methods`` is aligned with
+    ``analysis_ids`` and retains missing labels as None; ``methods`` is the
+    deduplicated list used for display and search.
     """
     connection = _read_connection(database_path)
     try:
@@ -295,14 +297,16 @@ def list_analytical_points(database_path: str | Path) -> dict[str, Any]:
                 "sample_id": row["sample_id"],
                 "sample_name": row["sample_name"],
                 "analysis_ids": [],
+                "analysis_methods": [],
                 "methods": [],
                 "placement_count": placement_counts.get(row["analytical_point_id"], 0),
             })
             if row["analysis_id"] is not None:
+                method = _method_label(row["analytical_method_json"])
                 item["analysis_ids"].append(row["analysis_id"])
-            method = _method_label(row["analytical_method_json"])
-            if method and method not in item["methods"]:
-                item["methods"].append(method)
+                item["analysis_methods"].append(method)
+                if method and method not in item["methods"]:
+                    item["methods"].append(method)
         items = list(by_id.values())
         return {
             "total": len(items),

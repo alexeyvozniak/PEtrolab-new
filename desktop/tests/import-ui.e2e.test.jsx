@@ -754,6 +754,7 @@ test("image assignment accepts a user-defined media type and applies it in bulk"
   await user.click(screen.getByRole("button", { name: "Применить к выбранным (3)" }));
 
   expect(screen.getAllByText("Cathodoluminescence").length).toBeGreaterThan(0);
+  await user.click(screen.getByRole("button", { name: "Подтвердить назначения" }));
   await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
   expect(await screen.findByText("KIV-2_A_BSE_01.tif (Cathodoluminescence)")).toBeTruthy();
 });
@@ -883,4 +884,117 @@ test("user resolves a repeated complex workbook with sheet-level and grouped dec
 
   await screen.findByRole("heading", { name: "Анализы" });
   expect(applyImportPlan).toHaveBeenCalled();
+});
+
+
+test("excluding one copy clears the duplicate warning", async () => {
+  uiState.mediaDuplicates = true;
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("checkbox", { name: "Выбрано: 3 из 3" }));
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать KIV-2_A_BSE_01.tif" }));
+  await user.click(screen.getByRole("button", { name: "Исключить выбранные дубликаты (1)" }));
+  expect(screen.queryByText("Одинаковые физические изображения не будут импортированы дважды.", { exact: false })).toBeNull();
+});
+
+test("expanding the queue during placement keeps confirmed existing assignments", async () => {
+  const item = { source_path: "C:/a.tif", display_name: "a.tif", source_fingerprint: "hash-a", width_px: 12, height_px: 8, suggested_media_type: "BSE", suggested_sample_name: "A", suggested_thin_section_name: "A1" };
+  const noop = vi.fn();
+  const props = { points: { items: [] }, busy: false, onChoose: noop, onChooseFolder: noop, onPreview: async () => null, onPlan: noop, onApply: noop, onCancel: noop };
+  const user = userEvent.setup();
+  const { rerender } = render(<ImagesWorkspace {...props} inspection={{ items: [item], duplicate_groups: [] }} />);
+  await user.click(await screen.findByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  rerender(<ImagesWorkspace {...props} inspection={{ items: [item, { ...item, source_path: "C:/b.tif", display_name: "b.tif", source_fingerprint: "hash-b" }], duplicate_groups: [] }} />);
+  expect(await screen.findByText("1 готово")).toBeTruthy();
+  expect(screen.getByRole("button", { name: /2\. b\.tif/ }).textContent).toContain("нужно подтвердить");
+});
+
+test("adding files preserves excluded duplicates and lets the user restore them", async () => {
+  const base = { width_px: 12, height_px: 8, suggested_media_type: "BSE", suggested_sample_name: "A", suggested_thin_section_name: "A1" };
+  const a = { ...base, source_path: "C:/a.tif", display_name: "a.tif", source_fingerprint: "dup" };
+  const b = { ...base, source_path: "C:/b.tif", display_name: "b.tif", source_fingerprint: "dup" };
+  const c = { ...base, source_path: "C:/c.tif", display_name: "c.tif", source_fingerprint: "other" };
+  const inspection = { items: [a, b], duplicate_groups: [[a.source_path, b.source_path]] };
+  const noop = vi.fn();
+  const props = { points: { items: [] }, busy: false, onChoose: noop, onChooseFolder: noop, onPlan: noop, onApply: noop, onCancel: noop };
+  const user = userEvent.setup();
+  const { rerender } = render(<ImagesWorkspace {...props} inspection={inspection} />);
+  await user.click(await screen.findByRole("checkbox", { name: "Выбрано: 2 из 2" }));
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать b.tif" }));
+  await user.click(screen.getByRole("button", { name: "Исключить выбранные дубликаты (1)" }));
+  rerender(<ImagesWorkspace {...props} inspection={{ items: [a, b, c], duplicate_groups: [[a.source_path, b.source_path]] }} />);
+  expect(await screen.findByText("Выбрано: 1 из 2")).toBeTruthy();
+  expect(screen.queryByRole("checkbox", { name: "Выбрать b.tif" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Вернуть в пакет" }));
+  expect(screen.getByRole("checkbox", { name: "Выбрать b.tif" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Исключить выбранные дубликаты/ })).toBeTruthy();
+});
+
+test("bulk sample assignment preserves each image type and storage mode", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  const table = screen.getByRole("table", { name: "Назначения импортируемых изображений" });
+  const rows = within(table).getAllByRole("row");
+  expect(rows[2].textContent).toContain("PPL");
+  await user.click(within(rows[2]).getByRole("button"));
+  await user.selectOptions(screen.getByRole("combobox", { name: "Хранение" }), "linked_external");
+  await user.click(within(rows[1]).getByRole("button"));
+  await user.click(screen.getByRole("button", { name: "Применить к выбранным (3)" }));
+  expect(rows[2].textContent).toContain("PPL");
+  await user.click(within(rows[2]).getByRole("button"));
+  expect(screen.getByRole("combobox", { name: "Хранение" }).value).toBe("linked_external");
+});
+
+test("saved placements survive added files, and analysis labels stay aligned", async () => {
+  const a = { source_path: "C:/a.tif", display_name: "a.tif", source_fingerprint: "hash-a", width_px: 640, height_px: 480, suggested_media_type: "BSE", suggested_sample_name: "A", suggested_thin_section_name: "A1" };
+  const b = { ...a, source_path: "C:/b.tif", display_name: "b.tif", source_fingerprint: "hash-b", suggested_media_type: "PPL" };
+  const point = { analytical_point_id: "p1", point_name: "P1", sample_name: "A", methods: ["EPMA", "LA-ICP-MS"], analysis_ids: ["id-1", "id-2", "id-3"], analysis_methods: ["EPMA", "EPMA", "LA-ICP-MS"] };
+  const noop = vi.fn();
+  const props = { points: { items: [point] }, busy: false, onChoose: noop, onChooseFolder: noop, onPreview: async (path) => ({ source_path: path, source_fingerprint: path === a.source_path ? a.source_fingerprint : b.source_fingerprint, source_width_px: 640, source_height_px: 480, preview_width_px: 640, preview_height_px: 480, preview_data_url: "data:image/png;base64,aA==" }), onPlan: noop, onApply: noop, onCancel: noop };
+  const user = userEvent.setup();
+  const { rerender } = render(<ImagesWorkspace {...props} inspection={{ items: [a], duplicate_groups: [] }} />);
+  await user.click(await screen.findByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  await user.click(screen.getByRole("button", { name: /P1 EPMA/ }));
+  const analysisList = screen.getByText("Связанные Analyses").nextElementSibling;
+  expect(analysisList.children[0].textContent).toContain("EPMA");
+  expect(analysisList.children[1].textContent).toContain("EPMA");
+  expect(analysisList.children[2].textContent).toContain("LA-ICP-MS");
+  fireEvent.keyDown(await screen.findByRole("application"), { key: "Enter" });
+  await user.click(screen.getByRole("button", { name: "Сохранить привязку" }));
+  rerender(<ImagesWorkspace {...props} inspection={{ items: [a, b], duplicate_groups: [] }} />);
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать a.tif" }));
+  await user.click(screen.getByRole("button", { name: "Подтвердить предложения" }));
+  await user.click(screen.getByRole("button", { name: "Продолжить: точки" }));
+  expect(await screen.findByRole("button", { name: "Размещение P1" })).toBeTruthy();
+});
+
+
+test("bulk sample assignment requires explicit confirmation without overwriting custom fields", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: "Изображения" }));
+  await user.click(screen.getByRole("button", { name: "Выбрать файлы" }));
+  await screen.findByRole("heading", { name: "Назначь Sample и шлиф" });
+  const type = screen.getByLabelText("Тип изображения");
+  await user.clear(type);
+  await user.type(type, "Custom type");
+  await user.selectOptions(screen.getByRole("combobox", { name: "Хранение" }), "linked_external");
+  await user.click(screen.getByRole("button", { name: "Применить к выбранным (3)" }));
+  expect(screen.getByText("0 готово")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Продолжить: точки" }).disabled).toBe(true);
+  await user.click(screen.getByRole("button", { name: "Подтвердить назначения" }));
+  expect(screen.getByText("3 готово")).toBeTruthy();
+  expect(screen.getByLabelText("Тип изображения").value).toBe("Custom type");
+  expect(screen.getByRole("combobox", { name: "Хранение" }).value).toBe("linked_external");
+  expect(screen.getByRole("button", { name: "Продолжить: точки" }).disabled).toBe(false);
 });
