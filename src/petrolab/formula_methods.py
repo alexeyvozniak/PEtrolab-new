@@ -25,6 +25,9 @@ from .orthopyroxene_formula import (ATOMIC_MASSES as OPX_ATOMIC_MASSES,
                                    FE_MODES as OPX_FE_MODES, METHOD_ID as OPX_METHOD_ID,
                                    METHOD_VERSION as OPX_METHOD_VERSION,
                                    OXIDES as OPX_OXIDES, calculate_orthopyroxene)
+from .orthopyroxene_structural_formula import (ATOMIC_MASSES as OPS_ATOMIC_MASSES,
+    FE_MODES as OPS_FE_MODES, METHOD_ID as OPS_METHOD_ID, METHOD_VERSION as OPS_METHOD_VERSION,
+    OXIDES as OPS_OXIDES, REQUIRED as OPS_REQUIRED, calculate_orthopyroxene_structural)
 from .mineral_verification import reported_target
 from .garnet_formula import (ATOMIC_MASSES as GRT_ATOMIC_MASSES, FE_MODES as GRT_FE_MODES,
                              METHOD_ID as GRT_METHOD_ID, METHOD_VERSION as GRT_METHOD_VERSION,
@@ -39,6 +42,7 @@ OPX_IMPLEMENTATION_SHA256 = '90e6999502d392087e546ba2f5311b47fc57bc3f590c9292eec
 AMP_IMPLEMENTATION_SHA256 = 'e840975a216609ec3deb7a61bb8cc47d4291b7fbafb93b0e4a0419641a0d0727'
 GRT_IMPLEMENTATION_SHA256 = '191cc08a88a13a387f2d9e00a8937841cc096137d7341eb408a1f8ecb806cd09'
 CPS_IMPLEMENTATION_SHA256 = 'ffc297d084c065d1faa9fa95cf626f6978e20bf64f9f09114f89ec9fc22d60aa'
+OPS_IMPLEMENTATION_SHA256 = '76c429f814f3a0808489d8f8902bb7e297b097d9b41f23f00fa0f00c983e10ca'
 COMPACT_FE_MODE_LABELS = {
     'all_fe2': 'Всё Fe как Fe²⁺ · FeO/FeOt',
     'reported_split': 'Раздельные FeO + Fe₂O₃',
@@ -355,6 +359,53 @@ def _clinopyroxene_structural_definition():
     return definition
 
 
+def _orthopyroxene_structural_definition():
+    cations = sorted({oxide[3] for oxide in OPS_OXIDES.values()})
+    fields = ([name + '_apfu' for name in cations]
+              + [site + '_' + name + '_apfu' for site in ('T', 'M1', 'M2') for name in cations]
+              + ['cation_sum', 'T_sum', 'M1_sum', 'M2_sum'])
+    definition = {
+        'method_id': OPS_METHOD_ID, 'version': OPS_METHOD_VERSION,
+        'name': 'Ортопироксен · 6 O · T/M1/M2', 'kind': 'formula', 'status': 'draft',
+        'input_domain': {'semantic_domain': 'oxide_wt_percent', 'required_fields': sorted(OPS_REQUIRED),
+            'allowed_units': ['wt.%'], 'missing_policy': 'reject_row', 'censored_policy': 'reject_row',
+            'compositional_domain_policy': 'explicit_subcomposition_required',
+            'nonpositive_policy': 'not_applicable', 'mixed_unit_policy': 'reject'},
+        'parameters': [{'name': 'fe_mode', 'value_type': 'choice', 'scientifically_significant': True}],
+        'output_fields': ([{'field': field, 'semantic_role': 'derived_value', 'unit': 'apfu'} for field in fields]
+            + [{'field': field, 'semantic_role': 'diagnostic', 'unit': 'mol.%'} for field in ('Wo', 'En', 'Fs')]
+            + [{'field': 'oxide_total', 'semantic_role': 'diagnostic', 'unit': 'wt.%'},
+               {'field': 'charge_sum', 'semantic_role': 'diagnostic', 'unit': None},
+               {'field': 'structural_formula', 'semantic_role': 'derived_value', 'unit': None}]),
+        'citations': [
+            {'title': 'Morimoto et al. (1988), Nomenclature of pyroxenes',
+             'doi': '10.3406/bulmi.1988.8099', 'url': 'https://doi.org/10.3406/bulmi.1988.8099'},
+            {'title': 'Yavuz (2013), WinPyrox, p1339/1348 and Table 5 S1',
+             'doi': '10.2138/am.2013.4292', 'url': 'https://doi.org/10.2138/am.2013.4292'},
+            {'title': 'Ejima et al. (2018), Table 1 and section 5.1',
+             'doi': '10.3390/min8050204', 'url': 'https://doi.org/10.3390/min8050204'},
+            {'title': 'Droop (1987), stoichiometric Fe3+ estimation',
+             'doi': '10.1180/minmag.1987.051.361.10', 'url': 'https://doi.org/10.1180/minmag.1987.051.361.10'},
+            {'title': 'CIAAW Abridged Standard Atomic Weights 2024', 'url': 'https://ciaaw.org/abridged-atomic-weights.htm'}],
+        'assumptions': ['Безводные 6 O; без нормировки wt.% к 100%.',
+            'Fe: всё Fe2, отдельные входные FeO/Fe2O3 или явная оценка Droop на 4 катиона.',
+            'Исходные Fe-колонки и предоставленное происхождение сохраняются; прежние преобразования не определяются автоматически.',
+            'T/M1/M2 — идеальная последовательность, не физическое Fe-Mg ordering.',
+            'Валентности других элементов заданы оксидами; только Fe переоценивается в Droop.'],
+        'applicability': ['Только явно принятый ортопироксен; не определение вида или симметрии.',
+            'Si > 2 APFU, ненулевые F/Cl/H2O и неподдержанные оксиды блокируют эту версию.',
+            'Суммы позиций диагностируются без подгонки к 2/1/1; нет термобарометрии/неопределённости.',
+            'Оценка Droop не заменяет измерение Fe3; Wo/En/Fs не являются полным набором конечных членов.'],
+        'benchmark_ids': ['ops-ideal-endmembers', 'ops-ferric-droop-endpoint',
+                          'ops-winpyrox-s1-generic', 'ops-tariat-ejima2018-natural'],
+        'implementation': {'algorithm_id': OPS_METHOD_ID, 'algorithm_version': OPS_METHOD_VERSION,
+                           'implementation_sha256': OPS_IMPLEMENTATION_SHA256},
+        'created_at': '2026-11-08T00:00:00Z',
+    }
+    definition['definition_fingerprint'] = fingerprint(definition)
+    return definition
+
+
 def method_definition(method_id=METHOD_ID, version=None):
     """Return one installed definition without changing existing olivine identity."""
     installed = {METHOD_ID: (METHOD_VERSION, _olivine_definition),
@@ -363,7 +414,8 @@ def method_definition(method_id=METHOD_ID, version=None):
                  OPX_METHOD_ID: (OPX_METHOD_VERSION, _orthopyroxene_definition),
                  AMP_METHOD_ID: (AMP_METHOD_VERSION, _amphibole_definition),
                  GRT_METHOD_ID: (GRT_METHOD_VERSION, _garnet_definition),
-                 CPS_METHOD_ID: (CPS_METHOD_VERSION, _clinopyroxene_structural_definition)}
+                 CPS_METHOD_ID: (CPS_METHOD_VERSION, _clinopyroxene_structural_definition),
+                 OPS_METHOD_ID: (OPS_METHOD_VERSION, _orthopyroxene_structural_definition)}
     current = installed.get(method_id)
     if current is None or (version is not None and version != current[0]):
         raise KeyError((method_id, version))
@@ -373,6 +425,15 @@ def method_definition(method_id=METHOD_ID, version=None):
 def executable_method(method_id, version):
     """Resolve domain behavior for workflow dispatch; values are never serialized."""
     definition = method_definition(method_id, version)
+    if method_id == OPS_METHOD_ID:
+        return {'definition': definition, 'accepted_targets': {'orthopyroxene'},
+                'target_label': 'ортопироксена', 'parameter_choices': {'fe_mode': OPS_FE_MODES},
+                'parameter_choice_labels': {'fe_mode': {'all_fe2': 'Всё Fe как Fe²⁺ · 6 O',
+                    'reported_split': 'Раздельные FeO + Fe₂O₃', 'stoichiometric_droop': 'Fe³⁺ по Droop · оценка'}},
+                'quick_presets': [{'id': 'all_fe2', 'label': 'Рассчитать формулу',
+                    'description': '6 O; всё Fe принято Fe²⁺; T/M1/M2 — идеальные оценки.',
+                    'parameters': {'fe_mode': 'all_fe2'}}],
+                'calculate': lambda rows, p: calculate_orthopyroxene_structural(rows, p['fe_mode'])}
     if method_id == CPS_METHOD_ID:
         return {'definition': definition,
                 'accepted_targets': {'clinopyroxene', 'Na-clinopyroxene', 'Na-Ca clinopyroxene'},
@@ -454,7 +515,8 @@ def list_methods(accepted_assignment=None):
                                        (OPX_METHOD_ID, OPX_METHOD_VERSION, OPX_ATOMIC_MASSES),
                                        (AMP_METHOD_ID, AMP_METHOD_VERSION, AMP_ATOMIC_MASSES),
                                        (GRT_METHOD_ID, GRT_METHOD_VERSION, GRT_ATOMIC_MASSES),
-                                       (CPS_METHOD_ID, CPS_METHOD_VERSION, CPS_ATOMIC_MASSES)):
+                                       (CPS_METHOD_ID, CPS_METHOD_VERSION, CPS_ATOMIC_MASSES),
+                                       (OPS_METHOD_ID, OPS_METHOD_VERSION, OPS_ATOMIC_MASSES)):
         registration = executable_method(method_id, version)
         if accepted_assignment is not None and accepted_target not in registration['accepted_targets']:
             continue

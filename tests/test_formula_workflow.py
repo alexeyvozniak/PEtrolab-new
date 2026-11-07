@@ -397,7 +397,7 @@ class MicaFormulaPersistenceTests(unittest.TestCase):
                          [(METHOD_ID, METHOD_VERSION), (MICA_METHOD_ID, MICA_METHOD_VERSION),
                           (CPX_METHOD_ID, CPX_METHOD_VERSION), (OPX_METHOD_ID, OPX_METHOD_VERSION),
                           (AMP_METHOD_ID, AMP_METHOD_VERSION), ('garnet.structural12', '0.1.0'),
-                          ('clinopyroxene.structural6', '0.1.0')])
+                          ('clinopyroxene.structural6', '0.1.0'), ('orthopyroxene.structural6', '0.1.0')])
         self.assertEqual(method_definition()['definition_fingerprint'],
                          '872567da3c7195d75c64790f14aa979fcf8ba6677a910a0a742eb9f2dcd0ed87')
         root = Path(__file__).parents[1] / 'schemas'
@@ -442,8 +442,8 @@ class MicaFormulaPersistenceTests(unittest.TestCase):
         self.assertEqual(list_methods('quartz')['methods'], [])
         self.assertEqual([m['method_id'] for m in list_methods('diopside')['methods']], [CPX_METHOD_ID, 'clinopyroxene.structural6'])
         self.assertEqual([m['method_id'] for m in list_methods('clinopyroxene')['methods']], [CPX_METHOD_ID, 'clinopyroxene.structural6'])
-        self.assertEqual([m['method_id'] for m in list_methods('enstatite')['methods']], [OPX_METHOD_ID])
-        self.assertEqual([m['method_id'] for m in list_methods('orthopyroxene')['methods']], [OPX_METHOD_ID])
+        self.assertEqual([m['method_id'] for m in list_methods('enstatite')['methods']], [OPX_METHOD_ID, 'orthopyroxene.structural6'])
+        self.assertEqual([m['method_id'] for m in list_methods('orthopyroxene')['methods']], [OPX_METHOD_ID, 'orthopyroxene.structural6'])
         self.assertEqual([m['method_id'] for m in list_methods('tremolite')['methods']], [AMP_METHOD_ID])
         self.assertEqual(list_methods('riebeckite')['methods'], [])
         self.assertEqual(list_methods('pigeonite')['methods'], [])

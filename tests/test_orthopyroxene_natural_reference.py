@@ -114,8 +114,10 @@ class OrthopyroxeneNaturalReferenceTests(unittest.TestCase):
         self.assertNotIn('Fe2O3', self.reference['original_mean_oxides'])
         self.assertEqual(set(self.reference['published_recast_iron_oxides']), {'FeO', 'Fe2O3'})
         self.assertTrue(self.reference['recast_iron_provenance']['not_direct_measurement_of_separate_oxides'])
-        # Registry intentionally unchanged; natural benchmark is not native acceptance.
+        # The earlier bulk method remains first; the structural method remains draft.
         from petrolab.formula_methods import list_methods
-        self.assertEqual([method['method_id'] for method in list_methods('enstatite')['methods']], ['orthopyroxene.oxygen6'])
+        methods = list_methods('enstatite')['methods']
+        self.assertEqual([method['method_id'] for method in methods], ['orthopyroxene.oxygen6', 'orthopyroxene.structural6'])
+        self.assertEqual(methods[1]['status'], 'draft')
         self.assertEqual(hashlib.sha256((ROOT / 'src/petrolab/orthopyroxene_formula.py').read_bytes().replace(b'\r\n', b'\n')).hexdigest(),
                          '90e6999502d392087e546ba2f5311b47fc57bc3f590c9292eec3180aa47cf0dd')

@@ -1,4 +1,4 @@
-"""Unregistered draft Opx core: ideal allocation, NOT physical site occupancy.
+"""Draft Opx core: ideal allocation, NOT physical site occupancy.
 
 Frozen independently from Cpx and the existing Opx oxygen6 method. A published
 ferric En-or-Cen reference tests the generic ideal pyroxene model only.
@@ -128,7 +128,7 @@ def calculate_orthopyroxene_structural(measurements, fe_mode):
     if fe_mode == 'reported_split':
         required |= {'FeO', 'Fe2O3'}
         if {'FeOt', 'Fe2O3t'} & seen:
-            errors.append('Измеренное раздельное железо несовместимо с суммарным FeOt/Fe₂O₃t.')
+            errors.append('Раздельные FeO и Fe₂O₃ несовместимы с суммарным FeOt/Fe₂O₃t.')
     else:
         if len({'FeO', 'FeOt'} & seen) != 1 or {'Fe2O3', 'Fe2O3t'} & seen:
             errors.append('Нужна ровно одна колонка FeO/FeOt без Fe₂O₃/Fe₂O₃t.')

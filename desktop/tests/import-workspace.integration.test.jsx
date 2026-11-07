@@ -655,6 +655,112 @@ test('real structural clinopyroxene coexists with bulk, keeps sites collapsed an
   expect(await readFile(second, 'utf8')).toBe(source);
 }, 60000);
 
+test('real structural orthopyroxene coexists with bulk and preserves history after an invalid Fe mode', async () => {
+  // Preserve the original FeOt designation; the independent ferric fraction
+  // is not inferred from the total iron reported in the publication.
+  const source = await readFile(resolve(process.cwd(), '../fixtures/formula/orthopyroxene_tariat2018.csv'), 'utf8');
+  await writeFile(second, source); queue = [second];
+  const user = userEvent.setup(); render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+  await user.click(await enabledButton('2 · Проверить минералы'));
+  await user.click(await enabledButton('Сохранить импорт в проект'));
+  await screen.findByRole('heading', { name: 'Анализы' });
+  await user.click(await enabledButton('Минералы'));
+  await user.click(screen.getByText('Назначить другой минерал'));
+  await user.type(screen.getByLabelText('Минерал из справочника'), 'enstatite');
+  await user.type(screen.getByLabelText('Основание назначения'), 'Опубликованный ортопироксен Tariat');
+  await user.click(await enabledButton('Сохранить ручное назначение'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  await user.click(await screen.findByText('Настроить расчёт', { selector: 'summary' }));
+  const method = screen.getByRole('combobox', { name: 'Метод формулы' });
+  expect(method.value).toBe('orthopyroxene.oxygen6');
+  await user.click(await enabledButton('Рассчитать формулу'));
+  await user.click(await enabledButton('Сохранить результат формулы'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  await user.selectOptions(method, 'orthopyroxene.structural6');
+  expect(screen.queryByLabelText('Предпросмотр формулы')).toBeNull();
+  await user.click(await enabledButton('Рассчитать формулу'));
+  expect((await screen.findByLabelText('Структурная формула')).textContent).toContain('O6');
+  const positions = screen.getByText('Позиции T/M1/M2 · оценка', { selector: 'summary' });
+  expect(positions.closest('details').open).toBe(false);
+  await user.click(positions);
+  const sites = screen.getByRole('table', { name: 'Распределение по позициям' });
+  for (const label of ['Сумма T', 'Сумма M1', 'Сумма M2']) expect(within(sites).getByText(label)).toBeTruthy();
+  await user.click(await enabledButton('Сохранить результат формулы'));
+  await screen.findByText('Сохранённые расчёты · 2');
+  await user.click(await enabledButton('Анализы'));
+  await user.click(await enabledButton('Минералы'));
+  await user.click(await enabledButton('Приняты пользователем 1'));
+  const summary = await screen.findByText(/Сохранён · Ортопироксен · 6 O · T\/M1\/M2 · v0\.1\.0/, { selector: 'summary' });
+  await user.click(summary);
+  const history = summary.closest('details');
+  expect(within(history).getByLabelText('Структурная формула').textContent).toContain('O6');
+  expect(within(history).getByText('Позиции T/M1/M2 · оценка', { selector: 'summary' }).closest('details').open).toBe(false);
+  expect(screen.getByText(/Сохранён · Ортопироксен · 6 O · bulk APFU/)).toBeTruthy();
+  await user.click(screen.getByText('Настроить расчёт', { selector: 'summary' }));
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Метод формулы' }), 'orthopyroxene.structural6');
+  const fe = screen.getByRole('combobox', { name: 'Режим железа' });
+  await user.selectOptions(fe, 'reported_split');
+  await user.click(await enabledButton('Рассчитать формулу'));
+  await screen.findByText(/Fe2O3: нет пригодного/);
+  expect(fe.value).toBe('reported_split');
+  expect(screen.getByRole('button', { name: 'Сохранить результат формулы' }).disabled).toBe(true);
+  expect(within(history).getByLabelText('Структурная формула')).toBeTruthy();
+  expect(requests.filter(request => request.command === 'formula.save')).toHaveLength(2);
+  expect(await readFile(second, 'utf8')).toBe(source);
+}, 60000);
+
+test('real structural orthopyroxene batch refuses an invalid row and saves the explicit remaining scope', async () => {
+  const fixture = await readFile(resolve(process.cwd(), '../fixtures/formula/orthopyroxene_tariat2018.csv'), 'utf8');
+  const [header, published] = fixture.trim().split(/\r?\n/);
+  const row = (name, invalid = false) => published.replace('Tariat mean n=22', name).replace('55.06', invalid ? '95' : '55.06');
+  const source = [header, row('Opx-1'), row('Opx-2'), row('Opx-invalid', true), ''].join('\n');
+  await writeFile(second, source); queue = [second];
+  const user = userEvent.setup(); render(<App />);
+  await user.click(await enabledButton('Выбрать файл'));
+  await user.click(await enabledButton('2 · Проверить минералы'));
+  await user.click(await enabledButton('Сохранить импорт в проект'));
+  await screen.findByRole('heading', { name: 'Анализы' });
+  await user.click(await enabledButton('Минералы'));
+  for (const id of ['Opx-1', 'Opx-2', 'Opx-invalid']) {
+    await user.click(await enabledButton(`Открыть анализ ${id}`));
+    const manual = screen.getByText('Назначить другой минерал');
+    if (!manual.closest('details').open) await user.click(manual);
+    const target = screen.getByLabelText('Минерал из справочника');
+    const reason = screen.getByLabelText('Основание назначения');
+    await waitFor(() => expect(target.disabled).toBe(false));
+    await user.clear(target); await user.type(target, 'enstatite');
+    await user.clear(reason); await user.type(reason, 'Явное тестовое назначение');
+    await user.click(await enabledButton('Сохранить ручное назначение'));
+  }
+  await user.click(await enabledButton('Анализы'));
+  for (const id of ['Opx-1', 'Opx-2', 'Opx-invalid']) await user.click(screen.getByRole('checkbox', { name: `Выбрать ${id}` }));
+  await user.click(await enabledButton('Минералы'));
+  await screen.findByText('Выбрано 3');
+  await user.click(screen.getByText('Настроить расчёт', { selector: 'summary' }));
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Метод формулы' }), 'orthopyroxene.structural6');
+  await user.click(await enabledButton('Рассчитать формулы'));
+  await screen.findByText('Готово 2 · Требуют решения 1');
+  expect(screen.getByRole('button', { name: 'Сохранить 3 результатов' }).disabled).toBe(true);
+  expect(requests.filter(r => r.command === 'formula.save')).toHaveLength(0);
+  await user.click(await enabledButton('Убрать этот анализ из отбора'));
+  expect(screen.queryByLabelText('Предпросмотр формулы')).toBeNull();
+  await user.click(await enabledButton('Рассчитать формулы'));
+  await screen.findByText('Готово 2 · Требуют решения 0');
+  const ids = requests.filter(r => r.command === 'formula.preview').at(-1).payload.analysis_ids;
+  expect(ids).toHaveLength(2);
+  await user.click(await enabledButton('Сохранить 2 результатов'));
+  await screen.findByText('Сохранённые расчёты · 1');
+  for (const id of ids) {
+    const response = await bridge.invoke('petrolab_command', { envelope: { protocol_version: '1.0',
+      request_id: crypto.randomUUID(), command: 'formula.runs.list', payload: { project_database_path: join(folder, 'project.sqlite'), analysis_id: id } } });
+    expect(response.result.runs[0].run.input.analysis_ids).toEqual(ids);
+    expect(response.result.runs[0].run.method_id).toBe('orthopyroxene.structural6');
+  }
+  expect(requests.filter(r => r.command === 'formula.save')).toHaveLength(1);
+  expect(await readFile(second, 'utf8')).toBe(source);
+}, 60000);
+
 test('real garnet keeps structural sites collapsed, estimates explicit and history unchanged after a failed split', async () => {
   const source = await readFile(resolve(process.cwd(), '../fixtures/formula/garnet_sg1.csv'), 'utf8');
   await writeFile(second, source);

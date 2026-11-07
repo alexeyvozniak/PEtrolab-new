@@ -131,6 +131,9 @@ def verify_service(executable=None, all_methods=False):
                     ('orthopyroxene_e17_016.csv', 'enstatite', 'orthopyroxene.oxygen6',
                      {'Si_apfu': 1.80, 'Mg_apfu': 1.56, 'Ca_apfu': .04,
                       'Wo': 2.45, 'En': 86.76, 'Fs': 10.79}, .05),
+                    ('orthopyroxene_tariat2018.csv', 'enstatite', 'orthopyroxene.structural6',
+                     {'Si_apfu': 1.902, 'Al_apfu': .190, 'Fe2_apfu': .172,
+                      'Mg_apfu': 1.677, 'Ca_apfu': .024, 'Mn_apfu': .005}, .001),
                     ('garnet_sg1.csv', 'almandine', 'garnet.structural12',
                      {'Si_apfu': 2.938, 'Al_apfu': 1.972, 'Fe3_apfu': .153,
                       'Fe2_apfu': 2.358, 'Mg_apfu': .525, 'Mn_apfu': .016, 'Ca_apfu': .039}, .003),
@@ -153,7 +156,8 @@ def verify_service(executable=None, all_methods=False):
                          'input_fingerprint': record['input_fingerprint'], 'ruleset_version': record['ruleset_version'],
                          'reason': 'AT-46: independent formula family acceptance'})
                     methods = send('formula.methods.list', {'accepted_assignment': target})['methods']
-                    expected_ids = ['clinopyroxene.oxygen6', 'clinopyroxene.structural6'] if method_id.startswith('clinopyroxene.') else [method_id]
+                    expected_ids = (['clinopyroxene.oxygen6', 'clinopyroxene.structural6'] if method_id.startswith('clinopyroxene.') else
+                                    ['orthopyroxene.oxygen6', 'orthopyroxene.structural6'] if method_id.startswith('orthopyroxene.') else [method_id])
                     assert [m['method_id'] for m in methods] == expected_ids, methods
                     method = next(m for m in methods if m['method_id'] == method_id)
                     chosen = {'fe_mode': 'reported_split'} if method_id == 'clinopyroxene.structural6' else method['quick_presets'][0]['parameters']

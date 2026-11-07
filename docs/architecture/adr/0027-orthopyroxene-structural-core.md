@@ -1,20 +1,22 @@
-# ADR 0027 - Unregistered structural orthopyroxene core
+# ADR 0027 - Separate draft structural orthopyroxene method
 
-2026-10-17 (prepared since 2026-10-13). Core-only research slice,
-**not installed in Formula Registry**.
-Master 11/20.2 and structural implementation plan; no new UI, persistence,
-adapter, classifier or service command. AT-50 below distinguishes core checks
-from the pending complete product path.
+2026-11-08 (core prepared 2026-10-13/17). Installed draft method in the
+existing Formula Registry and inspector, subject to AT-50 verification.
+Master 11/20.2 and structural implementation plan; no new screen, persistence,
+adapter, classifier or service command.
 
 ## Decision
 
-Prepare a direct, separately frozen Python implementation with intended ID
+Install a direct, separately frozen Python implementation with ID
 `orthopyroxene.structural6/0.1.0`, without changing or importing the scientific
 implementation of `orthopyroxene.oxygen6` or `clinopyroxene.structural6`.
 The existing seven installed definitions/fingerprints/defaults remain intact.
-Do not add it to the catalog until the independent Opx ferric/basis benchmark,
-reviewed applicability and integration acceptance are obtained. The natural
-benchmark below is now checked, but does not replace product/native acceptance.
+The existing seven definitions and fingerprints remain intact. The old
+`orthopyroxene.oxygen6` remains the first/default method for an accepted Opx.
+The new method is limited to explicitly accepted Opx, and requires explicit
+Fe parameters. Independently checked arithmetic, natural reference evidence,
+model limitations and native acceptance are recorded separately; none alone
+promotes the scientific status to `validated`.
 
 ## Bounded algorithm
 
@@ -81,8 +83,11 @@ not species; no mass total normalization or assumed uncertainty.
   differ from physical Fe-Mg occupancy. Printed abbreviated formula omits Ni
   and has Mn inconsistent with Table1: retain actual input atoms, do not fit.
 
-No scientific validation promotion. Required before installation: reviewed
-applicability and explicit treatment of literature-derived Fe inputs,
-separate Scientific Method Definition/implementation
-pin, old-method coexistence, NDJSON atomic save/stale/history and existing
-1363x936 inspector/native screenshots/keyboard plus bounded batch checks.
+The definition pins the independent implementation SHA and the limitations
+above. The existing service retains Fe mode, source Measurement IDs, exact
+scope, immutable history and staleness. Review/acceptance must cover the
+individual and bounded batch paths, packaged service and 1363x936 native
+inspector. A literature-derived Fe split retains its actual origin and is not
+represented as direct FeO/Fe₂O₃ measurement merely because it is supplied as
+input. Full crystallographic ordering, nomenclature and uncertainty require
+separate methods/evidence, and the status remains draft.

@@ -14,13 +14,13 @@
 2. Cpx/Opx: новые версии с Fe3+/Droop, T/M1/M2 и независимым ferric benchmark;
    старые oxygen6/0.1.0 и их fingerprints не менять.
    Cpx: отдельный `clinopyroxene.structural6/0.1.0`, ADR 0025, AT-48.
-   Opx в приложении пока только прежний bulk. Подготовлено отдельное,
-   **не подключённое к registry** ядро structural6 (ADR 0027, AT-50).
+   Opx: отдельный draft structural6 подключается рядом с прежним bulk
+   (ADR 0027, AT-50); прежний метод остаётся первым.
    Идеальные endpoint/баланс и природный ferric Tariat-эталон проверены отдельно;
    WinPyrox S1 («En или Cen») сам по себе не доказывает Opx-применимость.
    Tariat показывает ограничения Droop и идеальных Fe-Mg позиций, не их
-   научную валидацию. Следующий срез — reviewed applicability/provenance,
-   отдельная definition и native-подключение; не копировать
+   научную валидацию. Проверяются applicability/provenance, definition и
+   native-подключение; не копировать
    Cpx target/номенклатуру и не объявлять идеальные позиции физическими.
 3. Слюды/амфиболы: отдельные reviewed модели позиций и анионов, oxidation и
    измеренного H2O. Не определять неизвестные OH/Li/Fe3+ как измеренные.

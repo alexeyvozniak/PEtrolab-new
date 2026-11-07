@@ -191,6 +191,8 @@ class OrthopyroxeneStructuralCoreTests(unittest.TestCase):
             self.assertEqual(calculate_orthopyroxene_structural(rows, 'reported_split')['status'], 'failed')
         rows = measurements(ideal()); next(row for row in rows if row['field'] == 'FeO')['field'] = 'FeOt'
         self.assertEqual(calculate_orthopyroxene_structural(rows, 'all_fe2')['values'], run(ideal())['values'])
+        result = run(ideal(FeOt=1, Fe2O3=1), 'reported_split')
+        self.assertIn('Раздельные FeO и Fe₂O₃ несовместимы с суммарным FeOt/Fe₂O₃t.', result['errors'])
 
     def test_anions_trace_exclusions_and_optional_absence_preserve_provenance(self):
         for field in ('F', 'Cl', 'H2O'):
@@ -207,10 +209,9 @@ class OrthopyroxeneStructuralCoreTests(unittest.TestCase):
         self.assertNotIn('Ti_apfu', result['values'])
         self.assertNotIn('OH_apfu', result['values'])
 
-    def test_core_is_not_installed_and_old_scientific_implementations_are_unchanged(self):
+    def test_new_core_is_installed_after_old_and_scientific_implementations_are_unchanged(self):
         self.assertEqual([method['method_id'] for method in list_methods('enstatite')['methods']],
-                         ['orthopyroxene.oxygen6'])
-        self.assertNotIn('orthopyroxene.structural6', [method['method_id'] for method in list_methods()['methods']])
+                         ['orthopyroxene.oxygen6', 'orthopyroxene.structural6'])
         root = Path(__file__).resolve().parents[1] / 'src/petrolab'
         for module, expected in [
             ('orthopyroxene_formula.py', '90e6999502d392087e546ba2f5311b47fc57bc3f590c9292eec3180aa47cf0dd'),
