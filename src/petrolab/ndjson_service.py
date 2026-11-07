@@ -27,7 +27,14 @@ from .import_preview import (
     run_import_recipe_validate,
 )
 from .manual_mapping import review_duplicate_candidates, revise_import_mapping, revise_import_mappings, revise_import_sections
-from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
+from .media_import import (
+    apply_media_import_plan,
+    create_analytical_point,
+    create_media_import_plan,
+    create_media_preview,
+    inspect_media_sources,
+    list_analytical_points,
+)
 
 
 PROTOCOL_VERSION = "1.0"
@@ -263,8 +270,20 @@ def _dispatch_analytical_point_create(params: Mapping[str, Any]) -> dict[str, An
     )}
 
 
+def _dispatch_analytical_point_list(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": list_analytical_points(_project_database_path(params))}
+
+
 def _dispatch_media_inspect(params: Mapping[str, Any]) -> dict[str, Any]:
     return {"result": inspect_media_sources(_string_list(params, "source_paths"))}
+
+
+def _dispatch_media_preview(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": create_media_preview(
+        _string(params, "source_path"),
+        params.get("max_width_px", 1600),
+        params.get("max_height_px", 1200),
+    )}
 
 
 def _dispatch_media_plan(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -298,7 +317,9 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.batch.rollback": _dispatch_batch_rollback,
     "import.recipe.save_revision": _dispatch_recipe_save_revision,
     "analytical_point.create": _dispatch_analytical_point_create,
+    "analytical_point.list": _dispatch_analytical_point_list,
     "media.inspect_sources": _dispatch_media_inspect,
+    "media.preview": _dispatch_media_preview,
     "media.import.plan": _dispatch_media_plan,
     "media.import.apply": _dispatch_media_apply,
 }
