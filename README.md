@@ -45,6 +45,21 @@ python -m unittest discover -s tests
 
 Явный `PYTHONPATH` нужен, чтобы тесты использовали этот checkout, а не установленную ранее копию пакета. Задача VS Code `PetroLab: Python tests` задаёт его автоматически.
 
-## Открытие восстановленного проекта
+## Перенос проекта на другой компьютер
 
-Сервис поддерживает `project.archive.export` с уровнями `project`, `project_sources` и `full`, а также `project.archive.restore` для нового каталога. Чтобы открыть извлечённый `project.sqlite` отдельным запуском установленного приложения, задайте его абсолютный путь в `PETROLAB_PROJECT_DATABASE` перед запуском. Обычный запуск из меню «Пуск» использует каталог приложения.
+Закройте PetroLab. В PowerShell из каталога приложения укажите путь к своей базе и создайте архив. Уровень `full` включает базу, исходные таблицы и изображения. Для переноса только базы используйте `project`, для базы с таблицами — `project_sources`.
+
+```powershell
+$project = Join-Path $env:APPDATA 'org.petrolab.desktop\petrolab-v2.sqlite'
+.\binaries\petrolab-service.exe archive export $project 'D:\PetroLab.petrolab' --level full
+```
+
+Скопируйте архив на другой компьютер. Восстановление создаёт новый каталог. Затем откройте его в отдельном запуске PetroLab:
+
+```powershell
+.\binaries\petrolab-service.exe archive restore 'D:\PetroLab.petrolab' 'D:\PetroLab-Project'
+$env:PETROLAB_PROJECT_DATABASE = 'D:\PetroLab-Project\project.sqlite'
+.\petrolab-desktop.exe
+```
+
+Обычный запуск из меню «Пуск» открывает базу в каталоге приложения.

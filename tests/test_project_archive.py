@@ -1,8 +1,11 @@
 from contextlib import closing
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import unittest
 from uuid import uuid4
@@ -15,6 +18,37 @@ from petrolab.ndjson_service import handle_request
 
 
 class ProjectArchiveTests(unittest.TestCase):
+    def test_service_command_line_round_trip_and_missing_database(self):
+        repo = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "проект.sqlite"
+            archive = root / "архив.petrolab"
+            restored = root / "восстановленный проект"
+            command = [sys.executable, str(repo / "scripts" / "petrolab_service.py"), "archive"]
+            environment = {**os.environ, "PYTHONPATH": str(repo / "src")}
+
+            def cli(*args):
+                return subprocess.run([*command, *map(str, args)], capture_output=True, text=True, encoding="utf-8",
+                                      env=environment, timeout=30)
+
+            rejected = cli("export", database, archive, "--level", "project")
+            self.assertEqual(rejected.returncode, 2)
+            self.assertFalse(database.exists())
+            self.assertFalse(archive.exists())
+            request = {"protocol_version": "1.0", "request_id": str(uuid4()), "command": "project.analyses.list",
+                       "payload": {"project_database_path": str(database)}}
+            self.assertIn("result", handle_request(request))
+            exported = cli("export", database, archive, "--level", "project")
+            self.assertEqual(exported.returncode, 0, exported.stderr)
+            unpacked = cli("restore", archive, restored)
+            self.assertEqual(unpacked.returncode, 0, unpacked.stderr)
+            self.assertEqual(json.loads(exported.stdout)["manifest"], json.loads(unpacked.stdout)["manifest"])
+            self.assertTrue((restored / "project.sqlite").is_file())
+            second = cli("restore", archive, restored)
+            self.assertEqual(second.returncode, 1)
+            self.assertIn("PROJECT_ARCHIVE_DESTINATION_EXISTS", second.stderr)
+
     def test_three_archive_levels_and_rejection_leave_original_untouched(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

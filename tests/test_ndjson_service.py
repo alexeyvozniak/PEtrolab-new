@@ -304,7 +304,9 @@ class NdjsonServiceTests(unittest.TestCase):
             self.assertEqual(rejected["error"]["code"], "EXPORT_ANALYSES_UNAVAILABLE")
             self.assertFalse(output.exists())
             exported = call("analysis.selection.export_xlsx", analysis_ids=ids, output_path=str(output))
-            self.assertEqual(exported.get("result"), {"analysis_count": 17, "output_path": str(output)})
+            result = exported["result"]
+            self.assertEqual(result["analysis_count"], 17)
+            self.assertTrue(Path(result["output_path"]).samefile(output))
             with closing(load_workbook(output, read_only=True)) as workbook:
                 analyses = list(workbook["Analyses"].values)
                 by_header = [dict(zip(analyses[0], row)) for row in analyses[1:]]

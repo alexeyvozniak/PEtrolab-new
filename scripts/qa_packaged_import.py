@@ -40,6 +40,14 @@ def run(executable: Path, requests: list[dict]) -> list[dict]:
     return responses
 
 
+def archive_command(executable: Path, *args) -> dict:
+    completed = subprocess.run([str(executable), "archive", *map(str, args)], text=True, encoding="utf-8",
+                               capture_output=True, timeout=120, check=False)
+    if completed.returncode:
+        raise RuntimeError(f"Packaged archive command failed: {completed.stderr.strip()}")
+    return json.loads(completed.stdout)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path, default=ROOT / "desktop/src-tauri/binaries/petrolab-service.exe")
@@ -92,17 +100,15 @@ def main() -> None:
         Image.new("RGB", (48, 32), "#627758").save(image)
         archive = Path(directory) / "portable.petrolab"
         restored = Path(directory) / "relocated"
-        preview, exported, unpacked, reopened_copy = run(executable, [
-            request("media.preview_input", {"source_path": str(image)}),
-            request("project.archive.export", {
-                "project_database_path": database, "output_path": str(archive), "level": "project_sources",
-            }),
-            request("project.archive.restore", {"archive_path": str(archive), "destination_path": str(restored)}),
-            request("project.analyses.list", {"project_database_path": str(restored / "project.sqlite"), "limit": 100}),
-        ])
+        preview = run(executable, [request("media.preview_input", {"source_path": str(image)})])[0]
+        exported = archive_command(executable, "export", database, archive, "--level", "project_sources")
+        unpacked = archive_command(executable, "restore", archive, restored)
+        reopened_copy = run(executable, [
+            request("project.analyses.list", {"project_database_path": unpacked["project_database_path"], "limit": 100}),
+        ])[0]
         if not preview["result"]["preview_url"].startswith("data:image/jpeg;base64,"):
             raise AssertionError("Packaged service failed to decode and preview an image")
-        if (exported["result"]["manifest"] != unpacked["result"]["manifest"]
+        if (exported["manifest"] != unpacked["manifest"]
                 or reopened_copy["result"]["analyses"] != reopened["result"]["analyses"]):
             raise AssertionError("Packaged service changed project data during archive round-trip")
         selection_book = Path(directory) / "selection.xlsx"
