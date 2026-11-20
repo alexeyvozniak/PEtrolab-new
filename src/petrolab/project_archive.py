@@ -96,12 +96,17 @@ def export_project_archive(database_path, output_path, level):
             or not isinstance(level, str) or level not in _LEVELS):
         raise ValueError("project_archive")
     database_path, destination = Path(database_path), Path(output_path)
+    if not database_path.is_file():
+        _archive_error("База проекта не найдена.", "PROJECT_ARCHIVE_SOURCE_UNAVAILABLE")
     temporary = None
     try:
         with TemporaryDirectory(dir=destination.parent, prefix="petrolab-archive-") as staging:
             snapshot = Path(staging) / _DB
-            with closing(open_project(database_path)) as original, closing(sqlite3.connect(snapshot)) as copy:
+            source_uri = database_path.resolve().as_uri() + "?mode=ro"
+            with closing(sqlite3.connect(source_uri, uri=True)) as original, closing(sqlite3.connect(snapshot)) as copy:
                 original.backup(copy)
+            with closing(open_project(snapshot)):
+                pass
             with NamedTemporaryFile(dir=destination.parent, suffix=".petrolab.tmp", delete=False) as stream:
                 temporary = Path(stream.name)
             with ZipFile(temporary, "w", ZIP_DEFLATED) as archive:
@@ -119,7 +124,7 @@ def export_project_archive(database_path, output_path, level):
             _publish_new_file(temporary, destination)
     except FileExistsError as error:
         raise ImportCommandError("EXPORT_FILE_EXISTS", "Архив уже существует. Выберите новое имя.") from error
-    except OSError as error:
+    except (OSError, sqlite3.Error) as error:
         raise ImportCommandError("PROJECT_ARCHIVE_FAILED", "Не удалось сохранить переносимую копию проекта.") from error
     finally:
         if temporary is not None:

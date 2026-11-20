@@ -17,3 +17,4 @@ target/
 desktop/src-tauri/binaries/*.exe
 desktop/src-tauri/icons/icon.ico
 desktop/src-tauri/icons/icon.png
+desktop/src-tauri/gen/schemas/

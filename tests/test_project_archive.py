@@ -8,16 +8,36 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 from zipfile import ZipFile
 
 from PIL import Image
 
 from petrolab.desktop_workflow import suggest_import_recipe
+from petrolab.import_apply import MIGRATIONS, open_project
 from petrolab.ndjson_service import handle_request
+from petrolab.project_archive import export_project_archive
 
 
 class ProjectArchiveTests(unittest.TestCase):
+    def test_archive_migrates_only_database_copy(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "old-project.sqlite"
+            old_migrations = root / "migrations"
+            old_migrations.mkdir()
+            for migration in MIGRATIONS.glob("*.sql"):
+                if int(migration.name.split("_", 1)[0]) <= 17:
+                    (old_migrations / migration.name).write_bytes(migration.read_bytes())
+            with patch("petrolab.import_apply.MIGRATIONS", old_migrations), closing(open_project(database)):
+                pass
+            original = database.read_bytes()
+            archived = export_project_archive(database, str(root / "portable.petrolab"), "project")
+            self.assertGreater(archived["manifest"]["project_schema_version"], 17)
+            self.assertEqual(database.read_bytes(), original)
+            self.assertEqual(list(root.glob("old-project.sqlite.before-v*.bak")), [])
+
     def test_service_command_line_round_trip_and_missing_database(self):
         repo = Path(__file__).resolve().parents[1]
         with TemporaryDirectory() as directory:
