@@ -11,6 +11,13 @@ Both row- and column-oriented records are checked after mapping and exclusions.
 `not_determined` (literal n.d./nd, not an assertion of below detection), or
 `non_numeric`. Raw tokens are retained. `<0.01` keeps its numeric limit;
 `<DL`/bdl have no invented limit. No numeric concentration is imputed.
+Numeric limits also accept scientific notation and decimal commas (for example
+`<1e-3` and `<0,02`). A numeric limit outside the representable floating-point
+range, including nonzero values that underflow to zero, stays below detection
+with its original token and no invented numerical limit.
+Mineral suggestions reject a nonzero measurement that underflows to floating
+point zero. Input gate `import-wt-percent-complete-core-2` records this change;
+acceptances created under the earlier gate are stale and require review.
 
 Fe is strictly as reported, with no conversion. `reported_fe_form` is based on
 the physical header, not a renamed canonical field. Ambiguous Fe remains

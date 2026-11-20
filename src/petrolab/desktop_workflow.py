@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict
+from decimal import Decimal, InvalidOperation
 import hashlib
+import math
 from pathlib import Path
 from typing import Any
 
-from .import_apply import open_project
-from .import_preview import ImportCommandError, candidate_blocks, inspect_source, semantic_fingerprint, validate_recipe
+from .import_apply import latest_active_import, open_project
+from .import_preview import ImportCommandError, candidate_blocks, inspect_source, semantic_fingerprint, validate_recipe, value_status
 from .import_recognition import (
     IRON_FIELDS,
     mappings_for_column_block,
@@ -422,19 +424,58 @@ def _active_import_filter() -> str:
     return "b.status = 'applied' AND x.import_batch_id IS NULL"
 
 
-def list_project_analyses(database_path: str | Path, limit: int = 500, offset: int = 0) -> dict[str, Any]:
+def _measurement_numeric_value(measurement):
+    token = measurement["raw_token"]
+    if measurement["qualifier"] or (measurement["value_status"] or value_status(token)) != "numeric":
+        return None
+    try:
+        value = Decimal(str(token).strip().replace("\u00a0", "").replace(",", ".").rstrip("%"))
+        number = float(value)
+    except (InvalidOperation, OverflowError):
+        return None
+    return number if math.isfinite(number) and (number != 0 or value.is_zero()) else None
+
+
+def analysis_identity(row):
+    identity_values = json.loads(row["identity_json"])
+    recipe = json.loads(row["recipe_json"])
+    identity_names: list[str] = []
+    for section in recipe.get("sections", []):
+        if section.get("sheet_name") != row["sheet_name"] or section.get("block_id") != row["block_id"]:
+            continue
+        if section.get("orientation", "rows_are_analyses") == "columns_are_analyses" and section.get("analysis_axis_role", "Analysis") != "Ignore":
+            identity_names.append(section.get("analysis_axis_field") or "Analysis")
+        elif section.get("analysis_identity_policy") == "source_row":
+            identity_names.append("Source row")
+        identity_names.extend(
+            mapping.get("canonical_field") or mapping.get("source_header")
+            for mapping in section.get("mappings", [])
+            if mapping.get("target_role") == "identity"
+        )
+        break
+    identity = {
+        str(name): identity_values[index] if index < len(identity_values) else ""
+        for index, name in enumerate(identity_names)
+    }
+    return identity
+
+
+def list_project_analyses(database_path: str | Path, limit: int = 500, offset: int = 0, *, analysis_id=None) -> dict[str, Any]:
     """Return active Analysis/Measurement rows plus lossless source metadata."""
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))
     connection = open_project(database_path)
     try:
         active_filter = _active_import_filter()
+        requested_filter = " AND a.analysis_id = ?" if analysis_id else ""
+        requested_parameters = (analysis_id,) if analysis_id else ()
         total = connection.execute(
             f"""SELECT COUNT(*)
                 FROM analysis a
                 JOIN import_batch b ON b.import_batch_id = a.import_batch_id
                 LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-                WHERE {active_filter}"""
+                WHERE {active_filter}{requested_filter}""",
+            requested_parameters,
         ).fetchone()[0]
         rows = connection.execute(
             f"""SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number,
@@ -445,33 +486,14 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                 JOIN import_batch b ON b.import_batch_id = a.import_batch_id
                 JOIN import_recipe_revision r ON r.recipe_revision_id = b.recipe_revision_id
                 LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-                WHERE {active_filter}
-                ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number, a.source_column_number
+                WHERE {active_filter}{requested_filter}
+                ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number, a.source_column_number, a.analysis_id
                 LIMIT ? OFFSET ?""",
-            (limit, offset),
+            (*requested_parameters, limit, offset),
         ).fetchall()
         result: list[dict[str, Any]] = []
         for row in rows:
-            identity_values = json.loads(row["identity_json"])
-            recipe = json.loads(row["recipe_json"])
-            identity_names: list[str] = []
-            for section in recipe.get("sections", []):
-                if section.get("sheet_name") != row["sheet_name"] or section.get("block_id") != row["block_id"]:
-                    continue
-                if section.get("orientation", "rows_are_analyses") == "columns_are_analyses" and section.get("analysis_axis_role", "Analysis") != "Ignore":
-                    identity_names.append(section.get("analysis_axis_field") or "Analysis")
-                elif section.get("analysis_identity_policy") == "source_row":
-                    identity_names.append("Source row")
-                identity_names.extend(
-                    mapping.get("canonical_field") or mapping.get("source_header")
-                    for mapping in section.get("mappings", [])
-                    if mapping.get("target_role") == "identity"
-                )
-                break
-            identity = {
-                str(name): identity_values[index] if index < len(identity_values) else ""
-                for index, name in enumerate(identity_names)
-            }
+            identity = analysis_identity(row)
             source_metadata_rows = connection.execute(
                 """SELECT canonical_field, raw_token, source_header, source_row_number,
                           source_column_index, source_cell
@@ -497,7 +519,7 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                 source_metadata[key] = metadata["raw_token"]
 
             measurement_rows = connection.execute(
-                """SELECT canonical_field, unit, raw_token, qualifier, detection_limit,
+                """SELECT measurement_id, canonical_field, unit, raw_token, qualifier, detection_limit,
                           source_column_name, source_column_index, measurement_set, method, source_cell,
                           value_status, reported_fe_form, fe_handling
                    FROM measurement WHERE analysis_id = ? ORDER BY source_column_index, rowid""",
@@ -506,11 +528,13 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
             measurement_list = [
                 {
                     "field": measurement["canonical_field"],
+                    "measurement_id": measurement["measurement_id"],
                     "raw_token": measurement["raw_token"],
                     "unit": measurement["unit"],
                     "qualifier": measurement["qualifier"],
                     "detection_limit": measurement["detection_limit"],
                     "value_status": measurement["value_status"],
+                    "numeric_value": _measurement_numeric_value(measurement),
                     "reported_fe_form": measurement["reported_fe_form"],
                     "fe_handling": measurement["fe_handling"],
                     "source_header": measurement["source_column_name"],
@@ -522,6 +546,10 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                 for measurement in measurement_rows
             ]
             totals = Counter(item["field"] for item in measurement_list)
+            numeric_count = sum(item["numeric_value"] is not None for item in measurement_list)
+            weight_values = [item["numeric_value"] for item in measurement_list
+                             if item["unit"] == "wt.%" and item["numeric_value"] is not None]
+            weight_total = sum(weight_values)
             seen: Counter[str] = Counter()
             measurement_map: dict[str, dict[str, Any]] = {}
             for measurement in measurement_list:
@@ -539,6 +567,13 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
             semantic_evidence = {key.removesuffix('_json'): json.loads(semantic_row[key]) for key in semantic_row.keys() if key.endswith('_json') and semantic_row[key]} if semantic_row else {}
             result.append({
                 **semantic_evidence,
+                "composition_summary": {
+                    "measurement_count": len(measurement_list),
+                    "numeric_count": numeric_count,
+                    "weight_percent_count": len(weight_values),
+                    "non_numeric_count": len(measurement_list) - numeric_count,
+                    "reported_weight_percent_total": weight_total if math.isfinite(weight_total) else None,
+                },
                 "analysis_id": row["analysis_id"],
                 "source_id": row["source_id"],
                 "source_name": row["source_name"],
@@ -566,25 +601,7 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
                WHERE b.status = 'applied' AND x.import_batch_id IS NULL"""
         ).fetchone()[0]
-        latest = connection.execute(
-            """SELECT b.import_batch_id, b.source_id, b.applied_at, s.display_name,
-                      COUNT(a.analysis_id) AS analysis_count
-               FROM import_batch b
-               JOIN source_file s ON s.source_id = b.source_id
-               LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
-               LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-               WHERE b.status = 'applied' AND x.import_batch_id IS NULL
-               GROUP BY b.import_batch_id, b.source_id, b.applied_at, s.display_name
-               ORDER BY b.applied_at DESC, b.rowid DESC
-               LIMIT 1"""
-        ).fetchone()
-        latest_import = None if latest is None else {
-            "import_batch_id": latest["import_batch_id"],
-            "source_id": latest["source_id"],
-            "source_name": latest["display_name"],
-            "analysis_count": latest["analysis_count"],
-            "applied_at": latest["applied_at"],
-        }
+        latest_import = latest_active_import(connection)
         return {
             "total": total,
             "returned": len(result),
@@ -592,6 +609,8 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
             "has_more": offset + len(result) < total,
             "source_count": source_count,
             "import_batch_count": batch_count,
+            "has_work_groups": connection.execute("SELECT 1 FROM work_group LIMIT 1").fetchone() is not None,
+            "has_table_views": connection.execute("SELECT 1 FROM table_view LIMIT 1").fetchone() is not None,
             "latest_import": latest_import,
             "analyses": result,
         }

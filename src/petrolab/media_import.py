@@ -189,8 +189,15 @@ def create_analytical_point(
     point_name: str,
     analysis_ids: list[str],
     link_type: str,
+    *,
+    sample_id: str | None = None,
+    actor: str | None = None,
 ) -> dict[str, Any]:
-    sample_name = _text(sample_name, "sample_name")
+    if sample_id is None:
+        sample_name = _text(sample_name, "sample_name")
+    else:
+        sample_id = _uuid(sample_id, "sample_id")
+        actor = _text(actor, "actor", 120)
     point_name = _text(point_name, "point_name")
     if link_type not in LINK_TYPES:
         _fail("INVALID_ASSIGNMENT", "Analytical Point link type is unsupported.", link_type=link_type)
@@ -199,18 +206,27 @@ def create_analytical_point(
     normalized_ids = [_uuid(value, "analysis_id") for value in analysis_ids]
     connection = open_project(database_path)
     try:
-        existing_ids = {row[0] for row in connection.execute(
-            f"SELECT analysis_id FROM analysis WHERE analysis_id IN ({','.join('?' for _ in normalized_ids)})", normalized_ids
-        )}
-        missing = sorted(set(normalized_ids) - existing_ids)
-        if missing:
-            _fail("INVALID_ASSIGNMENT", "Analytical Point contains unknown Analysis IDs.", analysis_ids=missing)
         timestamp = _now()
         with connection:
-            sample = connection.execute("SELECT sample_id FROM sample WHERE sample_name = ?", (sample_name,)).fetchone()
-            sample_id = sample["sample_id"] if sample else _id()
-            if sample is None:
-                connection.execute("INSERT INTO sample (sample_id, sample_name, created_at) VALUES (?, ?, ?)", (sample_id, sample_name, timestamp))
+            connection.execute("BEGIN IMMEDIATE")
+            explicit = sample_id is not None
+            if explicit:
+                sample = connection.execute("SELECT sample_name FROM sample WHERE sample_id = ?", (sample_id,)).fetchone()
+                if sample is None:
+                    _fail("SAMPLE_UNAVAILABLE", "Физический образец недоступен.")
+                sample_name = sample["sample_name"]
+                validate_point_input(connection, sample_id, normalized_ids)
+            else:
+                known = {row[0] for row in connection.execute(
+                    "SELECT analysis_id FROM analysis WHERE analysis_id IN (SELECT value FROM json_each(?))",
+                    (json.dumps(normalized_ids),),
+                )}
+                if missing := sorted(set(normalized_ids) - known):
+                    _fail("INVALID_ASSIGNMENT", "Analytical Point contains unknown Analysis IDs.", analysis_ids=missing)
+                sample = connection.execute("SELECT sample_id FROM sample WHERE sample_name = ?", (sample_name,)).fetchone()
+                sample_id = sample["sample_id"] if sample else _id()
+                if sample is None:
+                    connection.execute("INSERT INTO sample (sample_id, sample_name, created_at) VALUES (?, ?, ?)", (sample_id, sample_name, timestamp))
             if connection.execute("SELECT 1 FROM analytical_point WHERE sample_id = ? AND point_name = ?", (sample_id, point_name)).fetchone():
                 _fail("POINT_ALREADY_EXISTS", "Analytical Point with this Sample and name already exists.")
             point_id = _id()
@@ -219,9 +235,42 @@ def create_analytical_point(
                 "INSERT INTO analytical_point_analysis (analytical_point_id, analysis_id, link_type, created_at) VALUES (?, ?, ?, ?)",
                 [(point_id, analysis_id, link_type, timestamp) for analysis_id in normalized_ids],
             )
-        return {"analytical_point_id": point_id, "sample_id": sample_id, "sample_name": sample_name, "point_name": point_name, "analysis_ids": normalized_ids, "link_type": link_type}
+            journal = write_point_journal(connection, point_id, normalized_ids, actor, "link_analytical_point", link_type) if explicit else None
+        result = {"analytical_point_id": point_id, "sample_id": sample_id, "sample_name": sample_name, "point_name": point_name, "analysis_ids": normalized_ids, "link_type": link_type}
+        return {**result, "journal": journal} if journal else result
     finally:
         connection.close()
+
+
+def validate_point_input(connection, sample_id, ids):
+    scoped = connection.execute("""
+        SELECT a.analysis_id FROM analysis a
+        JOIN analysis_import_semantics e USING (analysis_id)
+        JOIN import_batch b USING (import_batch_id)
+        LEFT JOIN import_batch_retraction r USING (import_batch_id)
+        WHERE b.status = 'applied' AND r.import_batch_id IS NULL
+          AND json_extract(e.sample_association_json, '$.sample_id') = ?
+          AND a.analysis_id IN (SELECT value FROM json_each(?))
+    """, (sample_id, json.dumps(ids)))
+    missing = sorted(set(ids) - {row[0] for row in scoped})
+    if missing:
+        _fail("POINT_SAMPLE_MISMATCH", "Часть анализов недоступна или не связана с выбранным физическим образцом.", analysis_ids=missing)
+
+
+def write_point_journal(connection, point_id, ids, actor, action, link_type):
+    inverse = "unlink_analytical_point" if action == "link_analytical_point" else "link_analytical_point"
+    parameters = {"analytical_point_id": point_id, "analysis_ids": ids, "link_type": link_type}
+    scope = [("analytical_point", point_id), *(("analysis", analysis_id) for analysis_id in ids)]
+    entry = {
+        "id": _id(), "project_id": connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0],
+        "action": action, "category": "domain",
+        "scope": [{"entity_type": kind, "entity_id": entity, "expected_revision": None, "result_revision": None} for kind, entity in scope],
+        "parameters": parameters, "reversible": True, "inverse_action": {"action": inverse, "parameters": parameters},
+        "state": "applied", "actor": actor, "created_at": _now(),
+    }
+    connection.execute("INSERT INTO operation_journal (id, entry_json) VALUES (?, ?)",
+                       (entry["id"], json.dumps(entry, ensure_ascii=False)))
+    return entry
 
 
 def _validate_geometry(geometry: Any, width: int, height: int) -> dict[str, Any]:
@@ -268,9 +317,14 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
         seen_fingerprints: dict[str, str] = {}
         for assignment in assignments:
             required = {"source_path", "ownership_mode", "media_type", "sample_name", "thin_section_name", "placements"}
-            if not isinstance(assignment, dict) or set(assignment) != required:
+            if (not isinstance(assignment, dict) or not required <= set(assignment)
+                    or set(assignment) - required - {"expected_source_fingerprint", "sample_target"}):
                 _fail("INVALID_ASSIGNMENT", "Media assignment fields are invalid.")
             inspection = inspect_media_source(assignment["source_path"])
+            if ("expected_source_fingerprint" in assignment
+                    and assignment["expected_source_fingerprint"] != inspection["source_fingerprint"]):
+                _fail("SOURCE_FINGERPRINT_MISMATCH", "Изображение изменилось после просмотра. Добавьте файл заново.",
+                      path=inspection["source_path"])
             previous = seen_fingerprints.get(inspection["source_fingerprint"])
             if previous is not None:
                 _fail("DUPLICATE_MEDIA_SOURCE", "The same physical image occurs more than once in the batch.", first_path=previous, duplicate_path=inspection["source_path"])
@@ -283,6 +337,9 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                 media_type = media_type.upper()
             sample_name = _text(assignment["sample_name"], "sample_name")
             section_name = _text(assignment["thin_section_name"], "thin_section_name")
+            target = assignment.get("sample_target")
+            if target is not None:
+                _check_media_sample_target(connection, sample_name, target)
             existing = connection.execute(
                 """SELECT ma.media_asset_id, s.sample_name, ts.thin_section_name, ma.media_type, ma.width_px, ma.height_px
                 FROM media_asset ma JOIN sample s ON s.sample_id = ma.sample_id
@@ -343,6 +400,8 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                 "placements": planned_placements,
             })
             plan_items[-1].pop("format")
+            if target is not None:
+                plan_items[-1]["sample_target"] = target
         plan = {"schema_version": 1, "semantic_fingerprint": "", "items": plan_items, "warnings": warnings}
         plan["semantic_fingerprint"] = _plan_fingerprint(plan)
         return plan
@@ -364,6 +423,20 @@ def _prepare_media_copy(database_path: str | Path, item: dict[str, Any]) -> Path
         temporary.unlink(missing_ok=True)
         raise
     return destination
+
+
+def _check_media_sample_target(connection, sample_name, target):
+    if not isinstance(target, dict) or set(target) != {"mode", "sample_id"}:
+        _fail("INVALID_ASSIGNMENT", "Выберите физический образец явно.")
+    current = connection.execute("SELECT sample_id FROM sample WHERE sample_name = ?", (sample_name,)).fetchone()
+    mode = target["mode"]
+    if mode == "new":
+        if current is not None:
+            _fail("SAMPLE_NAME_EXISTS", "Образец с этим именем уже существует. Выберите его из списка.")
+        if target["sample_id"] is not None:
+            _fail("INVALID_ASSIGNMENT", "Для нового образца идентификатор не указывается.")
+    elif mode != "existing" or current is None or current[0] != _uuid(target["sample_id"], "sample_id"):
+        _fail("SAMPLE_UNAVAILABLE", "Выбранный образец недоступен. Повторите назначение.")
 
 
 def _ensure_sample_and_section(connection: sqlite3.Connection, sample_name: str, section_name: str, timestamp: str) -> tuple[str, str]:
@@ -390,15 +463,16 @@ def apply_media_import_plan(database_path: str | Path, plan: Any) -> dict[str, A
     connection = open_project(database_path)
     copied: list[Path] = []
     try:
-        for item in plan["items"]:
-            if item.get("existing_media_asset_id") is None and item["ownership_mode"] == "managed_copy":
-                copied.append(_prepare_media_copy(database_path, item))
         timestamp = _now()
         batch_id = _id()
         created_assets = 0
         reused_assets = 0
         annotation_count = 0
         with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for item in plan["items"]:
+                if item.get("sample_target") is not None:
+                    _check_media_sample_target(connection, item["sample_name"], item["sample_target"])
             connection.execute(
                 "INSERT INTO media_import_batch (media_import_batch_id, status, semantic_fingerprint_sha256, plan_json, created_at, applied_at) VALUES (?, 'applied', ?, ?, ?, ?)",
                 (batch_id, plan["semantic_fingerprint"], json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")), timestamp, timestamp),
@@ -413,6 +487,8 @@ def apply_media_import_plan(database_path: str | Path, plan: Any) -> dict[str, A
                     reused_assets += 1
                 else:
                     source = Path(item["source_path"])
+                    if item["ownership_mode"] == "managed_copy":
+                        copied.append(_prepare_media_copy(database_path, item))
                     managed_relative = f"media/{asset_id}{source.suffix.lower()}" if item["ownership_mode"] == "managed_copy" else None
                     connection.execute(
                         """INSERT INTO media_asset

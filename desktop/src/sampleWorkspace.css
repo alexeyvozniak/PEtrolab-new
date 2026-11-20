@@ -1,0 +1,29 @@
+.sample-workspace { padding: 16px 22px; color: #23382c; background: #fff; }
+.sample-header, .sample-tabs, .sample-items li, .sample-card dl > div, .sample-card > header {
+  display: flex; align-items: center; gap: 10px; justify-content: space-between;
+}
+.sample-header h2, .sample-card h3 { margin: 0 0 8px; }
+.sample-header p, .sample-card p { margin: 5px 0; }
+.sample-header select { max-width: 230px; padding: 6px; border-radius: 5px; border: 1px solid #b9c9bf; }
+.sample-tabs { justify-content: flex-start; flex-wrap: wrap; border-bottom: 1px solid #dce5df; margin-block: 12px; }
+.sample-tabs button { background: transparent; color: inherit; border: 0; border-bottom: 2px solid transparent; padding: 8px; cursor: pointer; }
+.sample-tabs button[aria-current="page"] { border-color: #365b49; font-weight: 600; }
+.sample-tabs button:disabled { opacity: .55; cursor: default; }
+.sample-overview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 12px; }
+.sample-card { margin-bottom: 10px; padding: 14px; border: 1px solid #e0e8e3; border-radius: 7px; }
+.sample-card dl, .sample-card dd { margin: 0; }
+.sample-card dl > div, .sample-items li { padding-block: 7px; border-bottom: 1px solid #e0e8e3; overflow-wrap: anywhere; }
+.sample-card dl > div:last-child, .sample-items li:last-child { border-bottom: 0; }
+.sample-items { list-style: none; padding: 0; margin: 0; }
+.sample-items .outline-button { min-height: 29px; padding: 4px 9px; font-size: 12px; }
+.sample-form { display: grid; gap: 8px; margin-top: 8px; }
+.sample-form label { display: grid; gap: 3px; }
+.sample-form input, .sample-form textarea { padding: 6px; border: 1px solid #bccbbf; border-radius: 5px; color: inherit; font: inherit; }
+.sample-form div { display: flex; flex-wrap: wrap; gap: 8px; }
+.sample-notes { list-style: none; padding: 0; }
+.sample-notes li { padding: 8px; margin-bottom: 5px; background: #f7faf8; border: 1px solid #dce5df; border-radius: 5px; overflow-wrap: anywhere; }
+.sample-notes p { white-space: pre-wrap; }
+.point-workspace-grid { display: grid; grid-template-columns: minmax(230px, 1fr) minmax(0, 2fr); gap: 12px; align-items: start; }
+.point-row-actions { display: flex; gap: 5px; flex-wrap: wrap; }
+.point-analysis-items li { flex-wrap: wrap; align-items: flex-start; }
+.sample-form select { min-width: 0; padding: 6px; border: 1px solid #bccbbf; border-radius: 5px; color: inherit; font: inherit; }

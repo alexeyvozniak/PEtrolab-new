@@ -252,6 +252,7 @@ function RawPreview({ preview, state, loading, error, onNavigate, focusIssue, se
       {semanticTools?.actions.length > 0 && <div className="semantic-tool-panel" ref={actionsRef}>
         {contextMenu && <div className="semantic-context-menu" role="menu" aria-label="Назначить выделению">{semanticTools.actions.map((action) => <button type="button" role="menuitem" key={action.role} onClick={() => { setRequestedRole(action.role); setContextMenu(false); const control = actionsRef.current.querySelector('select'); control?.focus(); }}>{action.label}</button>)}<button type="button" onClick={() => setContextMenu(false)}>Закрыть меню</button></div>}
         <SemanticRangeActions records={semanticTools.records || []} requestedRole={requestedRole} selection={selection} setSelection={setSelection} actions={semanticTools.actions} analytes={semanticTools.analytes} annotations={annotations} blockId={section.block_id} busy={loading}
+          samples={semanticTools.samples} onAssignSample={semanticTools.onAssignSample}
           onDecision={onSemanticDecision} onPreview={async (decision) => previewResult(await previewSemanticExtension(preview.workspace_id, preview.source_id, decision))} />
       </div>}
     </div>

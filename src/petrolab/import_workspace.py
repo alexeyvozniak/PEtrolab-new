@@ -1,4 +1,4 @@
-"""Transient ADR-0014 review sessions. No batch commit or disk draft persistence."""
+"""ADR-0014 review sessions, fingerprint-bound drafts and atomic import commit."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -9,16 +9,21 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 from contextlib import closing
+from tempfile import NamedTemporaryFile
 
 from .clean_table import classify_clean_table
 from .desktop_workflow import (suggest_import_recipe, bulk_unit_scopes, bulk_ignore_scopes,
                                apply_bulk_unit_scope, apply_bulk_ignore_scope)
-from .import_apply import _require_mapping_review, _require_duplicate_review, _require_non_empty_plan
-from .import_preview import (ImportCommandError, inspect_source, create_import_plan,
+from .import_apply import (apply_import_batch, open_project, workspace_commit_exists,
+                           _require_duplicate_review, _require_non_empty_plan)
+from .import_preview import (ImportCommandError, inspect_source, create_import_plan, validate_recipe,
                              preview_source_window, semantic_fingerprint)
 from .manual_mapping import revise_import_mappings, revise_import_sections, review_duplicate_candidates
 from .semantic_import import apply_semantic_decision, SEMANTIC_ACTIONS
 from .analyte_dictionary import CANONICAL, confirmed_alias
+
+
+DRAFT_VERSION = 1
 
 
 def now():
@@ -90,15 +95,74 @@ class ImportWorkspaceStore:
             session['sources'].append(source)
             session['active_source_id'] = source['source_id']
 
+    def _draft_path(self, database_path):
+        return Path(str(Path(database_path).resolve()) + '.import-draft.json')
+
+    def _save_draft(self, session):
+        if not session['database_path']:
+            return
+        destination = self._draft_path(session['database_path'])
+        draft = {**session, 'schema_version': DRAFT_VERSION, 'sources': [
+            {key: value for key, value in source.items() if key not in {'inspection', 'classification'}}
+            for source in session['sources']
+        ]}
+        temporary = None
+        try:
+            with NamedTemporaryFile(mode='w', encoding='utf-8', dir=destination.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                json.dump(draft, stream, ensure_ascii=False, separators=(',', ':'))
+            temporary.replace(destination)
+        except OSError as error:
+            raise ImportCommandError('WORKSPACE_DRAFT_WRITE_FAILED', 'Не удалось сохранить черновик импорта.') from error
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def _remove_draft(self, session):
+        if session['database_path']:
+            self._draft_path(session['database_path']).unlink(missing_ok=True)
+
+    def _restore(self, database_path):
+        destination = self._draft_path(database_path)
+        if not destination.is_file():
+            return {'workspace': None}
+        try:
+            session = json.loads(destination.read_text(encoding='utf-8'))
+            if session.pop('schema_version') != DRAFT_VERSION or session['database_path'] != database_path:
+                raise ValueError('draft schema or project path')
+            with closing(open_project(database_path)) as connection:
+                if workspace_commit_exists(connection, session['workspace_id']):
+                    return {'workspace': None}
+            for source in session['sources']:
+                inspection = self._check(source)
+                validate_recipe(inspection, source['recipe'])
+                source['inspection'] = inspection.projection()
+                source['classification'] = classify_clean_table(inspection)
+            restored = self._project(session)
+        except ImportCommandError as error:
+            raise ImportCommandError('WORKSPACE_DRAFT_INCOMPATIBLE',
+                                     'Черновик не восстановлен. Проверьте исходные файлы или начните новый импорт.',
+                                     {'cause': error.code}) from error
+        except (AttributeError, KeyError, OSError, StopIteration, TypeError, ValueError) as error:
+            raise ImportCommandError('WORKSPACE_DRAFT_INCOMPATIBLE',
+                                     'Черновик повреждён или создан несовместимой версией. Начните новый импорт.') from error
+        self.sessions[session['workspace_id']] = session
+        return {'workspace': restored}
+
     def command(self, operation, params):
+        if operation == 'restore':
+            database_path = params.get('project_database_path')
+            if not isinstance(database_path, str) or not database_path:
+                raise ValueError('project_database_path')
+            return self._restore(str(Path(database_path).resolve()))
         if operation == 'create':
             timestamp = now()
             session = {'workspace_id': str(uuid4()), 'draft_revision': 0,
                        'created_at': timestamp, 'updated_at': timestamp, 'sources': [], 'active_source_id': None}
-            session['database_path'] = params.get('project_database_path')
+            database_path = params.get('project_database_path')
+            session['database_path'] = str(Path(database_path).resolve()) if database_path else None
             session['project_aliases'] = {}
             if session['database_path']:
-                from .import_apply import open_project
                 with closing(open_project(session['database_path'])) as connection:
                     session['project_aliases'] = {row['normalized_header']: json.loads(row['alias_json']) for row in connection.execute('SELECT * FROM project_analyte_alias')}
             self._add(session, params.get('sources'))
@@ -113,9 +177,12 @@ class ImportWorkspaceStore:
                     raise ImportCommandError('STALE_WORKSPACE_REVISION', 'Очередь уже изменилась. Обновите состояние перед повтором.',
                                              {'expected_revision': expected, 'current_revision': session['draft_revision']})
             if operation == 'discard':
+                self._remove_draft(session)
                 del self.sessions[session['workspace_id']]
                 return {'workspace_id': session['workspace_id'], 'status': 'discarded',
                         'staged_paths': [s['staged_path'] for s in session['sources']]}
+            if operation == 'commit':
+                return self._commit(session)
             if operation == 'preview_window':
                 source = self._source(session, params.get('source_id'))
                 self._check(source)
@@ -208,6 +275,13 @@ class ImportWorkspaceStore:
                     self._remember_alias(session, source, key, alias)
                 elif kind == 'duplicates':
                     source['recipe'] = review_duplicate_candidates(source['staged_path'], source['recipe'], 'keep_all')['recipe']
+                elif kind == 'workspace_duplicates':
+                    comparison = self._project(session)['duplicate_comparison']
+                    if not comparison or decision.get('fingerprint') != comparison['fingerprint']:
+                        raise ImportCommandError('STALE_DUPLICATE_REVIEW', 'Состав совпадений изменился. Проверьте его снова.')
+                    session['duplicate_review'] = {'fingerprint': comparison['fingerprint'], 'decided_at': now()}
+                elif kind == 'sample_assignment':
+                    self._assign_sample(session, source, decision)
                 elif kind == 'source_inclusion':
                     if type(decision.get('included')) is not bool:
                         raise ValueError('included')
@@ -227,13 +301,91 @@ class ImportWorkspaceStore:
                 session['updated_at'] = now()
         result = self._project(session)
         if operation != 'get':
+            self._save_draft(session)
             self.sessions[session['workspace_id']] = session
         return result
+
+    def _pending_samples(self, session):
+        return {
+            assignment['sample_id']: assignment['sample_name']
+            for source in session['sources']
+            for assignment in source['recipe']['global_decisions'].get('sample_assignments', {}).values()
+            if assignment['mode'] == 'new'
+        }
+
+    def _assign_sample(self, session, source, decision):
+        database_path = session['database_path']
+        if not database_path:
+            raise ImportCommandError('PROJECT_REQUIRED', 'Выберите проект перед назначением образца.')
+        candidates = {record['preview_id'] for record in self._review(source)['plan']['planned_records']}
+        selected = decision.get('preview_ids')
+        if not isinstance(selected, list) or not selected or not all(isinstance(item, str) for item in selected):
+            raise ValueError('preview_ids')
+        if not set(selected) <= candidates:
+            raise ImportCommandError('STALE_SAMPLE_ASSIGNMENT', 'Выделение изменилось. Выберите анализы снова.')
+        mode = decision.get('mode')
+        assignments = source['recipe']['global_decisions'].setdefault('sample_assignments', {})
+        if mode == 'clear':
+            for preview_id in selected:
+                assignments.pop(preview_id, None)
+        else:
+            pending = self._pending_samples(session)
+            with closing(open_project(database_path)) as connection:
+                if mode == 'existing':
+                    sample_id = decision.get('sample_id')
+                    if not isinstance(sample_id, str) or not sample_id:
+                        raise ValueError('sample_id')
+                    sample = connection.execute('SELECT * FROM sample WHERE sample_id = ?', (sample_id,)).fetchone()
+                    if sample is not None:
+                        name = sample['sample_name']
+                    elif sample_id in pending:
+                        name, mode = pending[sample_id], 'new'
+                    else:
+                        raise ImportCommandError('SAMPLE_NOT_FOUND', 'Выбранный физический образец не найден.')
+                elif mode == 'new':
+                    name = decision.get('sample_name')
+                    if not isinstance(name, str) or not name.strip():
+                        raise ValueError('sample_name')
+                    name = name.strip()
+                    if name in pending.values() or connection.execute('SELECT 1 FROM sample WHERE sample_name = ?', (name,)).fetchone():
+                        raise ImportCommandError('SAMPLE_NAME_EXISTS', 'Выберите существующий образец по ID или задайте другое имя для нового.')
+                    sample_id = str(uuid4())
+                else:
+                    raise ValueError('sample_assignment.mode')
+            assignment = {'sample_id': sample_id, 'sample_name': name, 'mode': mode, 'decided_at': now()}
+            for preview_id in selected:
+                assignments[preview_id] = assignment
+        source['recipe']['semantic_fingerprint'] = semantic_fingerprint(source['recipe'])
+
+    def _commit(self, session):
+        database_path = session['database_path']
+        if not database_path:
+            raise ImportCommandError('PROJECT_REQUIRED', 'Выберите проект перед сохранением импорта.')
+        projection = self._project(session)['session']
+        readiness = projection['readiness']
+        if not readiness['ready_to_commit']:
+            raise ImportCommandError('WORKSPACE_NOT_READY', 'Проверьте обязательные вопросы очереди.',
+                                     {'blocking_reason_codes': readiness['blocking_reason_codes']})
+        included = [source for source in session['sources'] if source['included']]
+        commit_id = str(uuid4())
+        results = apply_import_batch(database_path, [
+            (source['staged_path'], source['recipe'], source['sha256'], source['original_display_path']) for source in included
+        ], workspace_commit={'commit_id': commit_id, 'workspace_id': session['workspace_id'],
+                             'draft_revision': session['draft_revision'],
+                             'duplicate_review': session.get('duplicate_review')})
+        del self.sessions[session['workspace_id']]
+        try:
+            self._remove_draft(session)
+        except OSError:
+            pass
+        return {'workspace_commit_id': commit_id, 'sources': results,
+                'analysis_count': sum(item['analysis_count'] for item in results),
+                'measurement_count': sum(item['measurement_count'] for item in results),
+                'staged_paths': [source['staged_path'] for source in session['sources']]}
 
     def _remember_alias(self, session, source, key, alias):
         if not session.get('database_path'):
             raise ImportCommandError('PROJECT_REQUIRED', 'Выберите проект для сохранения обозначения.')
-        from .import_apply import open_project
         with closing(open_project(session['database_path'])) as connection, connection:
             old = connection.execute('SELECT alias_json FROM project_analyte_alias WHERE normalized_header = ?', (key,)).fetchone()
             if old and json.loads(old['alias_json'])['canonical_field'] != alias['canonical_field']:
@@ -281,6 +433,29 @@ class ImportWorkspaceStore:
                 'classification': source['classification'], 'issues': issues,
                 'bulk_unit_scopes': units, 'bulk_ignore_scopes': ignores, 'ready': ready,
                 'decisions': source['decisions'], 'source_id': source['source_id']}
+
+    def _compare_sources(self, state, reviews):
+        included = [source for source in state['sources'] if source['included']]
+        if len(included) < 2:
+            return None
+        by_identity = {}
+        for source in included:
+            synthetic_blocks = {block['block_id'] for block in source['recipe']['sections']
+                                if block.get('analysis_identity_policy') == 'source_row'}
+            for record in reviews[source['source_id']]['plan']['planned_records']:
+                identity = tuple(record['identity'])
+                if not any(identity) or record['block_id'] in synthetic_blocks:
+                    continue
+                entry = dict(record, source_id=source['source_id'], source_sha256=source['sha256'],
+                             source_name=Path(source['original_display_path']).name,
+                             preview_id=f"{source['source_id']}:{record['preview_id']}")
+                by_identity.setdefault(identity, []).append(entry)
+        groups = [group for group in by_identity.values() if len({entry['source_id'] for entry in group}) > 1]
+        if not groups:
+            return None
+        fingerprint = digest(groups)
+        reviewed = (state.get('duplicate_review') or {}).get('fingerprint') == fingerprint
+        return {'groups': groups, 'fingerprint': fingerprint, 'reviewed': reviewed}
 
     def _project(self, state):
         sources, issues, plans, reviews, scopes = [], [], [], {}, []
@@ -344,8 +519,9 @@ class ImportWorkspaceStore:
         section = next(s for s in active['recipe']['sections'] if s['block_id'] == active['active_block_id'])
         blockers = [i for i in issues if i['blocking']]
         reasons = sorted({i['code'] for i in blockers})
-        if len(sources) > 1:
-            reasons.append('MULTI_SOURCE_COMMIT_UNAVAILABLE')
+        comparison = self._compare_sources(state, reviews)
+        if comparison and not comparison['reviewed']:
+            reasons.append('WORKSPACE_DUPLICATE_REVIEW_REQUIRED')
         if not any(s['included'] for s in sources):
             reasons.append('NO_INCLUDED_SOURCES')
         session = {k: state[k] for k in ('workspace_id', 'draft_revision', 'created_at', 'updated_at', 'active_source_id')}
@@ -361,7 +537,15 @@ class ImportWorkspaceStore:
         active_review = deepcopy(reviews[active['source_id']])
         active_review['semantic_actions'] = SEMANTIC_ACTIONS
         active_review['canonical_analytes'] = CANONICAL
+        if state['database_path']:
+            with closing(open_project(state['database_path'])) as connection:
+                active_review['project_samples'] = [dict(row) for row in connection.execute(
+                    'SELECT sample_id, sample_name FROM sample ORDER BY sample_name, sample_id')]
+            active_review['project_samples'].extend(
+                {'sample_id': sample_id, 'sample_name': name, 'pending': True}
+                for sample_id, name in self._pending_samples(state).items()
+            )
         if active['recipe']['global_decisions'].get('mineral_verification_enabled'):
             from .mineral_verification import acceptance_scopes
             active_review['mineral_acceptance_scopes'] = acceptance_scopes(active_review['plan'], active['recipe'])
-        return {'session': session, 'active': active_review}
+        return {'session': session, 'active': active_review, 'duplicate_comparison': comparison}

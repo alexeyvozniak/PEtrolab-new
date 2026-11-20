@@ -6,6 +6,7 @@ import {
   File,
   FileArrowUp,
   GearSix,
+  House,
   Info,
   MagnifyingGlass,
   Plus,
@@ -13,10 +14,23 @@ import {
   Warning,
 } from "@phosphor-icons/react";
 import {
-  createImportWorkspace, addWorkspaceSources, getImportWorkspace, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
-  applyImportPlan,
+  createImportWorkspace, restoreImportWorkspace, addWorkspaceSources, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
+  commitImportWorkspace,
+  createWorkGroup, listWorkGroups,
+  listTableViews, saveTableView,
+  listEditDrafts, saveEditDraft, checkEditDraft, commitEditDraft,
+  pickAnalysisExportPath, exportAnalysisSelection,
   clearImportStaging,
   getProjectDatabasePath,
+  getProjectOverview, getProjectAnalysis, queryProjectAnalyses,
+  listProjectSamples, getProjectSample, saveSampleContext, addSampleNote,
+  createSamplePoint, listPointAnalyses, setPointAnalysisLink,
+  pickMediaFiles, pickMediaExportPath, inspectMediaFiles, previewMediaFile, draftMediaImport, commitMediaImport,
+  previewProjectMedia, exportMediaOriginal, exportMediaRendered,
+  reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
+  getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication,
+  getPlotCatalog, getPlotData, recordPlotVisibility,
+  listPlotSpecifications, openPlotSpecification, savePlotSpecification, savePlotSvg,
   isPetrolabDesktop,
   listProjectAnalyses,
   listProjectMineralIdentifications,
@@ -26,21 +40,28 @@ import {
 } from "./desktopApi";
 import { ImportWorkspace } from "./ImportWorkspace";
 import { AnalysesWorkspace } from "./AnalysesWorkspace";
+import { ProjectOverview, ProjectSearch } from "./ProjectNavigation";
+import { PlotWorkspace } from "./PlotWorkspace";
+import { SampleWorkspace } from "./SampleWorkspace";
+import { MediaImport } from "./MediaWorkspace";
+import { StatisticsWorkspace } from "./StatisticsWorkspace";
+import { PublicationWorkspace } from "./PublicationWorkspace";
 import "./styles.css";
 
 const ANALYSES_PAGE_SIZE = 500;
 
 const navigation = [
-  [MagnifyingGlass, "Поиск", false],
+  [House, "Обзор", true],
+  [MagnifyingGlass, "Поиск", true],
   [FileArrowUp, "Импорт", true],
   [Database, "Анализы", true],
-  [Columns, "Образцы", false],
+  [Columns, "Образцы", true],
   [Columns, "Минералы", false],
-  [Columns, "Связи", false],
-  [File, "Изображения", false],
-  [Columns, "Построение", false],
-  [Columns, "Статистика", false],
-  [Columns, "Публикации", false],
+  [Columns, "Связи", true],
+  [File, "Изображения", true],
+  [Columns, "Построение", true],
+  [Columns, "Статистика", true],
+  [Columns, "Публикации", true],
 ];
 
 function unwrap(response) {
@@ -81,9 +102,17 @@ async function attachMineralIdentifications(path, project) {
 
 export function App() {
   const desktopRuntimeAvailable = isPetrolabDesktop();
-  const [screen, setScreen] = useState("Импорт");
+  const [screen, setScreen] = useState("Обзор");
   const [databasePath, setDatabasePath] = useState("");
   const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
+  const [selectedAnalysisIds, setSelectedAnalysisIds] = useState([]);
+  const [navigationAnalysis, setNavigationAnalysis] = useState(null);
+  const [searchSeed, setSearchSeed] = useState(null);
+  const [publicationItems, setPublicationItems] = useState([]);
+  const [publicationName, setPublicationName] = useState("");
+  const [plotInputIds, setPlotInputIds] = useState(null);
+  const [hiddenSourceIds, setHiddenSourceIds] = useState([]);
+  const [hiddenAnalysisIds, setHiddenAnalysisIds] = useState([]);
   const [workspace, setWorkspace] = useState(null);
   const [sourceIssues, setSourceIssues] = useState([]);
   const [focusedIssueKey, setFocusedIssueKey] = useState("");
@@ -109,6 +138,7 @@ export function App() {
     if (!path) return;
     const listed = unwrap(await listProjectAnalyses(path, ANALYSES_PAGE_SIZE, 0));
     setProject(await attachMineralIdentifications(path, listed));
+    setNavigationAnalysis(null);
   }, [databasePath]);
 
   const loadMoreAnalyses = useCallback(async () => {
@@ -133,24 +163,6 @@ export function App() {
     }
   }, [busy, databasePath, project.analyses.length, project.has_more]);
 
-  useEffect(() => {
-    if (!desktopRuntimeAvailable) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const path = await getProjectDatabasePath();
-        if (cancelled) return;
-        setDatabasePath(path);
-        const result = unwrap(await listProjectAnalyses(path, ANALYSES_PAGE_SIZE, 0));
-        const enriched = await attachMineralIdentifications(path, result);
-        if (!cancelled) setProject(enriched);
-      } catch (caught) {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [desktopRuntimeAvailable]);
-
   const plannedMeasurementCount = plan?.summary?.planned_measurement_count
     ?? plan?.planned_records?.reduce((total, record) => total + record.measurements.length, 0)
     ?? 0;
@@ -168,11 +180,11 @@ export function App() {
   );
 
 
-  const receiveWorkspace = async (result, detailed = false) => {
+  const receiveWorkspace = useCallback(async (result, detailed = false) => {
     const { session, active } = result;
     // Publish the accepted revision before preview I/O: a failed preview must
     // not leave the client using a stale revision after a successful decision.
-    setWorkspace(session);
+    setWorkspace({ ...session, duplicate_comparison: result.duplicate_comparison });
     setBlockPreviews({});
     const source = session.sources.find((item) => item.source_id === session.active_source_id);
     setSourcePath(source.staged_path);
@@ -180,7 +192,7 @@ export function App() {
     setInspection(active.inspection);
     setRecipe(active.recipe);
     setSourceIssues(active.issues);
-    setSemanticTools({ actions: active.semantic_actions || [], analytes: active.canonical_analytes || [], mineralScopes: active.mineral_acceptance_scopes || [], records: active.plan.planned_records || [] });
+    setSemanticTools({ actions: active.semantic_actions || [], analytes: active.canonical_analytes || [], mineralScopes: active.mineral_acceptance_scopes || [], records: active.plan.planned_records || [], samples: active.project_samples });
     setBulkUnitScopes(active.bulk_unit_scopes);
     setBulkIgnoreScopes(active.bulk_ignore_scopes);
     setPlan(active.plan);
@@ -194,7 +206,35 @@ export function App() {
       return [section.block_id, { ...preview, workspace_id: session.workspace_id, source_id: source.source_id, source_path: source.staged_path }];
     }));
     setBlockPreviews(Object.fromEntries(pairs));
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!desktopRuntimeAvailable) return undefined;
+    let cancelled = false;
+    setBusy(true);
+    (async () => {
+      try {
+        const path = await getProjectDatabasePath();
+        if (cancelled) return;
+        setDatabasePath(path);
+        const result = unwrap(await listProjectAnalyses(path, ANALYSES_PAGE_SIZE, 0));
+        const enriched = await attachMineralIdentifications(path, result);
+        if (cancelled) return;
+        setProject(enriched);
+        const restored = unwrap(await restoreImportWorkspace(path));
+        if (!cancelled && restored.workspace) {
+          setScreen("Импорт");
+          await receiveWorkspace(restored.workspace);
+          if (!cancelled) setSuccess("Черновик импорта восстановлен.");
+        }
+      } catch (caught) {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [desktopRuntimeAvailable, receiveWorkspace]);
 
   const resetImportState = () => {
     setWorkspace(null);
@@ -285,18 +325,11 @@ export function App() {
     setError("");
     setActivity("Проверяю очередь перед сохранением…");
     try {
-      const current = unwrap(await getImportWorkspace(workspace.workspace_id));
-      if (!current.session.readiness.ready_to_commit) {
-        await receiveWorkspace(current, true);
-        throw new Error("Сохранение недоступно: проверьте обязательные вопросы очереди.");
-      }
-      const source = current.session.sources[0];
-      const result = unwrap(await applyImportPlan(databasePath, source.staged_path, current.active.recipe));
+      const result = unwrap(await commitImportWorkspace(workspace.workspace_id, workspace.draft_revision));
       // Commit has succeeded. Never offer a second apply if refresh/cleanup fails.
       resetImportState();
       setSuccess(`Импорт сохранён: ${result.analysis_count} Analysis, ${result.measurement_count} Measurement.`);
-      await discardImportWorkspace(workspace.workspace_id, current.session.draft_revision).then(unwrap);
-      clearImportStaging(source.staged_path).catch(() => {});
+      await Promise.all(result.staged_paths.map((path) => clearImportStaging(path).catch(() => {})));
       await refreshAnalyses(databasePath);
       setScreen("Анализы");
     } catch (caught) {
@@ -355,8 +388,119 @@ export function App() {
   const goTo = (label, enabled) => {
     if (!enabled || busy || blockDraftDirty || mappingDraftDirty) return;
     setError("");
+    if (label === "Построение") {
+      openPlots();
+      return;
+    }
+    if (label === "Поиск") setSearchSeed(null);
     setScreen(label);
-    if (label === "Анализы") refreshAnalyses().catch((caught) => setError(caught.message));
+  };
+  const openPlots = (ids = selectedAnalysisIds) => {
+    if (busy || !databasePath) return;
+    setPlotInputIds(ids.length ? [...ids] : null);
+    setScreen("Построение");
+  };
+  const loadPlotCatalog = useCallback(async () => unwrap(await getPlotCatalog(databasePath, plotInputIds)), [databasePath, plotInputIds]);
+  const loadPlotLayouts = useCallback(async () => unwrap(await listPlotSpecifications(databasePath)), [databasePath]);
+  const restorePlotLayout = async (id) => {
+    const layout = unwrap(await openPlotSpecification(databasePath, id));
+    setPlotInputIds(layout.input.analysis_ids);
+    const scope = new Set(layout.input.analysis_ids);
+    const sources = new Set(layout.legend.entries.map(({ value }) => value));
+    setHiddenAnalysisIds((current) => [...current.filter((analysisId) => !scope.has(analysisId)), ...layout.hidden_analysis_ids]);
+    setHiddenSourceIds((current) => [...current.filter((sourceId) => !sources.has(sourceId)), ...layout.hidden_source_ids]);
+    return layout;
+  };
+  const loadPlotData = useCallback(async (kind, axes, layers) =>
+    unwrap(await getPlotData(databasePath, plotInputIds, kind, axes, hiddenAnalysisIds, hiddenSourceIds, layers)),
+  [databasePath, plotInputIds, hiddenAnalysisIds, hiddenSourceIds]);
+  const setPlotVisibility = async (ids, hidden) => {
+    if (busy || !databasePath) return;
+    const changed = ids.filter((id) => hidden !== hiddenAnalysisIds.includes(id));
+    if (!changed.length) return;
+    setBusy(true);
+    setError("");
+    try {
+      unwrap(await recordPlotVisibility(databasePath, changed, hidden));
+      setHiddenAnalysisIds((current) => hidden ? [...new Set([...current, ...changed])] : current.filter((id) => !changed.includes(id)));
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadOverview = useCallback(async () => databasePath ? unwrap(await getProjectOverview(databasePath)) : null, [databasePath]);
+  const loadStatisticsGroups = useCallback(async () => databasePath ? unwrap(await listWorkGroups(databasePath)) : { groups: [] }, [databasePath]);
+  const loadStatisticsRuns = useCallback(async () => databasePath ? unwrap(await listCalculationRuns(databasePath)) : [], [databasePath]);
+  const loadPublication = useCallback(async () => databasePath ? unwrap(await getPublicationCatalog(databasePath))
+    : { groups: [], layouts: [], runs: [] }, [databasePath]);
+  const loadSamples = useCallback(async () => databasePath ? unwrap(await listProjectSamples(databasePath)) : [], [databasePath]);
+  const loadSample = useCallback(async (id) => unwrap(await getProjectSample(databasePath, id)), [databasePath]);
+  const loadPointAnalyses = useCallback(async (id) => unwrap(await listPointAnalyses(databasePath, id)), [databasePath]);
+  const queryProject = useCallback(async (query) => databasePath
+    ? unwrap(await queryProjectAnalyses(databasePath, query)) : { analyses: [], total: 0, has_more: false }, [databasePath]);
+  const openSearchSource = (source) => {
+    setSearchSeed({ source: source.source_name, source_id: source.source_id });
+    setScreen("Поиск");
+  };
+  const openSampleAnalyses = (sample, source) => {
+    setSearchSeed({ sample_id: sample.sample_id, sample_label: sample.sample_name,
+      ...(source ? { source: source.source_name, source_id: source.source_id } : {}) });
+    setScreen("Поиск");
+  };
+  const openSearchAnalysis = async (id) => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const analysis = unwrap(await getProjectAnalysis(databasePath, id));
+      setNavigationAnalysis(analysis);
+      setScreen("Анализы");
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const openOverviewGroup = async (id) => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const { groups } = unwrap(await listWorkGroups(databasePath));
+      const entry = groups.find(({ group }) => group.id === id);
+      if (!entry) throw new Error("Рабочая группа недоступна.");
+      const unavailable = new Set(entry.unavailable_analysis_ids);
+      setSelectedAnalysisIds(entry.group.analysis_ids.filter((analysisId) => !unavailable.has(analysisId)));
+      setNavigationAnalysis(null);
+      setSuccess(`Открыта группа «${entry.group.name}»${unavailable.size ? ` · недоступно: ${unavailable.size}` : ""}.`);
+      setScreen("Анализы");
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportSelection = async () => {
+    if (busy || !databasePath || !selectedAnalysisIds.length) return;
+    const ids = [...selectedAnalysisIds];
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const destination = await pickAnalysisExportPath();
+      if (!destination) return;
+      setActivity("Выгружаю отбор в XLSX…");
+      const result = unwrap(await exportAnalysisSelection(databasePath, ids, destination));
+      setSuccess(`Экспортировано анализов: ${result.analysis_count}. ${result.output_path}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setActivity("");
+      setBusy(false);
+    }
   };
 
   return (
@@ -379,7 +523,7 @@ export function App() {
             </button>
           ))}
         </nav>
-        <div className="side-footer"><Info size={18} /><span>Сейчас оживлены: импорт и анализы</span></div>
+        <div className="side-footer"><Info size={18} /><span>Локальный проект</span></div>
       </aside>
 
       <section className="workspace">
@@ -399,6 +543,75 @@ export function App() {
         {error && <div className="global-message error"><Warning size={20} weight="fill" /><span>{error}</span></div>}
         {success && <div className="global-message success"><CheckCircle size={20} weight="fill" /><span>{success}</span></div>}
 
+        {screen === "Обзор" && <ProjectOverview load={loadOverview} project={project} workspace={workspace}
+          selectionCount={selectedAnalysisIds.length} busy={busy} canImport={desktopRuntimeAvailable} onImport={startNewImport}
+          onResume={() => setScreen("Импорт")} onSource={openSearchSource} onGroup={openOverviewGroup} />}
+        {screen === "Поиск" && <ProjectSearch seed={searchSeed} queryProject={queryProject} onOpenAnalysis={openSearchAnalysis}
+          selectionCount={selectedAnalysisIds.length} busy={busy}
+          onPlot={openPlots}
+          onAddSelection={(ids) => setSelectedAnalysisIds((current) => [...new Set([...current, ...ids])])} />}
+        {["Образцы", "Связи", "Изображения"].includes(screen) && <SampleWorkspace key={screen} loadSamples={loadSamples} loadSample={loadSample}
+          initialTab={screen === "Связи" ? "Точки" : screen === "Изображения" ? "Изображения" : "Обзор"}
+          saveContext={async (id, context, revision) => unwrap(await saveSampleContext(databasePath, id, context, revision))}
+          addNote={async (id, author, body) => unwrap(await addSampleNote(databasePath, id, author, body))}
+          onImportMedia={databasePath && desktopRuntimeAvailable ? () => setScreen("Импорт изображений") : undefined}
+          previewMedia={async (id) => unwrap(await previewProjectMedia(databasePath, id))}
+          exportOriginal={async (image) => {
+            const destination = await pickMediaExportPath(image.display_name);
+            return destination ? unwrap(await exportMediaOriginal(databasePath, image.media_asset_id, destination)) : null;
+          }}
+          exportRendered={async (image, options) => {
+            const base = image.display_name.replace(/\.[^.]+$/, "");
+            const destination = await pickMediaExportPath(`${base}-annotated.png`);
+            return destination ? unwrap(await exportMediaRendered(databasePath, image.media_asset_id, destination, options)) : null;
+          }}
+          pointLinks={{
+            loadPoint: loadPointAnalyses,
+            createPoint: async (fields) => unwrap(await createSamplePoint(databasePath, fields)),
+            changeLink: async (pointId, analysisId, type, actor) => unwrap(await setPointAnalysisLink(databasePath, pointId, analysisId, type, actor)),
+            selectedIds: selectedAnalysisIds,
+            addToSelection: (id) => setSelectedAnalysisIds((current) => current.includes(id) ? current : [...current, id]),
+            openAnalysis: openSearchAnalysis,
+          }}
+          onOpenAnalyses={openSampleAnalyses} busy={busy} />}
+        {screen === "Импорт изображений" && <MediaImport actions={{
+          pick: pickMediaFiles, samples: loadSamples, sample: loadSample,
+          inspect: async (paths) => unwrap(await inspectMediaFiles(paths)),
+          preview: async (path) => unwrap(await previewMediaFile(path)),
+          plan: async (assignments) => unwrap(await draftMediaImport(databasePath, assignments)),
+          commit: async (plan) => unwrap(await commitMediaImport(databasePath, plan)),
+        }} onCancel={() => setScreen("Изображения")} onDone={(result) => {
+          setSuccess(`Изображений импортировано: ${result.created_media_asset_count}. Привязок: ${result.spatial_annotation_count}.`);
+          setScreen("Изображения");
+        }} />}
+        {screen === "Статистика" && <StatisticsWorkspace selectedIds={selectedAnalysisIds}
+          loadGroups={loadStatisticsGroups} loadRuns={loadStatisticsRuns}
+          loadCatalog={async (ids) => unwrap(await getPlotCatalog(databasePath, ids))}
+          reviewInput={async (input, features) => unwrap(await reviewStatistics(databasePath, input, features))}
+          runClustering={async (review, parameters) => unwrap(await runClustering(databasePath, review, parameters))}
+          openRun={async (id) => unwrap(await openCalculationRun(databasePath, id))}
+          onPublishRun={(run) => {
+            setPublicationItems((current) => {
+              if (current.length >= 24 || current.some((item) => item.kind === "calculation_run" && item.id === run.id)) return current;
+              return [...current, { draft_id: crypto.randomUUID(), kind: "calculation_run", id: run.id, label: "K-means", caption: "" }];
+            });
+            setScreen("Публикации");
+          }}
+          saveGroup={async (runId, cluster, name, actor) => unwrap(await saveCalculatedCluster(databasePath, runId, cluster, name, actor))} />}
+        {screen === "Публикации" && <PublicationWorkspace load={loadPublication} items={publicationItems} setItems={setPublicationItems}
+          name={publicationName} setName={setPublicationName} pickFigure={pickPublicationFigure}
+          check={async (name, items) => unwrap(await preparePublication(databasePath, name, items))}
+          exportZip={async (name, items, fingerprint) => {
+            const destination = await pickPublicationExportPath();
+            return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination)) : null;
+          }} />}
+        {screen === "Построение" && <PlotWorkspace loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
+          loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}
+          openLayout={restorePlotLayout} onExportSvg={savePlotSvg}
+          selectedIds={selectedAnalysisIds} setSelectedIds={setSelectedAnalysisIds} onBack={() => setScreen("Анализы")}
+          hiddenAnalysisIds={hiddenAnalysisIds} hiddenSourceIds={hiddenSourceIds} busy={busy}
+          onSetVisibility={setPlotVisibility}
+          onToggleSource={(id) => setHiddenSourceIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])} />}
         {screen === "Импорт" && (
           <section className={`live-page${sourcePath ? " import-live-page" : ""}`}>
             {!sourcePath && (
@@ -419,7 +632,7 @@ export function App() {
                 key={workspace?.active_source_id}
                 workspace={workspace}
                 focusedIssueKey={focusedIssueKey}
-                semanticTools={semanticTools}
+                semanticTools={{ ...semanticTools, onAssignSample: (decision) => decide({ ...decision, kind: "sample_assignment" }) }}
                 onSemanticDecision={(decision) => decide({ ...decision, kind: 'semantic' })}
                 onVerifyMinerals={() => decide({ kind: 'verify_minerals' })}
                 onAcceptMineral={(decision) => decide({ ...decision, kind: 'accept_mineral' })}
@@ -451,6 +664,9 @@ export function App() {
                 onBlockDirtyChange={setBlockDraftDirty}
                 onMappingDirtyChange={setMappingDraftDirty}
                 onKeepAllDuplicates={keepAllDuplicateCandidates}
+                onKeepAllWorkspaceDuplicates={() => decide({
+                  kind: "workspace_duplicates", fingerprint: workspace.duplicate_comparison.fingerprint,
+                })}
                 onCommit={commitImport}
                 onCancel={cancelImport}
                 onChooseOther={chooseFile}
@@ -461,7 +677,25 @@ export function App() {
 
         {screen === "Анализы" && (
           <AnalysesWorkspace
-            project={project}
+            project={navigationAnalysis && !project.analyses.some((item) => item.analysis_id === navigationAnalysis.analysis_id)
+              ? { ...project, analyses: [...project.analyses, navigationAnalysis] } : project}
+            initialFocusedId={navigationAnalysis?.analysis_id}
+            selectedIds={selectedAnalysisIds}
+            setSelectedIds={setSelectedAnalysisIds}
+            onListWorkGroups={async () => unwrap(await listWorkGroups(databasePath))}
+            onCreateWorkGroup={async (metadata) => unwrap(await createWorkGroup(databasePath, metadata))}
+            onExportSelection={exportSelection}
+            onOpenPlots={() => openPlots()}
+            hiddenPlotAnalysisIds={hiddenAnalysisIds}
+            onSetPlotVisibility={setPlotVisibility}
+            onListTableViews={async () => unwrap(await listTableViews(databasePath))}
+            onSaveTableView={async (view) => unwrap(await saveTableView(databasePath, view))}
+            editDraftActions={{
+              list: async (id) => unwrap(await listEditDrafts(databasePath, id)),
+              save: async (id, value) => unwrap(await saveEditDraft(databasePath, id, value)),
+              check: async (id) => unwrap(await checkEditDraft(databasePath, id)),
+              commit: async (id, actor, reason) => unwrap(await commitEditDraft(databasePath, id, actor, reason)),
+            }}
             busy={busy}
             onRefresh={() => refreshAnalyses().catch((caught) => setError(caught.message))}
             onRetract={retractLatest}

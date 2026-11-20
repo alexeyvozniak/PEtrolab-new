@@ -11,19 +11,20 @@ function recordSummary(record) {
   const identity = (record.identity || []).filter(Boolean).join(" · ") || "без распознанного идентификатора";
   const fields = (record.measurements || []).map((item) => {
     const context = item.method || item.measurement_set;
-    return context ? `${item.field} (${context})` : item.field;
+    const field = record.source_name ? `${item.field}: ${item.raw_token ?? "—"} ${item.unit || ""}` : item.field;
+    return context ? `${field} (${context})` : field;
   }).join(", ") || "без Measurement";
   return { identity, fields };
 }
 
-export function ImportDuplicateReview({ plan, recipe, busy, onKeepAll }) {
+export function ImportDuplicateReview({ plan, recipe, comparison, busy, onKeepAll }) {
   const warning = plan?.warnings?.find((item) => item.code === "DUPLICATE_CANDIDATES");
-  const groups = warning?.preview_ids || [];
+  const groups = comparison?.groups.map((group) => group.map((record) => record.preview_id)) || warning?.preview_ids || [];
   if (!groups.length) return null;
 
-  const records = new Map((plan?.planned_records || []).map((record) => [record.preview_id, record]));
+  const records = new Map((comparison?.groups.flat() || plan?.planned_records || []).map((record) => [record.preview_id, record]));
   const review = recipe?.global_decisions?.duplicate_review;
-  const reviewed = recipe?.global_decisions?.duplicate_policy === "keep_all"
+  const reviewed = comparison ? comparison.reviewed : recipe?.global_decisions?.duplicate_policy === "keep_all"
     && review?.decision === "keep_all"
     && review?.candidate_group_count === groups.length;
 
@@ -31,7 +32,7 @@ export function ImportDuplicateReview({ plan, recipe, busy, onKeepAll }) {
     <div className={`duplicate-review${reviewed ? " duplicate-reviewed" : ""}`}>
       <div className="duplicate-review-head">
         <div>
-          <b>{reviewed ? "Совпадения проверены" : "Нужно проверить возможные совпадения"}</b>
+          <b>{comparison ? "Совпадения между источниками" : reviewed ? "Совпадения проверены" : "Нужно проверить возможные совпадения"}</b>
           <span>
             PetroLab ничего не объединяет автоматически. Одинаковая идентичность может означать повтор, а может — дополнительные данные другого блока или метода.
           </span>
@@ -52,7 +53,7 @@ export function ImportDuplicateReview({ plan, recipe, busy, onKeepAll }) {
                 const summary = recordSummary(record);
                 return (
                   <div className="duplicate-record" key={previewId}>
-                    <span>{recordOrigin(record)}</span>
+                    <span>{[record.source_name, recordOrigin(record)].filter(Boolean).join(" · ")}</span>
                     <b>{summary.identity}</b>
                     <small>{summary.fields}</small>
                   </div>
@@ -70,7 +71,7 @@ export function ImportDuplicateReview({ plan, recipe, busy, onKeepAll }) {
             <span>Удаление отдельных повторов появится позже с отдельной provenance. Сейчас PetroLab не будет молча выбрасывать строки.</span>
           </div>
           <button className="primary-button" onClick={onKeepAll} disabled={busy}>
-            Проверено: оставить все записи
+            {comparison ? "Проверено: оставить записи из всех источников" : "Проверено: оставить все записи"}
           </button>
         </div>
       )}

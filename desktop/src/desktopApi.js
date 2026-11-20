@@ -3,6 +3,24 @@ import { invoke } from "@tauri-apps/api/core";
 export const PROTOCOL_VERSION = "1.0";
 
 export const createImportWorkspace = (sources, projectDatabasePath) => invokePetrolab("import.workspace.create", { sources, project_database_path: projectDatabasePath });
+export const restoreImportWorkspace = (projectDatabasePath) =>
+  invokePetrolab("import.workspace.restore", { project_database_path: projectDatabasePath });
+export const listWorkGroups = (projectDatabasePath) =>
+  invokePetrolab("work_group.list", { project_database_path: projectDatabasePath });
+export const listTableViews = (projectDatabasePath) =>
+  invokePetrolab("table_view.list", { project_database_path: projectDatabasePath });
+export const saveTableView = (projectDatabasePath, view) =>
+  invokePetrolab("table_view.save", { project_database_path: projectDatabasePath, ...view });
+export const listEditDrafts = (projectDatabasePath, analysisId) =>
+  invokePetrolab("edit_draft.list", { project_database_path: projectDatabasePath, analysis_id: analysisId });
+export const saveEditDraft = (projectDatabasePath, measurementId, newValue) =>
+  invokePetrolab("edit_draft.save", { project_database_path: projectDatabasePath, measurement_id: measurementId, new_value: newValue });
+export const checkEditDraft = (projectDatabasePath, draftId) =>
+  invokePetrolab("edit_draft.check", { project_database_path: projectDatabasePath, draft_id: draftId });
+export const commitEditDraft = (projectDatabasePath, draftId, actor, reason) =>
+  invokePetrolab("edit_draft.commit", { project_database_path: projectDatabasePath, draft_id: draftId, actor, reason });
+export const createWorkGroup = (projectDatabasePath, metadata) =>
+  invokePetrolab("work_group.create", { project_database_path: projectDatabasePath, ...metadata });
 export const previewSemanticExtension = (workspaceId, sourceId, decision) => invokePetrolab("import.workspace.preview_window", { workspace_id: workspaceId, source_id: sourceId, semantic_extension: decision });
 export const addWorkspaceSources = (workspaceId, revision, sources) =>
   invokePetrolab("import.workspace.add_sources", { workspace_id: workspaceId, expected_revision: revision, sources });
@@ -13,6 +31,8 @@ export const applyWorkspaceDecision = (workspaceId, revision, sourceId, decision
   });
 export const discardImportWorkspace = (workspaceId, revision) =>
   invokePetrolab("import.workspace.discard", { workspace_id: workspaceId, expected_revision: revision });
+export const commitImportWorkspace = (workspaceId, revision) =>
+  invokePetrolab("import.workspace.commit", { workspace_id: workspaceId, expected_revision: revision });
 export const previewWorkspaceWindow = (workspaceId, sourceId, sheetName, startRow, rowCount = 30, startColumn = 0, columnCount = 24) =>
   invokePetrolab("import.workspace.preview_window", { workspace_id: workspaceId, source_id: sourceId,
     sheet_name: sheetName, start_row: startRow, row_count: rowCount, start_column: startColumn, column_count: columnCount });
@@ -40,9 +60,92 @@ export async function invokePetrolab(command, payload) {
 }
 
 export const pickImportFile = () => desktopInvoke("pick_import_file");
+export const pickAnalysisExportPath = () => desktopInvoke("pick_analysis_export_path");
+export const savePlotSvg = (svg) => desktopInvoke("save_plot_svg", { svg });
+export const exportAnalysisSelection = (projectDatabasePath, analysisIds, outputPath) =>
+  invokePetrolab("analysis.selection.export_xlsx", {
+    project_database_path: projectDatabasePath, analysis_ids: analysisIds, output_path: outputPath,
+  });
 export const stageImportFile = (sourcePath) => desktopInvoke("stage_import_file", { sourcePath });
 export const clearImportStaging = (stagedPath) => desktopInvoke("clear_import_staging", { stagedPath });
 export const getProjectDatabasePath = () => desktopInvoke("project_database_path");
+export const getProjectOverview = (projectDatabasePath) =>
+  invokePetrolab("project.overview", { project_database_path: projectDatabasePath });
+export const listProjectSamples = (projectDatabasePath) =>
+  invokePetrolab("project.samples.list", { project_database_path: projectDatabasePath });
+export const reviewStatistics = (projectDatabasePath, input, features) => invokePetrolab("statistics.review", {
+  project_database_path: projectDatabasePath, input, features,
+});
+export const runClustering = (projectDatabasePath, review, parameters) => invokePetrolab("statistics.cluster.run", {
+  project_database_path: projectDatabasePath, input: review.input, features: review.features,
+  review_fingerprint: review.input_fingerprint, parameters,
+});
+export const listCalculationRuns = (projectDatabasePath) => invokePetrolab("statistics.runs.list", { project_database_path: projectDatabasePath });
+export const openCalculationRun = (projectDatabasePath, runId) =>
+  invokePetrolab("statistics.run.open", { project_database_path: projectDatabasePath, run_id: runId });
+export const saveCalculatedCluster = (projectDatabasePath, runId, cluster, name, actor) =>
+  invokePetrolab("statistics.cluster.save_group", { project_database_path: projectDatabasePath, run_id: runId, cluster, name, actor });
+export const getProjectSample = (projectDatabasePath, sampleId) =>
+  invokePetrolab("project.sample.get", { project_database_path: projectDatabasePath, sample_id: sampleId });
+export const saveSampleContext = (projectDatabasePath, sampleId, context, expectedRevision) =>
+  invokePetrolab("project.sample.context.save", { project_database_path: projectDatabasePath, sample_id: sampleId,
+    context, expected_revision: expectedRevision });
+export const addSampleNote = (projectDatabasePath, sampleId, author, body) =>
+  invokePetrolab("project.sample.note.add", { project_database_path: projectDatabasePath, sample_id: sampleId, author, body });
+export const pickMediaFiles = () => desktopInvoke("pick_media_files");
+export const pickPublicationFigure = () => desktopInvoke("pick_publication_figure");
+export const pickPublicationExportPath = () => desktopInvoke("pick_publication_export_path");
+export const getPublicationCatalog = (projectDatabasePath) => invokePetrolab("publication.catalog", { project_database_path: projectDatabasePath });
+export const preparePublication = (projectDatabasePath, name, items) => invokePetrolab("publication.prepare", {
+  project_database_path: projectDatabasePath, name, items,
+});
+export const exportPublication = (projectDatabasePath, name, items, fingerprint, outputPath) => invokePetrolab("publication.export", {
+  project_database_path: projectDatabasePath, name, items, expected_fingerprint: fingerprint, output_path: outputPath,
+});
+export const pickMediaExportPath = (name) => desktopInvoke("pick_media_export_path", { name });
+export const inspectMediaFiles = (paths) => invokePetrolab("media.inspect_sources", { source_paths: paths });
+export const previewMediaFile = (path) => invokePetrolab("media.preview_input", { source_path: path });
+export const draftMediaImport = (projectDatabasePath, assignments) => invokePetrolab("media.import.plan", {
+  project_database_path: projectDatabasePath, assignments,
+});
+export const commitMediaImport = (projectDatabasePath, plan) => invokePetrolab("media.import.apply", {
+  project_database_path: projectDatabasePath, plan,
+});
+export const previewProjectMedia = (projectDatabasePath, mediaAssetId) => invokePetrolab("media.preview", {
+  project_database_path: projectDatabasePath, media_asset_id: mediaAssetId,
+});
+export const exportMediaOriginal = (projectDatabasePath, mediaAssetId, outputPath) => invokePetrolab("media.export_original", {
+  project_database_path: projectDatabasePath, media_asset_id: mediaAssetId, output_path: outputPath,
+});
+export const exportMediaRendered = (projectDatabasePath, mediaAssetId, outputPath, options) => invokePetrolab("media.export_rendered", {
+  project_database_path: projectDatabasePath, media_asset_id: mediaAssetId, output_path: outputPath, options,
+});
+export const createSamplePoint = (projectDatabasePath, fields) =>
+  invokePetrolab("analytical_point.create", { project_database_path: projectDatabasePath, ...fields });
+export const listPointAnalyses = (projectDatabasePath, pointId) =>
+  invokePetrolab("analytical_point.analyses", { project_database_path: projectDatabasePath, point_id: pointId });
+export const setPointAnalysisLink = (projectDatabasePath, pointId, analysisId, linkType, actor) =>
+  invokePetrolab("analytical_point.link.set", { project_database_path: projectDatabasePath, point_id: pointId,
+    analysis_id: analysisId, link_type: linkType, actor });
+export const queryProjectAnalyses = (projectDatabasePath, query) =>
+  invokePetrolab("analysis.query", { project_database_path: projectDatabasePath, ...query });
+export const getProjectAnalysis = (projectDatabasePath, analysisId) =>
+  invokePetrolab("project.analysis.get", { project_database_path: projectDatabasePath, analysis_id: analysisId });
+export const getPlotCatalog = (projectDatabasePath, analysisIds) =>
+  invokePetrolab("plot_data.catalog", { project_database_path: projectDatabasePath, analysis_ids: analysisIds });
+export const listPlotSpecifications = (projectDatabasePath) =>
+  invokePetrolab("plot_spec.list", { project_database_path: projectDatabasePath });
+export const savePlotSpecification = (projectDatabasePath, layout) =>
+  invokePetrolab("plot_spec.save", { project_database_path: projectDatabasePath, ...layout });
+export const openPlotSpecification = (projectDatabasePath, id) =>
+  invokePetrolab("plot_spec.open", { project_database_path: projectDatabasePath, id });
+export const getPlotData = (projectDatabasePath, analysisIds, kind, axes, hiddenAnalysisIds, hiddenSourceIds, layers) =>
+  invokePetrolab("plot_data.query", { project_database_path: projectDatabasePath, analysis_ids: analysisIds, kind, axes,
+    hidden_analysis_ids: hiddenAnalysisIds, hidden_source_ids: hiddenSourceIds, layers });
+export const recordPlotVisibility = (projectDatabasePath, analysisIds, hidden) =>
+  invokePetrolab(hidden ? "plot_visibility.hide" : "plot_visibility.restore", {
+    project_database_path: projectDatabasePath, analysis_ids: analysisIds,
+  });
 
 export const inspectImportSource = (sourcePath) =>
   invokePetrolab("import.inspect_source", { source_path: sourcePath });

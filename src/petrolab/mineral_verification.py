@@ -3,12 +3,13 @@ from dataclasses import asdict
 import hashlib
 import json
 import math
+from decimal import Decimal, InvalidOperation
 
 from .mineral_reference import MINERALS
 from .alkaline_mineral_reference import ALKALINE_MINERALS
 from .mineral_recognition_extended import recognize_mineral_extended, EXTENDED_RULESET_VERSION
 
-INPUT_GATE_VERSION = 'import-wt-percent-complete-core-1'
+INPUT_GATE_VERSION = 'import-wt-percent-complete-core-2'
 REQUIRED_CORE = {'SiO2', 'Al2O3', 'MgO', 'CaO', 'Na2O', 'K2O'}
 REPORTED_TARGETS = {m.name.casefold(): m.chemical_target for m in (*MINERALS, *ALKALINE_MINERALS)}
 REPORTED_TARGETS.update({m.chemical_target.casefold(): m.chemical_target for m in (*MINERALS, *ALKALINE_MINERALS)})
@@ -50,11 +51,13 @@ def verify_record(record, accepted=None):
             problems.append('missing_or_censored_input')
             continue
         try:
-            value = float(str(measurement.get('raw_token')).replace(',', '.'))
-        except (TypeError, ValueError):
+            token = str(measurement.get('raw_token')).replace(',', '.')
+            exact_value = Decimal(token)
+            value = float(token)
+        except (TypeError, ValueError, InvalidOperation):
             problems.append('invalid_numeric_input')
             continue
-        if not math.isfinite(value) or value < 0:
+        if not math.isfinite(value) or value < 0 or (value == 0 and not exact_value.is_zero()):
             problems.append('invalid_numeric_input')
             continue
         inputs[field] = value

@@ -1,0 +1,11 @@
+.publication-workspace { padding: 16px 20px; color: #263a2d; }
+.publication-workspace h2, .publication-card h3, .publication-card h4 { margin: 0 0 7px; }
+.publication-grid { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(0, 1.65fr) minmax(185px, 1fr); gap: 10px; align-items: start; }
+.publication-card { border: 1px solid #dce5df; border-radius: 6px; padding: 12px; background: #fff; min-width: 0; overflow-wrap: anywhere; }
+.publication-card section { margin-top: 12px; border-top: 1px solid #dce5df; padding-top: 8px; }
+.publication-card ul, .publication-card ol { margin: 6px 0; padding-left: 18px; }
+.publication-card li { padding-bottom: 5px; }
+.publication-card small { display: block; }
+.publication-card label { display: grid; margin: 6px 0; gap: 3px; }
+.publication-card input, .publication-card select, .publication-card textarea { padding: 5px; border: 1px solid #adc0b4; border-radius: 4px; color: inherit; }
+.publication-actions { display: flex; flex-wrap: wrap; gap: 5px; }

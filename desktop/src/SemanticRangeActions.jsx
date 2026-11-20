@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 
-export function SemanticRangeActions({ records, selection, setSelection, actions, analytes, annotations, onDecision, onPreview, busy, blockId, requestedRole }) {
+export function SemanticRangeActions({ records, selection, setSelection, actions, analytes, annotations, onDecision, onPreview, samples, onAssignSample, busy, blockId, requestedRole }) {
   const [role, setRole] = useState('sample');
   const [value, setValue] = useState('');
   const [unit, setUnit] = useState('');
   const [extension, setExtension] = useState(null);
   const [error, setError] = useState('');
   const [remember, setRemember] = useState(false);
+  const [sampleTarget, setSampleTarget] = useState('');
+  const [sampleName, setSampleName] = useState('');
   useEffect(() => { if (requestedRole) setRole(requestedRole); }, [requestedRole]);
   useEffect(() => { setExtension(null); setError(''); }, [selection, annotations]);
   const selectedAction = actions.find((a) => a.role === role);
@@ -29,8 +31,23 @@ export function SemanticRangeActions({ records, selection, setSelection, actions
     {selection && <>
       {selectedRecords.length > 0 && <details className="semantic-sample-evidence"><summary>Образцы в выделении · {selectedRecords.length} анализов · физические связи не объединяются по имени</summary>{selectedRecords.slice(0, 8).map((record) => {
         const association = record.sample_association;
-        return <div key={record.preview_id}><b>{record.identity.join(' · ')}</b>: {association?.reported ? `${association.reported.value} · ${association.reported.origin}` : 'Образец не определён'}{association?.reported && <small> · связь с физическим Sample не подтверждена</small>}{(association?.candidates || []).map((candidate, index) => <button type="button" key={index} disabled={busy} title={`Неподтверждённая подсказка: ${candidate.confidence}; ${candidate.sheet_name}, строка ${candidate.row}`} onClick={() => { setRole('sample'); setValue(candidate.value); }}>Предложить {candidate.value}</button>)}</div>;
+        return <div key={record.preview_id}><b>{record.identity.join(' · ')}</b>: {association?.reported ? `${association.reported.value} · ${association.reported.origin}` : 'Нет обозначения в файле'}<small> · {association?.assignment ? `Физический образец: ${association.assignment.sample_name}` : 'Связь с физическим образцом не назначена'}</small>{(association?.candidates || []).map((candidate, index) => <button type="button" key={index} disabled={busy} title={`Неподтверждённая подсказка: ${candidate.confidence}; ${candidate.sheet_name}, строка ${candidate.row}`} onClick={() => { setRole('sample'); setValue(candidate.value); }}>Предложить {candidate.value}</button>)}</div>;
       })}{selectedRecords.length > 8 && <small>Показаны первые 8; сузьте выделение для остальных.</small>}</details>}
+      {role === 'sample' && samples && selectedRecords.length > 0 && <div className="semantic-assignment-controls">
+        <select aria-label="Физический образец" value={sampleTarget} onChange={(event) => setSampleTarget(event.target.value)} disabled={busy}>
+          <option value="">Выберите физический образец</option>
+          <option value="new">Создать отдельный образец</option>
+          {samples.map((sample) => <option key={sample.sample_id} value={sample.sample_id}>{sample.sample_name}{sample.pending ? " · черновик" : ""}</option>)}
+        </select>
+        {sampleTarget === 'new' && <input aria-label="Имя нового образца" value={sampleName} onChange={(event) => setSampleName(event.target.value)} disabled={busy} />}
+        <button type="button" disabled={busy || !sampleTarget || (sampleTarget === 'new' && !sampleName.trim())} onClick={() => onAssignSample({
+          mode: sampleTarget === 'new' ? 'new' : 'existing', sample_id: sampleTarget,
+          sample_name: sampleName, preview_ids: selectedRecords.map((record) => record.preview_id),
+        })}>Связать с физическим образцом</button>
+        {selectedRecords.some((record) => record.sample_association?.assignment) && <button type="button" disabled={busy} onClick={() => onAssignSample({
+          mode: 'clear', preview_ids: selectedRecords.map((record) => record.preview_id),
+        })}>Снять связь</button>}
+      </div>}
       <div className="semantic-bounds">
         {[['start_row', 'От строки', 1], ['end_row', 'До строки', 1], ['start_column', 'От колонки', 0], ['end_column', 'До колонки', 0]].map(([key, label, offset]) => <label key={key}>{label}<input type="number" min="1" aria-label={label} value={selection[key] + (offset === 0 ? 1 : 0)} onChange={(event) => { setSelection({ ...selection, [key]: Number(event.target.value) - (offset === 0 ? 1 : 0) }); setExtension(null); }} disabled={busy} /></label>)}
       </div>

@@ -17,6 +17,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from petrolab.import_apply import apply_import_plan, open_project  # noqa: E402
 from petrolab.import_preview import ImportCommandError  # noqa: E402
+from petrolab.media_display import export_media_original, export_media_rendered, preview_project_media  # noqa: E402
+from PIL import Image  # noqa: E402
 from petrolab.media_import import (  # noqa: E402
     apply_media_import_plan,
     create_analytical_point,
@@ -97,6 +99,39 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(len(result["items"]), 2)
             self.assertEqual(len(result["duplicate_groups"]), 1)
 
+    def test_preview_and_original_export_preserve_bytes_and_require_current_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            database = directory / "project.sqlite"
+            with closing(open_project(database)):
+                pass
+            image = directory / "original.png"
+            write_png(image, width=64, height=40)
+            original = image.read_bytes()
+            assignment = {"source_path": str(image), "sample_name": "KIV-2", "thin_section_name": "TS1",
+                          "placements": [], "ownership_mode": "linked_external", "media_type": "PPL",
+                          "sample_target": {"mode": "new", "sample_id": None},
+                          "expected_source_fingerprint": hashlib.sha256(original).hexdigest()}
+            plan = create_media_import_plan(database, [assignment])
+            apply_media_import_plan(database, plan)
+            media_id = plan["items"][0]["media_asset_id"]
+            preview = preview_project_media(database, media_id)
+            self.assertEqual((preview["width_px"], preview["height_px"], preview["annotations"]), (64, 40, []))
+            self.assertTrue(preview["preview_url"].startswith("data:image/jpeg;base64,"))
+            destination = directory / "copy.png"
+            result = export_media_original(database, media_id, str(destination))
+            self.assertEqual(result["sha256"], hashlib.sha256(original).hexdigest())
+            self.assertEqual(destination.read_bytes(), original)
+            with self.assertRaises(ImportCommandError) as overwrite:
+                export_media_original(database, media_id, str(image))
+            self.assertEqual(overwrite.exception.code, "EXPORT_FILE_EXISTS")
+            self.assertEqual(image.read_bytes(), original)
+            write_png(image, width=65, height=40)
+            with self.assertRaises(ImportCommandError) as changed:
+                export_media_original(database, media_id, str(directory / "changed.png"))
+            self.assertEqual(changed.exception.code, "SOURCE_FINGERPRINT_MISMATCH")
+            self.assertFalse((directory / "changed.png").exists())
+
     def test_windows_batch_file_is_not_treated_as_an_image(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             script = Path(directory_name) / "images.bat"
@@ -123,8 +158,21 @@ class MediaImportTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM spatial_annotation").fetchone()[0], 1)
                 row = connection.execute("SELECT geometry_kind, x_px, y_px, image_width_px, image_height_px FROM spatial_annotation").fetchone()
                 self.assertEqual(row, ("point", 5.25, 3.5, 12, 8))
-                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 10)
+                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 18)
             self.assertEqual(result["spatial_annotation_count"], 1)
+            media_id = plan["items"][0]["media_asset_id"]
+            preview = preview_project_media(database, media_id)
+            self.assertEqual([preview["annotations"][0][axis] for axis in ("x_px", "y_px")], [5.25, 3.5])
+            rendered = export_media_rendered(database, media_id, str(directory / "rendered.png"),
+                                             {"points": True, "regions": False, "labels": True})
+            with Image.open(rendered["output_path"]) as exported:
+                manifest = json.loads(exported.info["PetroLab"])
+                self.assertEqual(manifest["source_sha256"], source_hash)
+                self.assertEqual(manifest["annotation_ids"], rendered["annotation_ids"])
+                self.assertEqual(len(manifest["annotation_ids"]), 1)
+                self.assertEqual(exported.size, (12, 8))
+                self.assertTrue(any(high > 0 for _, high in exported.convert("RGB").getextrema()))
+            self.assertEqual(hashlib.sha256(image.read_bytes()).hexdigest(), source_hash)
 
     def test_cross_sample_placement_requires_and_preserves_reason(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

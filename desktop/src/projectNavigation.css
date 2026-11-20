@@ -1,0 +1,28 @@
+.project-navigation { display: grid; grid-template-columns: minmax(0, 1fr) 290px; min-height: calc(100vh - 90px); background: #fff; color: #23382c; }
+.project-navigation > main { min-width: 0; padding: 20px 24px; }
+.project-navigation > aside { min-width: 0; padding: 20px 16px; border-left: 1px solid #dce5df; background: #fafcfb; }
+.project-navigation h2, .project-navigation h3 { margin: 0 0 12px; }
+.project-navigation p, .project-navigation dd { margin: 6px 0; }
+.project-navigation aside dl > div { display: flex; justify-content: space-between; align-items: center; }
+.project-navigation aside section { margin-top: 24px; }
+.project-navigation aside .outline-button { width: 100%; margin-bottom: 6px; }
+.project-navigation .project-name { color: #586961; font-size: 13px; margin-bottom: 14px; }
+.overview-event { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #dfe8e1; }
+.overview-event small { display: block; color: #566a60; margin-bottom: 4px; }
+.overview-event b, .overview-event p, .project-fingerprint { overflow-wrap: anywhere; }
+.project-search-form { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: 8px; }
+.project-search-form label { min-width: 0; display: grid; gap: 5px; font-size: 12px; }
+.project-search-form input { width: 100%; min-width: 0; height: 38px; padding: 6px 9px; border: 1px solid #aabdaf; border-radius: 7px; color: inherit; }
+.project-search-chips, .project-search-page { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-block: 10px; }
+.project-search-chips .outline-button, .project-search-table .outline-button { min-height: 28px; font-size: 11px; padding: 4px 8px; }
+.project-search-table { margin-top: 8px; overflow: auto; }
+.project-search-table table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.project-search-table td, .project-search-table th { padding: 8px; text-align: left; border-bottom: 1px solid #dde5df; white-space: nowrap; }
+.project-search-table th { background: #eef4f0; }
+.project-search-table tr.marked { background: #e5f0e9; }
+.project-search-table input { accent-color: #365b49; }
+@media (max-width: 1250px) {
+  .project-navigation { grid-template-columns: minmax(0, 1fr) 215px; }
+  .project-navigation > main { padding-inline: 14px; }
+  .project-search-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

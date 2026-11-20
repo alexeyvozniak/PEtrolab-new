@@ -57,7 +57,21 @@
         "fe_semantics": {"type": "string", "enum": ["fe2_as_feo", "total_as_feot", "fe3_as_fe2o3", "separate_fe2_fe3", "not_present"]},
         "censored_value_policy": {"const": "preserve_original_token_and_detection_limit"},
         "duplicate_policy": {"type": "string", "enum": ["review_each", "keep_all", "skip_exact_after_review"]},
-        "unit_policy": {"const": "explicit_per_measurement_column"}
+        "unit_policy": {"const": "explicit_per_measurement_column"},
+        "sample_assignments": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sample_id", "sample_name", "mode", "decided_at"],
+            "properties": {
+              "sample_id": {"type": "string", "minLength": 1},
+              "sample_name": {"type": "string", "minLength": 1},
+              "mode": {"enum": ["existing", "new"]},
+              "decided_at": {"type": "string", "format": "date-time"}
+            }
+          }
+        }
       }
     },
     "migration_report": {

@@ -1,0 +1,29 @@
+.statistics-workspace { padding: 14px 20px; color: #25382d; }
+.statistics-workspace h2, .statistics-card h3 { margin: 0 0 10px; }
+.statistics-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 0; }
+.statistics-steps span { padding: 7px; border-bottom: 2px solid #dce5df; }
+.statistics-steps [aria-current="step"] { border-color: #356349; color: #24543d; font-weight: 650; }
+.statistics-task, .statistics-review, .statistics-result { display: grid; gap: 10px; margin-top: 9px; align-items: start; }
+.statistics-task { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.statistics-review { grid-template-columns: minmax(120px, 1fr) minmax(0, 3fr) minmax(160px, 1fr); }
+.statistics-result { grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr) minmax(210px, 1.35fr); }
+.statistics-card { padding: 12px; border: 1px solid #dce5df; border-radius: 6px; background: #fff; min-width: 0; overflow-wrap: anywhere; }
+.statistics-card p { margin: 6px 0; }
+.statistics-card ul { padding-left: 18px; margin: 7px 0; }
+.statistics-card li { padding-block: 3px; }
+.statistics-form, .statistics-features { display: grid; gap: 7px; margin-bottom: 10px; }
+.statistics-form label { display: grid; gap: 3px; }
+.statistics-form input, .statistics-form select { padding: 5px; color: inherit; border: 1px solid #b2c4b6; border-radius: 5px; }
+.statistics-features { display: flex; flex-wrap: wrap; max-height: 160px; overflow: auto; }
+.statistics-features label { padding: 4px 5px; border: 1px solid #dce5df; border-radius: 4px; }
+.statistics-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 9px; }
+.statistics-warning { background: #fff6e4; border-left: 3px solid #b58a49; padding: 7px; }
+.statistics-table { overflow: auto; margin-bottom: 8px; }
+.statistics-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.statistics-table th, .statistics-table td { text-align: left; padding: 5px; border-bottom: 1px solid #e4e9e4; }
+.statistics-table th { background: #edf3ef; }
+.statistics-scatter { width: 100%; height: auto; }
+.statistics-scatter text { font-size: 11px; fill: #25382d; }
+.statistics-cluster { margin-block: 6px; }
+.statistics-dot { width: 9px; height: 9px; border-radius: 50%; }
+.statistics-members { max-height: 220px; overflow: auto; }

@@ -242,6 +242,7 @@ export function ImportWorkspace({
   blockDraftDirty,
   mappingDraftDirty,
   duplicateReviewRequired,
+  onKeepAllWorkspaceDuplicates,
   canSaveImport,
   plannedMeasurementCount,
   unresolvedReviewCount,
@@ -312,6 +313,7 @@ export function ImportWorkspace({
     + (plan.issues || []).filter((item) => item.blocking).length
     + (mappingDraftDirty ? 1 : 0)
     + (duplicateReviewRequired ? 1 : 0)
+    + (workspace?.duplicate_comparison && !workspace.duplicate_comparison.reviewed ? 1 : 0)
     + (unresolvedReviewCount > 0 ? 1 : 0)
     + (plannedMeasurementCount === 0 ? 1 : 0);
 
@@ -538,6 +540,13 @@ export function ImportWorkspace({
               onKeepAll={onKeepAllDuplicates}
             />
           )}
+          {workspace?.duplicate_comparison && (
+            <ImportDuplicateReview
+              comparison={workspace.duplicate_comparison}
+              busy={busy || blockDraftDirty || mappingDraftDirty}
+              onKeepAll={onKeepAllWorkspaceDuplicates}
+            />
+          )}
           </>}
         </aside>
       </div>
@@ -545,8 +554,8 @@ export function ImportWorkspace({
       <footer className={`import-workspace-footer${canSaveImport ? "" : " blocked"}`}>
         <div className="import-footer-metrics">
           <span><b>{inspection.sheets.length}</b> листов</span>
-          <span><b>{plan.summary.planned_analysis_count}</b> Analysis</span>
-          <span><b>{plannedMeasurementCount}</b> Measurement</span>
+          <span><b>{workspace?.readiness.planned_analysis_count ?? plan.summary.planned_analysis_count}</b> Analysis</span>
+          <span><b>{workspace?.readiness.planned_measurement_count ?? plannedMeasurementCount}</b> Measurement</span>
           <span className={blockingCount ? "footer-warning" : ""}><b>{blockingCount}</b> обязательных решений{unresolvedReviewCount ? ` · ${unresolvedReviewCount} полей` : ""}</span>
         </div>
         <div className="import-footer-safety"><Info size={15} /><span>Исходный файл не изменится</span></div>
@@ -558,7 +567,7 @@ export function ImportWorkspace({
           </button>
         </div>
         {(blockDraftDirty || mappingDraftDirty || workspace?.sources.length > 1) && <div className="workspace-commit-note" role="status">
-          {blockDraftDirty || mappingDraftDirty ? "Примените правки перед переключением источника или экрана." : "Очередь для проверки: сохранение нескольких файлов пока недоступно. Решения хранятся до закрытия приложения."}
+          {blockDraftDirty || mappingDraftDirty ? "Примените правки перед переключением источника или экрана." : "При сохранении будут импортированы все включённые источники. Применённые решения сохраняются в черновике."}
         </div>}
       </footer>
       {showResultPreview && <ResultPreview plan={plan} sourceName={sourceName} onClose={() => setShowResultPreview(false)} />}

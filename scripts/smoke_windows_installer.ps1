@@ -1,9 +1,24 @@
 param(
-    [string]$BundleRoot = "desktop/src-tauri/target/release/bundle"
+    [string]$BundleRoot = "desktop/src-tauri/target/release/bundle",
+    [string]$BaselineMsi
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+# This test installs and uninstalls a product; never run it on a user's machine.
+if ($env:GITHUB_ACTIONS -ne "true" -or $env:RUNNER_ENVIRONMENT -ne "github-hosted" -or -not $env:RUNNER_TEMP) {
+    throw "Installer smoke test requires an isolated CI runner with RUNNER_TEMP."
+}
+$databaseCandidates = @(
+    (Join-Path ([Environment]::GetFolderPath("ApplicationData")) "org.petrolab.desktop\petrolab-v2.sqlite"),
+    (Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "org.petrolab.desktop\petrolab-v2.sqlite")
+)
+foreach ($database in $databaseCandidates) {
+    if (Test-Path -LiteralPath $database) {
+        throw "Existing PetroLab database detected; refusing to install or modify it: $database"
+    }
+}
 
 $bundle = Resolve-Path $BundleRoot
 $msi = Get-ChildItem -Path $bundle -Recurse -File -Filter "*.msi" |
@@ -30,58 +45,68 @@ $installArgs = @(
 $appProcess = $null
 $serviceProcesses = @()
 $installed = $false
+$previousInstalled = $false
+$baselinePath = if ($BaselineMsi) { (Resolve-Path -LiteralPath $BaselineMsi).Path } else { $null }
+$database = $null
+$upgradeState = Join-Path $env:RUNNER_TEMP "PetroLab-project-$runId.json"
+$env:PETROLAB_PROJECT_DATABASE = $null
+$env:PETROLAB_PYTHON = $null
 
 try {
+    if ($baselinePath) {
+        $previousArgs = @(
+            "/i", ('"{0}"' -f $baselinePath), "/qn", "/norestart",
+            ('INSTALLDIR="{0}"' -f $installRoot), "/l*v",
+            ('"{0}"' -f (Join-Path $env:RUNNER_TEMP "PetroLab-baseline-$runId.log"))
+        )
+        $previousInstaller = Start-Process -FilePath "msiexec.exe" -WindowStyle Hidden -ArgumentList $previousArgs -Wait -PassThru
+        if ($previousInstaller.ExitCode -ne 0) { throw "Baseline MSI installation returned $($previousInstaller.ExitCode)." }
+        $previousInstalled = $true
+        $database = $databaseCandidates[0]
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $database) | Out-Null
+        $baselineService = Join-Path $installRoot "binaries\petrolab-service.exe"
+        & python (Join-Path $PSScriptRoot "qa_installer_project.py") seed $baselineService $database $upgradeState
+        if ($LASTEXITCODE -ne 0) { throw "Failed to seed the baseline project." }
+        $previousProduct = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+            Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -eq 'PetroLab' } |
+            Select-Object -ExpandProperty PSPath
+        if (@($previousProduct).Count -ne 1) { throw "Could not identify the baseline MSI registration." }
+    }
     Write-Host "Installing $($msi.FullName)"
-    $installer = Start-Process -FilePath "msiexec.exe" -ArgumentList $installArgs -Wait -PassThru
-    if ($installer.ExitCode -notin @(0, 3010)) {
+    $installer = Start-Process -FilePath "msiexec.exe" -WindowStyle Hidden -ArgumentList $installArgs -Wait -PassThru
+    if ($installer.ExitCode -ne 0) {
         if (Test-Path $installerLog) {
             Get-Content $installerLog -Tail 120 | Write-Host
         }
         throw "MSI installation failed with exit code $($installer.ExitCode)."
     }
     $installed = $true
-
-    $candidateRoots = @(
-        $installRoot,
-        (Join-Path $env:LOCALAPPDATA "PetroLab"),
-        (Join-Path $env:LOCALAPPDATA "Programs\PetroLab"),
-        (Join-Path $env:ProgramFiles "PetroLab")
-    )
-    $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
-    if ($programFilesX86) {
-        $candidateRoots += Join-Path $programFilesX86 "PetroLab"
+    if ($baselinePath) {
+        if (Test-Path -LiteralPath $previousProduct) { throw "The candidate did not replace the baseline MSI registration." }
+        $previousInstalled = $false
     }
 
-    $appExecutable = $null
-    foreach ($candidateRoot in $candidateRoots | Select-Object -Unique) {
-        if (-not (Test-Path $candidateRoot)) {
-            continue
-        }
-        $appExecutable = Get-ChildItem -Path $candidateRoot -Recurse -File -Filter "*.exe" |
+    $appExecutable = Get-ChildItem -LiteralPath $installRoot -Recurse -File -Filter "*.exe" |
             Where-Object {
                 $_.Name -match "petrolab" -and
                 $_.Name -notmatch "service|unins|uninstall"
             } |
             Sort-Object LastWriteTimeUtc -Descending |
             Select-Object -First 1
-        if ($null -ne $appExecutable) {
-            break
-        }
-    }
 
     if ($null -eq $appExecutable) {
         throw "Installed PetroLab executable was not found. MSI log: $installerLog"
     }
 
-    $databaseCandidates = @(
-        (Join-Path $env:APPDATA "org.petrolab.desktop\petrolab-v2.sqlite"),
-        (Join-Path $env:LOCALAPPDATA "org.petrolab.desktop\petrolab-v2.sqlite")
-    )
-    foreach ($database in $databaseCandidates) {
-        if (Test-Path $database) {
-            Remove-Item -LiteralPath $database -Force
-        }
+    $installedService = Join-Path $appExecutable.DirectoryName "binaries\petrolab-service.exe"
+    & python (Join-Path $PSScriptRoot "qa_packaged_import.py") --executable $installedService
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installed service failed the isolated import and restart check."
+    }
+    if ($baselinePath) {
+        & python (Join-Path $PSScriptRoot "qa_installer_project.py") verify $installedService $database $upgradeState
+        if ($LASTEXITCODE -ne 0) { throw "The upgrade changed or lost the baseline project." }
     }
 
     Write-Host "Launching $($appExecutable.FullName)"
@@ -101,13 +126,17 @@ try {
             $windowReady = $true
         }
 
-        $serviceProcesses = @(Get-Process -Name "petrolab-service" -ErrorAction SilentlyContinue)
+        # Only count the service belonging to this app, never another open project.
+        $serviceProcesses = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($appProcess.Id)" |
+            Where-Object { $_.Name -eq "petrolab-service.exe" } |
+            ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue })
         if ($serviceProcesses.Count -gt 0) {
             $serviceReady = $true
         }
 
-        foreach ($database in $databaseCandidates) {
-            if (Test-Path $database) {
+        foreach ($candidate in $databaseCandidates) {
+            if (Test-Path -LiteralPath $candidate) {
+                $database = $candidate
                 $databaseReady = $true
                 break
             }
@@ -141,9 +170,17 @@ finally {
 
     if ($installed) {
         $uninstallArgs = @("/x", ('"{0}"' -f $msi.FullName), "/qn", "/norestart")
-        $uninstaller = Start-Process -FilePath "msiexec.exe" -ArgumentList $uninstallArgs -Wait -PassThru
-        if ($uninstaller.ExitCode -notin @(0, 1605, 3010)) {
-            Write-Warning "MSI uninstall returned $($uninstaller.ExitCode)."
-        }
+        $uninstaller = Start-Process -FilePath "msiexec.exe" -WindowStyle Hidden -ArgumentList $uninstallArgs -Wait -PassThru
+        $uninstallStatus = $uninstaller.ExitCode
     }
+    if ($previousInstalled) {
+        Start-Process -FilePath "msiexec.exe" -WindowStyle Hidden -Wait -ArgumentList @("/x", ('"{0}"' -f $baselinePath), "/qn", "/norestart")
+    }
+}
+
+if ($uninstallStatus -ne 0 -or (Test-Path -LiteralPath $appExecutable.FullName) -or (Test-Path -LiteralPath $installedService)) {
+    throw "Uninstall left application components or returned $uninstallStatus."
+}
+if (-not $database -or -not (Test-Path -LiteralPath $database)) {
+    throw "Uninstall removed persistent project data."
 }

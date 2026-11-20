@@ -250,6 +250,9 @@ def apply_semantic_decision(source_path, recipe, decision, *, preview=False):
 def interpret_records(inspection, recipe, records):
     """Keep reported labels and unresolved links separate from Analysis identity."""
     annotations = recipe['global_decisions'].get('semantic_annotations', [])
+    sample_assignments = recipe['global_decisions'].get('sample_assignments', {})
+    if not isinstance(sample_assignments, dict):
+        fail('RECIPE_SCHEMA_INCOMPATIBLE', 'Sample assignments must be keyed by Analysis preview ID.')
     output = []
     for record in records:
         section = next(s for s in recipe['sections'] if s['block_id'] == record['block_id'])
@@ -307,6 +310,14 @@ def interpret_records(inspection, recipe, records):
         record['sample_association'] = {'sample_id': None, 'status': 'reported_unlinked' if sample else 'unresolved',
                                         'candidates': sample_candidates(sheet, section, record, inspection.fingerprint) if not sample else [],
                                         'reported': sample, 'reported_fields': {k: v for k, v in reported.items() if k in {'Sample', 'Sample ID', 'Sample name'}}}
+        assignment = sample_assignments.get(record['preview_id'])
+        if assignment is not None:
+            if (not isinstance(assignment, dict) or assignment.get('mode') not in {'existing', 'new'}
+                    or not all(isinstance(assignment.get(key), str) and assignment[key].strip()
+                               for key in ('sample_id', 'sample_name', 'decided_at'))):
+                fail('RECIPE_SCHEMA_INCOMPATIBLE', 'An explicit Sample assignment requires a target, mode and time.')
+            record['sample_association'].update(sample_id=assignment['sample_id'], status='linked',
+                                                assignment=assignment)
         record['reported_mineral'] = reported.get('Mineral')
         record['mineral_assignment'] = mineral if mineral and mineral['origin'] == 'user_assigned' else None
         record['analytical_method'] = method

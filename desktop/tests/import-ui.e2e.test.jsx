@@ -1,9 +1,88 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { AnalysesWorkspace } from "../src/AnalysesWorkspace";
+import { useState } from "react";
+
+function SelectionTestWorkspace(props) {
+  const [selectedIds, setSelectedIds] = useState([]);
+  return <AnalysesWorkspace {...props} selectedIds={selectedIds} setSelectedIds={setSelectedIds} />;
+}
+
+test("drag, Shift and Ctrl select stable analysis IDs without changing focus semantics", () => {
+  const analyses = Array.from({ length: 34 }, (_, index) => ({
+    analysis_id: `id-${index + 1}`, source_id: "source", source_name: "ranges.xlsx", sheet_name: "Sheet",
+    source_row_number: index + 2, identity: { Analysis: `A-${index + 1}` }, measurements: {}, source_metadata: {},
+  }));
+  render(<SelectionTestWorkspace project={{ total: 34, source_count: 1, analyses }} busy={false} />);
+  const table = within(screen.getByRole("table"));
+  const cell = (index) => table.getByRole("cell", { name: `A-${index}`, exact: true });
+  const checkbox = (index) => table.getByRole("checkbox", { name: `Выбрать A-${index}`, exact: true });
+  const names = () => table.getAllByRole("checkbox").filter((item) => item.checked).map((item) => item.getAttribute("aria-label"));
+  fireEvent.click(cell(3));
+  expect(names()).toEqual([]);
+  fireEvent(checkbox(8), new MouseEvent("pointerdown", { bubbles: true, button: 0, buttons: 1 }));
+  fireEvent(cell(17), new MouseEvent("pointerover", { bubbles: true, buttons: 1 }));
+  fireEvent(window, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+  expect(names()).toEqual(Array.from({ length: 10 }, (_, index) => `Выбрать A-${index + 8}`));
+  fireEvent.click(cell(19), { shiftKey: true });
+  expect(names()).toEqual(Array.from({ length: 12 }, (_, index) => `Выбрать A-${index + 8}`));
+  fireEvent.click(cell(27), { ctrlKey: true });
+  expect(names()).toEqual([...Array.from({ length: 12 }, (_, index) => `Выбрать A-${index + 8}`), "Выбрать A-27"]);
+  fireEvent.change(table.getByRole("textbox", { name: "Фильтр Analysis" }), { target: { value: "A-27" } });
+  expect(screen.getByText("Скрыто фильтром: 12")).toBeTruthy();
+});
+
+test("same-named sources filter independently without changing selection", async () => {
+  const user = userEvent.setup();
+  const analyses = [
+    { analysis_id: "a1", source_id: "source-1", source_name: "same.xlsx", sheet_name: "Sheet 1", source_row_number: 2, identity: { Analysis: "A1" }, measurements: {}, source_metadata: {} },
+    { analysis_id: "a2", source_id: "source-2", source_name: "same.xlsx", sheet_name: "Sheet 2", source_row_number: 2, identity: { Analysis: "A2" }, measurements: {}, source_metadata: {} },
+  ];
+  render(<SelectionTestWorkspace project={{ total: 2, source_count: 2, analyses }} busy={false} />);
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать A1" }));
+  await user.click(screen.getByRole("button", { name: /same\.xlsx · source-2/ }));
+  expect(screen.queryByRole("checkbox", { name: "Выбрать A1" })).toBeNull();
+  expect(screen.getByRole("checkbox", { name: "Выбрать A2" })).toBeTruthy();
+  expect(screen.getByText("1 выбрано")).toBeTruthy();
+  expect(screen.getByText("Скрыто фильтром: 1")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: /same\.xlsx · source-1/ }));
+  expect(screen.getByRole("checkbox", { name: "Выбрать A1" }).checked).toBe(true);
+  expect(screen.queryByText("Скрыто фильтром: 1")).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: "Выбрать A2" })).toBeNull();
+});
 
 const uiState = vi.hoisted(() => ({ imported: false, mode: "clean", detailsEnabled: true, unitApplied: false, duplicatesReviewed: false }));
+
+test("categorical and logical filters compose with a unit-specific numeric condition", async () => {
+  const user = userEvent.setup();
+  const analyses = [["A1", "verified", "ppm", true], ["A2", "conflict", "wt.%", true], ["A3", "not_checked", "ppm", false]]
+    .map(([id, status, unit, linked]) => ({
+      analysis_id: id, source_id: "source", source_name: "mixed.xlsx", sheet_name: "Sheet", identity: { Analysis: id },
+      mineral_verification: { status }, sample_association: { sample_id: linked ? "sample" : null },
+      measurements: { F: { raw_token: "5", numeric_value: 5, unit } },
+    }));
+  render(<SelectionTestWorkspace project={{ total: 3, source_count: 1, analyses }} busy={false} />);
+  await user.click(screen.getByText("Статус минерала", { exact: true }));
+  await user.type(screen.getByRole("searchbox", { name: "Поиск статусов минерала" }), "конфликт");
+  await user.click(screen.getByRole("checkbox", { name: "конфликт", exact: true }));
+  await user.clear(screen.getByRole("searchbox", { name: "Поиск статусов минерала" }));
+  await user.click(screen.getByRole("checkbox", { name: "принято", exact: true }));
+  const table = within(screen.getByRole("table"));
+  expect(table.queryByText("A3")).toBeNull();
+  const numeric = table.getByRole("textbox", { name: "Фильтр F" });
+  await user.type(numeric, "> 0");
+  expect(numeric.getAttribute("aria-invalid")).toBe("true");
+  await user.type(numeric, " ppm");
+  expect(numeric.getAttribute("aria-invalid")).toBe("false");
+  expect(table.getByText("A1")).toBeTruthy();
+  expect(table.queryByText("A2")).toBeNull();
+  await user.selectOptions(screen.getByRole("combobox", { name: "Связь с физическим образцом" }), "unlinked");
+  expect(table.queryByText("A1")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
+  expect(table.getByText("A3")).toBeTruthy();
+});
 
 vi.mock("../src/desktopApi", () => {
   const recipe = {
@@ -106,6 +185,7 @@ vi.mock("../src/desktopApi", () => {
     latest_import: null,
     analyses: [{
       analysis_id: "analysis-ui-1",
+      source_id: "source-ui",
       source_name: "Windows UI smoke",
       sheet_name: "Data",
       source_row_number: 2,
@@ -116,6 +196,7 @@ vi.mock("../src/desktopApi", () => {
       measurement_list: measurementList,
     }, {
       analysis_id: "analysis-ui-2",
+      source_id: "source-ui",
       source_name: "Windows UI smoke",
       sheet_name: "Data",
       source_row_number: 3,
@@ -190,9 +271,9 @@ vi.mock("../src/desktopApi", () => {
       uiState.duplicatesReviewed = true;
       return { result: { recipe: currentComplexRecipe(), plan: complexPlan(), duplicate_review: { candidate_group_count: 1 } } };
     }),
-    applyImportPlan: vi.fn().mockImplementation(async () => {
+    commitImportWorkspace: vi.fn().mockImplementation(async () => {
       uiState.imported = true;
-      return { result: { analysis_count: 2, measurement_count: 6, source_metadata_count: 0 } };
+      return { result: { analysis_count: 2, measurement_count: 6, staged_paths: [] } };
     }),
     reviseImportMappings: vi.fn(),
     retractLastImport: vi.fn(),
@@ -227,6 +308,8 @@ vi.mock("../src/desktopApi", () => {
   });
   api.addWorkspaceSources = vi.fn();
   api.getImportWorkspace = vi.fn(projectWorkspace);
+  api.restoreImportWorkspace = vi.fn(async () => ({ result: { workspace: null } }));
+  api.getProjectOverview = vi.fn(async () => ({ result: { project_name: "QA", recent_imports: [], recent_groups: [] } }));
   api.discardImportWorkspace = vi.fn(async () => ({ result: { staged_paths: [sourceDescriptor.staged_path] } }));
   api.previewWorkspaceWindow = vi.fn(async (_workspace, _source, sheetName, startRow, rows, column, columns) =>
     api.previewImportWindow(sourceDescriptor.staged_path, sheetName, startRow, rows, column, columns));
@@ -242,7 +325,7 @@ vi.mock("../src/desktopApi", () => {
 
 });
 
-import { applyImportPlan, pickImportFile, createImportPlan } from "../src/desktopApi";
+import { commitImportWorkspace, pickImportFile, createImportPlan } from "../src/desktopApi";
 import { App } from "../src/App";
 
 afterEach(() => {
@@ -278,6 +361,10 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
 
   await user.click(screen.getByRole("checkbox", { name: "Выбрать UI-1" }));
   expect(screen.getByText("1 выбрано")).toBeTruthy();
+  const nav = within(screen.getByRole("navigation"));
+  await user.click(nav.getByRole("button", { name: "Импорт" }));
+  await user.click(nav.getByRole("button", { name: "Анализы" }));
+  expect(screen.getByRole("checkbox", { name: "Выбрать UI-1" }).checked).toBe(true);
 
   const search = screen.getByRole("textbox", { name: "Поиск анализов" });
   await user.type(search, "KIV-3");
@@ -285,11 +372,7 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
   expect(within(table).getByText("UI-2")).toBeTruthy();
   expect(within(table).queryByText("UI-1")).toBeNull();
   await user.clear(search);
-  expect(applyImportPlan).toHaveBeenCalledWith(
-    "C:/PetroLab/project.sqlite",
-    "C:/PetroLab/staging/ui-clean-table.csv",
-    expect.any(Object),
-  );
+  expect(commitImportWorkspace).toHaveBeenCalledWith("workspace-1", expect.any(Number));
   await waitFor(() => expect(uiState.imported).toBe(true));
 });
 
@@ -324,7 +407,7 @@ test("Python identity blocker is visible, navigable and prevents saving", async 
   await user.click(issue);
   expect(screen.getByText("Исходная таблица")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Импортировать после проверки" }).disabled).toBe(true);
-  expect(applyImportPlan).not.toHaveBeenCalled();
+  expect(commitImportWorkspace).not.toHaveBeenCalled();
 });
 
 test("user resolves a repeated complex workbook with sheet-level and grouped decisions", async () => {
@@ -359,5 +442,5 @@ test("user resolves a repeated complex workbook with sheet-level and grouped dec
   await user.click(save);
 
   await screen.findByRole("heading", { name: "Анализы" });
-  expect(applyImportPlan).toHaveBeenCalled();
+  expect(commitImportWorkspace).toHaveBeenCalled();
 });

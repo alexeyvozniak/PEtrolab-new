@@ -11,7 +11,7 @@
     "field": {"type": "string", "minLength": 1},
     "operator": {
       "type": "string",
-      "enum": ["equals", "not_equals", "contains", "in", "not_in", "between", "is_empty", "is_not_empty", "is_true", "is_false"]
+      "enum": ["equals", "not_equals", "contains", "in", "not_in", "between", "greater_than", "greater_or_equal", "less_than", "less_or_equal", "is_empty", "is_not_empty", "below_detection_limit", "is_true", "is_false", "measurement_expression"]
     },
     "value": {
       "oneOf": [

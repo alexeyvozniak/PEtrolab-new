@@ -169,6 +169,8 @@ All database writes occur in one SQLite transaction. Managed artifacts created f
 
 A later explicit product decision may add per-source commit, but it must not be silently substituted for atomic batch behaviour.
 
+The commit command takes the workspace ID and expected draft revision. It uses the project attached when the workspace was created and returns one commit ID, per-source results, totals and staging paths for cleanup. Each persisted plan records the shared commit ID. Retracting the last import retracts every still-active batch with that ID in one transaction and preserves the original rows and provenance.
+
 ### 10. Exact provenance remains physical
 
 Virtual matrices, transposition and normalized previews are presentation/interpretation layers.
@@ -190,11 +192,16 @@ Autosaved workspace drafts contain staged source references, fingerprints and ex
 
 Restore is rejected or downgraded to a new inspection when a required source fingerprint or schema version is incompatible.
 
+The desktop keeps one versioned draft beside each local project. It stores staged source references, recipes and applied decisions. Inspection and plans are rebuilt from the staged files upon `import.workspace.restore`. A successful commit takes precedence over a leftover draft with the same workspace ID, including after interrupted cleanup. Discard removes the draft and returns its staging paths for cleanup.
+
+The queue compares reported Analysis identities across included sources and excludes identities generated from physical row numbers. Matching identities are candidates for review. Keep-all confirmation binds to the displayed comparison fingerprint and is recorded with the commit.
+
 ### 12. Service command boundary
 
 Implement the workspace through versioned scientific-service commands:
 
 - `import.workspace.create`;
+- `import.workspace.restore`;
 - `import.workspace.add_sources`;
 - `import.workspace.get`;
 - `import.workspace.preview_window`;

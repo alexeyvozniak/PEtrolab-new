@@ -638,9 +638,14 @@ def validate_recipe(inspection: SourceInspection, recipe: dict[str, Any]) -> dic
 def _qualifier(token: str | None) -> tuple[str | None, float | None]:
     if token is None or not token.strip():
         return "missing", None
-    match = re.fullmatch(r"\s*<\s*([0-9]+(?:[.,][0-9]+)?)\s*", token)
+    match = re.fullmatch(r"\s*<\s*((?:[0-9]+(?:[.,][0-9]*)?|[.,][0-9]+)(?:[eE][+-]?[0-9]+)?)\s*", token)
     if match:
-        return "below_detection_limit", float(match.group(1).replace(",", "."))
+        numeric_token = match.group(1).replace(",", ".")
+        limit = float(numeric_token)
+        # A nonzero textual limit can underflow to 0.0 in binary floating point.
+        mantissa = re.split(r"[eE]", numeric_token, maxsplit=1)[0]
+        underflow = limit == 0 and any(char in "123456789" for char in mantissa)
+        return "below_detection_limit", limit if math.isfinite(limit) and not underflow else None
     if token.strip().lower() in {"<dl", "<dl>", "bdl"}:
         return "below_detection_limit", None
     return None, None

@@ -14,6 +14,8 @@
       "properties": {
         "field": {"type": "string", "minLength": 1},
         "unit": {"type": ["string", "null"]},
+        "method": {"type": ["string", "null"]},
+        "measurement_set": {"type": ["string", "null"]},
         "scale": {"type": "string", "enum": ["linear", "log"]},
         "manual_range": {
           "oneOf": [
@@ -40,6 +42,7 @@
     "id": {"type": "string", "format": "uuid"},
     "project_id": {"type": "string", "format": "uuid"},
     "name": {"type": "string", "minLength": 1, "maxLength": 120},
+    "schema_version": {"type": "integer", "minimum": 1},
     "input": {
       "oneOf": [
         {
@@ -87,6 +90,38 @@
     },
     "filters": {"type": "array", "items": {"$ref": "analysis-filter.schema.json"}},
     "hidden_analysis_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
+    "hidden_source_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
+    "layers": {
+      "type": "array", "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "name", "analysis_ids", "show_points", "opacity", "field"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 120},
+          "analysis_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
+          "show_points": {"type": "boolean"},
+          "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+          "field": {
+            "oneOf": [
+              {"type": "null"},
+              {
+                "type": "object", "additionalProperties": false,
+                "required": ["method", "visible", "probability"],
+                "properties": {
+                  "method": {"enum": ["convex_hull", "normal_probability_ellipse"]},
+                  "visible": {"type": "boolean"},
+                  "probability": {"type": ["null", "number"], "exclusiveMinimum": 0, "exclusiveMaximum": 1}
+                },
+                "if": {"properties": {"method": {"const": "convex_hull"}}},
+                "then": {"properties": {"probability": {"type": "null"}}},
+                "else": {"properties": {"probability": {"type": "number"}}}
+              }
+            ]
+          }
+        }
+      }
+    },
     "created_at": {"type": "string", "format": "date-time"},
     "updated_at": {"type": "string", "format": "date-time"}
   }

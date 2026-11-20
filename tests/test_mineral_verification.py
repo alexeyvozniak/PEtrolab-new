@@ -39,6 +39,26 @@ def complete_silica_record(reported_mineral):
 
 
 class MineralVerificationTests(unittest.TestCase):
+    def test_nonzero_underflow_does_not_become_classifier_zero(self) -> None:
+        record = complete_silica_record('silica')
+        record['measurements'][1]['raw_token'] = '1e-999'
+        result = verify_record(record)
+        self.assertEqual(result['status'], 'insufficient_input')
+        self.assertIn('invalid_numeric_input', result['issues'])
+        self.assertIsNone(result['prediction'])
+        self.assertEqual(record['measurements'][1]['raw_token'], '1e-999')
+
+    def test_gate_change_invalidates_previous_acceptance(self) -> None:
+        from petrolab.mineral_verification import fingerprint, EXTENDED_RULESET_VERSION
+        record = complete_silica_record('silica')
+        old_fingerprint = fingerprint([record['measurements'], record['reported_mineral'], None,
+                                       EXTENDED_RULESET_VERSION, 'import-wt-percent-complete-core-1'])
+        accepted = {'target': 'silica', 'input_fingerprint': old_fingerprint,
+                    'ruleset_version': EXTENDED_RULESET_VERSION}
+        result = verify_record(record, accepted=accepted)
+        self.assertIsNone(result['accepted'])
+        self.assertIn('accepted_assignment_stale', result['issues'])
+
     def test_legacy_string_reported_label_is_safe_and_compared(self) -> None:
         result = verify_record(complete_silica_record("silica"))
 

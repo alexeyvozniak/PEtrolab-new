@@ -59,6 +59,17 @@
           "existing_media_asset_id": {
             "oneOf": [{"type": "null"}, {"type": "string", "format": "uuid"}]
           },
+          "sample_target": {
+            "type": "object", "additionalProperties": false,
+            "required": ["mode", "sample_id"],
+            "properties": {
+              "mode": {"enum": ["existing", "new"]},
+              "sample_id": {"type": ["string", "null"], "format": "uuid"}
+            },
+            "if": {"properties": {"mode": {"const": "new"}}},
+            "then": {"properties": {"sample_id": {"type": "null"}}},
+            "else": {"properties": {"sample_id": {"type": "string"}}}
+          },
           "placements": {
             "type": "array",
             "items": {

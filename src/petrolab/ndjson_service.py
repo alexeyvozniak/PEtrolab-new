@@ -10,6 +10,13 @@ from typing import Any, TextIO
 
 from .clean_table import classify_clean_table
 from .import_workspace import ImportWorkspaceStore
+from .work_groups import create_work_group, list_work_groups
+from .selection_export import export_selection_xlsx
+from .table_views import list_table_views, save_table_view
+from .edit_drafts import check_edit_draft, commit_edit_draft, list_edit_drafts, save_edit_draft
+from .project_navigation import project_overview, search_analyses
+from .sample_workspace import add_sample_note, change_point_link, get_point_analyses, get_project_sample, list_project_samples, save_sample_context
+from .plot_data import list_plot_specifications, open_plot_specification, plot_catalog, query_plot_data, record_plot_visibility, save_plot_specification
 from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe
 from .import_apply import (
     apply_import_plan,
@@ -28,6 +35,11 @@ from .import_preview import (
 )
 from .manual_mapping import review_duplicate_candidates, revise_import_mapping, revise_import_mappings, revise_import_sections
 from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
+from .media_display import export_media_original, export_media_rendered, preview_input_media, preview_project_media
+from .statistics_service import list_calculation_runs, open_calculation_run, review_statistics, run_clustering, save_calculated_cluster
+from .publication import export_publication, prepare_publication, publication_catalog
+from .project_archive import export_project_archive, restore_project_archive
+from .workspace_snapshots import apply_analysis_template, list_workspace_snapshots, open_workspace_snapshot, save_analysis_template, save_workspace_snapshot
 
 
 PROTOCOL_VERSION = "1.0"
@@ -224,6 +236,16 @@ def _dispatch_project_analyses_list(params: Mapping[str, Any]) -> dict[str, Any]
     return {"result": list_project_analyses(_project_database_path(params), raw_limit, raw_offset)}
 
 
+def _dispatch_analysis_get(params: Mapping[str, Any]) -> dict[str, Any]:
+    analysis_id = params.get("analysis_id")
+    if not isinstance(analysis_id, str) or str(uuid.UUID(analysis_id)) != analysis_id:
+        raise ValueError("analysis_id")
+    analyses = list_project_analyses(_project_database_path(params), 1, analysis_id=analysis_id)["analyses"]
+    if not analyses:
+        raise ImportCommandError("ANALYSIS_NOT_FOUND", "Анализ больше недоступен.")
+    return {"result": analyses[0]}
+
+
 def _dispatch_project_mineral_identification_list(params: Mapping[str, Any]) -> dict[str, Any]:
     raw_limit = params.get("limit", 500)
     raw_offset = params.get("offset", 0)
@@ -254,12 +276,14 @@ def _dispatch_recipe_save_revision(params: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _dispatch_analytical_point_create(params: Mapping[str, Any]) -> dict[str, Any]:
+    sample_id = params.get("sample_id")
     return {"result": create_analytical_point(
         _project_database_path(params),
-        _string(params, "sample_name"),
+        _string(params, "sample_name") if sample_id is None else "",
         _string(params, "point_name"),
         _string_list(params, "analysis_ids"),
         _string(params, "link_type"),
+        sample_id=sample_id, actor=params.get("actor"),
     )}
 
 
@@ -276,6 +300,111 @@ def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
 
 
 COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
+    "workspace.snapshot.save": lambda params: {"result": save_workspace_snapshot(
+        _project_database_path(params), params.get("name"), params.get("state"),
+    )},
+    "workspace.snapshot.list": lambda params: {"result": list_workspace_snapshots(_project_database_path(params))},
+    "workspace.snapshot.open": lambda params: {"result": open_workspace_snapshot(
+        _project_database_path(params), params.get("id"),
+    )},
+    "workspace.template.save": lambda params: {"result": save_analysis_template(
+        _project_database_path(params), params.get("name"), params.get("plot_id"),
+    )},
+    "workspace.template.apply": lambda params: {"result": apply_analysis_template(
+        _project_database_path(params), params.get("id"), params.get("analysis_ids"), params.get("name"),
+    )},
+    "project.archive.export": lambda params: {"result": export_project_archive(
+        _project_database_path(params), params.get("output_path"), params.get("level"),
+    )},
+    "project.archive.restore": lambda params: {"result": restore_project_archive(
+        params.get("archive_path"), params.get("destination_path"),
+    )},
+    "publication.catalog": lambda params: {"result": publication_catalog(_project_database_path(params))},
+    "publication.prepare": lambda params: {"result": prepare_publication(
+        _project_database_path(params), params.get("name"), params.get("items"),
+    )},
+    "publication.export": lambda params: {"result": export_publication(
+        _project_database_path(params), params.get("name"), params.get("items"),
+        params.get("expected_fingerprint"), params.get("output_path"),
+    )},
+    "statistics.review": lambda params: {"result": review_statistics(
+        _project_database_path(params), params.get("input"), params.get("features"),
+    )},
+    "statistics.cluster.run": lambda params: {"result": run_clustering(
+        _project_database_path(params), params.get("input"), params.get("features"),
+        params.get("review_fingerprint"), params.get("parameters"),
+    )},
+    "statistics.cluster.save_group": lambda params: {"result": save_calculated_cluster(
+        _project_database_path(params), params.get("run_id"), params.get("cluster"), params.get("name"), params.get("actor"),
+    )},
+    "statistics.runs.list": lambda params: {"result": list_calculation_runs(_project_database_path(params))},
+    "statistics.run.open": lambda params: {"result": open_calculation_run(_project_database_path(params), params.get("run_id"))},
+    "plot_spec.save": lambda params: {"result": save_plot_specification(
+        _project_database_path(params), params.get("name"), params.get("analysis_ids"), params.get("panels"),
+        params.get("colors"), params.get("hidden_analysis_ids", []), params.get("hidden_source_ids", []),
+        params.get("layers"),
+    )},
+    "plot_spec.list": lambda params: {"result": list_plot_specifications(_project_database_path(params))},
+    "plot_spec.open": lambda params: {"result": open_plot_specification(_project_database_path(params), params.get("id"))},
+    "plot_visibility.hide": lambda params: {"result": record_plot_visibility(
+        _project_database_path(params), params.get("analysis_ids"), True,
+    )},
+    "plot_visibility.restore": lambda params: {"result": record_plot_visibility(
+        _project_database_path(params), params.get("analysis_ids"), False,
+    )},
+    "plot_data.catalog": lambda params: {"result": plot_catalog(_project_database_path(params), params.get("analysis_ids"))},
+    "plot_data.query": lambda params: {"result": query_plot_data(
+        _project_database_path(params), params.get("kind"), params.get("axes"), params.get("analysis_ids"),
+        params.get("hidden_analysis_ids"), params.get("hidden_source_ids"), params.get("layers"),
+    )},
+    "project.overview": lambda params: {"result": project_overview(_project_database_path(params))},
+    "project.samples.list": lambda params: {"result": list_project_samples(_project_database_path(params))},
+    "project.sample.get": lambda params: {"result": get_project_sample(_project_database_path(params), params.get("sample_id"))},
+    "project.sample.context.save": lambda params: {"result": save_sample_context(
+        _project_database_path(params), params.get("sample_id"), params.get("context"), params.get("expected_revision"),
+    )},
+    "project.sample.note.add": lambda params: {"result": add_sample_note(
+        _project_database_path(params), params.get("sample_id"), params.get("author"), params.get("body"),
+    )},
+    "analytical_point.analyses": lambda params: {"result": get_point_analyses(
+        _project_database_path(params), params.get("point_id"),
+    )},
+    "analytical_point.link.set": lambda params: {"result": change_point_link(
+        _project_database_path(params), params.get("point_id"), params.get("analysis_id"), params.get("actor"), params.get("link_type"),
+    )},
+    "media.preview_input": lambda params: {"result": preview_input_media(_source_path(params))},
+    "media.preview": lambda params: {"result": preview_project_media(_project_database_path(params), params.get("media_asset_id"))},
+    "media.export_original": lambda params: {"result": export_media_original(
+        _project_database_path(params), params.get("media_asset_id"), params.get("output_path"),
+    )},
+    "media.export_rendered": lambda params: {"result": export_media_rendered(
+        _project_database_path(params), params.get("media_asset_id"), params.get("output_path"), params.get("options"),
+    )},
+    "analysis.query": lambda params: {"result": search_analyses(
+        _project_database_path(params), **{key: params[key] for key in ("query", "mineral", "source", "method", "source_id", "sample_id", "limit", "offset") if key in params},
+    )},
+    "project.analysis.get": _dispatch_analysis_get,
+    "edit_draft.commit": lambda params: {"result": commit_edit_draft(
+        _project_database_path(params), params.get("draft_id"), params.get("actor"), params.get("reason"),
+    )},
+    "edit_draft.save": lambda params: {"result": save_edit_draft(
+        _project_database_path(params), params.get("measurement_id"), params.get("new_value", {}),
+    )},
+    "edit_draft.list": lambda params: {"result": list_edit_drafts(_project_database_path(params), params.get("analysis_id"))},
+    "edit_draft.check": lambda params: {"result": check_edit_draft(_project_database_path(params), params.get("draft_id"))},
+    "table_view.save": lambda params: {"result": save_table_view(
+        _project_database_path(params), params.get("name"), params.get("columns"),
+        params.get("sort"), params.get("filters"),
+    )},
+    "table_view.list": lambda params: {"result": list_table_views(_project_database_path(params))},
+    "analysis.selection.export_xlsx": lambda params: {"result": export_selection_xlsx(
+        _project_database_path(params), params.get("analysis_ids"), params.get("output_path"),
+    )},
+    "work_group.create": lambda params: {"result": create_work_group(
+        _project_database_path(params), params.get("name"), params.get("analysis_ids"),
+        params.get("created_by"), params.get("description", ""),
+    )},
+    "work_group.list": lambda params: {"result": list_work_groups(_project_database_path(params))},
     "import.inspect_source": _dispatch_import_inspect,
     "import.clean_table.classify": _dispatch_import_clean_table_classify,
     "import.preview.window": _dispatch_import_preview_window,
@@ -304,7 +433,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
 }
 
 WORKSPACES = ImportWorkspaceStore()
-for _operation in ('create', 'add_sources', 'get', 'preview_window', 'apply_decision', 'apply_bulk_decision', 'replan', 'discard'):
+for _operation in ('create', 'restore', 'add_sources', 'get', 'preview_window', 'apply_decision', 'apply_bulk_decision', 'replan', 'discard', 'commit'):
     COMMANDS[f'import.workspace.{_operation}'] = lambda params, operation=_operation: {'result': WORKSPACES.command(operation, params)}
 
 

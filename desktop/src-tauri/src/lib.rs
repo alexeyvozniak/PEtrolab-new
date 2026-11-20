@@ -141,6 +141,99 @@ fn pick_import_file() -> Option<String> {
         .map(|source| source.to_string_lossy().into_owned())
 }
 
+#[tauri::command]
+fn pick_analysis_export_path() -> Option<String> {
+    rfd::FileDialog::new()
+        .add_filter("Excel workbook", &["xlsx"])
+        .set_file_name("PetroLab-selection.xlsx")
+        .save_file()
+        .map(|mut destination| {
+            if destination.extension().is_none() {
+                destination.set_extension("xlsx");
+            }
+            destination.to_string_lossy().into_owned()
+        })
+}
+
+#[tauri::command]
+fn pick_media_files() -> Vec<String> {
+    rfd::FileDialog::new()
+        .add_filter("Images", &["png", "jpg", "jpeg", "tif", "tiff", "bmp"])
+        .pick_files()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
+}
+
+#[tauri::command]
+fn pick_publication_figure() -> Option<String> {
+    rfd::FileDialog::new()
+        .add_filter("SVG", &["svg"])
+        .pick_file()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn pick_publication_export_path() -> Option<String> {
+    rfd::FileDialog::new()
+        .add_filter("ZIP", &["zip"])
+        .set_file_name("PetroLab-publication.zip")
+        .save_file()
+        .map(|mut path| {
+            if path.extension().is_none() {
+                path.set_extension("zip");
+            }
+            path.to_string_lossy().into_owned()
+        })
+}
+
+#[tauri::command]
+fn pick_media_export_path(name: String) -> Option<String> {
+    let name = std::path::Path::new(&name).file_name()?.to_str()?;
+    let extension = std::path::Path::new(name).extension()?.to_str()?;
+    rfd::FileDialog::new()
+        .add_filter("Image", &[extension])
+        .set_file_name(name)
+        .save_file()
+        .map(|mut path| {
+            if path.extension().is_none() {
+                path.set_extension(extension);
+            }
+            path.to_string_lossy().into_owned()
+        })
+}
+
+#[tauri::command]
+async fn save_plot_svg(svg: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(mut destination) = rfd::FileDialog::new()
+            .add_filter("SVG", &["svg"])
+            .set_file_name("PetroLab-plot.svg")
+            .save_file()
+        else {
+            return Ok(None);
+        };
+        if destination.extension().is_none() {
+            destination.set_extension("svg");
+        }
+        if !destination.extension().is_some_and(|value| value.eq_ignore_ascii_case("svg")) {
+            return Err("Выберите файл с расширением .svg.".to_owned());
+        }
+        let mut file = fs::File::create_new(&destination)
+            .map_err(|error| format!("Не удалось создать новый файл SVG. {error}"))?;
+        let result = file.write_all(svg.as_bytes()).and_then(|()| file.sync_all());
+        drop(file);
+        if let Err(error) = result {
+            let _ = fs::remove_file(&destination);
+            return Err(format!("Не удалось записать SVG. {error}"));
+        }
+        Ok(Some(destination.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|error| format!("Не удалось запустить экспорт SVG. {error}"))?
+}
+
 fn stage_import_copy(root: PathBuf, source: PathBuf) -> Result<Value, String> {
     if !source.is_file() {
         return Err(format!("Selected source is no longer available: {}", source.to_string_lossy()));
@@ -197,6 +290,16 @@ async fn clear_import_staging(app: AppHandle, staged_path: String) -> Result<(),
 
 #[tauri::command]
 fn project_database_path(app: AppHandle) -> Result<String, String> {
+    if let Some(value) = env::var_os("PETROLAB_PROJECT_DATABASE") {
+        let path = PathBuf::from(value);
+        if !path.is_absolute() || !path.is_file() {
+            return Err("Указанный файл проекта PetroLab недоступен. Проверьте абсолютный путь.".to_owned());
+        }
+        return path
+            .to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "Путь к проекту содержит неподдерживаемые символы.".to_owned());
+    }
     let directory = app
         .path()
         .app_data_dir()
@@ -208,13 +311,19 @@ fn project_database_path(app: AppHandle) -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let service = PythonService::start(&app.handle()).map_err(std::io::Error::other)?;
+            let service = PythonService::start(app.handle()).map_err(std::io::Error::other)?;
             app.manage(Arc::new(Mutex::new(service)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             petrolab_command,
             pick_import_file,
+            pick_analysis_export_path,
+            pick_media_files,
+            pick_media_export_path,
+            pick_publication_figure,
+            pick_publication_export_path,
+            save_plot_svg,
             stage_import_file,
             clear_import_staging,
             project_database_path

@@ -1,0 +1,113 @@
+import { useEffect, useState } from "react";
+import "./publicationWorkspace.css";
+
+const KINDS = { work_group: "Рабочие группы", calculation_run: "Расчёты", plot_specification: "Раскладки" };
+
+export function PublicationWorkspace({ load, pickFigure, check, exportZip, items, setItems, name, setName }) {
+  const [catalog, setCatalog] = useState(null);
+  const [prepared, setPrepared] = useState(null);
+  const [pending, setPending] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [linkLayoutId, setLinkLayoutId] = useState("");
+  useEffect(() => {
+    let active = true;
+    load().then((value) => { if (active) setCatalog(value); })
+      .catch((caught) => { if (active) setStatus({ error: caught.message }); });
+    return () => { active = false; };
+  }, [load]);
+  const update = (next) => {
+    setItems(next);
+    setPrepared(null);
+    setStatus(null);
+  };
+  const add = (kind, id, label, sourcePath) => update([...items, { draft_id: crypto.randomUUID(), kind, id, label, caption: "",
+    ...(sourcePath ? { source_path: sourcePath } : {}) }]);
+  const perform = async (task) => {
+    setPending(true);
+    setStatus(null);
+    try { await task(); }
+    catch (caught) { setStatus({ error: caught.message }); }
+    finally { setPending(false); }
+  };
+  const payload = () => items.map(({ draft_id, label, ...item }) => item);
+  const available = {
+    work_group: catalog?.groups.map(({ group, unavailable_analysis_ids }) => ({
+      id: group.id, label: group.name, note: `${group.analysis_ids.length} анализов`, disabled: unavailable_analysis_ids.length > 0,
+    })),
+    calculation_run: catalog?.runs.map((run) => ({ id: run.id, label: `K-means · ${run.transform}`, note: run.created_at.slice(0, 10) })),
+    plot_specification: catalog?.layouts.map((item) => ({ id: item.id, label: item.name })),
+  };
+  const selectFigure = () => perform(async () => {
+    const path = await pickFigure();
+    if (path) add("svg_figure", linkLayoutId, path.split(/[\\/]/).pop(), path);
+  });
+  const move = (index, delta) => {
+    const ordered = items.slice();
+    [ordered[index], ordered[index + delta]] = [ordered[index + delta], ordered[index]];
+    update(ordered);
+  };
+  return <section className="publication-workspace">
+    <h2>Публикации</h2>
+    {status && <p role={status.error ? "alert" : "status"}>{status.error || status.notice}</p>}
+    <div className="publication-grid">
+      <aside className="publication-card">
+        <h3>Библиотека материалов</h3>
+        {!catalog && !status?.error && <p role="status">Загружаю материалы…</p>}
+        {catalog && Object.entries(KINDS).map(([kind, label]) => <section key={kind}>
+          <h4>{label}</h4>
+          {!available[kind].length && <p>Пока пусто.</p>}
+          <ul>{available[kind].map((item) => <li key={item.id}>
+            <button className="outline-button" type="button" disabled={pending || item.disabled || items.length >= 24}
+              onClick={() => add(kind, item.id, item.label)}>Добавить «{item.label}»</button>
+            {item.note && <small>{item.note}</small>}
+          </li>)}</ul>
+        </section>)}
+        {catalog?.layouts.length > 0 && <section>
+          <h4>Фигура SVG</h4>
+          <label>Раскладка фигуры<select value={linkLayoutId} disabled={pending} onChange={(event) => setLinkLayoutId(event.target.value)}>
+            <option value="">Выберите сохранённую раскладку</option>
+            {catalog.layouts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select></label>
+          <button className="outline-button" type="button" disabled={pending || !linkLayoutId || items.length >= 24}
+            onClick={selectFigure}>Добавить файл SVG</button>
+        </section>}
+      </aside>
+      <main className="publication-card">
+        <h3>Состав пакета</h3>
+        <label>Название пакета<input value={name} maxLength={120} disabled={pending} onChange={(event) => {
+          setName(event.target.value); setPrepared(null); setStatus(null);
+        }} /></label>
+        <p>Профиль · Без профиля</p>
+        <ol className="publication-items">{items.map((item, index) => <li key={item.draft_id}>
+          <b>{item.label}</b>
+          <label>Подпись материала {index + 1}<textarea value={item.caption} maxLength={2000} disabled={pending}
+            onChange={(event) => update(items.map((entry) => entry.draft_id === item.draft_id
+              ? { ...entry, caption: event.target.value } : entry))} /></label>
+          <div className="publication-actions">
+            <button className="outline-button" type="button" disabled={pending || index === 0} onClick={() => move(index, -1)}>Выше</button>
+            <button className="outline-button" type="button" disabled={pending || index === items.length - 1} onClick={() => move(index, 1)}>Ниже</button>
+            <button className="outline-button" type="button" disabled={pending} onClick={() => update(items.filter((entry) => entry.draft_id !== item.draft_id))}>Убрать</button>
+          </div>
+        </li>)}</ol>
+        {items.length === 0 && <p>Добавьте рабочую группу, расчёт или раскладку из библиотеки.</p>}
+        <button className="primary-button" type="button" disabled={pending || !items.length || !name.trim()}
+          onClick={() => perform(async () => setPrepared(await check(name, payload())))}>Проверить пакет</button>
+      </main>
+      <aside className="publication-card">
+        <h3>Проверка и экспорт</h3>
+        {prepared ? <>
+          <p>Материалов · {prepared.manifest.items.length}</p>
+          <p>Анализов · {prepared.manifest.analysis_count}</p>
+          <ul>{prepared.manifest.files.map((file) => <li key={file.path}>{file.path}</li>)}</ul>
+          {prepared.manifest.warnings.length > 0 && <details open><summary>Предупреждения</summary>
+            <ul>{prepared.manifest.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+          </details>}
+          <button className="primary-button" type="button" disabled={pending} onClick={() => perform(async () => {
+            const result = await exportZip(name, payload(), prepared.fingerprint);
+            if (result) setStatus({ notice: `Пакет сохранён: ${result.output_path}` });
+          })}>Собрать ZIP</button>
+        </> : <p>Проверьте состав перед сборкой ZIP.</p>}
+      </aside>
+    </div>
+  </section>;
+}

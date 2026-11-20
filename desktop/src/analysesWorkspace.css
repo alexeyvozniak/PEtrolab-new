@@ -27,6 +27,20 @@
 .analyses-filter-block { display: grid; gap: 6px; padding: 15px 13px; border-top: 1px solid #e4e8e4; }
 .analyses-filter-block label { color: #6d7771; font-size: 10px; font-weight: 700; }
 .analyses-filter-block select { width: 100%; min-height: 36px; border: 1px solid #cfd7d1; border-radius: 8px; background: #fff; padding: 0 9px; }
+.analysis-category-filter summary { cursor: pointer; font-size: 11px; font-weight: 700; }
+.analysis-category-filter > div { display: grid; gap: 5px; margin-top: 7px; }
+.analysis-category-filter input[type="search"] { width: 100%; min-width: 0; padding: 5px 7px; border: 1px solid #cfd7d1; border-radius: 6px; }
+.analysis-category-filter label { display: flex; align-items: center; gap: 5px; min-height: 24px; }
+.analysis-work-groups form, .analysis-work-groups form label { display: grid; gap: 5px; }
+.analysis-work-groups input, .analysis-work-groups textarea { width: 100%; min-width: 0; border: 1px solid #cfd7d1; border-radius: 6px; padding: 5px; }
+.analysis-work-groups button { min-width: 0; min-height: 32px; padding: 4px 7px; font-size: 11px; overflow-wrap: anywhere; }
+.analysis-edit-drafts { padding: 12px; border-bottom: 1px solid #e4e8e4; font-size: 11px; }
+.analysis-edit-drafts summary { cursor: pointer; font-weight: 700; }
+.analysis-edit-drafts form, .analysis-edit-drafts label, .analysis-edit-draft { display: grid; gap: 5px; }
+.analysis-edit-drafts form, .analysis-edit-draft { margin-top: 8px; }
+.analysis-edit-drafts input, .analysis-edit-drafts select { min-width: 0; width: 100%; padding: 5px; border: 1px solid #cfd7d1; border-radius: 6px; }
+.analysis-edit-drafts .outline-button { min-height: 30px; font-size: 11px; padding: 4px 7px; }
+.analysis-edit-draft span { display: block; overflow-wrap: anywhere; }
 .analyses-source-note { display: flex; align-items: flex-start; gap: 7px; margin: 0 12px; padding: 12px 0; border-top: 1px solid #e7ebe7; color: #748078; font-size: 10px; line-height: 1.45; }
 
 .analyses-toolbar { min-width: 0; min-height: 58px; display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-bottom: 1px solid #dde3de; background: #fff; }
@@ -41,6 +55,9 @@
 .analysis-columns-menu > div { position: absolute; z-index: 20; top: 44px; right: 0; width: 260px; max-height: 420px; overflow: auto; padding: 10px; border: 1px solid #d7ddd8; border-radius: 10px; background: #fff; box-shadow: 0 14px 32px rgba(35, 49, 40, .16); }
 .analysis-columns-menu p { margin: 2px 4px 8px; color: #6c766f; font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .analysis-columns-menu label { min-height: 32px; display: flex; align-items: center; gap: 7px; padding: 4px; color: #3b463f; font-size: 10px; }
+.analysis-filter-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 11px 0; }
+.analysis-filter-chips button { display: flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 7px; border: 1px solid #cbd5cd; border-radius: 8px; background: #edf4ee; color: #315d45; font-size: 10px; overflow-wrap: anywhere; }
+.analysis-filter-chips button.invalid { border-color: #d5aa73; background: #fff4e5; color: #65420d; }
 
 .analyses-table-scroll { min-width: 0; min-height: 0; overflow: auto; margin: 10px; border: 1px solid #dfe4df; border-radius: 9px; background: #fff; }
 .analyses-data-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 10px; }
@@ -50,15 +67,18 @@
 .analyses-data-table thead tr.analysis-filter-row th { top: 42px; z-index: 3; height: 35px; padding: 4px 6px; background: #fbfcfb; }
 .analyses-data-table th button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 5px; border: 0; background: transparent; color: inherit; padding: 0; font-size: 10px; font-weight: 750; text-align: left; }
 .analyses-data-table th input { width: 100%; min-width: 74px; height: 25px; border: 1px solid #dce2dd; border-radius: 6px; padding: 0 6px; background: #fff; font-size: 9px; }
+.analyses-data-table th input[aria-invalid="true"] { border-color: #a87529; }
 .analyses-data-table td > span { display: block; overflow: hidden; text-overflow: ellipsis; }
 .analyses-data-table td small { display: block; margin-top: 2px; color: #849089; font-size: 8px; }
 .analyses-data-table tbody tr { background: #fff; }
 .analyses-data-table tbody tr:hover { background: #f4f8f4; }
 .analyses-data-table tbody tr.focused { background: #eef5ef; box-shadow: inset 3px 0 #4a795b; }
 .analyses-data-table tbody tr.selected { background: #e5f1e7; }
+.analyses-data-table.selecting-range { user-select: none; }
 .analyses-data-table .analysis-select-cell { position: sticky; z-index: 2; left: 0; min-width: 42px; width: 42px; max-width: 42px; text-align: center; background: inherit; }
 .analyses-data-table thead .analysis-select-cell { z-index: 6; background: #f5f7f5; }
 .analyses-data-table input[type="checkbox"] { accent-color: #315d45; }
+.analyses-data-table th input[type="checkbox"] { width: auto; min-width: 0; height: auto; padding: 0; }
 .analyses-no-results { min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #77827b; }
 .analyses-no-results b { margin-top: 8px; color: #455249; }
 .analyses-no-results span { margin-top: 4px; font-size: 10px; }
@@ -97,6 +117,8 @@
 .analysis-selection-chips { min-width: 0; display: flex; gap: 5px; overflow: hidden; }
 .analysis-selection-chips button { min-height: 31px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid #d4ddd6; border-radius: 7px; background: #f5f8f5; color: #314038; font-size: 9px; white-space: nowrap; }
 .analysis-selection-chips > span { align-self: center; color: #657168; font-size: 9px; }
+.analysis-selection-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.analysis-selection-actions button { min-height: 32px; padding: 5px 9px; font-size: 11px; }
 .analysis-retract-link { position: absolute; left: 14px; bottom: 12px; border: 0; background: transparent; color: #8a4842; font-size: 9px; text-decoration: underline; }
 
 .analyses-empty { min-height: calc(100vh - 76px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px; background: #fff; color: #405047; text-align: center; }

@@ -189,10 +189,89 @@ def open_project(database_path: str | Path) -> sqlite3.Connection:
     connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    existing_tables = {row[0] for row in connection.execute(
+        "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'"
+    )}
+    if existing_tables and "schema_migration" not in existing_tables:
+        connection.close()
+        raise ImportCommandError(
+            "PROJECT_SCHEMA_UNSUPPORTED",
+            "Файл не содержит истории миграций PetroLab. Проект не изменён.",
+            {},
+        )
     connection.execute("CREATE TABLE IF NOT EXISTS schema_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migration")}
+    if not applied and existing_tables - {"schema_migration"}:
+        connection.close()
+        raise ImportCommandError(
+            "PROJECT_SCHEMA_UNSUPPORTED",
+            "История миграций проекта пуста, но база содержит данные. Проект не изменён.",
+            {},
+        )
     migrations = sorted(MIGRATIONS.glob("*.sql"))
+    supported_versions = {int(item.name.split("_", 1)[0]) for item in migrations}
+    if not supported_versions or applied - supported_versions:
+        connection.close()
+        raise ImportCommandError(
+            "PROJECT_SCHEMA_UNSUPPORTED",
+            "Проект создан более новой или несовместимой версией PetroLab. Откройте его в совместимой версии приложения.",
+            {"unsupported_migrations": sorted(applied - supported_versions)},
+        )
+    missing_versions = sorted(version for version in supported_versions if version < max(applied, default=0) and version not in applied)
+    if missing_versions:
+        connection.close()
+        raise ImportCommandError(
+            "PROJECT_SCHEMA_UNSUPPORTED",
+            "В истории миграций проекта пропущены записи. Проект не изменён.",
+            {"missing_migrations": missing_versions},
+        )
+    if 11 in applied and not {"project_identity", "work_group", "work_group_analysis"} <= existing_tables:
+        connection.close()
+        raise ImportCommandError(
+            "PROJECT_SCHEMA_UNSUPPORTED",
+            "Структура проекта не соответствует миграции рабочих групп. Проект не изменён.",
+            {"incompatible_migration": 11},
+        )
+    if 12 in applied and "table_view" not in existing_tables:
+        connection.close()
+        raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции представлений таблицы.",
+                                 {"incompatible_migration": 12})
+    if 13 in applied and "edit_draft" not in existing_tables:
+        connection.close()
+        raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции черновиков правок.",
+                                 {"incompatible_migration": 13})
+    if 14 in applied and "operation_journal" not in existing_tables:
+        connection.close()
+        raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции журнала операций.",
+                                 {"incompatible_migration": 14})
+    if 15 in applied and "plot_specification" not in existing_tables:
+        connection.close()
+        raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции раскладок.",
+                                 {"incompatible_migration": 15})
+    if 16 in applied and not {"sample_context", "sample_note"} <= existing_tables:
+        connection.close()
+        raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции паспортов образцов.",
+                                 {"incompatible_migration": 16})
+    if 17 in applied and not {"calculation_run", "work_group_calculation_origin"} <= existing_tables:
+        connection.close()
+        raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции расчётов.",
+                                 {"incompatible_migration": 17})
+    if 18 in applied and not {"workspace_snapshot", "analysis_template"} <= existing_tables:
+        connection.close()
+        raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции рабочих состояний.",
+                                 {"incompatible_migration": 18})
+    meta_exists = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_meta'").fetchone()
+    if meta_exists:
+        meta = connection.execute("SELECT project_schema_version FROM project_meta WHERE singleton = 1").fetchone()
+        if meta and meta[0] > max(applied, default=0):
+            connection.close()
+            raise ImportCommandError(
+                "PROJECT_SCHEMA_UNSUPPORTED",
+                "Версия схемы проекта не соответствует истории миграций. Проект не изменён.",
+                {"project_schema_version": meta[0], "latest_recorded_migration": max(applied, default=0)},
+            )
     pending = [item for item in migrations if int(item.name.split("_", 1)[0]) not in applied]
+    backup_path = None
     if applied and pending:
         backup_path = Path(str(database_path) + f".before-v{int(pending[0].name.split('_', 1)[0])}-{_id()}.bak")
         with closing(sqlite3.connect(backup_path)) as backup:
@@ -201,16 +280,34 @@ def open_project(database_path: str | Path) -> sqlite3.Connection:
         version = int(migration.name.split("_", 1)[0])
         if version in applied:
             continue
-        with connection:
-            connection.executescript(migration.read_text(encoding="utf-8"))
-            connection.execute("INSERT INTO schema_migration (version, applied_at) VALUES (?, ?)", (version, _now()))
+        # executescript commits a pending transaction before executing its input;
+        # an outer `with connection` therefore cannot roll back partial DDL.
+        # Put both the migration and its history entry in the same transaction.
+        try:
+            connection.executescript(
+                "BEGIN IMMEDIATE;\n"
+                + migration.read_text(encoding="utf-8")
+                + f"\nINSERT INTO schema_migration (version, applied_at) VALUES ({version}, '{_now()}');\nCOMMIT;"
+            )
+        except (sqlite3.Error, OSError, UnicodeError) as exc:
+            connection.rollback()
+            connection.close()
+            raise ImportCommandError(
+                "PROJECT_MIGRATION_FAILED",
+                ("Не удалось обновить проект. Последняя миграция отменена; перед повторной попыткой проверьте резервную копию."
+                 if backup_path else "Не удалось создать проект. Последняя миграция отменена; резервная копия не создавалась."),
+                {"migration": migration.name, "backup_path": str(backup_path) if backup_path else None},
+            ) from exc
     latest_version = max(int(migration.name.split("_", 1)[0]) for migration in migrations)
     with connection:
         connection.execute(
             "INSERT OR IGNORE INTO project_meta (singleton, project_schema_version, created_at) VALUES (1, ?, ?)",
             (latest_version, _now()),
         )
-        connection.execute("UPDATE project_meta SET project_schema_version = ? WHERE singleton = 1", (latest_version,))
+        connection.execute(
+            "UPDATE project_meta SET project_schema_version = ? WHERE singleton = 1 AND project_schema_version <> ?",
+            (latest_version, latest_version),
+        )
     return connection
 
 
@@ -224,13 +321,15 @@ def _prepare_managed_copy(database_path: str | Path, source_id: str, source_path
     destination = _managed_copy_path(database_path, source_id, source_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
-    shutil.copyfile(source_path, temporary)
     from .import_preview import _fingerprint
 
-    if _fingerprint(temporary) != expected_sha256:
+    try:
+        shutil.copyfile(source_path, temporary)
+        if _fingerprint(temporary) != expected_sha256:
+            raise ImportCommandError("SOURCE_FINGERPRINT_MISMATCH", "Source changed while its managed copy was being prepared.")
+        temporary.replace(destination)
+    finally:
         temporary.unlink(missing_ok=True)
-        raise ImportCommandError("SOURCE_FINGERPRINT_MISMATCH", "Source changed while its managed copy was being prepared.")
-    temporary.replace(destination)
     return destination
 
 
@@ -295,9 +394,10 @@ def save_import_recipe_revision(database_path: str | Path, source_id: str, recip
         connection.close()
 
 
-def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
-    """Apply a fresh plan atomically; this function never writes the source file."""
+def _validated_import(source_path, recipe, expected_fingerprint=None):
     inspection = inspect_source(source_path)
+    if expected_fingerprint is not None and inspection.fingerprint != expected_fingerprint:
+        raise ImportCommandError("SOURCE_FINGERPRINT_MISMATCH", "Файл изменился после добавления. Добавьте его заново.")
     plan = create_import_plan(inspection, recipe)
     blockers = [issue for issue in plan.get("issues", []) if issue.get("blocking")]
     if blockers:
@@ -305,126 +405,194 @@ def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe
     _require_non_empty_plan(plan)
     _require_mapping_review(recipe)
     _require_duplicate_review(plan, recipe)
+    return inspection, plan
+
+
+def _persist_samples(connection, records, timestamp):
+    assignments = {}
+    for record in records:
+        assignment = record["sample_association"].get("assignment")
+        if assignment is None:
+            continue
+        sample_id = assignment["sample_id"]
+        previous = assignments.setdefault(sample_id, assignment)
+        if previous["sample_name"] != assignment["sample_name"] or previous["mode"] != assignment["mode"]:
+            raise ImportCommandError("SAMPLE_ASSIGNMENT_CONFLICT", "Назначения одного образца не согласованы.")
+    for sample_id, assignment in assignments.items():
+        sample = connection.execute("SELECT sample_name FROM sample WHERE sample_id = ?", (sample_id,)).fetchone()
+        name = assignment["sample_name"]
+        if assignment["mode"] == "existing":
+            if sample is None or sample["sample_name"] != name:
+                raise ImportCommandError("STALE_SAMPLE_ASSIGNMENT", "Образец изменился. Назначьте его снова.")
+        else:
+            if sample is not None or connection.execute("SELECT 1 FROM sample WHERE sample_name = ?", (name,)).fetchone():
+                raise ImportCommandError("SAMPLE_NAME_EXISTS", "Образец уже существует. Выберите его по ID или задайте другое имя.")
+            connection.execute("INSERT INTO sample (sample_id, sample_name, created_at) VALUES (?, ?, ?)",
+                               (sample_id, name, timestamp))
+
+
+def _persist_import(connection, database_path, source_path, recipe, inspection, plan, managed_files):
     source_kind = "managed_copy" if recipe["ownership_mode"] == "managed_copy" else "linked_reference"
     source_id, batch_id = _id(), _id()
-    managed_copy: Path | None = None
+    managed_copy = None
     if source_kind == "managed_copy":
         managed_copy = _prepare_managed_copy(database_path, source_id, source_path, inspection.fingerprint)
-    connection = open_project(database_path)
-    try:
-        timestamp = _now()
-        metadata_count = 0
-        with connection:
+        managed_files.append(managed_copy)
+    timestamp = _now()
+    metadata_count = 0
+    connection.execute(
+        """INSERT INTO source_file
+        (source_id, source_kind, display_name, source_fingerprint_sha256, linked_path, last_verified_at, state, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'current', ?)""",
+        (source_id, source_kind, Path(source_path).name, inspection.fingerprint,
+         plan["original_source_path"] if source_kind == "linked_reference" else None, timestamp, timestamp),
+    )
+    if managed_copy is not None:
+        connection.execute(
+            "UPDATE source_file SET managed_relative_path = ? WHERE source_id = ?",
+            (managed_copy.relative_to(Path(database_path).parent).as_posix(), source_id),
+        )
+    recipe_revision_id = _insert_recipe_revision(connection, source_id, recipe, timestamp)
+    connection.execute(
+        """INSERT INTO import_batch
+        (import_batch_id, source_id, recipe_revision_id, source_fingerprint_sha256, status, plan_json, created_at, applied_at)
+        VALUES (?, ?, ?, ?, 'planned', ?, ?, NULL)""",
+        (batch_id, source_id, recipe_revision_id, inspection.fingerprint,
+         json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")), timestamp),
+    )
+    for record in plan["planned_records"]:
+        analysis_id = _id()
+        orientation = record.get("orientation", "rows_are_analyses")
+        connection.execute(
+            """INSERT INTO analysis
+            (analysis_id, import_batch_id, source_id, preview_id, sheet_name, source_row_number, block_id,
+             identity_json, created_at, source_column_number, source_orientation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                analysis_id, batch_id, source_id, record["preview_id"], record["sheet_name"], record["row_number"],
+                record["block_id"], json.dumps(record["identity"], ensure_ascii=False), timestamp,
+                record.get("source_column_number"), orientation,
+            ),
+        )
+        connection.execute(
+            '''INSERT INTO analysis_import_semantics
+               (analysis_id, sample_association_json, reported_mineral_json, mineral_assignment_json,
+                mineral_verification_json, analytical_method_json) VALUES (?, ?, ?, ?, ?, ?)''',
+            (analysis_id, *(json.dumps(record.get(key), ensure_ascii=False, sort_keys=True) for key in
+             ('sample_association', 'reported_mineral', 'mineral_assignment', 'mineral_verification', 'analytical_method'))),
+        )
+        for metadata in _source_metadata_for_record(inspection, recipe, record):
             connection.execute(
-                """INSERT INTO source_file
-                (source_id, source_kind, display_name, source_fingerprint_sha256, linked_path, last_verified_at, state, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'current', ?)""",
-                (source_id, source_kind, Path(source_path).name, inspection.fingerprint,
-                 str(Path(source_path).resolve()) if source_kind == "linked_reference" else None, timestamp, timestamp),
+                """INSERT INTO analysis_source_metadata
+                (analysis_source_metadata_id, analysis_id, import_batch_id, canonical_field, raw_token,
+                 source_header, source_row_number, source_column_index, source_cell, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    _id(), analysis_id, batch_id, metadata["canonical_field"], metadata["raw_token"],
+                    metadata["source_header"], metadata["source_row_number"], metadata["source_column_index"],
+                    metadata["source_cell"], timestamp,
+                ),
             )
-            if managed_copy is not None:
-                connection.execute(
-                    "UPDATE source_file SET managed_relative_path = ? WHERE source_id = ?",
-                    (managed_copy.relative_to(Path(database_path).parent).as_posix(), source_id),
-                )
-            recipe_revision_id = _insert_recipe_revision(connection, source_id, recipe, timestamp)
+            metadata_count += 1
+        for measurement in record["measurements"]:
             connection.execute(
-                """INSERT INTO import_batch
-                (import_batch_id, source_id, recipe_revision_id, source_fingerprint_sha256, status, plan_json, created_at, applied_at)
-                VALUES (?, ?, ?, ?, 'planned', ?, ?, NULL)""",
-                (batch_id, source_id, recipe_revision_id, inspection.fingerprint,
-                 json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")), timestamp),
+                """INSERT INTO measurement
+                (measurement_id, analysis_id, canonical_field, unit, raw_token, qualifier, detection_limit,
+                 source_column_name, source_column_index, created_at, source_row_number,
+                 physical_source_column_index, source_cell, measurement_set, method,
+                 value_status, reported_fe_form, fe_handling)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    _id(), analysis_id, measurement["field"], measurement["unit"], measurement["raw_token"],
+                    measurement["qualifier"], measurement["detection_limit"], measurement["source_header"],
+                    measurement["source_column_index"], timestamp, measurement["physical_source_row_number"],
+                    measurement["physical_source_column_index"], measurement["source_cell"],
+                    measurement.get("measurement_set"), measurement.get("method"),
+                    measurement["value_status"], measurement["reported_fe_form"], measurement["fe_handling"],
+                ),
             )
-            for record in plan["planned_records"]:
-                analysis_id = _id()
-                orientation = record.get("orientation", "rows_are_analyses")
+            if orientation == "rows_are_analyses":
                 connection.execute(
-                    """INSERT INTO analysis
-                    (analysis_id, import_batch_id, source_id, preview_id, sheet_name, source_row_number, block_id,
-                     identity_json, created_at, source_column_number, source_orientation)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    """INSERT INTO source_row_provenance
+                    (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token,
+                     normalized_token, qualifier, analysis_id, value_status)
+                    VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)""",
                     (
-                        analysis_id, batch_id, source_id, record["preview_id"], record["sheet_name"], record["row_number"],
-                        record["block_id"], json.dumps(record["identity"], ensure_ascii=False), timestamp,
-                        record.get("source_column_number"), orientation,
+                        _id(), batch_id, record["sheet_name"], measurement["physical_source_row_number"],
+                        measurement["source_header"], measurement["raw_token"], measurement["qualifier"], analysis_id, measurement["value_status"],
                     ),
                 )
-                connection.execute(
-                    '''INSERT INTO analysis_import_semantics
-                       (analysis_id, sample_association_json, reported_mineral_json, mineral_assignment_json,
-                        mineral_verification_json, analytical_method_json) VALUES (?, ?, ?, ?, ?, ?)''',
-                    (analysis_id, *(json.dumps(record.get(key), ensure_ascii=False, sort_keys=True) for key in
-                     ('sample_association', 'reported_mineral', 'mineral_assignment', 'mineral_verification', 'analytical_method'))),
-                )
-                for metadata in _source_metadata_for_record(inspection, recipe, record):
-                    connection.execute(
-                        """INSERT INTO analysis_source_metadata
-                        (analysis_source_metadata_id, analysis_id, import_batch_id, canonical_field, raw_token,
-                         source_header, source_row_number, source_column_index, source_cell, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            _id(), analysis_id, batch_id, metadata["canonical_field"], metadata["raw_token"],
-                            metadata["source_header"], metadata["source_row_number"], metadata["source_column_index"],
-                            metadata["source_cell"], timestamp,
-                        ),
-                    )
-                    metadata_count += 1
-                for measurement in record["measurements"]:
-                    connection.execute(
-                        """INSERT INTO measurement
-                        (measurement_id, analysis_id, canonical_field, unit, raw_token, qualifier, detection_limit,
-                         source_column_name, source_column_index, created_at, source_row_number,
-                         physical_source_column_index, source_cell, measurement_set, method,
-                         value_status, reported_fe_form, fe_handling)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            _id(), analysis_id, measurement["field"], measurement["unit"], measurement["raw_token"],
-                            measurement["qualifier"], measurement["detection_limit"], measurement["source_header"],
-                            measurement["source_column_index"], timestamp, measurement["physical_source_row_number"],
-                            measurement["physical_source_column_index"], measurement["source_cell"],
-                            measurement.get("measurement_set"), measurement.get("method"),
-                            measurement["value_status"], measurement["reported_fe_form"], measurement["fe_handling"],
-                        ),
-                    )
-                    if orientation == "rows_are_analyses":
-                        connection.execute(
-                            """INSERT INTO source_row_provenance
-                            (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token,
-                             normalized_token, qualifier, analysis_id, value_status)
-                            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)""",
-                            (
-                                _id(), batch_id, record["sheet_name"], measurement["physical_source_row_number"],
-                                measurement["source_header"], measurement["raw_token"], measurement["qualifier"], analysis_id, measurement["value_status"],
-                            ),
-                        )
-                    connection.execute(
-                        """INSERT INTO source_cell_provenance
-                        (provenance_id, import_batch_id, analysis_id, sheet_name, source_row_number,
-                         source_column_index, source_cell, source_header, raw_token, qualifier, value_status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            _id(), batch_id, analysis_id, record["sheet_name"], measurement["physical_source_row_number"],
-                            measurement["physical_source_column_index"], measurement["source_cell"],
-                            measurement["source_header"], measurement["raw_token"], measurement["qualifier"],
-                            measurement["value_status"],
-                        ),
-                    )
-            connection.execute("UPDATE import_batch SET status = 'applied', applied_at = ? WHERE import_batch_id = ?", (timestamp, batch_id))
-        return {
-            "import_batch_id": batch_id,
-            "source_id": source_id,
-            "recipe_revision_id": recipe_revision_id,
-            "analysis_count": plan["summary"]["planned_analysis_count"],
-            "measurement_count": plan["summary"]["planned_measurement_count"],
-            "source_metadata_count": metadata_count,
-            "warnings": plan["warnings"],
-        }
-    except Exception:
-        if managed_copy is not None:
-            managed_copy.unlink(missing_ok=True)
-        raise
-    finally:
-        connection.close()
+            connection.execute(
+                """INSERT INTO source_cell_provenance
+                (provenance_id, import_batch_id, analysis_id, sheet_name, source_row_number,
+                 source_column_index, source_cell, source_header, raw_token, qualifier, value_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    _id(), batch_id, analysis_id, record["sheet_name"], measurement["physical_source_row_number"],
+                    measurement["physical_source_column_index"], measurement["source_cell"],
+                    measurement["source_header"], measurement["raw_token"], measurement["qualifier"],
+                    measurement["value_status"],
+                ),
+            )
+    connection.execute("UPDATE import_batch SET status = 'applied', applied_at = ? WHERE import_batch_id = ?", (timestamp, batch_id))
+    return {
+        "import_batch_id": batch_id,
+        "source_id": source_id,
+        "recipe_revision_id": recipe_revision_id,
+        "analysis_count": plan["summary"]["planned_analysis_count"],
+        "measurement_count": plan["summary"]["planned_measurement_count"],
+        "source_metadata_count": metadata_count,
+        "warnings": plan["warnings"],
+    }
+
+
+def workspace_commit_exists(connection, workspace_id):
+    return connection.execute(
+        "SELECT 1 FROM import_batch WHERE json_extract(plan_json, '$.workspace_commit.workspace_id') = ? LIMIT 1",
+        (workspace_id,),
+    ).fetchone() is not None
+
+
+def apply_import_batch(database_path, sources, *, workspace_commit=None):
+    prepared = []
+    for source_path, recipe, expected_fingerprint, original_source_path in sources:
+        inspection, plan = _validated_import(source_path, recipe, expected_fingerprint)
+        if workspace_commit is not None:
+            plan_fingerprint = hashlib.sha256(json.dumps(
+                plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")).hexdigest()
+            plan["workspace_commit"] = {
+                **workspace_commit,
+                "plan_fingerprint": plan_fingerprint,
+                "recipe_fingerprint": semantic_fingerprint(recipe),
+            }
+        plan["original_source_path"] = str(Path(original_source_path).resolve())
+        prepared.append((source_path, recipe, inspection, plan))
+
+    managed_files = []
+    with closing(open_project(database_path)) as connection:
+        try:
+            with connection:
+                if workspace_commit is not None:
+                    connection.execute("BEGIN IMMEDIATE")
+                    if workspace_commit_exists(connection, workspace_commit["workspace_id"]):
+                        raise ImportCommandError("WORKSPACE_ALREADY_COMMITTED", "Эта очередь уже сохранена в проекте.")
+                _persist_samples(connection, (
+                    record for _, _, _, plan in prepared for record in plan["planned_records"]
+                ), _now())
+                return [
+                    _persist_import(connection, database_path, *source, managed_files)
+                    for source in prepared
+                ]
+        except Exception:
+            for managed_file in managed_files:
+                managed_file.unlink(missing_ok=True)
+            raise
+
+
+def apply_import_plan(database_path: str | Path, source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
+    """Apply a fresh plan atomically; this function never writes the source file."""
+    return apply_import_batch(database_path, [(source_path, recipe, None, source_path)])[0]
 
 
 def check_linked_source(database_path: str | Path, source_id: str) -> dict[str, Any]:
@@ -451,39 +619,48 @@ def check_linked_source(database_path: str | Path, source_id: str) -> dict[str, 
         connection.close()
 
 
+def latest_active_import(connection: sqlite3.Connection) -> dict[str, Any] | None:
+    rows = connection.execute("""
+        WITH active AS (
+            SELECT b.import_batch_id, b.source_id, b.applied_at, s.display_name, b.rowid AS batch_order,
+                   json_extract(b.plan_json, '$.workspace_commit.commit_id') AS commit_id
+            FROM import_batch b
+            JOIN source_file s ON s.source_id = b.source_id
+            LEFT JOIN import_batch_retraction r ON r.import_batch_id = b.import_batch_id
+            WHERE b.status = 'applied' AND r.import_batch_id IS NULL
+        ), latest AS (
+            SELECT * FROM active ORDER BY applied_at DESC, batch_order DESC LIMIT 1
+        )
+        SELECT a.*, (SELECT COUNT(*) FROM analysis WHERE import_batch_id = a.import_batch_id) AS analysis_count
+        FROM active a JOIN latest l ON a.import_batch_id = l.import_batch_id OR a.commit_id = l.commit_id
+        ORDER BY a.applied_at DESC, a.batch_order DESC
+    """).fetchall()
+    if not rows:
+        return None
+    latest = rows[0]
+    return {
+        "import_batch_id": latest["import_batch_id"],
+        "source_id": latest["source_id"],
+        "source_name": ", ".join(row["display_name"] for row in reversed(rows)),
+        "analysis_count": sum(row["analysis_count"] for row in rows),
+        "applied_at": latest["applied_at"],
+        "import_batch_ids": [row["import_batch_id"] for row in rows],
+    }
+
+
 def retract_latest_import(database_path: str | Path, reason: str = "user_retracted") -> dict[str, Any]:
-    connection = open_project(database_path)
-    try:
-        row = connection.execute(
-            """SELECT b.import_batch_id, b.source_id, b.applied_at, s.display_name,
-                      COUNT(a.analysis_id) AS analysis_count
-               FROM import_batch b
-               JOIN source_file s ON s.source_id = b.source_id
-               LEFT JOIN analysis a ON a.import_batch_id = b.import_batch_id
-               LEFT JOIN import_batch_retraction r ON r.import_batch_id = b.import_batch_id
-               WHERE b.status = 'applied' AND r.import_batch_id IS NULL
-               GROUP BY b.import_batch_id, b.source_id, b.applied_at, s.display_name
-               ORDER BY b.applied_at DESC, b.rowid DESC
-               LIMIT 1"""
-        ).fetchone()
-        if row is None:
+    with closing(open_project(database_path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        latest = latest_active_import(connection)
+        if latest is None:
             raise ImportCommandError("INVALID_ASSIGNMENT", "There is no active applied import to retract.")
         timestamp = _now()
-        with connection:
-            connection.execute(
-                """INSERT INTO import_batch_retraction (retraction_id, import_batch_id, reason, created_at)
-                   VALUES (?, ?, ?, ?)""",
-                (_id(), row["import_batch_id"], reason or "user_retracted", timestamp),
-            )
-        return {
-            "import_batch_id": row["import_batch_id"],
-            "source_id": row["source_id"],
-            "source_name": row["display_name"],
-            "analysis_count": row["analysis_count"],
-            "retracted_at": timestamp,
-        }
-    finally:
-        connection.close()
+        connection.executemany(
+            """INSERT INTO import_batch_retraction (retraction_id, import_batch_id, reason, created_at)
+               VALUES (?, ?, ?, ?)""",
+            [(_id(), batch_id, reason or "user_retracted", timestamp) for batch_id in latest["import_batch_ids"]],
+        )
+        return {**latest, "retracted_at": timestamp}
 
 
 def rollback_incomplete_batch(database_path: str | Path, import_batch_id: str) -> dict[str, Any]:
