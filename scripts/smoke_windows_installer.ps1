@@ -45,6 +45,7 @@ $installArgs = @(
 $appProcess = $null
 $serviceProcesses = @()
 $installed = $false
+$ready = $false
 $previousInstalled = $false
 $baselinePath = if ($BaselineMsi) { (Resolve-Path -LiteralPath $BaselineMsi).Path } else { $null }
 $database = $null
@@ -158,6 +159,7 @@ try {
     }
 
     Write-Host "Installed PetroLab smoke test passed: window, scientific service and project database are ready."
+    $ready = $true
 }
 finally {
     if ($null -ne $appProcess -and -not $appProcess.HasExited) {
@@ -169,6 +171,7 @@ finally {
     }
 
     if ($installed) {
+        if ($ready) { $beforeUninstall = (Get-FileHash -Algorithm SHA256 -LiteralPath $database).Hash }
         $uninstallArgs = @("/x", ('"{0}"' -f $msi.FullName), "/qn", "/norestart")
         $uninstaller = Start-Process -FilePath "msiexec.exe" -WindowStyle Hidden -ArgumentList $uninstallArgs -Wait -PassThru
         $uninstallStatus = $uninstaller.ExitCode
@@ -183,4 +186,7 @@ if ($uninstallStatus -ne 0 -or (Test-Path -LiteralPath $appExecutable.FullName) 
 }
 if (-not $database -or -not (Test-Path -LiteralPath $database)) {
     throw "Uninstall removed persistent project data."
+}
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $database).Hash -ne $beforeUninstall) {
+    throw "Uninstall changed the persistent project database."
 }

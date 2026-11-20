@@ -4,6 +4,7 @@ import argparse
 from hashlib import sha256
 import json
 from pathlib import Path
+from uuid import uuid4
 from zipfile import ZipFile
 
 from qa_packaged_import import request, run
@@ -11,10 +12,15 @@ from petrolab.desktop_workflow import suggest_import_recipe
 
 
 def project_state(executable, database):
-    return [item["result"] for item in run(executable, [
+    state = [item["result"] for item in run(executable, [
         request(command, {"project_database_path": str(database)})
         for command in ("project.analyses.list", "work_group.list", "plot_spec.list")
     ])]
+    layouts = run(executable, [
+        request("plot_spec.open", {"project_database_path": str(database), "id": layout["id"]})
+        for layout in state[2]
+    ])
+    return [*state[:2], [item["result"] for item in layouts]]
 
 
 def seed(executable, database, state_file):
@@ -31,8 +37,6 @@ def seed(executable, database, state_file):
     ])
     ids = [row["analysis_id"] for row in listed["result"]["analyses"]]
     axes = catalog["result"]["axes"]
-    from uuid import uuid4
-
     archive = state_file.with_suffix(".petrolab")
     run(executable, [
         request("work_group.create", {**scope, "name": "Upgrade QA", "analysis_ids": ids, "created_by": "QA"}),

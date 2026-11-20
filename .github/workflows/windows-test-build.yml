@@ -2,13 +2,17 @@ name: Windows test build
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/petrolab-2-release]
   pull_request:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        installer-check: [clean, upgrade]
     env:
       PYTHONUTF8: "1"
       PYTHONPATH: ${{ github.workspace }}\\src
@@ -83,9 +87,28 @@ jobs:
         working-directory: desktop
         run: npm run tauri build
       - name: Install and launch packaged Windows app
+        if: matrix.installer-check == 'clean'
         shell: pwsh
-        run: .\\scripts\\smoke_windows_installer.ps1
+        run: ./scripts/smoke_windows_installer.ps1
+      - name: Build baseline MSI for upgrade rehearsal
+        if: matrix.installer-check == 'upgrade'
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $baselineVersion = "0.1.6"
+          $currentVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ([version]$currentVersion -le [version]$baselineVersion) { throw "The upgrade baseline must be older than the candidate." }
+          $override = Join-Path $env:RUNNER_TEMP "PetroLab-baseline.conf.json"
+          @{ version = $baselineVersion } | ConvertTo-Json -Compress | Set-Content -LiteralPath $override -Encoding utf8
+          npm run tauri -- build --bundles msi --config $override
+          $baseline = "src-tauri/target/release/bundle/msi/PetroLab_${baselineVersion}_x64_en-US.msi"
+          Move-Item -LiteralPath $baseline -Destination (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi")
+      - name: Verify upgrade preserves the project and uninstall retains it
+        if: matrix.installer-check == 'upgrade'
+        shell: pwsh
+        run: ./scripts/smoke_windows_installer.ps1 -BaselineMsi (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi")
       - name: Upload test installer
+        if: matrix.installer-check == 'clean'
         uses: actions/upload-artifact@v4
         with:
           name: PetroLab-Windows-test-${{ github.sha }}

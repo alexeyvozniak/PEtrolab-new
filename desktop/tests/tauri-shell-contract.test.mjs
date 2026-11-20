@@ -261,6 +261,10 @@ test("Windows release gate installs and launches the packaged application", asyn
   const uiSmoke = await read("tests/import-ui.e2e.test.jsx");
   assert.match(workflow, /Install and launch packaged Windows app/);
   assert.match(workflow, /smoke_windows_installer\.ps1/);
+  assert.match(workflow, /installer-check: \[clean, upgrade\]/);
+  assert.match(workflow, /smoke_windows_installer\.ps1 -BaselineMsi/);
+  assert.match(smoke, /qa_installer_project\.py"\) verify/);
+  assert.match(smoke, /Uninstall removed persistent project data/);
   assert.match(workflow, /npm run test:ui/);
   assert.match(smoke, /msiexec\.exe/);
   assert.match(smoke, /MainWindowHandle/);
