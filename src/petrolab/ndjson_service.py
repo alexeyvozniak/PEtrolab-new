@@ -40,6 +40,8 @@ from .media_import import (apply_media_import_plan, create_analytical_point, cre
                            inspect_media_sources, load_media_import_draft, save_media_import_draft)
 from .media_display import export_media_original, export_media_rendered, preview_input_media, preview_project_media
 from .statistics_service import list_calculation_runs, open_calculation_run, review_statistics, run_clustering, save_calculated_cluster
+from .formula_service import list_formula_runs, open_formula_run, review_formula, run_formula
+from .olivine_formula import OLIVINE
 from .publication import export_publication, prepare_publication, publication_catalog
 from .project_archive import export_project_archive, restore_project_archive
 from .workspace_snapshots import apply_analysis_template, list_workspace_snapshots, open_workspace_snapshot, save_analysis_template, save_workspace_snapshot
@@ -341,6 +343,13 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "statistics.cluster.save_group": lambda params: {"result": save_calculated_cluster(
         _project_database_path(params), params.get("run_id"), params.get("cluster"), params.get("name"), params.get("actor"),
     )},
+    "formula.methods.list": lambda _: {"result": [OLIVINE]},
+    "formula.review": lambda params: {"result": review_formula(_project_database_path(params), params.get("method_id"),
+        params.get("analysis_id"), params.get("measurement_ids"))},
+    "formula.run": lambda params: {"result": run_formula(_project_database_path(params), params.get("method_id"),
+        params.get("analysis_id"), params.get("measurement_ids"), params.get("input_fingerprint"), params.get("method_definition_fingerprint"))},
+    "formula.run.open": lambda params: {"result": open_formula_run(_project_database_path(params), params.get("run_id"))},
+    "formula.runs.list": lambda params: {"result": list_formula_runs(_project_database_path(params), params.get("analysis_id"))},
     "statistics.runs.list": lambda params: {"result": list_calculation_runs(_project_database_path(params))},
     "statistics.run.open": lambda params: {"result": open_calculation_run(_project_database_path(params), params.get("run_id"))},
     "plot_spec.save": lambda params: {"result": save_plot_specification(

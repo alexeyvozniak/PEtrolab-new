@@ -195,8 +195,8 @@ def list_calculation_runs(database_path):
             SELECT id, created_at, json_extract(definition_json, '$.parameters.scaling') AS scaling,
                    json_extract(definition_json, '$.parameters.transform') AS transform,
                    json_extract(definition_json, '$.parameters.clusters') AS clusters
-            FROM calculation_run ORDER BY created_at DESC, rowid DESC
-        """)
+            FROM calculation_run WHERE json_extract(definition_json, '$.method_id') = ? ORDER BY created_at DESC, rowid DESC
+        """, (_METHOD["method_id"],))
         return [dict(row) for row in rows]
 
 
@@ -204,7 +204,8 @@ def open_calculation_run(database_path, run_id):
     _selection([run_id])
     with closing(open_project(database_path)) as connection:
         connection.execute("BEGIN")
-        row = connection.execute("SELECT definition_json FROM calculation_run WHERE id = ?", (run_id,)).fetchone()
+        row = connection.execute("""SELECT definition_json FROM calculation_run
+            WHERE id = ? AND json_extract(definition_json, '$.method_id') = ?""", (run_id, _METHOD["method_id"])).fetchone()
         if not row:
             raise ImportCommandError("CALCULATION_RUN_UNAVAILABLE", "Сохранённый расчёт недоступен.")
         run = json.loads(row[0])
