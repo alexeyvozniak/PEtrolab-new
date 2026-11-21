@@ -1,10 +1,75 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import "./mediaWorkspace.css";
 
-export function MediaViewer({ image, annotations, onPlace, shape = "point" }) {
+export function MediaViewer({ image, annotations, onPlace, loadRegion, shape = "point" }) {
   const [zoom, setZoom] = useState(100);
   const [start, setStart] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [tile, setTile] = useState(null);
+  const [tileError, setTileError] = useState("");
+  const viewer = useRef(null);
+  const scene = useRef(null);
+  const anchor = useRef(null);
+  const regionLoader = useRef(loadRegion);
+  regionLoader.current = loadRegion;
+  const precision = zoom > 400 && Boolean(loadRegion);
+  const changeZoom = (value) => {
+    const viewport = viewer.current;
+    const bounds = scene.current.getBoundingClientRect();
+    if (bounds.width && bounds.height) {
+      anchor.current = [(viewport.scrollLeft + viewport.clientWidth / 2) / bounds.width,
+        (viewport.scrollTop + viewport.clientHeight / 2) / bounds.height];
+    }
+    setZoom(value);
+  };
+  useLayoutEffect(() => {
+    if (!anchor.current) return;
+    const viewport = viewer.current;
+    const bounds = scene.current.getBoundingClientRect();
+    viewport.scrollLeft = anchor.current[0] * bounds.width - viewport.clientWidth / 2;
+    viewport.scrollTop = anchor.current[1] * bounds.height - viewport.clientHeight / 2;
+    anchor.current = null;
+  }, [zoom]);
+  useEffect(() => {
+    setTile(null);
+    setTileError("");
+    if (!precision) return;
+    const viewport = viewer.current;
+    let sequence = 0;
+    let timer;
+    const update = () => {
+      const current = ++sequence;
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const { width: displayedWidth, height: displayedHeight } = scene.current.getBoundingClientRect();
+        if (!displayedWidth || !displayedHeight) return;
+        const px = image.width_px / displayedWidth;
+        const py = image.height_px / displayedHeight;
+        const width = Math.min(1400, image.width_px, Math.ceil(viewport.clientWidth * px) + 2);
+        const height = Math.min(1400, image.height_px, Math.ceil(viewport.clientHeight * py) + 2);
+        const left = Math.max(0, Math.min(image.width_px - width,
+          Math.floor((viewport.scrollLeft + viewport.clientWidth / 2) * px - width / 2)));
+        const top = Math.max(0, Math.min(image.height_px - height,
+          Math.floor((viewport.scrollTop + viewport.clientHeight / 2) * py - height / 2)));
+        try {
+          const result = await regionLoader.current({ left, top, width, height });
+          if (current === sequence) { setTile(result); setTileError(""); }
+        } catch (caught) {
+          if (current === sequence) { setTile(null); setTileError(caught.message); }
+        }
+      }, 120);
+    };
+    update();
+    viewport.addEventListener("scroll", update);
+    const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    resize?.observe(viewport);
+    return () => {
+      sequence += 1;
+      clearTimeout(timer);
+      resize?.disconnect();
+      viewport.removeEventListener("scroll", update);
+    };
+  }, [zoom, precision, image]);
   const position = (event) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     return {
@@ -22,18 +87,25 @@ export function MediaViewer({ image, annotations, onPlace, shape = "point" }) {
       y_px: b.y_px < a.y_px ? a.y_px - height_px : a.y_px, width_px, height_px };
   };
   const reset = () => { setStart(null); setPreview(null); };
-  const length = Math.max(image.width_px, image.height_px);
+  const length = Math.max(image.width_px, image.height_px) * 100 / zoom;
   return <>
-    <label className="media-zoom">Масштаб {zoom}% <input aria-label="Масштаб изображения" type="range" min="50" max="400" step="25" value={zoom}
-      onChange={(event) => setZoom(Number(event.target.value))} /></label>
-    <div className="media-viewer">
-      <div className="media-scene" style={{ width: `${zoom}%` }}>
+    <label className="media-zoom">Масштаб {zoom}% <input aria-label="Масштаб изображения" type="range" min="50" max={loadRegion ? 2000 : 400} step="25" value={zoom}
+      onChange={(event) => changeZoom(Number(event.target.value))} /></label>
+    {precision && tileError && <p role="alert">{tileError}</p>}
+    <div className="media-viewer" ref={viewer}>
+      <div className="media-scene" ref={scene} style={{ width: `${zoom}%` }}>
         <img src={image.preview_url} alt="Изображение шлифа" draggable={false} />
+        {precision && tile && <img className="media-precision-region" src={tile.preview_url} alt="" draggable={false} style={{
+          left: `${tile.region.left * 100 / image.width_px}%`, top: `${tile.region.top * 100 / image.height_px}%`,
+          width: `${tile.region.width * 100 / image.width_px}%`, height: `${tile.region.height * 100 / image.height_px}%`,
+        }} />}
         <svg viewBox={`0 0 ${image.width_px} ${image.height_px}`} preserveAspectRatio="none" aria-label="Аннотации изображения"
           className={onPlace ? "editable" : undefined}
           onPointerDown={onPlace ? (event) => {
             if (event.button !== 0) return;
             const location = position(event);
+            if (precision && (!tile || location.x_px < tile.region.left || location.y_px < tile.region.top
+                || location.x_px >= tile.region.left + tile.region.width || location.y_px >= tile.region.top + tile.region.height)) return;
             if (shape === "point") { onPlace({ kind: "point", ...location }); return; }
             setStart(location);
             event.currentTarget.setPointerCapture(event.pointerId);
@@ -97,7 +169,7 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
     </ul>
     {status && <p role={status.error ? "alert" : "status"}>{status.error || status.notice}</p>}
     {image && <>
-      <MediaViewer key={openId} image={image} annotations={image.annotations.map((item) => ({
+      <MediaViewer key={openId} image={image} loadRegion={(region) => previewMedia(openId, region)} annotations={image.annotations.map((item) => ({
         ...item, id: item.spatial_annotation_id, kind: item.geometry_kind, label: item.point_name,
       }))} />
       {exportRendered && <fieldset className="media-export-options">
@@ -280,7 +352,9 @@ export function MediaImport({ actions, onCancel, onDone }) {
             </select></label>
           </div>
           {pointId && <p>Щёлкните на изображении для точки или протяните область.</p>}
-          <MediaViewer key={activePath} image={image} shape={shape} onPlace={pointId && !pending && (!pointSampleId || exceptionReason.trim()) ? place : undefined}
+          <MediaViewer key={activePath} image={image} shape={shape}
+            loadRegion={(region) => actions.preview(activePath, region, image.source_fingerprint)}
+            onPlace={pointId && !pending && (!pointSampleId || exceptionReason.trim()) ? place : undefined}
             annotations={active.placements.map((item) => ({ ...item.geometry, id: item.analytical_point_id,
               label: item.pointLabel }))} />
           <ul className="sample-items">{active.placements.map(({ analytical_point_id: id, pointLabel }) => <li key={id}>

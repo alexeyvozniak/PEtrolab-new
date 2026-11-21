@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from base64 import b64decode
 import hashlib
+from io import BytesIO
 import json
 import sqlite3
 import struct
@@ -17,7 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from petrolab.import_apply import apply_import_plan, open_project  # noqa: E402
 from petrolab.import_preview import ImportCommandError  # noqa: E402
-from petrolab.media_display import export_media_original, export_media_rendered, preview_project_media  # noqa: E402
+from petrolab.media_display import export_media_original, export_media_rendered, preview_input_media, preview_project_media  # noqa: E402
 from PIL import Image  # noqa: E402
 from petrolab.media_import import (  # noqa: E402
     apply_media_import_plan,
@@ -107,6 +109,10 @@ class MediaImportTests(unittest.TestCase):
                 pass
             image = directory / "original.png"
             write_png(image, width=64, height=40)
+            with Image.open(image) as opened:
+                edited_fixture = opened.copy()
+            edited_fixture.putpixel((13, 8), (229, 76, 23, 255))
+            edited_fixture.save(image)
             original = image.read_bytes()
             assignment = {"source_path": str(image), "sample_name": "KIV-2", "thin_section_name": "TS1",
                           "placements": [], "ownership_mode": "linked_external", "media_type": "PPL",
@@ -118,6 +124,18 @@ class MediaImportTests(unittest.TestCase):
             preview = preview_project_media(database, media_id)
             self.assertEqual((preview["width_px"], preview["height_px"], preview["annotations"]), (64, 40, []))
             self.assertTrue(preview["preview_url"].startswith("data:image/jpeg;base64,"))
+            region = {"left": 10, "top": 5, "width": 7, "height": 6}
+            detailed = preview_project_media(database, media_id, region)
+            self.assertEqual(detailed["region"], region)
+            self.assertEqual(preview_input_media(image, region, hashlib.sha256(original).hexdigest()), detailed)
+            with Image.open(BytesIO(b64decode(detailed["preview_url"].split(",")[1]))) as cropped:
+                self.assertEqual(cropped.size, (7, 6))
+                self.assertEqual(cropped.getpixel((3, 3)), (229, 76, 23, 255))
+            with self.assertRaises(ValueError):
+                preview_project_media(database, media_id, {**region, "left": 60})
+            with self.assertRaises(ImportCommandError) as wrong_fingerprint:
+                preview_input_media(image, region, "0" * 64)
+            self.assertEqual(wrong_fingerprint.exception.code, "SOURCE_FINGERPRINT_MISMATCH")
             destination = directory / "copy.png"
             result = export_media_original(database, media_id, str(destination))
             self.assertEqual(result["sha256"], hashlib.sha256(original).hexdigest())

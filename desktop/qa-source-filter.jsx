@@ -4,6 +4,7 @@ import { AnalysesWorkspace } from './src/AnalysesWorkspace';
 import { ProjectOverview, ProjectSearch } from './src/ProjectNavigation';
 import { PlotWorkspace } from './src/PlotWorkspace';
 import { SampleWorkspace } from './src/SampleWorkspace';
+import { MediaViewer } from './src/MediaWorkspace';
 import './src/styles.css';
 const sources = ['11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'];
 const analyses = sources.flatMap((id, index) => Array.from({length: 5}, (_, row) => {
@@ -92,10 +93,40 @@ const qaSample = {
 };
 const loadQaSamples = async () => [qaSample];
 const loadQaSample = async () => qaSample;
+function PrecisionFixture() {
+  const [point, setPoint] = React.useState(null);
+  const image = React.useMemo(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1600;
+    canvas.height = 1000;
+    const context = canvas.getContext("2d");
+    for (let y = 0; y < canvas.height; y += 18) {
+      for (let x = 0; x < canvas.width; x += 18) {
+        context.fillStyle = ['#334849', '#607576', '#97a19a', '#c4c4a3'][(x / 18 + y / 18) % 4];
+        context.fillRect(x, y, 18, 18);
+      }
+    }
+    const preview = document.createElement("canvas");
+    preview.width = 400;
+    preview.height = 250;
+    preview.getContext("2d").drawImage(canvas, 0, 0, 400, 250);
+    return { canvas, width_px: canvas.width, height_px: canvas.height, preview_url: preview.toDataURL("image/jpeg") };
+  }, []);
+  const loadRegion = async (region) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = region.width;
+    canvas.height = region.height;
+    canvas.getContext("2d").drawImage(image.canvas, region.left, region.top, region.width, region.height,
+      0, 0, region.width, region.height);
+    return { region, preview_url: canvas.toDataURL() };
+  };
+  return <MediaViewer image={image} loadRegion={loadRegion} onPlace={setPoint}
+    annotations={point ? [{ ...point, id: "qa-point", label: "P-01" }] : []} />;
+}
 createRoot(document.getElementById('root')).render(navigationMode === 'overview'
   ? <ProjectOverview load={qaOverview} project={project} selectionCount={1} onSource={()=>{}} onGroup={()=>{}} />
   : navigationMode === 'search'
     ? <ProjectSearch seed={{mineral:'Апатит'}} queryProject={qaSearch} selectionCount={1} onAddSelection={()=>{}} onOpenAnalysis={()=>{}} />
     : navigationMode === 'plot' ? <PlotFixture /> : navigationMode === 'sample'
       ? <SampleWorkspace loadSamples={loadQaSamples} loadSample={loadQaSample} onOpenAnalyses={()=>{}} />
-      : <RangeFixture />);
+      : navigationMode === 'precision' ? <PrecisionFixture /> : <RangeFixture />);

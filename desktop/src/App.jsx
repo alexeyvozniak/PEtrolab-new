@@ -555,7 +555,7 @@ export function App() {
           saveContext={async (id, context, revision) => unwrap(await saveSampleContext(databasePath, id, context, revision))}
           addNote={async (id, author, body) => unwrap(await addSampleNote(databasePath, id, author, body))}
           onImportMedia={databasePath && desktopRuntimeAvailable ? () => setScreen("Импорт изображений") : undefined}
-          previewMedia={async (id) => unwrap(await previewProjectMedia(databasePath, id))}
+          previewMedia={async (id, region) => unwrap(await previewProjectMedia(databasePath, id, region))}
           exportOriginal={async (image) => {
             const destination = await pickMediaExportPath(image.display_name);
             return destination ? unwrap(await exportMediaOriginal(databasePath, image.media_asset_id, destination)) : null;
@@ -577,7 +577,7 @@ export function App() {
         {screen === "Импорт изображений" && <MediaImport actions={{
           pick: pickMediaFiles, samples: loadSamples, sample: loadSample,
           inspect: async (paths) => unwrap(await inspectMediaFiles(paths)),
-          preview: async (path) => unwrap(await previewMediaFile(path)),
+          preview: async (path, region, fingerprint) => unwrap(await previewMediaFile(path, region, fingerprint)),
           plan: async (assignments) => unwrap(await draftMediaImport(databasePath, assignments)),
           commit: async (plan) => unwrap(await commitMediaImport(databasePath, plan)),
         }} onCancel={() => setScreen("Изображения")} onDone={(result) => {

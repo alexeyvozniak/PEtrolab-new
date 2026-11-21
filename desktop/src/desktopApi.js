@@ -104,15 +104,17 @@ export const exportPublication = (projectDatabasePath, name, items, fingerprint,
 });
 export const pickMediaExportPath = (name) => desktopInvoke("pick_media_export_path", { name });
 export const inspectMediaFiles = (paths) => invokePetrolab("media.inspect_sources", { source_paths: paths });
-export const previewMediaFile = (path) => invokePetrolab("media.preview_input", { source_path: path });
+export const previewMediaFile = (path, region, fingerprint) => invokePetrolab("media.preview_input", {
+  source_path: path, region, expected_fingerprint: fingerprint,
+});
 export const draftMediaImport = (projectDatabasePath, assignments) => invokePetrolab("media.import.plan", {
   project_database_path: projectDatabasePath, assignments,
 });
 export const commitMediaImport = (projectDatabasePath, plan) => invokePetrolab("media.import.apply", {
   project_database_path: projectDatabasePath, plan,
 });
-export const previewProjectMedia = (projectDatabasePath, mediaAssetId) => invokePetrolab("media.preview", {
-  project_database_path: projectDatabasePath, media_asset_id: mediaAssetId,
+export const previewProjectMedia = (projectDatabasePath, mediaAssetId, region) => invokePetrolab("media.preview", {
+  project_database_path: projectDatabasePath, media_asset_id: mediaAssetId, region,
 });
 export const exportMediaOriginal = (projectDatabasePath, mediaAssetId, outputPath) => invokePetrolab("media.export_original", {
   project_database_path: projectDatabasePath, media_asset_id: mediaAssetId, output_path: outputPath,

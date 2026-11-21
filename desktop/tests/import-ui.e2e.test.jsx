@@ -3,7 +3,28 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AnalysesWorkspace } from "../src/AnalysesWorkspace";
+import { MediaViewer } from "../src/MediaWorkspace";
 import { useState } from "react";
+
+test("thin section precision zoom loads original pixels and places in original coordinates", async () => {
+  const loadRegion = vi.fn(async (region) => ({ region, preview_url: "/region.png" }));
+  const onPlace = vi.fn();
+  const { container } = render(<MediaViewer image={{ width_px: 1000, height_px: 500, preview_url: "/overview.jpg" }}
+    annotations={[]} loadRegion={loadRegion} onPlace={onPlace} />);
+  const viewport = container.querySelector(".media-viewer");
+  const scene = container.querySelector(".media-scene");
+  const svg = screen.getByLabelText("Аннотации изображения");
+  const rect = () => ({ left: 0, top: 0, width: parseInt(scene.style.width) * 4, height: parseInt(scene.style.width) * 2 });
+  Object.defineProperties(viewport, { clientWidth: { value: 400 }, clientHeight: { value: 200 } });
+  scene.getBoundingClientRect = rect;
+  svg.getBoundingClientRect = () => ({ ...rect(), left: -viewport.scrollLeft, top: -viewport.scrollTop });
+  fireEvent.change(screen.getByRole("slider", { name: "Масштаб изображения" }), { target: { value: "2000" } });
+  expect(screen.getByText("Масштаб 2000%")).toBeTruthy();
+  await waitFor(() => expect(container.querySelector(".media-precision-region")).toBeTruthy());
+  expect(loadRegion).toHaveBeenLastCalledWith({ left: 474, top: 236, width: 52, height: 27 });
+  fireEvent(svg, new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 200, clientY: 100 }));
+  expect(onPlace).toHaveBeenCalledExactlyOnceWith({ kind: "point", x_px: 500, y_px: 250 });
+});
 
 function SelectionTestWorkspace(props) {
   const [selectedIds, setSelectedIds] = useState([]);

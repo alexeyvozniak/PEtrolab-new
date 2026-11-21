@@ -372,8 +372,12 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "analytical_point.link.set": lambda params: {"result": change_point_link(
         _project_database_path(params), params.get("point_id"), params.get("analysis_id"), params.get("actor"), params.get("link_type"),
     )},
-    "media.preview_input": lambda params: {"result": preview_input_media(_source_path(params))},
-    "media.preview": lambda params: {"result": preview_project_media(_project_database_path(params), params.get("media_asset_id"))},
+    "media.preview_input": lambda params: {"result": preview_input_media(
+        _source_path(params), params.get("region"), params.get("expected_fingerprint"),
+    )},
+    "media.preview": lambda params: {"result": preview_project_media(
+        _project_database_path(params), params.get("media_asset_id"), params.get("region"),
+    )},
     "media.export_original": lambda params: {"result": export_media_original(
         _project_database_path(params), params.get("media_asset_id"), params.get("output_path"),
     )},

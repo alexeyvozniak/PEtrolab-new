@@ -33,30 +33,55 @@ def _asset_source(database_path, media_id):
     return asset, source
 
 
-def _thumbnail(source, expected_fingerprint):
+def _preview_image(source, expected_fingerprint, region=None):
     try:
         if _sha256(source) != expected_fingerprint:
             _fail("SOURCE_FINGERPRINT_MISMATCH", "Изображение изменилось. Предпросмотр остановлен.")
         with Image.open(source) as image:
-            image.thumbnail((1400, 1400))
-            converted = image.convert("RGB")
             buffer = BytesIO()
-            converted.save(buffer, format="JPEG", quality=88)
+            if region is None:
+                image.thumbnail((1400, 1400))
+                image.convert("RGB").save(buffer, format="JPEG", quality=88)
+            else:
+                left, top, width, height = _preview_region(region, image.width, image.height)
+                crop = image.crop((left, top, left + width, top + height))
+                if crop.mode not in {"L", "I;16", "RGB", "RGBA"}:
+                    crop = crop.convert("RGBA")
+                crop.save(buffer, format="PNG", compress_level=2)
         if _sha256(source) != expected_fingerprint:
             _fail("SOURCE_FINGERPRINT_MISMATCH", "Изображение изменилось во время предпросмотра.")
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
         _fail("MEDIA_PREVIEW_FAILED", "Создать предпросмотр изображения не удалось.")
-    return "data:image/jpeg;base64," + b64encode(buffer.getvalue()).decode("ascii")
+    content_type = "jpeg" if region is None else "png"
+    return f"data:image/{content_type};base64," + b64encode(buffer.getvalue()).decode("ascii")
 
 
-def preview_input_media(source_path):
+def _preview_region(region, image_width, image_height):
+    keys = ("left", "top", "width", "height")
+    if not isinstance(region, dict) or set(region) != set(keys) or any(type(region[key]) is not int for key in keys):
+        raise ValueError("Недопустимая область предпросмотра.")
+    left, top, width, height = (region[key] for key in keys)
+    if not (0 <= left < image_width and 0 <= top < image_height
+            and 1 <= width <= min(1400, image_width - left)
+            and 1 <= height <= min(1400, image_height - top)):
+        raise ValueError("Область предпросмотра выходит за границы изображения.")
+    return left, top, width, height
+
+
+def preview_input_media(source_path, region=None, expected_fingerprint=None):
     image = inspect_media_source(source_path)
-    return {**image, "preview_url": _thumbnail(Path(image["source_path"]), image["source_fingerprint"])}
+    if region is not None and expected_fingerprint != image["source_fingerprint"]:
+        _fail("SOURCE_FINGERPRINT_MISMATCH", "Изображение изменилось. Добавьте файл заново.")
+    preview = _preview_image(Path(image["source_path"]), image["source_fingerprint"], region)
+    return {**image, "preview_url": preview} if region is None else {"region": region, "preview_url": preview}
 
 
-def preview_project_media(database_path, media_id):
+def preview_project_media(database_path, media_id, region=None):
     asset, source = _asset_source(database_path, media_id)
-    return {"preview_url": _thumbnail(source, asset["source_fingerprint_sha256"]),
+    preview = _preview_image(source, asset["source_fingerprint_sha256"], region)
+    if region is not None:
+        return {"region": region, "preview_url": preview}
+    return {"preview_url": preview,
             "width_px": asset["width_px"], "height_px": asset["height_px"],
             "annotations": _annotations(database_path, media_id)}
 
