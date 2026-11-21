@@ -148,13 +148,26 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
   const [drawing, setDrawing] = useState(false);
   const [shape, setShape] = useState("rectangle");
   const inspectPoint = Boolean(pointLinks && focus?.analytical_point_id);
-  const [renderOptions, setRenderOptions] = useState({ points: true, regions: true, labels: true });
+  const [renderOptions, setRenderOptions] = useState({ points: true, regions: true, labels: true, scale_bar: false, legend: false });
+  const [scaleUnit, setScaleUnit] = useState("px");
+  const [referencePixels, setReferencePixels] = useState("");
+  const [referenceLength, setReferenceLength] = useState("");
+  const [excludedAnnotations, setExcludedAnnotations] = useState([]);
+  const calibrated = renderOptions.scale_bar && scaleUnit !== "px";
+  const calibrationReady = Number(referencePixels) > 0 && Number(referencePixels) <= image?.width_px
+    && Number.isFinite(Number(referenceLength)) && Number(referenceLength) > 0;
   const open = async (id) => {
     setOpenId(id);
     setImage(null);
     setFocus(null);
     setDrawing(false);
     setAttachment(false);
+    if (id !== openId) {
+      setScaleUnit("px");
+      setReferencePixels("");
+      setReferenceLength("");
+      setExcludedAnnotations([]);
+    }
     setStatus(null);
     setPending(true);
     try { setImage(await previewMedia(id)); }
@@ -217,8 +230,9 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
         </section>}
         <div>
           <MediaViewer key={openId} image={image} loadRegion={(region) => previewMedia(openId, region)} focus={focus}
-            onPlace={drawing && !pending ? saveRegion : undefined} shape={shape} annotations={image.annotations.map((item) => ({
-            ...item, id: item.spatial_annotation_id, kind: item.geometry_kind, label: item.point_name || item.label,
+            onPlace={drawing && !pending ? saveRegion : undefined} shape={shape} annotations={image.annotations.filter((item) => !exportRendered ||
+              (renderOptions[item.geometry_kind === "point" ? "points" : "regions"] && !excludedAnnotations.includes(item.spatial_annotation_id))).map((item) => ({
+            ...item, id: item.spatial_annotation_id, kind: item.geometry_kind, label: !exportRendered || renderOptions.labels ? item.point_name || item.label : null,
           }))} />
         </div>
         {attachment && focus && !drawing && <MediaAttachment key={focus.spatial_annotation_id} target={focus}
@@ -228,11 +242,36 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
       </div>
       {exportRendered && <fieldset className="media-export-options">
         <legend>PNG с метками и подписями</legend>
-        {Object.entries({ points: "Точки", regions: "Области", labels: "Подписи" }).map(([key, label]) =>
+        {Object.entries({ points: "Точки", regions: "Области", labels: "Подписи", scale_bar: "Масштабная линейка", legend: "Легенда" }).map(([key, label]) =>
           <label key={key}><input type="checkbox" checked={renderOptions[key]} disabled={pending}
             onChange={(event) => setRenderOptions({ ...renderOptions, [key]: event.target.checked })} /> {label}</label>)}
-        <button className="outline-button" type="button" disabled={pending}
-          onClick={() => save(exportRendered, images.find(({ media_asset_id }) => media_asset_id === openId), renderOptions)}>
+        {image.annotations.length > 0 && <details className="media-export-annotations">
+          <summary>Выбрать метки</summary>
+          {image.annotations.map((item) => <label key={item.spatial_annotation_id}>
+            <input type="checkbox" disabled={pending || !renderOptions[item.geometry_kind === "point" ? "points" : "regions"]}
+              checked={!excludedAnnotations.includes(item.spatial_annotation_id)} onChange={(event) => setExcludedAnnotations((previous) =>
+                event.target.checked ? previous.filter((id) => id !== item.spatial_annotation_id) : [...previous, item.spatial_annotation_id])} />
+            {item.point_name || item.label || "Метка"}
+          </label>)}
+        </details>}
+        {renderOptions.scale_bar && <div className="media-export-scale sample-form">
+          <label>Единица линейки<select value={scaleUnit} disabled={pending} onChange={(event) => setScaleUnit(event.target.value)}>
+            <option value="px">Пиксели оригинала</option><option value="µm">мкм</option><option value="mm">мм</option><option value="cm">см</option>
+          </select></label>
+          {calibrated && <>
+            <label>Известная горизонтальная длина<input type="number" step="any" min="0" value={referenceLength} disabled={pending}
+              onChange={(event) => setReferenceLength(event.target.value)} /></label>
+            <label>Длина этого отрезка в пикселях оригинала<input type="number" step="any" min="0" max={image.width_px} value={referencePixels} disabled={pending}
+              onChange={(event) => setReferencePixels(event.target.value)} /></label>
+          </>}
+        </div>}
+        <button className="outline-button" type="button" disabled={pending || (calibrated && !calibrationReady)}
+          onClick={() => save(exportRendered, images.find(({ media_asset_id }) => media_asset_id === openId), {
+            ...renderOptions,
+            ...(excludedAnnotations.length > 0 ? { annotation_ids: image.annotations.map(({ spatial_annotation_id }) => spatial_annotation_id)
+              .filter((id) => !excludedAnnotations.includes(id)) } : {}),
+            ...(calibrated ? { calibration: { reference_length: Number(referenceLength), reference_pixels: Number(referencePixels), unit: scaleUnit } } : {}),
+          })}>
           Выгрузить с разметкой
         </button>
       </fieldset>}
@@ -434,7 +473,7 @@ export function MediaImport({ actions, onCancel, onDone }) {
           <button className="outline-button" type="button" aria-pressed={activePath === item.source_path} disabled={pending || Boolean(exceptionPreview)}
             onClick={() => pickPreview(item)}>{item.display_name}</button>
           <label>Тип <select value={item.media_type} disabled={pending} onChange={(event) => changeFile(item.source_path, { media_type: event.target.value })}>
-            {["BSE", "PPL", "XPL", "Аналитические точки", "Другое"].map((type) => <option key={type}>{type}</option>)}
+            {["BSE", "PPL", "XPL", "Полевое фото", "Ручной образец", "Аналитические точки", "Другое"].map((type) => <option key={type}>{type}</option>)}
           </select></label>
           <button className="outline-button" type="button" disabled={pending || Boolean(exceptionPreview)} onClick={() => {
             if (item.source_path === activePath) { setActivePath(""); setImage(null); }

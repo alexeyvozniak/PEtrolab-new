@@ -521,7 +521,7 @@ test("numeric filters distinguish blanks, detection limits and zero without clea
   expect(table.getByRole("checkbox", { name: "Выбрать A-HIGH" }).checked).toBe(true);
 }, 20000);
 
-test("imports a thin-section image, previews it and exports a byte-for-byte original without annotations", async () => {
+test("opens field context and exports a byte-for-byte photo original and a decorated copy without annotations", async () => {
   const source = join(folder, "ppl.png");
   const originalImage = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAAUElEQVR4nM3OMQEAIAzAsFJleEAI/j/+GaBRkLXvoURiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJMbfgekBmXUBQky7dlsAAAAASUVORK5CYII=", "base64");
   await writeFile(source, originalImage);
@@ -532,24 +532,43 @@ test("imports a thin-section image, previews it and exports a byte-for-byte orig
   await user.click(await enabledButton("Импорт изображений"));
   await user.click(await enabledButton("Выбрать изображения"));
   await user.selectOptions(await screen.findByLabelText("Физический образец"), "new");
-  await user.type(screen.getByLabelText("Имя нового образца"), "КИВ-17");
+  await user.type(screen.getByLabelText("Имя нового образца"), "SM-01B");
   await user.type(screen.getByLabelText("Имя шлифа"), "TS1");
   await user.click(await enabledButton("ppl.png"));
   await screen.findByRole("img", { name: "Изображение шлифа" });
-  await user.selectOptions(screen.getByLabelText("Тип"), "PPL");
+  await user.selectOptions(screen.getByLabelText("Тип"), "Полевое фото");
   await user.click(await enabledButton("Проверить импорт изображений"));
   await screen.findByText("В пакете есть изображения без размещённых точек.");
   await user.click(await enabledButton("Импортировать изображения"));
-  await screen.findByRole("heading", { name: "Образец КИВ-17" });
+  await screen.findByRole("heading", { name: "Образец SM-01B" });
+  await user.click(within(screen.getByRole("navigation", { name: "Разделы образца" })).getByRole("button", { name: "Обзор" }));
+  await user.click(await enabledButton("Редактировать паспорт"));
+  await user.type(screen.getByLabelText("Местонахождение или обнажение"), "Северный массив · обнажение 12");
+  await user.type(screen.getByLabelText("Хранение"), "ящик 4, кассета B");
+  await user.click(await enabledButton("Сохранить паспорт"));
+  await screen.findByText("Северный массив · обнажение 12");
+  expect(screen.getByText("ящик 4, кассета B")).toBeTruthy();
+  await user.type(screen.getByLabelText("Автор заметки"), "Иванов");
+  await user.type(screen.getByLabelText("Текст заметки"), "Свежая поверхность отбора.");
+  await user.click(await enabledButton("Добавить заметку"));
+  await screen.findByText("Свежая поверхность отбора.");
   await user.click(await enabledButton("Открыть"));
   const preview = await screen.findByRole("img", { name: "Изображение шлифа" });
   expect(preview.src.startsWith("data:image/jpeg;base64,")).toBe(true);
   await user.click(await enabledButton("Выгрузить оригинал"));
   await screen.findByText(/Сохранено: .*copy-ppl.png/);
   expect(await readFile(join(folder, "copy-ppl.png"))).toEqual(originalImage);
+  await user.click(screen.getByRole("checkbox", { name: "Масштабная линейка", exact: true }));
+  await user.click(screen.getByRole("checkbox", { name: "Легенда", exact: true }));
+  await user.selectOptions(screen.getByLabelText("Единица линейки"), "cm");
+  expect(screen.getByRole("button", { name: "Выгрузить с разметкой" }).disabled).toBe(true);
+  await user.type(screen.getByLabelText("Известная горизонтальная длина"), "4");
+  await user.type(screen.getByLabelText("Длина этого отрезка в пикселях оригинала"), "24");
   await user.click(await enabledButton("Выгрузить с разметкой"));
   await screen.findByText(/Сохранено: .*copy-ppl-annotated.png/);
-  expect((await readFile(join(folder, "copy-ppl-annotated.png"))).includes(Buffer.from("PetroLab"))).toBe(true);
+  const rendered = await readFile(join(folder, "copy-ppl-annotated.png"));
+  expect(rendered.includes(Buffer.from('"rendered_scale": {"pixels": 12, "length": 2.0, "unit": "cm"}'))).toBe(true);
+  expect(rendered.includes(Buffer.from('"rendered_legend": {"points": 0, "regions": 0}'))).toBe(true);
   expect(await readFile(source)).toEqual(originalImage);
 }, 20000);
 

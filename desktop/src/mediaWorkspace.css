@@ -35,3 +35,8 @@
 .media-zoom { display: inline-flex; align-items: center; gap: 8px; margin-top: 6px; }
 .media-zoom input { accent-color: #267048; }
 .media-export-options { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; border: 1px solid #dae5dc; }
+.media-export-scale { flex-basis: 100%; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); }
+.media-export-scale input { min-width: 0; }
+.media-export-annotations { flex-basis: 100%; }
+.media-export-annotations label { display: inline-flex; align-items: center; margin-right: 10px; }
+.media-export-options input[type="checkbox"] { accent-color: #267048; }

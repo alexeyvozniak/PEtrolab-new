@@ -4,6 +4,7 @@ from base64 import b64encode
 from contextlib import closing
 from io import BytesIO
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -133,18 +134,93 @@ def _publish_new_file(temporary, destination):
         os.link(temporary, destination)
 
 
+def _export_scale(rendered, calibration):
+    pixels = max(1, rendered.width // 4)
+    if calibration is None:
+        return {"pixels": pixels, "length": pixels, "unit": "px"}
+    if (not isinstance(calibration, dict) or set(calibration) != {"reference_pixels", "reference_length", "unit"}
+            or calibration["unit"] not in ("µm", "mm", "cm")):
+        raise ValueError("scale_calibration")
+    reference_pixels, reference_length = calibration["reference_pixels"], calibration["reference_length"]
+    if (type(reference_pixels) not in (int, float) or type(reference_length) not in (int, float)
+            or not (0 < reference_pixels <= rendered.width) or not (0 < reference_length < math.inf)):
+        _fail("INVALID_MEDIA_CALIBRATION", "Введите положительную длину и ширину отрезка на оригинале в пикселях.")
+    distance = pixels * (reference_length / reference_pixels)
+    if not 0 < distance < math.inf:
+        _fail("INVALID_MEDIA_CALIBRATION", "Заданная калибровка выходит за числовой диапазон.")
+    return {"pixels": pixels, "length": distance, "unit": calibration["unit"]}
+
+
+def _draw_export_key(rendered, font, line, scale, legend):
+    if not scale and legend is None:
+        return rendered
+    draw = ImageDraw.Draw(rendered)
+    padding = max(4, line * 4)
+    marker = max(5, line * 4)
+    _, _, _, text_height = draw.textbbox((0, 0), "Аg", font=font)
+    row_height = max(text_height, marker) + padding
+    legend_rows = []
+    if legend is not None:
+        if legend["points"]:
+            legend_rows.append(("point", f"Точки: {legend['points']}"))
+        if legend["regions"]:
+            legend_rows.append(("region", f"Области: {legend['regions']}"))
+        if not legend_rows:
+            legend_rows.append((None, "Без аннотаций"))
+    scale_label = f"{scale['length']:.4g} {scale['unit']}" if scale else ""
+    widths = [float(draw.textlength(label, font=font)) + (marker + padding if kind else 0) for kind, label in legend_rows]
+    if scale:
+        widths.append(max(scale["pixels"], float(draw.textlength(scale_label, font=font))))
+    panel_width = math.ceil(max(widths)) + 2 * padding
+    panel_height = len(legend_rows) * row_height + 2 * padding + (row_height + marker + padding if scale else 0)
+    if panel_width + 2 * padding <= rendered.width and panel_height * 2 <= rendered.height:
+        left, top = padding, rendered.height - panel_height - padding
+    else:
+        left, top = 0, rendered.height
+        extended = Image.new("RGB", (max(rendered.width, panel_width), rendered.height + panel_height), "#16231b")
+        extended.paste(rendered, (0, 0))
+        rendered = extended
+        draw = ImageDraw.Draw(rendered)
+    draw.rectangle((left, top, left + panel_width - 1, top + panel_height - 1), fill="#16231b")
+    x, y = left + padding, top + padding
+    for kind, label in legend_rows:
+        if kind:
+            shape = draw.ellipse if kind == "point" else draw.rectangle
+            shape((x, y + padding, x + marker, y + padding + marker), outline="#a5edaf", width=line)
+        draw.text((x + (marker + padding if kind else 0), y), label, font=font, fill="white")
+        y += row_height
+    if scale:
+        draw.text((x, y), scale_label, font=font, fill="white")
+        y += row_height
+        end = x + scale["pixels"]
+        draw.line((x, y, end, y), fill="white", width=line)
+        for endpoint in (x, end):
+            draw.line((endpoint, y - marker // 2, endpoint, y + marker // 2), fill="white", width=line)
+    return rendered
+
+
 def export_media_rendered(database_path, media_id, output_path, options):
     if not isinstance(output_path, str) or not output_path:
         raise ValueError("output_path")
-    if (not isinstance(options, dict) or set(options) != {"points", "regions", "labels"}
-            or any(type(value) is not bool for value in options.values())):
+    required = {"points", "regions", "labels"}
+    switches = required | {"legend", "scale_bar"}
+    if (not isinstance(options, dict) or not required <= options.keys() or options.keys() - switches - {"calibration", "annotation_ids"}
+            or any(type(options[key]) is not bool for key in switches & options.keys())
+            or (options.get("calibration") is not None and not options.get("scale_bar"))):
         raise ValueError("render_options")
     asset, source = _asset_source(database_path, media_id)
     destination = Path(output_path)
     if destination.suffix.lower() != ".png":
         _fail("INVALID_MEDIA_EXPORT_PATH", "Изображение с разметкой сохраняется как отдельный PNG.")
-    annotations = [item for item in _annotations(database_path, media_id)
-                   if options["points" if item["geometry_kind"] == "point" else "regions"]]
+    available = _annotations(database_path, media_id)
+    selected = options.get("annotation_ids", [item["spatial_annotation_id"] for item in available])
+    if not isinstance(selected, list) or not all(isinstance(item, str) for item in selected):
+        raise ValueError("annotation_ids")
+    selected = set(selected)
+    if not selected <= {item["spatial_annotation_id"] for item in available}:
+        _fail("MEDIA_ANNOTATION_UNAVAILABLE", "Набор меток изменился. Откройте изображение заново.")
+    annotations = [item for item in available if item["spatial_annotation_id"] in selected
+                   and options["points" if item["geometry_kind"] == "point" else "regions"]]
     temporary = None
     try:
         if _sha256(source) != asset["source_fingerprint_sha256"]:
@@ -177,10 +253,18 @@ def export_media_rendered(database_path, media_id, output_path, options):
             if options["labels"] and label:
                 draw.text((x + 2 * radius, y), label, font=font, fill="#ffffff",
                           stroke_width=line, stroke_fill="#152318")
+        scale = _export_scale(rendered, options.get("calibration")) if options.get("scale_bar") else None
+        legend = None
+        if options.get("legend"):
+            count = sum(item["geometry_kind"] == "point" for item in annotations)
+            legend = {"points": count, "regions": len(annotations) - count}
+        rendered = _draw_export_key(rendered, font, line, scale, legend)
         manifest = {
             "version": 1, "media_asset_id": media_id, "source_sha256": asset["source_fingerprint_sha256"],
             "annotation_ids": [item["spatial_annotation_id"] for item in annotations], "options": options,
         }
+        if scale or legend is not None:
+            manifest.update(version=2, rendered_scale=scale, rendered_legend=legend)
         metadata = PngImagePlugin.PngInfo()
         metadata.add_itxt("PetroLab", json.dumps(manifest, ensure_ascii=False))
         with NamedTemporaryFile(dir=destination.parent, suffix=".media.tmp", delete=False) as stream:

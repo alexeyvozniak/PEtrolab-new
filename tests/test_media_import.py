@@ -201,6 +201,21 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(change_media_link(database, point_id, saved_photo, True)["media_link_id"], point_link)
             area_after = next(row for row in preview_project_media(database, asset_id)["annotations"] if row["spatial_annotation_id"] == area_id)
             self.assertEqual((area_after["geometry_kind"], area_after["x_px"], area_after["width_px"]), ("square", 3.5, 4))
+            destination = folder / "publication.png"
+            settings = {"points": True, "regions": True, "labels": True, "legend": True, "scale_bar": True,
+                        "calibration": {"reference_pixels": 6, "reference_length": 30, "unit": "µm"}}
+            publication = export_media_rendered(database, asset_id, str(destination), settings)
+            self.assertEqual(set(publication["annotation_ids"]), {point_id, area_id})
+            self.assertEqual(publication["rendered_scale"], {"pixels": 3, "length": 15.0, "unit": "µm"})
+            self.assertEqual(publication["rendered_legend"], {"points": 1, "regions": 1})
+            with Image.open(destination) as rendered:
+                manifest = json.loads(rendered.info["PetroLab"])
+                self.assertEqual(manifest["source_sha256"], hashes[original])
+                self.assertEqual(manifest["options"], settings)
+                self.assertGreater(rendered.height, 8)
+            subset = export_media_rendered(database, asset_id, str(folder / "area-only.png"), {**settings, "annotation_ids": [area_id]})
+            self.assertEqual(subset["annotation_ids"], [area_id])
+            self.assertEqual(subset["rendered_legend"], {"points": 0, "regions": 1})
             with closing(open_project(database)) as connection, connection:
                 connection.execute("CREATE TRIGGER reject_media_link BEFORE INSERT ON media_link BEGIN SELECT RAISE(ABORT, 'test link failure'); END")
             with self.assertRaisesRegex(sqlite3.IntegrityError, "test link failure"):

@@ -93,7 +93,7 @@ const qaSample = {
 };
 const loadQaSamples = async () => [qaSample];
 const loadQaSample = async () => qaSample;
-function PrecisionFixture({ reopen = false, importBatch = false }) {
+function PrecisionFixture({ reopen = false, importBatch = false, exportPhoto = false }) {
   const [point, setPoint] = React.useState(null);
   const [selectedIds, setSelectedIds] = React.useState([]);
   const savedLinks = React.useRef([]);
@@ -125,6 +125,16 @@ function PrecisionFixture({ reopen = false, importBatch = false }) {
       0, 0, region.width, region.height);
     return { region, preview_url: canvas.toDataURL() };
   };
+  if (exportPhoto) {
+    const sample = { ...qaSample, images: [{ media_asset_id: 'field', display_name: 'SM-01B_field.png', media_type: 'Полевое фото',
+      width_px: image.width_px, height_px: image.height_px }] };
+    const annotations = [{ spatial_annotation_id: 'point', geometry_kind: 'point', point_name: 'P-01', x_px: 400, y_px: 340 },
+      { spatial_annotation_id: 'area', geometry_kind: 'rectangle', label: 'Z-01', x_px: 850, y_px: 420, width_px: 150, height_px: 80 }];
+    return <SampleWorkspace loadSamples={async () => [sample]} loadSample={async () => sample}
+      previewMedia={(_, region) => region ? loadRegion(region) : Promise.resolve({ ...image, annotations })}
+      exportOriginal={async () => ({ output_path: 'SM-01B_field.png' })}
+      exportRendered={async () => ({ output_path: 'SM-01B_field-annotated.png' })} />;
+  }
   if (importBatch) {
     const batch = ['BSE', 'PPL', 'XPL'].map((type) => ({ source_path: `${type}.png`, display_name: `${type}.png`, source_fingerprint: type }));
     const samples = [{ sample_id: 's2', sample_name: 'KIV-2' }, { sample_id: 's5', sample_name: 'KIV-5' }];
@@ -184,4 +194,5 @@ createRoot(document.getElementById('root')).render(navigationMode === 'overview'
       ? <SampleWorkspace loadSamples={loadQaSamples} loadSample={loadQaSample} onOpenAnalyses={()=>{}} />
       : navigationMode === 'precision' || navigationMode === 'precision-reopen'
         ? <PrecisionFixture reopen={navigationMode === 'precision-reopen'} />
-        : navigationMode === 'media-import' ? <PrecisionFixture importBatch /> : <RangeFixture />);
+        : navigationMode === 'media-import' ? <PrecisionFixture importBatch />
+          : navigationMode === 'media-export' ? <PrecisionFixture exportPhoto /> : <RangeFixture />);
