@@ -44,14 +44,22 @@ $installArgs = @(
 
 $appProcess = $null
 $serviceProcesses = @()
+$installedService = $null
 $installed = $false
-$ready = $false
 $previousInstalled = $false
 $baselinePath = if ($BaselineMsi) { (Resolve-Path -LiteralPath $BaselineMsi).Path } else { $null }
 $database = $null
 $upgradeState = Join-Path $env:RUNNER_TEMP "PetroLab-project-$runId.json"
 $env:PETROLAB_PROJECT_DATABASE = $null
 $env:PETROLAB_PYTHON = $null
+
+function Get-InstalledServiceProcesses {
+    if ($installedService) {
+        Get-CimInstance Win32_Process -Filter "Name = 'petrolab-service.exe'" |
+            Where-Object { $_.ExecutablePath -eq $installedService } |
+            ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
+    }
+}
 
 try {
     if ($baselinePath) {
@@ -158,20 +166,33 @@ try {
         throw "PetroLab opened but did not create its fresh project SQLite database."
     }
 
-    Write-Host "Installed PetroLab smoke test passed: window, scientific service and project database are ready."
-    $ready = $true
+    Write-Host "PetroLab window, scientific service and project database are ready."
+    if (-not $appProcess.CloseMainWindow() -or -not $appProcess.WaitForExit(15000)) {
+        throw "Installed PetroLab did not exit after closing its main window."
+    }
+
+    # The bundled PyInstaller loader and its worker are separate processes.
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while (@(Get-InstalledServiceProcesses).Count -gt 0) {
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "Installed scientific service stayed active after closing PetroLab."
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    $beforeUninstall = (Get-FileHash -Algorithm SHA256 -LiteralPath $database).Hash
 }
 finally {
     if ($null -ne $appProcess -and -not $appProcess.HasExited) {
         Stop-Process -Id $appProcess.Id -Force -ErrorAction SilentlyContinue
         $appProcess.WaitForExit(5000) | Out-Null
     }
-    foreach ($serviceProcess in $serviceProcesses) {
+    foreach ($serviceProcess in @(Get-InstalledServiceProcesses)) {
         Stop-Process -Id $serviceProcess.Id -Force -ErrorAction SilentlyContinue
+        $serviceProcess.WaitForExit(5000) | Out-Null
     }
 
     if ($installed) {
-        if ($ready) { $beforeUninstall = (Get-FileHash -Algorithm SHA256 -LiteralPath $database).Hash }
         $uninstallArgs = @("/x", ('"{0}"' -f $msi.FullName), "/qn", "/norestart")
         $uninstaller = Start-Process -FilePath "msiexec.exe" -WindowStyle Hidden -ArgumentList $uninstallArgs -Wait -PassThru
         $uninstallStatus = $uninstaller.ExitCode
@@ -190,3 +211,4 @@ if (-not $database -or -not (Test-Path -LiteralPath $database)) {
 if ((Get-FileHash -Algorithm SHA256 -LiteralPath $database).Hash -ne $beforeUninstall) {
     throw "Uninstall changed the persistent project database."
 }
+Write-Host "Installed PetroLab smoke test passed: startup, shutdown and uninstall preserved the project."
