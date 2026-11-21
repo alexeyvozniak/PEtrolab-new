@@ -4,6 +4,7 @@ import { AnalysesWorkspace } from './src/AnalysesWorkspace';
 import { ProjectOverview, ProjectSearch } from './src/ProjectNavigation';
 import { PlotWorkspace } from './src/PlotWorkspace';
 import { SampleWorkspace } from './src/SampleWorkspace';
+import { PublicationWorkspace } from './src/PublicationWorkspace';
 import { MediaImport, MediaViewer } from './src/MediaWorkspace';
 import './src/styles.css';
 const sources = ['11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'];
@@ -186,6 +187,21 @@ function PrecisionFixture({ reopen = false, importBatch = false, exportPhoto = f
   return <MediaViewer image={image} loadRegion={loadRegion} onPlace={setPoint}
     annotations={point ? [{ ...point, id: "qa-point", label: "P-01" }] : []} />;
 }
+const loadQaPublication = async () => ({ groups: [], layouts: [], runs: [], formula_runs: [
+  { id: 'formula-current', method_name: 'Оливин на 4 атома кислорода', analysis_label: 'O1', method_version: '1.0.0', created_at: '2026-11-21' },
+  { id: 'formula-stale', method_name: 'Оливин на 4 атома кислорода', analysis_label: 'O2', method_version: '1.0.0', created_at: '2026-11-20' },
+] });
+function PublicationFixture() {
+  const [items, setItems] = React.useState([]);
+  const [name, setName] = React.useState('Северный массив');
+  return <PublicationWorkspace load={loadQaPublication} items={items} setItems={setItems} name={name} setName={setName}
+    check={async (_, selected) => {
+      if (selected.some(({ id }) => id === 'formula-stale')) throw new Error('Сохранённый расчёт устарел. Повторите расчёт перед экспортом.');
+      return { fingerprint: 'qa', manifest: { items: selected, analysis_count: 1, warnings: [], files: [
+        { path: 'materials/01-formula_run.json' }, { path: 'data/measurements.jsonl' }, { path: 'data/derived_values.csv' },
+      ] } };
+    }} exportZip={async () => ({ output_path: 'petrolab-package.zip' })} />;
+}
 createRoot(document.getElementById('root')).render(navigationMode === 'overview'
   ? <ProjectOverview load={qaOverview} project={project} selectionCount={1} onSource={()=>{}} onGroup={()=>{}} />
   : navigationMode === 'search'
@@ -195,4 +211,5 @@ createRoot(document.getElementById('root')).render(navigationMode === 'overview'
       : navigationMode === 'precision' || navigationMode === 'precision-reopen'
         ? <PrecisionFixture reopen={navigationMode === 'precision-reopen'} />
         : navigationMode === 'media-import' ? <PrecisionFixture importBatch />
-          : navigationMode === 'media-export' ? <PrecisionFixture exportPhoto /> : <RangeFixture />);
+          : navigationMode === 'media-export' ? <PrecisionFixture exportPhoto />
+            : navigationMode === 'publication' ? <PublicationFixture /> : <RangeFixture />);

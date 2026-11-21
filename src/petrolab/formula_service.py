@@ -130,13 +130,20 @@ def open_formula_run(database_path, run_id):
         return {**run, "status": "stale" if reasons else "current", "stale_reasons": reasons}
 
 
-def list_formula_runs(database_path, analysis_id):
-    _selection([analysis_id])
+def list_formula_runs(database_path, analysis_id=None):
+    if analysis_id is not None:
+        _selection([analysis_id])
     with closing(open_project(database_path)) as connection:
-        rows = connection.execute("""SELECT id, created_at, json_extract(definition_json, '$.method_id') AS method_id,
-                   json_extract(definition_json, '$.method_version') AS method_version
-            FROM calculation_run
-            WHERE json_extract(definition_json, '$.method_id') LIKE 'formula.%'
-              AND json_extract(definition_json, '$.analysis_id') = ?
-            ORDER BY created_at DESC, rowid DESC""", (analysis_id,))
-        return [dict(row) for row in rows]
+        rows = connection.execute("""SELECT r.id, r.created_at, json_extract(r.definition_json, '$.method_id') AS method_id,
+                   json_extract(r.definition_json, '$.method_version') AS method_version,
+                   json_extract(r.definition_json, '$.method_definition.name') AS method_name,
+                   a.analysis_id, a.identity_json
+            FROM calculation_run r JOIN analysis a ON a.analysis_id = json_extract(r.definition_json, '$.analysis_id')
+            WHERE json_extract(r.definition_json, '$.method_id') LIKE 'formula.%' AND (? IS NULL OR a.analysis_id = ?)
+            ORDER BY r.created_at DESC, r.rowid DESC""", (analysis_id, analysis_id))
+        results = []
+        for row in rows:
+            item = dict(row)
+            item["analysis_label"] = " · ".join(value for value in json.loads(item.pop("identity_json")) if value) or item["analysis_id"]
+            results.append(item)
+        return results

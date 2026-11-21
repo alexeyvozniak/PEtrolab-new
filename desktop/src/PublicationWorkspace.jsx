@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import "./publicationWorkspace.css";
 
-const KINDS = { work_group: "Рабочие группы", calculation_run: "Расчёты", plot_specification: "Раскладки" };
+const KINDS = { work_group: "Рабочие группы", calculation_run: "Кластеризация", formula_run: "Формулы минералов", plot_specification: "Раскладки" };
 
 export function PublicationWorkspace({ load, pickFigure, check, exportZip, items, setItems, name, setName }) {
   const [catalog, setCatalog] = useState(null);
@@ -35,6 +35,8 @@ export function PublicationWorkspace({ load, pickFigure, check, exportZip, items
       id: group.id, label: group.name, note: `${group.analysis_ids.length} анализов`, disabled: unavailable_analysis_ids.length > 0,
     })),
     calculation_run: catalog?.runs.map((run) => ({ id: run.id, label: `K-means · ${run.transform}`, note: run.created_at.slice(0, 10) })),
+    formula_run: (catalog?.formula_runs || []).map((run) => ({ id: run.id,
+      label: `${run.method_name} · ${run.analysis_label}`, note: `Версия ${run.method_version} · ${run.created_at.slice(0, 10)}` })),
     plot_specification: catalog?.layouts.map((item) => ({ id: item.id, label: item.name })),
   };
   const selectFigure = () => perform(async () => {
@@ -91,7 +93,7 @@ export function PublicationWorkspace({ load, pickFigure, check, exportZip, items
         </li>)}</ol>
         {items.length === 0 && <p>Добавьте рабочую группу, расчёт или раскладку из библиотеки.</p>}
         <button className="primary-button" type="button" disabled={pending || !items.length || !name.trim()}
-          onClick={() => perform(async () => setPrepared(await check(name, payload())))}>Проверить пакет</button>
+          onClick={() => perform(async () => { setPrepared(null); setPrepared(await check(name, payload())); })}>Проверить пакет</button>
       </main>
       <aside className="publication-card">
         <h3>Проверка и экспорт</h3>

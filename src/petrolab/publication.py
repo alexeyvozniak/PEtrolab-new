@@ -1,7 +1,9 @@
 """Local publication snapshots and deterministic ZIP export."""
 
 from contextlib import closing
+import csv
 from hashlib import sha256
+from io import StringIO
 import json
 from pathlib import Path
 import re
@@ -10,6 +12,7 @@ from xml.etree import ElementTree
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from .import_apply import open_project
+from .formula_service import list_formula_runs, open_formula_run
 from .import_preview import ImportCommandError
 from .media_display import _publish_new_file
 from .plot_data import list_plot_specifications, open_plot_specification
@@ -31,7 +34,18 @@ def _json_bytes(value):
 
 def publication_catalog(database_path):
     return {"groups": list_work_groups(database_path)["groups"], "layouts": list_plot_specifications(database_path),
-            "runs": list_calculation_runs(database_path)}
+            "runs": list_calculation_runs(database_path), "formula_runs": list_formula_runs(database_path)}
+
+
+def _derived_values_csv(runs):
+    fields = ["id", "run_id", "analysis_id", "field", "unit", "value", "method_id", "method_version", "input_fingerprint"]
+    stream = StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=fields, lineterminator="\n")
+    writer.writeheader()
+    for run in runs.values():
+        definition = {key: run[key] for key in ("method_id", "method_version", "input_fingerprint")}
+        writer.writerows({**value, **definition} for value in run["result_manifest"]["derived_values"])
+    return stream.getvalue().encode("utf-8")
 
 
 def _read_vector(path):
@@ -99,6 +113,7 @@ def _build_package(database_path, name, items):
     manifest_items = []
     warnings = []
     all_ids = {}
+    formulas = {}
     for index, item in enumerate(items, 1):
         if not isinstance(item, dict) or set(item) not in ({"kind", "id", "caption"}, {"kind", "id", "caption", "source_path"}):
             raise ValueError("publication_item")
@@ -111,11 +126,15 @@ def _build_package(database_path, name, items):
                 raise ImportCommandError("PUBLICATION_INPUT_UNAVAILABLE", "Выбранная рабочая группа содержит недоступный вход.")
             result = group["group"]
             label, ids = result["name"], result["analysis_ids"]
-        elif kind == "calculation_run":
-            result = open_calculation_run(database_path, identifier)
+        elif kind in {"calculation_run", "formula_run"}:
+            result = (open_formula_run if kind == "formula_run" else open_calculation_run)(database_path, identifier)
             if result["status"] != "current":
                 raise ImportCommandError("PUBLICATION_STALE_RESULT", "Сохранённый расчёт устарел. Повторите расчёт перед экспортом.")
-            label, ids = "Расчёт " + result["method_id"], result["input"]["analysis_ids"]
+            if kind == "formula_run":
+                label, ids = result["method_definition"]["name"], [result["analysis_id"]]
+                formulas[identifier] = result
+            else:
+                label, ids = "Расчёт " + result["method_id"], result["input"]["analysis_ids"]
         elif kind in ("plot_specification", "svg_figure"):
             result = open_plot_specification(database_path, identifier)
             label, ids = result["name"], result["input"]["analysis_ids"]
@@ -136,6 +155,8 @@ def _build_package(database_path, name, items):
         all_ids.update(dict.fromkeys(ids))
     if all_ids:
         files.update(_supplementary_data(database_path, list(all_ids)))
+    if formulas:
+        files["data/derived_values.csv"] = _derived_values_csv(formulas)
     with closing(open_project(database_path)) as connection:
         project_id = connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0]
     files["README.md"] = (f"# {name.strip()}\n\n" + "\n".join(

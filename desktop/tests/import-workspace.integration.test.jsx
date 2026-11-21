@@ -80,7 +80,7 @@ async function enabledButton(name) {
     const button = screen.getByRole("button", { name });
     expect(button.disabled, String(name)).toBe(false);
     return button;
-  });
+  }, name === "Выбрать файл" ? { timeout: 12000 } : undefined);
 }
 
 test("real Python workspace retains two sources and mapping, identity repair and raw tokens", async () => {
@@ -780,13 +780,22 @@ test("real Python mineral review separates conflicts and persists only explicit 
 }, 20000);
 
 test("statistics reviews mixed domains before clustering and preserves saved cluster membership on a new run", async () => {
-  await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],La [ppm]\nA,1,2,2\nB,2,3,4\nC,20,40,5\nD,21,41,6\nE,<1,2,5\nF,0,3,5\n");
+  await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],La [ppm],MgO [wt.%],FeO [wt.%]\nA,1,2,2,45,10\nB,2,3,4,45,10\nC,20,40,5,45,10\nD,21,41,6,45,10\nE,<1,2,5,45,10\nF,0,3,5,45,10\n");
   queue = [second];
   const user = userEvent.setup();
   render(<App />);
   await user.click(await enabledButton("Выбрать файл"));
   await user.click(await enabledButton(/^(Импортировать таблицу|Сохранить импорт в проект)$/));
   const table = within(await screen.findByRole("table"));
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  const analyses = (await invokePetrolab("project.analyses.list", database)).result.analyses;
+  const analysis = analyses.find(({ identity }) => identity.Analysis === "D");
+  const formulaInput = { ...database, method_id: "formula.olivine.4o", analysis_id: analysis.analysis_id,
+    measurement_ids: ["SiO2", "MgO", "FeO"].map((field) => analysis.measurements[field].measurement_id) };
+  const formulaReview = (await invokePetrolab("formula.review", formulaInput)).result;
+  const formula = await invokePetrolab("formula.run", { ...formulaInput, input_fingerprint: formulaReview.input_fingerprint,
+    method_definition_fingerprint: formulaReview.method_definition_fingerprint });
+  expect(formula.result).toBeTruthy();
   for (const name of ["A", "B", "C", "D", "E", "F"]) {
     await user.click(table.getByRole("checkbox", { name: `Выбрать ${name}` }));
   }
@@ -821,11 +830,16 @@ test("statistics reviews mixed domains before clustering and preserves saved clu
   expect(requests.filter((request) => request.command === "statistics.cluster.run")).toHaveLength(2);
   expect(requests.filter((request) => request.command === "statistics.cluster.save_group")).toHaveLength(1);
   await user.click(await enabledButton("Добавить расчёт в публикацию"));
+  await user.click(await enabledButton("Добавить «Оливин на 4 атома кислорода · D»"));
   await user.type(screen.getByLabelText("Название пакета"), "Результат исследования");
   await user.type(screen.getByLabelText("Подпись материала 1"), "Кластеризация");
+  await user.type(screen.getByLabelText("Подпись материала 2"), "Формула оливина");
   await user.click(await enabledButton("Проверить пакет"));
   await screen.findByText("Анализов · 6");
+  expect(screen.getByText("data/derived_values.csv")).toBeTruthy();
   await user.click(await enabledButton("Собрать ZIP"));
   await screen.findByText(/Пакет сохранён: .*petrolab-package.zip/);
-  expect((await readFile(join(folder, "petrolab-package.zip"))).includes(Buffer.from("manifest.json"))).toBe(true);
+  const zip = await readFile(join(folder, "petrolab-package.zip"));
+  expect(zip.includes(Buffer.from("manifest.json"))).toBe(true);
+  expect(zip.includes(Buffer.from("data/derived_values.csv"))).toBe(true);
 }, 20000);

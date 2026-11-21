@@ -11,6 +11,8 @@
 
 Быстрый export service доступен из владельца материала. Publication Package является отдельным агрегатом для упорядоченного набора Export Artifacts и журнала. Corel-safe SVG использует плоские редактируемые группы и запрещает clipPath, mask, foreignObject и растеризацию векторных примитивов; валидатор проверяет профиль до записи.
 
+Материал `formula_run` включает неизменяемую запись метода, Measurement ID, отпечаток входа и Derived Values. Пакет добавляет `data/derived_values.csv` с ID расчёта, версиями, единицами и отпечатками отдельно от исходной `data/measurements.jsonl`. Подготовка и запись повторно проверяют актуальность расчёта. Устаревший запуск блокирует сборку.
+
 Plot Specification содержит упорядоченные Plot Layers. Каждый слой хранит точный набор Analysis ID, z-order, point style/opacity/visibility и опциональный Field с методом и параметрами. Plot Visibility исключает Analysis из входа Field; скрытие маркеров слоя не исключает.
 
 ## Consequences

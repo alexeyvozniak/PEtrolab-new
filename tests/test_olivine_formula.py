@@ -1,10 +1,14 @@
 from contextlib import closing
+import csv
+from io import StringIO
+import json
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
+from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -14,6 +18,7 @@ from petrolab.import_apply import apply_import_plan, open_project
 from petrolab.import_preview import ImportCommandError
 from petrolab.ndjson_service import handle_request
 from petrolab.olivine_formula import OLIVINE, calculate_olivine
+from petrolab.publication import export_publication, prepare_publication, publication_catalog
 from petrolab.statistics_service import list_calculation_runs
 from real_world_fixtures import write_xlsx
 
@@ -70,11 +75,31 @@ class OlivineFormulaTests(unittest.TestCase):
             old = call("formula.run", **fields, **fingerprints(checked))["result"]
             self.assertEqual(call("formula.run.open", run_id=old["id"])["result"]["status"], "current")
             self.assertEqual(list_calculation_runs(database), [])
+            self.assertEqual(publication_catalog(database)["formula_runs"][0]["analysis_label"], "O1")
+            materials = [{"kind": "formula_run", "id": old["id"], "caption": "Оливин"}]
+            prepared = prepare_publication(database, "Формула", materials)
+            destination = path / "formula.zip"
+            export_publication(database, "Формула", materials, prepared["fingerprint"], str(destination))
+            with ZipFile(destination) as archive:
+                formula = json.loads(archive.read("materials/01-formula_run.json"))
+                derived = list(csv.DictReader(StringIO(archive.read("data/derived_values.csv").decode())))
+                measured = [json.loads(line) for line in archive.read("data/measurements.jsonl").splitlines()]
+                self.assertEqual(formula["input_measurement_ids"], old["input_measurement_ids"])
+                magnesium, = [row for row in derived if row["field"] == "apfu.Mg"]
+                self.assertEqual(magnesium["input_fingerprint"], old["input_fingerprint"])
+                self.assertEqual(magnesium["method_version"], OLIVINE["version"])
+                original, = [row for row in measured if row["measurement_id"] == measurements["MgO"]]
+                self.assertEqual((original["unit"], original["raw_token"]), ("wt.%", "47.971"))
             draft = save_edit_draft(database, measurements["MgO"], "46.5")
             self.assertEqual(call("formula.run.open", run_id=old["id"])["result"]["status"], "current")
             self.assertTrue(commit_edit_draft(database, draft["id"], "Проверка", "Контрольная поправка")['applied'])
             stale = call("formula.run.open", run_id=old["id"])["result"]
             self.assertEqual(stale["stale_reasons"], ["inputs_changed"])
+            rejected_path = path / "stale.zip"
+            with self.assertRaises(ImportCommandError) as reject:
+                export_publication(database, "Формула", materials, prepared["fingerprint"], str(rejected_path))
+            self.assertEqual(reject.exception.code, "PUBLICATION_STALE_RESULT")
+            self.assertFalse(rejected_path.exists())
             self.assertEqual(call("formula.run", **fields, **fingerprints(checked))["error"]["code"], "FORMULA_REVIEW_STALE")
             with patch("petrolab.formula_service.OLIVINE", {**OLIVINE, "version": "1.1.0"}):
                 refreshed = call("formula.review", **fields)["result"]
