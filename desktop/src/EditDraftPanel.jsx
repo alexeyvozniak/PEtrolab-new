@@ -9,6 +9,7 @@ const conflictLabels = {
 
 export function EditDraftPanel({ analysisId, measurements, actions }) {
   const [rows, setRows] = useState([]);
+  const [expanded, setExpanded] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -61,10 +62,12 @@ export function EditDraftPanel({ analysisId, measurements, actions }) {
     });
   };
 
-  return <details className="analysis-edit-drafts" onToggle={(event) => {
-    if (event.currentTarget.open) run(refresh);
-  }}>
-    <summary>Черновики правок</summary>
+  return <details className="analysis-edit-drafts" open={expanded}>
+    <summary onClick={(event) => {
+      event.preventDefault();
+      setExpanded(!expanded);
+      if (!expanded && !pending) run(refresh);
+    }}>Черновики правок</summary>
     <form onSubmit={save} aria-label="Новый черновик правки">
       <label>Измерение<select name="measurement_id" disabled={pending}>
         {available.map((measurement) => <option key={measurement.measurement_id} value={measurement.measurement_id}>

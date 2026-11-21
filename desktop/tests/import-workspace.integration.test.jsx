@@ -74,9 +74,11 @@ afterEach(async () => {
 });
 
 async function enabledButton(name) {
-  const button = await screen.findByRole("button", { name });
-  await waitFor(() => expect(button.disabled).toBe(false));
-  return button;
+  return waitFor(() => {
+    const button = screen.getByRole("button", { name });
+    expect(button.disabled, String(name)).toBe(false);
+    return button;
+  });
 }
 
 test("real Python workspace retains two sources and mapping, identity repair and raw tokens", async () => {
@@ -403,8 +405,7 @@ test("an edit draft survives reopening and reports external source changes witho
   await user.click(await enabledButton("Анализы"));
   await user.click(within(await screen.findByRole("table")).getByText("B1"));
   await user.click(await screen.findByText("Черновики правок", { exact: true }));
-  const details = await screen.findByRole("complementary", { name: "Подробности анализа" });
-  await waitFor(() => expect(details.textContent).toContain("Было 40 → предлагается 42 wt.%"));
+  await screen.findByText("Было 40 → предлагается 42 wt.%");
   await user.click(await enabledButton("Проверить исходный файл"));
   await screen.findByText("Исходный файл изменился");
   const table = within(screen.getByRole("table"));
