@@ -93,14 +93,15 @@ export const saveSampleContext = (projectDatabasePath, sampleId, context, expect
 export const addSampleNote = (projectDatabasePath, sampleId, author, body) =>
   invokePetrolab("project.sample.note.add", { project_database_path: projectDatabasePath, sample_id: sampleId, author, body });
 export const pickMediaFiles = () => desktopInvoke("pick_media_files");
-export const pickPublicationFigure = () => desktopInvoke("pick_publication_figure");
+export const pickPublicationFigure = (format) => desktopInvoke("pick_publication_figure", { format });
 export const pickPublicationExportPath = () => desktopInvoke("pick_publication_export_path");
 export const getPublicationCatalog = (projectDatabasePath) => invokePetrolab("publication.catalog", { project_database_path: projectDatabasePath });
-export const preparePublication = (projectDatabasePath, name, items) => invokePetrolab("publication.prepare", {
-  project_database_path: projectDatabasePath, name, items,
+export const preparePublication = (projectDatabasePath, name, items, { profile, width }) => invokePetrolab("publication.prepare", {
+  project_database_path: projectDatabasePath, name, items, profile, width_mm: width,
 });
-export const exportPublication = (projectDatabasePath, name, items, fingerprint, outputPath) => invokePetrolab("publication.export", {
+export const exportPublication = (projectDatabasePath, name, items, fingerprint, outputPath, { profile, width }) => invokePetrolab("publication.export", {
   project_database_path: projectDatabasePath, name, items, expected_fingerprint: fingerprint, output_path: outputPath,
+  profile, width_mm: width,
 });
 export const pickMediaExportPath = (name) => desktopInvoke("pick_media_export_path", { name });
 export const inspectMediaFiles = (paths) => invokePetrolab("media.inspect_sources", { source_paths: paths });

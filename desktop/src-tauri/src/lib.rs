@@ -178,9 +178,15 @@ async fn pick_media_folder() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn pick_publication_figure() -> Option<String> {
+fn pick_publication_figure(format: Option<String>) -> Option<String> {
+    let (label, extensions): (&str, &[&str]) = match format.as_deref() {
+        Some("pdf") => ("PDF", &["pdf"]),
+        Some("tiff") => ("TIFF", &["tif", "tiff"]),
+        Some("png") => ("PNG", &["png"]),
+        _ => ("SVG", &["svg"]),
+    };
     rfd::FileDialog::new()
-        .add_filter("SVG", &["svg"])
+        .add_filter(label, extensions)
         .pick_file()
         .map(|path| path.to_string_lossy().into_owned())
 }

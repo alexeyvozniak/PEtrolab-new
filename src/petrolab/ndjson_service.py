@@ -328,10 +328,12 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "publication.catalog": lambda params: {"result": publication_catalog(_project_database_path(params))},
     "publication.prepare": lambda params: {"result": prepare_publication(
         _project_database_path(params), params.get("name"), params.get("items"),
+        params.get("profile", "neutral"), params.get("width_mm"),
     )},
     "publication.export": lambda params: {"result": export_publication(
         _project_database_path(params), params.get("name"), params.get("items"),
         params.get("expected_fingerprint"), params.get("output_path"),
+        params.get("profile", "neutral"), params.get("width_mm"),
     )},
     "statistics.review": lambda params: {"result": review_statistics(
         _project_database_path(params), params.get("input"), params.get("features"),

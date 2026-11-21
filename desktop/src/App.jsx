@@ -112,6 +112,7 @@ export function App() {
   const [searchSeed, setSearchSeed] = useState(null);
   const [publicationItems, setPublicationItems] = useState([]);
   const [publicationName, setPublicationName] = useState("");
+  const [publicationSettings, setPublicationSettings] = useState({ profile: "neutral", width: 90 });
   const [plotInputIds, setPlotInputIds] = useState(null);
   const [hiddenSourceIds, setHiddenSourceIds] = useState([]);
   const [hiddenAnalysisIds, setHiddenAnalysisIds] = useState([]);
@@ -616,10 +617,11 @@ export function App() {
           saveGroup={async (runId, cluster, name, actor) => unwrap(await saveCalculatedCluster(databasePath, runId, cluster, name, actor))} />}
         {screen === "Публикации" && <PublicationWorkspace load={loadPublication} items={publicationItems} setItems={setPublicationItems}
           name={publicationName} setName={setPublicationName} pickFigure={pickPublicationFigure}
-          check={async (name, items) => unwrap(await preparePublication(databasePath, name, items))}
-          exportZip={async (name, items, fingerprint) => {
+          settings={publicationSettings} setSettings={setPublicationSettings}
+          check={async (name, items, settings) => unwrap(await preparePublication(databasePath, name, items, settings))}
+          exportZip={async (name, items, fingerprint, settings) => {
             const destination = await pickPublicationExportPath();
-            return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination)) : null;
+            return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination, settings)) : null;
           }} />}
         {screen === "Построение" && <PlotWorkspace loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
           loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}

@@ -187,17 +187,28 @@ function PrecisionFixture({ reopen = false, importBatch = false, exportPhoto = f
   return <MediaViewer image={image} loadRegion={loadRegion} onPlace={setPoint}
     annotations={point ? [{ ...point, id: "qa-point", label: "P-01" }] : []} />;
 }
-const loadQaPublication = async () => ({ groups: [], layouts: [], runs: [], formula_runs: [
+const loadQaPublication = async () => ({ groups: [], layouts: [{ id: 'layout-1', name: 'Распределение составов' }], runs: [], formula_runs: [
   { id: 'formula-current', method_name: 'Оливин на 4 атома кислорода', analysis_label: 'O1', method_version: '1.0.0', created_at: '2026-11-21' },
   { id: 'formula-stale', method_name: 'Оливин на 4 атома кислорода', analysis_label: 'O2', method_version: '1.0.0', created_at: '2026-11-20' },
 ] });
 function PublicationFixture() {
   const [items, setItems] = React.useState([]);
   const [name, setName] = React.useState('Северный массив');
+  const [settings, setSettings] = React.useState({ profile: 'neutral', width: 90 });
   return <PublicationWorkspace load={loadQaPublication} items={items} setItems={setItems} name={name} setName={setName}
-    check={async (_, selected) => {
+    settings={settings} setSettings={setSettings} pickFigure={async (format) => `составы.${format}`}
+    check={async (_, selected, options) => {
       if (selected.some(({ id }) => id === 'formula-stale')) throw new Error('Сохранённый расчёт устарел. Повторите расчёт перед экспортом.');
-      return { fingerprint: 'qa', manifest: { items: selected, analysis_count: 1, warnings: [], files: [
+      if (selected.some((item) => item.kind === 'publication_figure' && !item.caption.trim())) throw new Error('Добавьте подпись к фигуре.');
+      const figures = selected.filter((item) => item.kind === 'publication_figure');
+      const warnings = figures.some((item) => item.source_path.endsWith('.png')) ? ['Figure 1 · PNG включён как копия для просмотра. Для подачи добавьте PDF или TIFF.'] : [];
+      return { fingerprint: 'qa', manifest: { items: selected.map((item) => {
+        const position = figures.indexOf(item);
+        if (position < 0) return item;
+        return { ...item, figure: { number: position + 1, format: item.source_path.split('.').at(-1).toUpperCase(),
+          target_width_mm: options.width, ...(item.source_path.endsWith('.pdf') ? {} : { effective_dpi: 1016 }) } };
+      }), analysis_count: 1, warnings, files: [
+        ...figures.map((item, index) => ({ path: `figures/Figure_0${index + 1}.${item.source_path.split('.').at(-1)}` })),
         { path: 'materials/01-formula_run.json' }, { path: 'data/measurements.jsonl' }, { path: 'data/derived_values.csv' },
       ] } };
     }} exportZip={async () => ({ output_path: 'petrolab-package.zip' })} />;

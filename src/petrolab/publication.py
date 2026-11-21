@@ -3,13 +3,18 @@
 from contextlib import closing
 import csv
 from hashlib import sha256
-from io import StringIO
+from io import BytesIO, StringIO
 import json
+from math import isfinite
 from pathlib import Path
 import re
 from tempfile import NamedTemporaryFile
 from xml.etree import ElementTree
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
+
+from PIL import Image
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 from .import_apply import open_project
 from .formula_service import list_formula_runs, open_formula_run
@@ -26,6 +31,74 @@ _SVG_ATTRIBUTES = {
     "id", "width", "height", "viewBox", "transform", "x", "y", "x1", "x2", "y1", "y2", "cx", "cy", "r",
     "d", "text-anchor", "points", "fill", "fill-opacity", "stroke", "stroke-width", "opacity", "font-size", "font-family",
 }
+_LITHOS_WIDTHS = (90, 180)
+_LITHOS_RASTER_DPI = {"halftone": 300, "combination": 500, "line_art": 1000}
+_LITHOS_FORMATS = {".pdf": "PDF", ".tif": "TIFF", ".tiff": "TIFF", ".png": "PNG"}
+
+
+def _pdf_fonts_embedded(resources, visited):
+    if not resources:
+        return True
+    resources = resources.get_object()
+    if id(resources) in visited:
+        return True
+    visited.add(id(resources))
+    fonts = resources.get("/Font")
+    for reference in fonts.get_object().values() if fonts is not None else ():
+        font = reference.get_object()
+        if font.get("/Subtype") == "/Type3":
+            if not _pdf_fonts_embedded(font.get("/Resources"), visited):
+                return False
+            continue
+        for descendant in font.get("/DescendantFonts", [font]):
+            descriptor = descendant.get_object().get("/FontDescriptor")
+            if descriptor is None or not any(key in descriptor.get_object() for key in ("/FontFile", "/FontFile2", "/FontFile3")):
+                return False
+    objects = resources.get("/XObject")
+    return objects is None or all(
+        _pdf_fonts_embedded(reference.get_object().get("/Resources"), visited)
+        for reference in objects.get_object().values()
+    )
+
+
+def _read_lithos_figure(path, width_mm, artwork):
+    extension = Path(path).suffix.lower() if isinstance(path, str) else ""
+    if extension not in _LITHOS_FORMATS:
+        raise ImportCommandError("PUBLICATION_FIGURE_FORMAT", "Выберите файл PDF, TIFF или PNG.")
+    try:
+        with Path(path).open("rb") as stream:
+            data = stream.read(40 * 1024 * 1024 + 1)
+        if len(data) > 40 * 1024 * 1024:
+            raise ImportCommandError("PUBLICATION_FIGURE_TOO_LARGE", "Фигура превышает 40 МиБ.")
+        if extension == ".pdf":
+            reader = PdfReader(BytesIO(data), strict=True)
+            if reader.is_encrypted or len(reader.pages) != 1:
+                raise ValueError("expected one unencrypted page")
+            page = reader.pages[0]
+            edge = page.cropbox.height if page.rotation % 180 else page.cropbox.width
+            actual_width = float(edge * page.user_unit) * 25.4 / 72
+            if not isfinite(actual_width) or abs(actual_width - width_mm) > 1:
+                raise ImportCommandError("PUBLICATION_FIGURE_WIDTH", f"Ширина страницы PDF должна быть {width_mm} мм (±1 мм).")
+            if not _pdf_fonts_embedded(page.get("/Resources"), set()):
+                raise ImportCommandError("PUBLICATION_FIGURE_FONTS", "В PDF обнаружены невстроенные шрифты.")
+            return data, {"format": "PDF", "page_width_mm": round(actual_width, 2)}, []
+        with Image.open(BytesIO(data), formats=[_LITHOS_FORMATS[extension]]) as image:
+            if image.n_frames != 1:
+                raise ValueError("expected one raster frame")
+            image.load()
+            width, height = image.size
+    except ImportCommandError:
+        raise
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, ArithmeticError, RecursionError,
+            PdfReadError, Image.DecompressionBombError) as error:
+        raise ImportCommandError("PUBLICATION_FIGURE_UNSUPPORTED", "Не удалось прочитать фигуру. Нужен одностраничный PDF или растровый файл с одним кадром.") from error
+    minimum = _LITHOS_RASTER_DPI[artwork]
+    actual_dpi = width * 25.4 / width_mm
+    if actual_dpi < minimum:
+        raise ImportCommandError("PUBLICATION_FIGURE_DPI", f"При ширине {width_mm} мм разрешение составляет {actual_dpi:.1f} dpi. Для выбранного типа нужно не менее {minimum} dpi.")
+    warnings = ["PNG включён как копия для просмотра. Для подачи добавьте PDF или TIFF."] if extension == ".png" else []
+    return data, {"format": _LITHOS_FORMATS[extension], "width_px": width, "height_px": height,
+                  "artwork": artwork, "effective_dpi": round(actual_dpi, 2), "minimum_dpi": minimum}, warnings
 
 
 def _json_bytes(value):
@@ -104,9 +177,10 @@ def _supplementary_data(database_path, ids):
         return {"data/analyses.jsonl": as_lines(analysis_rows), "data/measurements.jsonl": as_lines(measurements)}
 
 
-def _build_package(database_path, name, items):
+def _build_package(database_path, name, items, profile, width_mm):
     if (not isinstance(name, str) or not 1 <= len(name.strip()) <= 120
-            or not isinstance(items, list) or not 1 <= len(items) <= 24):
+            or not isinstance(items, list) or not 1 <= len(items) <= 24
+            or profile not in ("neutral", "lithos") or (profile == "lithos" and width_mm not in _LITHOS_WIDTHS)):
         raise ValueError("publication_package")
     library = {item["group"]["id"]: item for item in list_work_groups(database_path)["groups"]}
     files = {}
@@ -114,8 +188,10 @@ def _build_package(database_path, name, items):
     warnings = []
     all_ids = {}
     formulas = {}
+    figures = []
     for index, item in enumerate(items, 1):
-        if not isinstance(item, dict) or set(item) not in ({"kind", "id", "caption"}, {"kind", "id", "caption", "source_path"}):
+        if (not isinstance(item, dict) or not {"kind", "id", "caption"} <= item.keys()
+                or item.keys() - {"kind", "id", "caption", "source_path", "artwork"}):
             raise ValueError("publication_item")
         kind, identifier, caption = item["kind"], item["id"], item["caption"]
         if not isinstance(identifier, str) or not isinstance(caption, str) or len(caption) > 2000:
@@ -135,7 +211,7 @@ def _build_package(database_path, name, items):
                 formulas[identifier] = result
             else:
                 label, ids = "Расчёт " + result["method_id"], result["input"]["analysis_ids"]
-        elif kind in ("plot_specification", "svg_figure"):
+        elif kind in ("plot_specification", "svg_figure", "publication_figure"):
             result = open_plot_specification(database_path, identifier)
             label, ids = result["name"], result["input"]["analysis_ids"]
         else:
@@ -143,16 +219,44 @@ def _build_package(database_path, name, items):
         stem = f"{index:02d}-{kind}"
         paths = [f"materials/{stem}.json"]
         files[paths[0]] = _json_bytes(result)
+        figure = None
         if kind == "svg_figure":
+            if "artwork" in item:
+                raise ValueError("publication_item_artwork")
             paths.append(f"figures/{stem}.svg")
             files[paths[-1]] = _read_vector(item.get("source_path"))
-        elif "source_path" in item:
+            if profile == "lithos":
+                warnings.append(f"Материал {index} · SVG включён для редактирования. Для подачи добавьте PDF или TIFF.")
+        elif kind == "publication_figure":
+            artwork = item.get("artwork", "line_art")
+            if profile != "lithos" or not isinstance(artwork, str) or artwork not in _LITHOS_RASTER_DPI:
+                raise ValueError("publication_figure_profile")
+            if not caption.strip():
+                raise ImportCommandError("PUBLICATION_FIGURE_CAPTION", f"Добавьте подпись к фигуре в строке {index}.")
+            data, checks, notices = _read_lithos_figure(item.get("source_path"), width_mm, artwork)
+            number = len(figures) + 1
+            extension = {"PDF": "pdf", "TIFF": "tiff", "PNG": "png"}[checks["format"]]
+            paths.append(f"figures/Figure_{number:02d}.{extension}")
+            files[paths[-1]] = data
+            warnings.extend(f"Figure {number} · {notice}" for notice in notices)
+            figure = {"number": number, "target_width_mm": width_mm, **checks}
+            figures.append((figure, caption.strip()))
+        elif "source_path" in item or "artwork" in item:
             raise ValueError("publication_item_path")
         if not caption.strip():
             warnings.append(f"Материал {index} «{label}» без подписи.")
         manifest_items.append({"order": index, "kind": kind, "reference_id": identifier, "label": label,
                                "caption": caption.strip(), "paths": paths, "analysis_ids": ids})
+        if figure:
+            manifest_items[-1]["figure"] = figure
         all_ids.update(dict.fromkeys(ids))
+    if profile == "lithos":
+        if not any(figure["format"] in {"PDF", "TIFF"} for figure, _ in figures):
+            warnings.append("В пакете пока нет PDF или TIFF для подачи.")
+        if figures:
+            files["figures/captions.txt"] = ("\n\n".join(
+                f"Figure {figure['number']}. {caption}" for figure, caption in figures
+            ) + "\n").encode()
     if all_ids:
         files.update(_supplementary_data(database_path, list(all_ids)))
     if formulas:
@@ -163,22 +267,24 @@ def _build_package(database_path, name, items):
         f"{item['order']}. {item['label']}\n\n{item['caption']}\n" for item in manifest_items
     )).encode()
     manifest = {
-        "schema_version": 1, "project_id": project_id, "name": name.strip(), "profile": "neutral",
+        "schema_version": 1, "project_id": project_id, "name": name.strip(), "profile": profile,
         "items": manifest_items, "warnings": warnings, "analysis_count": len(all_ids),
         "files": [{"path": path, "sha256": sha256(data).hexdigest(), "size": len(data)} for path, data in files.items()],
     }
+    if profile == "lithos":
+        manifest["figure_width_mm"] = width_mm
     return files, manifest, sha256(_json_bytes(manifest)).hexdigest()
 
 
-def prepare_publication(database_path, name, items):
-    _, manifest, fingerprint = _build_package(database_path, name, items)
+def prepare_publication(database_path, name, items, profile="neutral", width_mm=None):
+    _, manifest, fingerprint = _build_package(database_path, name, items, profile, width_mm)
     return {"manifest": manifest, "fingerprint": fingerprint}
 
 
-def export_publication(database_path, name, items, expected_fingerprint, output_path):
+def export_publication(database_path, name, items, expected_fingerprint, output_path, profile="neutral", width_mm=None):
     if not isinstance(output_path, str) or not output_path or Path(output_path).suffix.lower() != ".zip":
         raise ValueError("publication_output_path")
-    files, manifest, fingerprint = _build_package(database_path, name, items)
+    files, manifest, fingerprint = _build_package(database_path, name, items, profile, width_mm)
     if fingerprint != expected_fingerprint:
         raise ImportCommandError("PUBLICATION_CHANGED", "Содержимое изменилось после проверки. Проверьте пакет снова.")
     target = Path(output_path)
