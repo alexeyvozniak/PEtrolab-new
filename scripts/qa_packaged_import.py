@@ -12,9 +12,11 @@ import tempfile
 import uuid
 from contextlib import closing
 from pathlib import Path
+from zipfile import ZipFile
 
 from openpyxl import Workbook, load_workbook
 from PIL import Image
+from pypdf import PdfWriter
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
@@ -46,6 +48,42 @@ def archive_command(executable: Path, *args) -> dict:
     if completed.returncode:
         raise RuntimeError(f"Packaged archive command failed: {completed.stderr.strip()}")
     return json.loads(completed.stdout)
+
+
+def check_lithos_package(executable: Path, directory: Path, database: str, analysis_ids: list[str]) -> None:
+    project = {"project_database_path": database}
+    catalog = run(executable, [request("plot_data.catalog", {**project, "analysis_ids": analysis_ids})])[0]["result"]
+    layout = run(executable, [request("plot_spec.save", {
+        **project, "name": "QA Lithos", "analysis_ids": analysis_ids, "colors": {},
+        "panels": [{"id": str(uuid.uuid4()), "kind": "binary", "axes": catalog["axes"][:2]}],
+    })])[0]["result"]
+    figure = directory / "submission.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=90 * 72 / 25.4, height=100)
+    writer.write(figure)
+    params = {**project, "name": "QA Lithos", "profile": "lithos", "width_mm": 90, "items": [{
+        "kind": "publication_figure", "id": layout["id"], "caption": "QA figure", "source_path": str(figure),
+    }]}
+    original_database = Path(database).read_bytes()
+    snapshot = run(executable, [request("publication.prepare", params)])[0]["result"]
+    destination = directory / "submission.zip"
+    run(executable, [request("publication.export", {
+        **params, "expected_fingerprint": snapshot["fingerprint"], "output_path": str(destination),
+    })])
+    if Path(database).read_bytes() != original_database:
+        raise AssertionError("Packaged publication changed the project database")
+    with ZipFile(destination) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        item = manifest["items"][0]
+        if (manifest != snapshot["manifest"] or manifest["profile"] != "lithos"
+                or item["reference_id"] != layout["id"] or item["analysis_ids"] != analysis_ids
+                or item["figure"]["page_width_mm"] != 90):
+            raise AssertionError("Packaged publication lost the checked figure or its provenance")
+        if archive.read("figures/Figure_01.pdf") != figure.read_bytes():
+            raise AssertionError("Packaged publication changed the attached PDF")
+        for entry in manifest["files"]:
+            if hashlib.sha256(archive.read(entry["path"])).hexdigest() != entry["sha256"]:
+                raise AssertionError(f"Packaged publication checksum mismatch: {entry['path']}")
 
 
 def main() -> None:
@@ -96,6 +134,8 @@ def main() -> None:
         groups = run(executable, [request("work_group.list", {"project_database_path": database})])[0]["result"]["groups"]
         if group["analysis_ids"] != members or groups != [{"group": group, "unavailable_analysis_ids": []}]:
             raise AssertionError("Packaged service changed work group membership after restart")
+        check_lithos_package(executable, Path(directory), database,
+                             [row["analysis_id"] for row in reopened["result"]["analyses"]])
         image = Path(directory) / "thin-section.png"
         Image.new("RGB", (48, 32), "#627758").save(image)
         archive = Path(directory) / "portable.petrolab"
@@ -227,7 +267,7 @@ def main() -> None:
         with closing(load_workbook(edit_source, read_only=True)) as checked:
             if checked.active["B2"].value != 6.5:
                 raise AssertionError("Packaged service did not write the selected XLSX cell")
-    print("Packaged import: analyses and draft restored; source unchanged; unsupported databases rejected without changes.")
+    print("Packaged service: import and draft restored, Lithos ZIP verified, unsupported databases rejected unchanged.")
 
 
 if __name__ == "__main__":
