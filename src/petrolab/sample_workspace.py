@@ -79,7 +79,8 @@ def get_project_sample(database_path, sample_id):
             GROUP BY s.source_id, s.display_name ORDER BY s.display_name, s.source_id
         """, (sample_id,))
         points = connection.execute("""
-            SELECT p.analytical_point_id, p.point_name, COUNT(l.analysis_id) AS analysis_count
+            SELECT p.analytical_point_id, p.point_name, COUNT(l.analysis_id) AS analysis_count,
+                   EXISTS (SELECT 1 FROM analytical_point_annotation pa WHERE pa.analytical_point_id = p.analytical_point_id) AS placed
             FROM analytical_point p LEFT JOIN analytical_point_analysis l USING (analytical_point_id)
             WHERE p.sample_id = ? GROUP BY p.analytical_point_id, p.point_name ORDER BY p.point_name
         """, (sample_id,))

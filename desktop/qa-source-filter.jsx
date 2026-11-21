@@ -4,7 +4,7 @@ import { AnalysesWorkspace } from './src/AnalysesWorkspace';
 import { ProjectOverview, ProjectSearch } from './src/ProjectNavigation';
 import { PlotWorkspace } from './src/PlotWorkspace';
 import { SampleWorkspace } from './src/SampleWorkspace';
-import { MediaViewer } from './src/MediaWorkspace';
+import { MediaImport, MediaViewer } from './src/MediaWorkspace';
 import './src/styles.css';
 const sources = ['11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'];
 const analyses = sources.flatMap((id, index) => Array.from({length: 5}, (_, row) => {
@@ -93,7 +93,7 @@ const qaSample = {
 };
 const loadQaSamples = async () => [qaSample];
 const loadQaSample = async () => qaSample;
-function PrecisionFixture({ reopen = false }) {
+function PrecisionFixture({ reopen = false, importBatch = false }) {
   const [point, setPoint] = React.useState(null);
   const [selectedIds, setSelectedIds] = React.useState([]);
   const savedLinks = React.useRef([]);
@@ -123,6 +123,20 @@ function PrecisionFixture({ reopen = false }) {
       0, 0, region.width, region.height);
     return { region, preview_url: canvas.toDataURL() };
   };
+  if (importBatch) {
+    const batch = ['BSE', 'PPL', 'XPL'].map((type) => ({ source_path: `${type}.png`, display_name: `${type}.png`, source_fingerprint: type }));
+    const samples = [{ sample_id: 's2', sample_name: 'KIV-2' }, { sample_id: 's5', sample_name: 'KIV-5' }];
+    const points = [{ analytical_point_id: 'p7', point_name: 'P-07' }, { analytical_point_id: 'p8', point_name: 'P-08' }, { analytical_point_id: 'p3', point_name: 'P-03' }];
+    return <MediaImport actions={{ samples: async () => samples,
+      sample: async (id) => ({ sample_id: id, thin_sections: [], points: id === 's2' ? points.slice(0, 2) : points.slice(2) }),
+      pick: async () => batch.map(({ source_path }) => source_path), inspect: async () => ({ items: batch }),
+      preview: async (path, region) => region ? loadRegion(region) : { ...image, ...batch.find((item) => item.source_path === path) },
+      plan: async (items) => ({ items: items.map((item) => ({ ...item, display_name: item.source_path, media_asset_id: item.source_path,
+        placements: item.placements.map((placement) => ({ ...placement, spatial_annotation_id: placement.analytical_point_id,
+          point_name: points.find((point) => point.analytical_point_id === placement.analytical_point_id).point_name, point_sample_name: 'KIV-5' })) })),
+        unplaced_points: [{ ...points[1], sample_name: 'KIV-2', thin_section_name: 'KIV-2-A' }] }),
+    }} />;
+  }
   if (reopen) {
     const photo = { thin_section_id: 'section', media_asset_id: 'ppl', display_name: 'PPL-detail.png', media_type: 'PPL',
       width_px: image.width_px, height_px: image.height_px };
@@ -163,4 +177,5 @@ createRoot(document.getElementById('root')).render(navigationMode === 'overview'
     : navigationMode === 'plot' ? <PlotFixture /> : navigationMode === 'sample'
       ? <SampleWorkspace loadSamples={loadQaSamples} loadSample={loadQaSample} onOpenAnalyses={()=>{}} />
       : navigationMode === 'precision' || navigationMode === 'precision-reopen'
-        ? <PrecisionFixture reopen={navigationMode === 'precision-reopen'} /> : <RangeFixture />);
+        ? <PrecisionFixture reopen={navigationMode === 'precision-reopen'} />
+        : navigationMode === 'media-import' ? <PrecisionFixture importBatch /> : <RangeFixture />);

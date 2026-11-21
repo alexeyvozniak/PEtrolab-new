@@ -126,7 +126,7 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
           } : undefined}
           onPointerCancel={reset} onLostPointerCapture={reset}>
           {[...annotations, ...(preview ? [{ ...preview, id: "draft" }] : [])].map((item) =>
-            <g key={item.id}>
+            <g key={item.id} className={item.provisional ? "media-provisional" : undefined}>
               {item.kind === "point"
                 ? <circle cx={item.x_px} cy={item.y_px} r={length / 95} />
                 : <rect x={item.x_px} y={item.y_px} width={item.width_px} height={item.height_px} />}
@@ -253,6 +253,8 @@ export function MediaImport({ actions, onCancel, onDone }) {
   const [pointSampleId, setPointSampleId] = useState("");
   const [pointContext, setPointContext] = useState(null);
   const [exceptionReason, setExceptionReason] = useState("");
+  const [exceptionNote, setExceptionNote] = useState("");
+  const [exceptionPreview, setExceptionPreview] = useState(null);
   const [shape, setShape] = useState("point");
   const [plan, setPlan] = useState(null);
   const [pending, setPending] = useState(false);
@@ -262,6 +264,11 @@ export function MediaImport({ actions, onCancel, onDone }) {
   const active = files.find(({ source_path }) => source_path === activePath);
   const points = pointSampleId ? (pointContext?.sample_id === pointSampleId ? pointContext.points : [])
     : context?.sample_id === sampleId ? context.points : [];
+  const assignedPoints = new Set(files.flatMap((item) => item.placements.map((placement) => placement.analytical_point_id)));
+  const orderedPoints = [...points].sort((a, b) => Number(Boolean(a.placed || assignedPoints.has(a.analytical_point_id))) -
+    Number(Boolean(b.placed || assignedPoints.has(b.analytical_point_id))));
+  const unplaced = plan?.unplaced_points || [];
+  const clearException = () => { setExceptionPreview(null); setExceptionReason(""); setExceptionNote(""); };
   useEffect(() => {
     let alive = true;
     actions.samples().then((items) => { if (alive) setSamples(items); })
@@ -315,14 +322,13 @@ export function MediaImport({ actions, onCancel, onDone }) {
     setSampleId(value);
     setPointId("");
     setPointSampleId("");
-    setExceptionReason("");
-    setFiles((current) => current.map((item) => ({ ...item, placements: [] })));
+    clearException();
   };
-  const place = (geometry) => {
+  const place = (geometry, reason = null) => {
     const placements = active.placements.filter((item) => item.analytical_point_id !== pointId);
     changeFile(activePath, { placements: [...placements, { analytical_point_id: pointId, geometry,
       pointLabel: points.find(({ analytical_point_id }) => analytical_point_id === pointId)?.point_name,
-      cross_sample_exception_reason: pointSampleId ? exceptionReason.trim() : null }] });
+      cross_sample_exception_reason: reason }] });
   };
   const review = () => perform(async () => {
     setPlan(await actions.plan(files.map((item) => ({
@@ -339,19 +345,29 @@ export function MediaImport({ actions, onCancel, onDone }) {
     {error && <p role="alert">{error}</p>}
     {plan ? <>
       <h3>Проверка перед импортом</h3>
-      <ul className="sample-items">{plan.items.map((item) => <li key={item.media_asset_id}>
-        <span>{item.display_name} · {item.media_type} · {item.sample_name} · {item.thin_section_name}</span>
-        <span>Привязок: {item.placements.length}</span>
-      </li>)}</ul>
+      <div className="project-search-table"><table>
+        <thead><tr><th>Файл</th><th>Образец</th><th>Шлиф</th><th>Тип</th><th>Размещено точек</th><th>Исключения</th></tr></thead>
+        <tbody>{plan.items.map((item) => <tr key={item.media_asset_id}>
+          <td>{item.display_name}</td><td>{item.sample_name}</td><td>{item.thin_section_name}</td><td>{item.media_type}</td>
+          <td>{item.placements.length}</td><td>{item.placements.filter((placement) => placement.cross_sample_exception_reason).length}</td>
+        </tr>)}</tbody>
+      </table></div>
       {plan.items.some((item) => !item.placements.length) && <p>В пакете есть изображения без размещённых точек.</p>}
       {plan.items.flatMap((item) => item.placements.filter((placement) => placement.cross_sample_exception_reason)
         .map((placement) => <p key={placement.spatial_annotation_id}>
-          {item.display_name} · точка другого образца · {placement.cross_sample_exception_reason}
+          {item.display_name} · {placement.point_sample_name} / {placement.point_name} · {placement.cross_sample_exception_reason}
         </p>))}
+      {unplaced.length > 0 && <section className="sample-card media-import-warning">
+        <h4>Неразмещённые точки ({unplaced.length})</h4>
+        <ul className="sample-items">{unplaced.map((point) => <li key={`${point.analytical_point_id}-${point.thin_section_name}`}>
+          {point.sample_name} · {point.thin_section_name} · {point.point_name}
+        </li>)}</ul>
+        <p>Эти точки сохранят существующие связи с анализами.</p>
+      </section>}
       <div className="point-row-actions">
         <button className="outline-button" type="button" disabled={pending} onClick={() => setPlan(null)}>Назад к назначению</button>
         <button className="primary-button" type="button" disabled={pending} onClick={() => perform(async () => onDone(await actions.commit(plan)))}>
-          Импортировать изображения
+          {unplaced.length > 0 ? "Завершить без неразмещённых точек" : "Импортировать изображения"}
         </button>
       </div>
     </> : <div className="sample-overview">
@@ -359,29 +375,30 @@ export function MediaImport({ actions, onCancel, onDone }) {
         <h3>Файлы, образец и шлиф</h3>
         <button className="outline-button" type="button" disabled={pending} onClick={pick}>Выбрать изображения</button>
         <div className="sample-form">
-          <label>Физический образец <select value={sampleId} disabled={pending} onChange={(event) => changeSample(event.target.value)}>
+          <label>Физический образец <select value={sampleId} disabled={pending || assignedPoints.size > 0 || Boolean(exceptionPreview)} onChange={(event) => changeSample(event.target.value)}>
             <option value="">Выберите образец</option>
             {samples.map((item) => <option value={item.sample_id} key={item.sample_id}>{item.sample_name}</option>)}
             <option value="new">Новый образец</option>
           </select></label>
-          {sampleId === "new" && <label>Имя нового образца<input value={newSample} disabled={pending} maxLength={200} onChange={(event) => setNewSample(event.target.value)} /></label>}
+          {assignedPoints.size > 0 && <p>Для смены образца сначала снимите предварительные привязки.</p>}
+          {sampleId === "new" && <label>Имя нового образца<input value={newSample} disabled={pending || assignedPoints.size > 0 || Boolean(exceptionPreview)} maxLength={200} onChange={(event) => setNewSample(event.target.value)} /></label>}
           <label>Имя шлифа<input list="sample-thin-sections" value={section} maxLength={200} disabled={pending}
             onChange={(event) => setSection(event.target.value)} /></label>
           <datalist id="sample-thin-sections">{(context?.sample_id === sampleId ? context.thin_sections : []).map((item) =>
             <option key={item.thin_section_id} value={item.thin_section_name} />)}</datalist>
         </div>
         <ul className="sample-items media-items">{files.map((item) => <li key={item.source_path}>
-          <button className="outline-button" type="button" aria-pressed={activePath === item.source_path} disabled={pending}
+          <button className="outline-button" type="button" aria-pressed={activePath === item.source_path} disabled={pending || Boolean(exceptionPreview)}
             onClick={() => pickPreview(item)}>{item.display_name}</button>
           <label>Тип <select value={item.media_type} disabled={pending} onChange={(event) => changeFile(item.source_path, { media_type: event.target.value })}>
             {["BSE", "PPL", "XPL", "Аналитические точки", "Другое"].map((type) => <option key={type}>{type}</option>)}
           </select></label>
-          <button className="outline-button" type="button" disabled={pending} onClick={() => {
+          <button className="outline-button" type="button" disabled={pending || Boolean(exceptionPreview)} onClick={() => {
             if (item.source_path === activePath) { setActivePath(""); setImage(null); }
             setFiles((current) => current.filter(({ source_path }) => source_path !== item.source_path));
           }}>Убрать</button>
         </li>)}</ul>
-        <button className="primary-button" type="button" disabled={pending || !sampleId || !sampleName || !section.trim() || !files.length}
+        <button className="primary-button" type="button" disabled={pending || !sampleId || !sampleName || !section.trim() || !files.length || Boolean(exceptionPreview)}
           onClick={review}>Проверить импорт изображений</button>
       </section>
       <section className="sample-card">
@@ -390,27 +407,41 @@ export function MediaImport({ actions, onCancel, onDone }) {
         {image && active && <>
           <div className="sample-form">
             <label>Образец аналитической точки<select value={pointSampleId} disabled={pending}
-              onChange={(event) => { setPointSampleId(event.target.value); setPointId(""); setExceptionReason(""); }}>
+              onChange={(event) => { setPointSampleId(event.target.value); setPointId(""); clearException(); }}>
               <option value="">Текущий образец</option>
               {samples.filter((item) => item.sample_id !== sampleId).map((item) =>
                 <option value={item.sample_id} key={item.sample_id}>{item.sample_name}</option>)}
             </select></label>
-            <label>Аналитическая точка<select value={pointId} disabled={pending} onChange={(event) => setPointId(event.target.value)}>
+            <label>Аналитическая точка<select value={pointId} disabled={pending} onChange={(event) => { setPointId(event.target.value); clearException(); }}>
               <option value="">Без привязки</option>
-              {points.map((point) => <option key={point.analytical_point_id} value={point.analytical_point_id}>{point.point_name}</option>)}
+              {orderedPoints.map((point) => <option key={point.analytical_point_id} value={point.analytical_point_id}>{point.point_name}</option>)}
             </select></label>
-            {pointSampleId && pointId && <label>Причина привязки к точке другого образца<input value={exceptionReason} maxLength={1000}
-              onChange={(event) => setExceptionReason(event.target.value)} /></label>}
-            <label>Геометрия<select value={shape} onChange={(event) => setShape(event.target.value)}>
+            <label>Геометрия<select value={shape} disabled={Boolean(exceptionPreview)} onChange={(event) => setShape(event.target.value)}>
               <option value="point">Точка</option><option value="rectangle">Прямоугольник</option><option value="square">Квадрат</option>
             </select></label>
           </div>
           {pointId && <p>Щёлкните на изображении для точки или протяните область.</p>}
           <MediaViewer key={activePath} image={image} shape={shape}
             loadRegion={(region) => actions.preview(activePath, region, image.source_fingerprint)}
-            onPlace={pointId && !pending && (!pointSampleId || exceptionReason.trim()) ? place : undefined}
-            annotations={active.placements.map((item) => ({ ...item.geometry, id: item.analytical_point_id,
-              label: item.pointLabel }))} />
+            onPlace={pointId && !pending ? (geometry) => { if (pointSampleId) setExceptionPreview(geometry); else place(geometry); } : undefined}
+            annotations={[...active.placements.map((item) => ({ ...item.geometry, id: item.analytical_point_id, label: item.pointLabel })),
+              ...(exceptionPreview ? [{ ...exceptionPreview, id: "cross-sample-preview", label: "Предпросмотр", provisional: true }] : [])]} />
+          {pointSampleId && pointId && <fieldset className="sample-form media-import-warning">
+            <legend>Выбор точки другого образца</legend>
+            <p>Образец изображения: {sampleName}. Образец точки: {samples.find((sample) => sample.sample_id === pointSampleId)?.sample_name}.</p>
+            <label>Причина исключения<select value={exceptionReason} disabled={pending} onChange={(event) => setExceptionReason(event.target.value)}>
+              <option value="">Выберите причину</option><option>Изображение охватывает другой образец</option>
+              <option>Ошибка атрибуции образца</option><option>Другая причина</option>
+            </select></label>
+            <label>Комментарий к исключению<textarea value={exceptionNote} maxLength={500} disabled={pending}
+              onChange={(event) => setExceptionNote(event.target.value)} /></label>
+            <div><button className="primary-button" type="button" disabled={pending || !exceptionPreview || !exceptionReason || (exceptionReason === "Другая причина" && !exceptionNote.trim())}
+              onClick={() => { place(exceptionPreview, [exceptionReason, exceptionNote.trim()].filter(Boolean).join(": ")); clearException(); }}>
+              Подтвердить исключение и сохранить связь
+            </button><button className="outline-button" type="button" onClick={() => { setPointSampleId(""); setPointId(""); clearException(); }}>
+              Вернуться к точкам образца
+            </button></div>
+          </fieldset>}
           <ul className="sample-items">{active.placements.map(({ analytical_point_id: id, pointLabel }) => <li key={id}>
             <span>{pointLabel}</span>
             <button className="outline-button" type="button" disabled={pending} onClick={() =>

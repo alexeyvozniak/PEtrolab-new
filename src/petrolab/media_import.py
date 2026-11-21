@@ -376,7 +376,7 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                     _fail("INVALID_ASSIGNMENT", "An Analytical Point may be placed only once on one image.", analytical_point_id=point_id)
                 seen_points.add(point_id)
                 point = connection.execute(
-                    """SELECT ap.analytical_point_id, s.sample_name FROM analytical_point ap
+                    """SELECT ap.analytical_point_id, ap.point_name, s.sample_name FROM analytical_point ap
                     JOIN sample s ON s.sample_id = ap.sample_id WHERE ap.analytical_point_id = ?""", (point_id,)
                 ).fetchone()
                 if point is None:
@@ -398,6 +398,8 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                 planned_placements.append({
                     "spatial_annotation_id": _id(),
                     "analytical_point_id": point_id,
+                    "point_name": point["point_name"],
+                    "point_sample_name": point["sample_name"],
                     "geometry": _validate_geometry(placement["geometry"], inspection["width_px"], inspection["height_px"]),
                     "cross_sample_exception_reason": reason,
                 })
@@ -414,11 +416,32 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
             plan_items[-1].pop("format")
             if target is not None:
                 plan_items[-1]["sample_target"] = target
-        plan = {"schema_version": 1, "semantic_fingerprint": "", "items": plan_items, "warnings": warnings}
+        plan = {"schema_version": 1, "semantic_fingerprint": "", "items": plan_items, "warnings": warnings,
+                "unplaced_points": _unplaced_points(connection, plan_items)}
         plan["semantic_fingerprint"] = _plan_fingerprint(plan)
         return plan
     finally:
         connection.close()
+
+
+def _unplaced_points(connection, items):
+    placements = {}
+    for item in items:
+        scope = (item["sample_name"], item["thin_section_name"])
+        placements.setdefault(scope, set()).update(placement["analytical_point_id"] for placement in item["placements"])
+    remaining = []
+    for (sample_name, section_name), placed in placements.items():
+        rows = connection.execute("""
+            SELECT p.analytical_point_id, p.point_name FROM analytical_point p JOIN sample s USING (sample_id)
+            WHERE s.sample_name = ? AND NOT EXISTS (
+                SELECT 1 FROM analytical_point_annotation pa JOIN spatial_annotation a USING (spatial_annotation_id)
+                JOIN thin_section ts USING (thin_section_id)
+                WHERE pa.analytical_point_id = p.analytical_point_id AND ts.sample_id = s.sample_id AND ts.thin_section_name = ?
+            ) ORDER BY p.point_name, p.analytical_point_id
+        """, (sample_name, section_name))
+        remaining.extend({**dict(row), "sample_name": sample_name, "thin_section_name": section_name}
+                         for row in rows if row["analytical_point_id"] not in placed)
+    return remaining
 
 
 def _prepare_media_copy(database_path: str | Path, item: dict[str, Any]) -> Path:

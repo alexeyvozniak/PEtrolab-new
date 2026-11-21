@@ -660,6 +660,75 @@ test("saves a thin section point placed at 20× and reopens its original area af
   expect(await readFile(source)).toEqual(originalImage);
 }, 30000);
 
+test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed points", async () => {
+  await writeFile(second, "Analysis,SiO2 [wt.%]\nA1,40\nA2,41\nA3,42\nA4,43\nA5,44\nA6,45\n");
+  const photos = Object.fromEntries(Object.entries({
+    BSE: "iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAAGklEQVR4nO3BAQEAAACCIP+vbkhAAQAAAPBsEiAAAZJII8cAAAAASUVORK5CYII=",
+    PPL: "iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAATUlEQVR4nM3OQQEAIACEMCTh9U/j3wKyBDvbKJEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYifF34HUBU10BMEN2uoMAAAAASUVORK5CYII=",
+    XPL: "iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAATUlEQVR4nM3OQQEAIACEMKR/iIvq3wKyBDvbKJEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYifF34HUBUHwCIEdGWBYAAAAASUVORK5CYII=",
+  }).map(([type, bytes]) => [join(folder, `${type}.png`), Buffer.from(bytes, "base64")]));
+  await Promise.all(Object.entries(photos).map(([path, bytes]) => writeFile(path, bytes)));
+  queue = [second]; mediaQueue = Object.keys(photos);
+  const user = userEvent.setup();
+  const app = render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton("Импортировать таблицу"));
+  await screen.findByRole("heading", { name: "Анализы" });
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  const analyses = (await invokePetrolab("project.analyses.list", database)).result.analyses;
+  const points = await Promise.all([["KIV-2", "P-07"], ["KIV-2", "P-08"], ["KIV-5", "P-03"]].map(([sample, name], index) =>
+    invokePetrolab("analytical_point.create", { ...database, sample_name: sample, point_name: name,
+      analysis_ids: analyses.slice(2 * index, 2 * index + 2).map((row) => row.analysis_id), link_type: "same_point" })));
+  expect(points.every((point) => point.result)).toBe(true);
+  await user.click(await enabledButton("Изображения"));
+  await user.click(await enabledButton("Импорт изображений"));
+  await user.click(await enabledButton("Выбрать изображения"));
+  await user.selectOptions(await screen.findByLabelText("Физический образец"), await screen.findByRole("option", { name: "KIV-2" }));
+  await user.type(screen.getByLabelText("Имя шлифа"), "KIV-2-A");
+  for (const type of ["PPL", "XPL"]) {
+    const row = (await enabledButton(`${type}.png`)).closest("li");
+    await user.selectOptions(within(row).getByLabelText("Тип"), type);
+  }
+  await user.click(await enabledButton("BSE.png"));
+  const choosePoint = async (name) => user.selectOptions(await screen.findByLabelText("Аналитическая точка"),
+    await screen.findByRole("option", { name }));
+  await choosePoint("P-07");
+  expect(screen.queryByRole("option", { name: "P-03" })).toBeNull();
+  const svg = screen.getByLabelText("Аннотации изображения");
+  expect(svg.querySelectorAll("circle")).toHaveLength(0);
+  svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 480, height: 320 });
+  const clickImage = (x, y) => fireEvent(svg, new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: x, clientY: y }));
+  clickImage(150, 120);
+  await user.selectOptions(screen.getByLabelText("Образец аналитической точки"), points[2].result.sample_id);
+  await choosePoint("P-03");
+  clickImage(250, 220);
+  expect(svg.querySelector(".media-provisional")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Проверить импорт изображений" }).disabled).toBe(true);
+  expect(screen.getByRole("button", { name: "Подтвердить исключение и сохранить связь" }).disabled).toBe(true);
+  await user.selectOptions(screen.getByLabelText("Причина исключения"), "Изображение охватывает другой образец");
+  await user.click(await enabledButton("Подтвердить исключение и сохранить связь"));
+  expect(svg.querySelector(".media-provisional")).toBeNull();
+  await user.click(await enabledButton("Проверить импорт изображений"));
+  await screen.findByText("Неразмещённые точки (1)");
+  expect(screen.getByText("KIV-2 · KIV-2-A · P-08")).toBeTruthy();
+  expect(screen.getByText(/BSE.png · KIV-5 \/ P-03 · Изображение охватывает другой образец/)).toBeTruthy();
+  const rows = within(screen.getByRole("table")).getAllByRole("row");
+  expect(rows.map((row) => row.textContent)).toEqual(expect.arrayContaining([
+    "BSE.pngKIV-2KIV-2-ABSE21", "PPL.pngKIV-2KIV-2-APPL00", "XPL.pngKIV-2KIV-2-AXPL00",
+  ]));
+  await user.click(await enabledButton("Завершить без неразмещённых точек"));
+  await screen.findByText("Изображений импортировано: 3. Привязок: 2.");
+  const apply = requests.find((request) => request.command === "media.import.apply").payload.plan;
+  const bse = apply.items.find((item) => item.media_type === "BSE");
+  const saved = (await invokePetrolab("media.preview", { ...database, media_asset_id: bse.media_asset_id })).result.annotations;
+  expect(saved.map((item) => item.point_name).sort()).toEqual(["P-03", "P-07"]);
+  expect(saved.find((item) => item.point_name === "P-03")).toMatchObject({
+    point_sample_id: points[2].result.sample_id, cross_sample_exception: 1, exception_reason: "Изображение охватывает другой образец",
+  });
+  for (const [path, bytes] of Object.entries(photos)) expect(await readFile(path)).toEqual(bytes);
+  expect(app.container.querySelector(".media-provisional")).toBeNull();
+}, 30000);
+
 test("real Python mineral review separates conflicts and persists only explicit acceptance", async () => {
   await writeFile(second, "Analysis,Mineral,SiO2 (wt.%),Al2O3 (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%),FeO (wt.%)\nB1,olivine,40,0,50,0,0,0,10\nB2,garnet,40,0,50,0,0,0,10\n");
   const raw = await readFile(second, "utf8");
