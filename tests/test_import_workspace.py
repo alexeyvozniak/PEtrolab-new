@@ -275,6 +275,16 @@ class ImportWorkspaceTests(unittest.TestCase):
         restored = call('analytical_point.link.set', **change, link_type='same_point')['result']
         self.assertEqual(restored['parameters']['analysis_ids'], [ids[0]])
         self.assertEqual(len(call('analytical_point.analyses', point_id=point_id)['result']), 2)
+        for analysis_id in ids[:2]:
+            call('analytical_point.link.set', **{**change, 'analysis_id': analysis_id})
+        batch = {'point_id': point_id, 'actor': 'Иванов', 'link_type': 'same_point'}
+        rejected = call('analytical_point.link.set', **batch, analysis_ids=ids)
+        self.assertEqual(rejected['error']['code'], 'POINT_SAMPLE_MISMATCH')
+        self.assertEqual(call('analytical_point.analyses', point_id=point_id)['result'], [])
+        journal = call('analytical_point.link.set', **batch, analysis_ids=ids[:2])['result']
+        self.assertEqual(journal['parameters']['analysis_ids'], ids[:2])
+        self.assertEqual(journal['inverse_action']['parameters']['analysis_ids'], ids[:2])
+        self.assertEqual({row['analysis_id'] for row in call('analytical_point.analyses', point_id=point_id)['result']}, set(ids[:2]))
         self.assertEqual(list_project_analyses(database)['analyses'], analyses)
         self.assertEqual(self.source.read_text(encoding='utf-8'), text)
 

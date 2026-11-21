@@ -567,6 +567,7 @@ export function App() {
           }}
           pointLinks={{
             loadPoint: loadPointAnalyses,
+            queryProject,
             createPoint: async (fields) => unwrap(await createSamplePoint(databasePath, fields)),
             changeLink: async (pointId, analysisId, type, actor) => unwrap(await setPointAnalysisLink(databasePath, pointId, analysisId, type, actor)),
             selectedIds: selectedAnalysisIds,

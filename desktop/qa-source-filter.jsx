@@ -95,6 +95,8 @@ const loadQaSamples = async () => [qaSample];
 const loadQaSample = async () => qaSample;
 function PrecisionFixture({ reopen = false }) {
   const [point, setPoint] = React.useState(null);
+  const [selectedIds, setSelectedIds] = React.useState([]);
+  const savedLinks = React.useRef([]);
   const image = React.useMemo(() => {
     const canvas = document.createElement("canvas");
     canvas.width = 1600;
@@ -121,11 +123,21 @@ function PrecisionFixture({ reopen = false }) {
     return { region, preview_url: canvas.toDataURL() };
   };
   if (reopen) {
-    const sample = { ...qaSample, thin_sections: [{ thin_section_id: 'section', thin_section_name: 'KIV-2-A' }],
+    const sample = { ...qaSample, sample_name: 'KIV-2', thin_sections: [{ thin_section_id: 'section', thin_section_name: 'KIV-2-A' }],
       images: [{ thin_section_id: 'section', media_asset_id: 'bse', display_name: 'KIV-2-A-BSE.png', media_type: 'BSE',
         width_px: image.width_px, height_px: image.height_px }] };
-    const annotations = [{ spatial_annotation_id: 'annotation-1', geometry_kind: 'point', point_name: 'P-01', x_px: 1080, y_px: 380 }];
+    const annotations = [{ spatial_annotation_id: 'annotation-1', analytical_point_id: 'point-1', point_sample_id: sample.sample_id,
+      geometry_kind: 'point', point_name: 'P-01', x_px: 1080, y_px: 380 }];
+    const candidates = [
+      { analysis_id: 'epma', identity: 'EPMA #431', method: 'EPMA', mineral: 'Флогопит', source_name: 'epma.xlsx', sheet_name: 'Oxides', source_row_number: 5, active: true },
+      { analysis_id: 'laser', identity: 'LA-ICP-MS #87', method: 'LA-ICP-MS', mineral: 'Флогопит', source_name: 'laser.xlsx', sheet_name: 'Trace', source_row_number: 9, active: true },
+    ];
     return <SampleWorkspace initialTab="Шлифы" loadSamples={async () => [sample]} loadSample={async () => sample}
+      pointLinks={{ selectedIds, loadPoint: async () => savedLinks.current,
+        queryProject: async (search) => ({ analyses: candidates.filter((row) => row.identity.toLowerCase().includes(search.query.toLowerCase())), has_more: false }),
+        changeLink: async (_, ids, type) => { savedLinks.current = type
+          ? candidates.filter((row) => ids.includes(row.analysis_id)) : savedLinks.current.filter((row) => row.analysis_id !== ids); },
+        addToSelection: (id) => setSelectedIds((current) => [...current, id]), openAnalysis: () => {} }}
       previewMedia={(_, region) => region ? loadRegion(region) : Promise.resolve({ ...image, annotations })} />;
   }
   return <MediaViewer image={image} loadRegion={loadRegion} onPlace={setPoint}

@@ -90,7 +90,8 @@ def _annotations(database_path, media_id):
     with closing(open_project(database_path)) as connection:
         rows = connection.execute("""
             SELECT sa.spatial_annotation_id, sa.geometry_kind, sa.x_px, sa.y_px, sa.width_px, sa.height_px,
-                   p.point_name, apa.cross_sample_exception, apa.exception_reason
+                   p.analytical_point_id, p.sample_id AS point_sample_id, p.point_name,
+                   apa.cross_sample_exception, apa.exception_reason
             FROM spatial_annotation sa
             LEFT JOIN analytical_point_annotation apa USING (spatial_annotation_id)
             LEFT JOIN analytical_point p USING (analytical_point_id)

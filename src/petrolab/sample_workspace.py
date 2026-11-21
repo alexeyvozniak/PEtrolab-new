@@ -162,9 +162,16 @@ def _point_analysis(row):
     return record
 
 
-def change_point_link(database_path, point_id, analysis_id, actor, link_type=None):
+def change_point_link(database_path, point_id, analysis_id, actor, link_type=None, *, analysis_ids=None):
     _sample_id(point_id)
-    _sample_id(analysis_id)
+    if analysis_ids is None:
+        analysis_ids = [analysis_id]
+    elif analysis_id is not None or link_type is None or not isinstance(analysis_ids, list) or not analysis_ids:
+        raise ValueError("analysis_ids")
+    for item in analysis_ids:
+        _sample_id(item)
+    if len(set(analysis_ids)) != len(analysis_ids):
+        raise ValueError("analysis_ids must be distinct")
     if not isinstance(actor, str) or not 1 <= len(actor.strip()) <= 120:
         raise ValueError("actor")
     if link_type is not None and link_type not in LINK_TYPES:
@@ -175,8 +182,9 @@ def change_point_link(database_path, point_id, analysis_id, actor, link_type=Non
         if not point:
             raise ImportCommandError("POINT_UNAVAILABLE", "Аналитическая точка недоступна.")
         current = connection.execute("""
-            SELECT link_type FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?
-        """, (point_id, analysis_id)).fetchone()
+            SELECT link_type FROM analytical_point_analysis
+            WHERE analytical_point_id = ? AND analysis_id IN (SELECT value FROM json_each(?)) LIMIT 1
+        """, (point_id, json.dumps(analysis_ids))).fetchone()
         if link_type is None:
             if current is None:
                 raise ImportCommandError("POINT_LINK_UNAVAILABLE", "Эту связь уже сняли.")
@@ -185,7 +193,8 @@ def change_point_link(database_path, point_id, analysis_id, actor, link_type=Non
             return write_point_journal(connection, point_id, [analysis_id], actor.strip(), "unlink_analytical_point", current[0])
         if current is not None:
             raise ImportCommandError("POINT_LINK_EXISTS", "Этот анализ уже связан с точкой.")
-        validate_point_input(connection, point[0], [analysis_id])
-        connection.execute("INSERT INTO analytical_point_analysis VALUES (?, ?, ?, ?)",
-                           (point_id, analysis_id, link_type, _now()))
-        return write_point_journal(connection, point_id, [analysis_id], actor.strip(), "link_analytical_point", link_type)
+        validate_point_input(connection, point[0], analysis_ids)
+        timestamp = _now()
+        connection.executemany("INSERT INTO analytical_point_analysis VALUES (?, ?, ?, ?)",
+                               [(point_id, item, link_type, timestamp) for item in analysis_ids])
+        return write_point_journal(connection, point_id, analysis_ids, actor.strip(), "link_analytical_point", link_type)

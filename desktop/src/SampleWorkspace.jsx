@@ -158,7 +158,7 @@ export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote,
         current.thin_sections.map((item) => <details key={item.thin_section_id}>
           <summary>{item.thin_section_name}</summary>
           <MediaGallery images={current.images.filter((image) => image.thin_section_id === item.thin_section_id)}
-            previewMedia={previewMedia} showPoints />
+            previewMedia={previewMedia} pointLinks={pointLinks} showPoints />
         </details>) : <p>У образца нет связанных шлифов.</p>}</section>}
       {tab === "Изображения" && <section className="sample-card"><h3>Изображения</h3>{gallery}</section>}
     </>}

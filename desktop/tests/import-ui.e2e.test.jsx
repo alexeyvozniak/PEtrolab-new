@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { AnalysesWorkspace } from "../src/AnalysesWorkspace";
 import { MediaViewer } from "../src/MediaWorkspace";
 import { SampleWorkspace } from "../src/SampleWorkspace";
+import { ThinSectionLinks } from "../src/ThinSectionLinks";
 import { useState } from "react";
 
 test("thin section precision zoom loads original pixels and places in original coordinates", async () => {
@@ -62,6 +63,38 @@ function SelectionTestWorkspace(props) {
   const [selectedIds, setSelectedIds] = useState([]);
   return <AnalysesWorkspace {...props} selectedIds={selectedIds} setSelectedIds={setSelectedIds} />;
 }
+
+test("thin section links EPMA and LA-ICP-MS together and only adds an explicitly chosen analysis to selection", async () => {
+  const point = { analytical_point_id: "point", point_sample_id: "sample", point_name: "P-07" };
+  const analyses = [{ analysis_id: "epma", identity: "A1", method: "EPMA", active: true },
+    { analysis_id: "laser", identity: "A2", method: "LA-ICP-MS", active: true }];
+  let links = [];
+  const loadPoint = vi.fn(async () => links);
+  const queryProject = vi.fn(async () => ({ analyses, has_more: false }));
+  const changeLink = vi.fn(async (_, ids, type) => {
+    links = type ? analyses.filter((row) => ids.includes(row.analysis_id)) : links.filter((row) => row.analysis_id !== ids);
+  });
+  const addToSelection = vi.fn();
+  const user = userEvent.setup();
+  render(<ThinSectionLinks point={point} actions={{ loadPoint, changeLink, queryProject, addToSelection, selectedIds: ["prior"] }} />);
+  await screen.findByText("У этой точки нет связанных анализов.");
+  expect(addToSelection).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Найти существующие анализы" }));
+  await user.click(await screen.findByRole("checkbox", { name: "Отметить A1" }));
+  await user.click(screen.getByRole("checkbox", { name: "Отметить A2" }));
+  expect(queryProject).toHaveBeenCalledWith(expect.objectContaining({ sample_id: "sample" }));
+  await user.click(screen.getByRole("button", { name: "Связать отмеченные анализы (2)" }));
+  expect(changeLink).toHaveBeenCalledExactlyOnceWith("point", ["epma", "laser"], "same_point", "Локальный пользователь");
+  await screen.findByText("A2");
+  expect(addToSelection).not.toHaveBeenCalled();
+  const row = screen.getByText("A1").closest("li");
+  await user.click(within(row).getByRole("button", { name: "Добавить в отбор" }));
+  expect(addToSelection).toHaveBeenCalledExactlyOnceWith("epma");
+  await user.click(within(row).getByRole("button", { name: "Снять связь" }));
+  await screen.findByText("Связь снята.");
+  await waitFor(() => expect(screen.queryByText("A1")).toBeNull());
+  expect(screen.getByText("A2")).toBeTruthy();
+});
 
 test("drag, Shift and Ctrl select stable analysis IDs without changing focus semantics", () => {
   const analyses = Array.from({ length: 34 }, (_, index) => ({

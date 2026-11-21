@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ThinSectionLinks } from "./ThinSectionLinks";
 import "./mediaWorkspace.css";
 
 export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, shape = "point" }) {
@@ -136,12 +137,13 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
   </>;
 }
 
-export function MediaGallery({ images, previewMedia, exportOriginal, exportRendered, showPoints = false }) {
+export function MediaGallery({ images, previewMedia, exportOriginal, exportRendered, showPoints = false, pointLinks }) {
   const [openId, setOpenId] = useState("");
   const [image, setImage] = useState(null);
   const [status, setStatus] = useState(null);
   const [pending, setPending] = useState(false);
   const [focus, setFocus] = useState(null);
+  const inspectPoint = Boolean(pointLinks && focus?.analytical_point_id);
   const [renderOptions, setRenderOptions] = useState({ points: true, regions: true, labels: true });
   const open = async (id) => {
     setOpenId(id);
@@ -177,7 +179,7 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
     </ul>
     {status && <p role={status.error ? "alert" : "status"}>{status.error || status.notice}</p>}
     {image && <>
-      <div className={showPoints ? "media-with-points" : undefined}>
+      <div className={showPoints ? `media-with-points${inspectPoint ? " media-with-inspector" : ""}` : undefined}>
         {showPoints && <section aria-label="Точки снимка">
           {image.annotations.length > 0 ? <ul className="sample-items">{image.annotations.map((item) => <li key={item.spatial_annotation_id}>
             <button className="outline-button" type="button" aria-pressed={focus?.spatial_annotation_id === item.spatial_annotation_id}
@@ -189,6 +191,7 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
             ...item, id: item.spatial_annotation_id, kind: item.geometry_kind, label: item.point_name,
           }))} />
         </div>
+        {inspectPoint && <ThinSectionLinks key={focus.analytical_point_id} point={focus} actions={pointLinks} />}
       </div>
       {exportRendered && <fieldset className="media-export-options">
         <legend>PNG с метками и подписями</legend>
