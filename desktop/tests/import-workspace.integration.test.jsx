@@ -14,7 +14,7 @@ import { App } from "../src/App";
 import { invokePetrolab } from "../src/desktopApi";
 configure({ asyncUtilTimeout: 5000 });
 
-let child, folder, first, second, queue, mediaQueue, original, pending, lines, requests;
+let child, folder, first, second, queue, mediaQueue, mediaFolder, original, pending, lines, requests;
 function startService() {
   child = spawn("python", ["-m", "petrolab.ndjson_service"], {
     cwd: resolve(process.cwd(), ".."), windowsHide: true,
@@ -41,12 +41,13 @@ beforeEach(async () => {
   original = "Analysis,Fe (wt.%),F (wt.%)\nA1,10,<DL\nA2,11,n.d.\n";
   await writeFile(first, original);
   await writeFile(second, "Analysis,SiO2 [wt.%]\nB1,40\nB2,41\n");
-  queue = [first, second]; mediaQueue = []; pending = new Map(); requests = [];
+  queue = [first, second]; mediaQueue = []; mediaFolder = null; pending = new Map(); requests = [];
   startService();
   bridge.invoke = async (command, args) => {
     if (command === "project_database_path") return join(folder, "project.sqlite");
     if (command === "pick_import_file") return queue.shift() || null;
     if (command === "pick_media_files") return mediaQueue.splice(0);
+    if (command === "pick_media_folder") return mediaFolder;
     if (command === "pick_media_export_path") return join(folder, `copy-${args.name}`);
     if (command === "pick_publication_export_path") return join(folder, "petrolab-package.zip");
     if (command === "pick_analysis_export_path") return join(folder, "selection.xlsx");
@@ -668,9 +669,9 @@ test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed p
     XPL: "iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAATUlEQVR4nM3OQQEAIACEMKR/iIvq3wKyBDvbKJEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYifF34HUBUHwCIEdGWBYAAAAASUVORK5CYII=",
   }).map(([type, bytes]) => [join(folder, `${type}.png`), Buffer.from(bytes, "base64")]));
   await Promise.all(Object.entries(photos).map(([path, bytes]) => writeFile(path, bytes)));
-  queue = [second]; mediaQueue = Object.keys(photos);
+  queue = [second]; mediaFolder = folder;
   const user = userEvent.setup();
-  const app = render(<App />);
+  let app = render(<App />);
   await user.click(await enabledButton("Выбрать файл"));
   await user.click(await enabledButton("Импортировать таблицу"));
   await screen.findByRole("heading", { name: "Анализы" });
@@ -682,7 +683,7 @@ test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed p
   expect(points.every((point) => point.result)).toBe(true);
   await user.click(await enabledButton("Изображения"));
   await user.click(await enabledButton("Импорт изображений"));
-  await user.click(await enabledButton("Выбрать изображения"));
+  await user.click(await enabledButton("Добавить папку"));
   await user.selectOptions(await screen.findByLabelText("Физический образец"), await screen.findByRole("option", { name: "KIV-2" }));
   await user.type(screen.getByLabelText("Имя шлифа"), "KIV-2-A");
   for (const type of ["PPL", "XPL"]) {
@@ -716,6 +717,18 @@ test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed p
   expect(rows.map((row) => row.textContent)).toEqual(expect.arrayContaining([
     "BSE.pngKIV-2KIV-2-ABSE21", "PPL.pngKIV-2KIV-2-APPL00", "XPL.pngKIV-2KIV-2-AXPL00",
   ]));
+  await user.click(await enabledButton("Сохранить черновик"));
+  await screen.findByText("Черновик сохранён.");
+  app.unmount();
+  await stopService();
+  startService();
+  app = render(<App />);
+  await user.click(await enabledButton("Изображения"));
+  await user.click(await enabledButton("Импорт изображений"));
+  await user.click(await enabledButton("Восстановить черновик"));
+  await screen.findByText("Черновик восстановлен.");
+  expect(screen.getByText("Неразмещённые точки (1)")).toBeTruthy();
+  expect(screen.getByText(/BSE.png · KIV-5 \/ P-03 · Изображение охватывает другой образец/)).toBeTruthy();
   await user.click(await enabledButton("Завершить без неразмещённых точек"));
   await screen.findByText("Изображений импортировано: 3. Привязок: 2.");
   const apply = requests.find((request) => request.command === "media.import.apply").payload.plan;
@@ -725,6 +738,7 @@ test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed p
   expect(saved.find((item) => item.point_name === "P-03")).toMatchObject({
     point_sample_id: points[2].result.sample_id, cross_sample_exception: 1, exception_reason: "Изображение охватывает другой образец",
   });
+  expect((await invokePetrolab("media.import.draft.load", database)).result).toBeNull();
   for (const [path, bytes] of Object.entries(photos)) expect(await readFile(path)).toEqual(bytes);
   expect(app.container.querySelector(".media-provisional")).toBeNull();
 }, 30000);

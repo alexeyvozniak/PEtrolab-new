@@ -26,6 +26,7 @@ import {
   listProjectSamples, getProjectSample, saveSampleContext, addSampleNote,
   createSamplePoint, listPointAnalyses, setPointAnalysisLink, createManualPointAnalysis,
   pickMediaFiles, pickMediaExportPath, inspectMediaFiles, previewMediaFile, draftMediaImport, commitMediaImport,
+  pickMediaFolder, inspectMediaFolder, loadMediaImportDraft, saveMediaImportDraft,
   createMediaRegion, listMediaLinks, setMediaLink, importLinkedPhoto,
   previewProjectMedia, exportMediaOriginal, exportMediaRendered,
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
@@ -440,6 +441,7 @@ export function App() {
   const loadSample = useCallback(async (id) => unwrap(await getProjectSample(databasePath, id)), [databasePath]);
   const loadPointAnalyses = useCallback(async (id) => unwrap(await listPointAnalyses(databasePath, id)), [databasePath]);
   const loadMediaLinks = useCallback(async (id) => unwrap(await listMediaLinks(databasePath, id)), [databasePath]);
+  const loadMediaDraft = useCallback(async () => unwrap(await loadMediaImportDraft(databasePath)), [databasePath]);
   const queryProject = useCallback(async (query) => databasePath
     ? unwrap(await queryProjectAnalyses(databasePath, query)) : { analyses: [], total: 0, has_more: false }, [databasePath]);
   const openSearchSource = (source) => {
@@ -588,10 +590,12 @@ export function App() {
           onOpenAnalyses={openSampleAnalyses} busy={busy} />}
         {screen === "Импорт изображений" && <MediaImport actions={{
           pick: pickMediaFiles, samples: loadSamples, sample: loadSample,
+          pickFolder: pickMediaFolder, inspectFolder: async (path) => unwrap(await inspectMediaFolder(path)),
+          loadDraft: loadMediaDraft, saveDraft: async (plan, prior) => unwrap(await saveMediaImportDraft(databasePath, plan, prior)),
           inspect: async (paths) => unwrap(await inspectMediaFiles(paths)),
           preview: async (path, region, fingerprint) => unwrap(await previewMediaFile(path, region, fingerprint)),
           plan: async (assignments) => unwrap(await draftMediaImport(databasePath, assignments)),
-          commit: async (plan) => unwrap(await commitMediaImport(databasePath, plan)),
+          commit: async (plan, draftFingerprint) => unwrap(await commitMediaImport(databasePath, plan, draftFingerprint)),
         }} onCancel={() => setScreen("Изображения")} onDone={(result) => {
           setSuccess(`Изображений импортировано: ${result.created_media_asset_count}. Привязок: ${result.spatial_annotation_count}.`);
           setScreen("Изображения");

@@ -12,6 +12,7 @@ import shutil
 import sqlite3
 import struct
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -155,6 +156,15 @@ def inspect_media_sources(source_paths: Iterable[str | Path]) -> dict[str, Any]:
         by_fingerprint.setdefault(item["source_fingerprint"], []).append(item["source_path"])
     duplicate_groups = [group for group in by_fingerprint.values() if len(group) > 1]
     return {"items": items, "duplicate_groups": duplicate_groups}
+
+
+def inspect_media_folder(folder: str) -> dict[str, Any]:
+    root = Path(folder)
+    try:
+        paths = [path for path in root.iterdir() if path.suffix.lower() in MEDIA_FORMATS and not path.is_symlink() and path.is_file()]
+    except OSError:
+        _fail("MEDIA_FOLDER_UNAVAILABLE", "Не удалось прочитать папку с изображениями.")
+    return inspect_media_sources(sorted(paths, key=lambda path: (path.name.casefold(), path.name))) if paths else {"items": [], "duplicate_groups": []}
 
 
 def _text(value: Any, field: str, max_length: int = 200) -> str:
@@ -486,7 +496,7 @@ def _ensure_sample_and_section(connection: sqlite3.Connection, sample_name: str,
     return sample_id, section_id
 
 
-def apply_media_import_plan(database_path: str | Path, plan: Any, *, attach_to: str | None = None) -> dict[str, Any]:
+def _verify_media_plan_sources(plan):
     if not isinstance(plan, dict) or plan.get("schema_version") != 1 or not isinstance(plan.get("items"), list) or not plan["items"]:
         _fail("PLAN_SCHEMA_INCOMPATIBLE", "Media import plan is invalid.")
     if plan.get("semantic_fingerprint") != _plan_fingerprint(plan):
@@ -495,6 +505,41 @@ def apply_media_import_plan(database_path: str | Path, plan: Any, *, attach_to: 
         current = inspect_media_source(item["source_path"])
         if current["source_fingerprint"] != item["source_fingerprint"] or current["width_px"] != item["width_px"] or current["height_px"] != item["height_px"]:
             _fail("SOURCE_FINGERPRINT_MISMATCH", "Image changed after planning.", path=item["source_path"])
+
+
+def load_media_import_draft(database_path):
+    with closing(open_project(database_path)) as connection:
+        draft = connection.execute("SELECT fingerprint, plan_json, saved_at FROM media_import_draft WHERE singleton = 1").fetchone()
+    if draft is None:
+        return None
+    plan = json.loads(draft["plan_json"])
+    issue = None
+    try:
+        _verify_media_plan_sources(plan)
+    except (ImportCommandError, OSError):
+        issue = "Файл черновика изменился или недоступен. Верните исходные файлы или начните новый импорт."
+    return {"fingerprint": draft["fingerprint"], "saved_at": draft["saved_at"], "plan": plan if not issue else None, "issue": issue}
+
+
+def save_media_import_draft(database_path, plan, expected_fingerprint=None):
+    _verify_media_plan_sources(plan)
+    fingerprint = plan["semantic_fingerprint"]
+    saved_at = _now()
+    encoded = json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    with closing(open_project(database_path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        current = connection.execute("SELECT fingerprint FROM media_import_draft WHERE singleton = 1").fetchone()
+        if (current[0] if current else None) != expected_fingerprint:
+            _fail("MEDIA_DRAFT_CONFLICT", "Черновик изменился. Снова откройте импорт изображений.")
+        connection.execute("""INSERT INTO media_import_draft (singleton, fingerprint, plan_json, saved_at) VALUES (1, ?, ?, ?)
+            ON CONFLICT (singleton) DO UPDATE SET fingerprint = excluded.fingerprint, plan_json = excluded.plan_json, saved_at = excluded.saved_at""",
+            (fingerprint, encoded, saved_at))
+    return {"fingerprint": fingerprint, "saved_at": saved_at}
+
+
+def apply_media_import_plan(database_path: str | Path, plan: Any, *, attach_to: str | None = None,
+                            draft_fingerprint: str | None = None) -> dict[str, Any]:
+    _verify_media_plan_sources(plan)
     connection = open_project(database_path)
     copied: list[Path] = []
     try:
@@ -506,6 +551,10 @@ def apply_media_import_plan(database_path: str | Path, plan: Any, *, attach_to: 
         link_ids = []
         with connection:
             connection.execute("BEGIN IMMEDIATE")
+            if draft_fingerprint is not None:
+                saved = connection.execute("SELECT fingerprint FROM media_import_draft WHERE singleton = 1").fetchone()
+                if not saved or saved[0] != draft_fingerprint:
+                    _fail("MEDIA_DRAFT_CONFLICT", "Черновик изменился или уже сохранён. Снова откройте импорт изображений.")
             for item in plan["items"]:
                 if item.get("sample_target") is not None:
                     _check_media_sample_target(connection, item["sample_name"], item["sample_target"])
@@ -556,6 +605,8 @@ def apply_media_import_plan(database_path: str | Path, plan: Any, *, attach_to: 
                 if attach_to is not None:
                     from .media_links import attach_media
                     link_ids.append(attach_media(connection, attach_to, asset_id))
+            if draft_fingerprint is not None:
+                connection.execute("DELETE FROM media_import_draft WHERE singleton = 1 AND fingerprint = ?", (draft_fingerprint,))
         return {"media_import_batch_id": batch_id, "created_media_asset_count": created_assets, "reused_media_asset_count": reused_assets, "spatial_annotation_count": annotation_count,
                 "warnings": plan.get("warnings", []), **({"media_link_ids": link_ids} if attach_to is not None else {})}
     except Exception:

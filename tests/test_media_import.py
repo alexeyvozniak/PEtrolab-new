@@ -29,7 +29,10 @@ from petrolab.media_import import (  # noqa: E402
     create_analytical_point,
     create_media_import_plan,
     inspect_media_source,
+    inspect_media_folder,
     inspect_media_sources,
+    load_media_import_draft,
+    save_media_import_draft,
 )
 from test_import_preview import FIXTURE, fixture_recipe  # noqa: E402
 
@@ -67,6 +70,41 @@ class MediaImportTests(unittest.TestCase):
         first = create_analytical_point(database, "KIV-2", "P-07", ids[:2], "same_point")
         second = create_analytical_point(database, "OTHER", "P-08", ids[2:4], "same_grain")
         return database, first, second
+
+    def test_folder_draft_detects_changes_and_is_consumed_by_one_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            pictures = folder / "снимки"
+            pictures.mkdir()
+            first = pictures / "BSE.png"
+            write_png(first)
+            (pictures / "readme.txt").write_text("not an image", encoding="utf-8")
+            (pictures / "subfolder").mkdir()
+            write_png(pictures / "subfolder" / "nested.png")
+            files = inspect_media_folder(str(pictures))["items"]
+            self.assertEqual([item["display_name"] for item in files], ["BSE.png"])
+            database, point, _ = self._project_with_points(folder)
+            plan = create_media_import_plan(database, [self._assignment(first, point["analytical_point_id"])])
+            saved = save_media_import_draft(database, plan)
+            self.assertEqual(load_media_import_draft(database)["plan"], plan)
+            with self.assertRaises(ImportCommandError) as stale:
+                save_media_import_draft(database, plan)
+            self.assertEqual(stale.exception.code, "MEDIA_DRAFT_CONFLICT")
+            original = first.read_bytes()
+            write_png(first, width=13)
+            blocked = load_media_import_draft(database)
+            self.assertIsNone(blocked["plan"])
+            self.assertTrue(blocked["issue"])
+            self.assertEqual(blocked["fingerprint"], saved["fingerprint"])
+            with self.assertRaises(ImportCommandError):
+                apply_media_import_plan(database, plan, draft_fingerprint=saved["fingerprint"])
+            first.write_bytes(original)
+            self.assertEqual(apply_media_import_plan(database, plan, draft_fingerprint=saved["fingerprint"])["spatial_annotation_count"], 1)
+            self.assertIsNone(load_media_import_draft(database))
+            with self.assertRaises(ImportCommandError) as replay:
+                apply_media_import_plan(database, plan, draft_fingerprint=saved["fingerprint"])
+            self.assertEqual(replay.exception.code, "MEDIA_DRAFT_CONFLICT")
+            self.assertEqual(first.read_bytes(), original)
 
     def test_manual_analysis_preserves_tokens_and_creates_the_link_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -255,7 +293,7 @@ class MediaImportTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM spatial_annotation").fetchone()[0], 1)
                 row = connection.execute("SELECT geometry_kind, x_px, y_px, image_width_px, image_height_px FROM spatial_annotation").fetchone()
                 self.assertEqual(row, ("point", 5.25, 3.5, 12, 8))
-                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 19)
+                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 20)
             self.assertEqual(result["spatial_annotation_count"], 1)
             media_id = plan["items"][0]["media_asset_id"]
             preview = preview_project_media(database, media_id)

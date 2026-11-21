@@ -36,7 +36,8 @@ from .import_preview import (
     run_import_recipe_validate,
 )
 from .manual_mapping import review_duplicate_candidates, revise_import_mapping, revise_import_mappings, revise_import_sections
-from .media_import import apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_sources
+from .media_import import (apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_folder,
+                           inspect_media_sources, load_media_import_draft, save_media_import_draft)
 from .media_display import export_media_original, export_media_rendered, preview_input_media, preview_project_media
 from .statistics_service import list_calculation_runs, open_calculation_run, review_statistics, run_clustering, save_calculated_cluster
 from .publication import export_publication, prepare_publication, publication_catalog
@@ -298,7 +299,8 @@ def _dispatch_media_plan(params: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _dispatch_media_apply(params: Mapping[str, Any]) -> dict[str, Any]:
-    return {"result": apply_media_import_plan(_project_database_path(params), _object(params, "plan"))}
+    return {"result": apply_media_import_plan(_project_database_path(params), _object(params, "plan"),
+                                              draft_fingerprint=params.get("draft_fingerprint"))}
 
 
 COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
@@ -448,8 +450,13 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "import.recipe.save_revision": _dispatch_recipe_save_revision,
     "analytical_point.create": _dispatch_analytical_point_create,
     "media.inspect_sources": _dispatch_media_inspect,
+    "media.inspect_folder": lambda params: {"result": inspect_media_folder(_string(params, "folder"))},
     "media.import.plan": _dispatch_media_plan,
     "media.import.apply": _dispatch_media_apply,
+    "media.import.draft.load": lambda params: {"result": load_media_import_draft(_project_database_path(params))},
+    "media.import.draft.save": lambda params: {"result": save_media_import_draft(
+        _project_database_path(params), _object(params, "plan"), params.get("expected_fingerprint"),
+    )},
 }
 
 WORKSPACES = ImportWorkspaceStore()

@@ -98,6 +98,8 @@ function PrecisionFixture({ reopen = false, importBatch = false }) {
   const [selectedIds, setSelectedIds] = React.useState([]);
   const savedLinks = React.useRef([]);
   const savedPhotos = React.useRef({});
+  const mediaDraft = React.useRef(null);
+  const [batchOpen, setBatchOpen] = React.useState(true);
   const image = React.useMemo(() => {
     const canvas = document.createElement("canvas");
     canvas.width = 1600;
@@ -127,9 +129,13 @@ function PrecisionFixture({ reopen = false, importBatch = false }) {
     const batch = ['BSE', 'PPL', 'XPL'].map((type) => ({ source_path: `${type}.png`, display_name: `${type}.png`, source_fingerprint: type }));
     const samples = [{ sample_id: 's2', sample_name: 'KIV-2' }, { sample_id: 's5', sample_name: 'KIV-5' }];
     const points = [{ analytical_point_id: 'p7', point_name: 'P-07' }, { analytical_point_id: 'p8', point_name: 'P-08' }, { analytical_point_id: 'p3', point_name: 'P-03' }];
-    return <MediaImport actions={{ samples: async () => samples,
+    if (!batchOpen) return <button className="primary-button" onClick={() => setBatchOpen(true)}>Импорт изображений</button>;
+    return <MediaImport onCancel={() => setBatchOpen(false)} actions={{ samples: async () => samples,
       sample: async (id) => ({ sample_id: id, thin_sections: [], points: id === 's2' ? points.slice(0, 2) : points.slice(2) }),
       pick: async () => batch.map(({ source_path }) => source_path), inspect: async () => ({ items: batch }),
+      pickFolder: async () => 'test-folder', inspectFolder: async () => ({ items: batch }),
+      loadDraft: async () => mediaDraft.current,
+      saveDraft: async (plan) => { mediaDraft.current = { plan, fingerprint: 'test-draft' }; return mediaDraft.current; },
       preview: async (path, region) => region ? loadRegion(region) : { ...image, ...batch.find((item) => item.source_path === path) },
       plan: async (items) => ({ items: items.map((item) => ({ ...item, display_name: item.source_path, media_asset_id: item.source_path,
         placements: item.placements.map((placement) => ({ ...placement, spatial_annotation_id: placement.analytical_point_id,

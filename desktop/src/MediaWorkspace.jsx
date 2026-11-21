@@ -257,6 +257,9 @@ export function MediaImport({ actions, onCancel, onDone }) {
   const [exceptionPreview, setExceptionPreview] = useState(null);
   const [shape, setShape] = useState("point");
   const [plan, setPlan] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [activeDraftFingerprint, setActiveDraftFingerprint] = useState(null);
+  const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const pickedSample = samples.find(({ sample_id }) => sample_id === sampleId);
@@ -269,6 +272,13 @@ export function MediaImport({ actions, onCancel, onDone }) {
     Number(Boolean(b.placed || assignedPoints.has(b.analytical_point_id))));
   const unplaced = plan?.unplaced_points || [];
   const clearException = () => { setExceptionPreview(null); setExceptionReason(""); setExceptionNote(""); };
+  useEffect(() => {
+    if (!actions.loadDraft) return;
+    let alive = true;
+    actions.loadDraft().then((saved) => { if (alive) setDraft(saved); })
+      .catch((caught) => { if (alive) setError(caught.message); });
+    return () => { alive = false; };
+  }, [actions.loadDraft]);
   useEffect(() => {
     let alive = true;
     actions.samples().then((items) => { if (alive) setSamples(items); })
@@ -292,14 +302,12 @@ export function MediaImport({ actions, onCancel, onDone }) {
   const perform = async (task) => {
     setPending(true);
     setError("");
+    setNotice("");
     try { await task(); }
     catch (caught) { setError(caught.message); }
     finally { setPending(false); }
   };
-  const pick = () => perform(async () => {
-    const paths = await actions.pick();
-    if (!paths.length) return;
-    const inspection = await actions.inspect(paths);
+  const addImages = (inspection) => {
     setFiles((current) => {
       const seen = new Set(current.map(({ source_fingerprint }) => source_fingerprint));
       const added = inspection.items.flatMap((item) => {
@@ -309,7 +317,30 @@ export function MediaImport({ actions, onCancel, onDone }) {
       });
       return [...current, ...added];
     });
+  };
+  const pick = () => perform(async () => {
+    const paths = await actions.pick();
+    if (paths.length) addImages(await actions.inspect(paths));
   });
+  const pickFolder = () => perform(async () => {
+    const path = await actions.pickFolder();
+    if (!path) return;
+    const inspection = await actions.inspectFolder(path);
+    if (inspection.items.length) addImages(inspection);
+    else setNotice("В выбранной папке нет поддерживаемых изображений.");
+  });
+  const restoreDraft = () => {
+    const saved = draft.plan;
+    const first = saved.items[0];
+    const target = first.sample_target;
+    setSampleId(target?.mode === "new" ? "new" : target?.sample_id || samples.find((sample) => sample.sample_name === first.sample_name)?.sample_id || "new");
+    setNewSample(first.sample_name);
+    setSection(first.thin_section_name);
+    setFiles(saved.items.map((item) => ({ ...item, placements: item.placements.map((placement) => ({ ...placement, pointLabel: placement.point_name })) })));
+    setActiveDraftFingerprint(draft.fingerprint);
+    setPlan(saved);
+    setNotice("Черновик восстановлен.");
+  };
   const pickPreview = (item) => perform(async () => {
     setImage(null);
     setActivePath(item.source_path);
@@ -343,6 +374,9 @@ export function MediaImport({ actions, onCancel, onDone }) {
     <div className="sample-header"><h2>Импорт изображений шлифов</h2>
       <button className="outline-button" type="button" disabled={pending} onClick={onCancel}>К изображениям</button></div>
     {error && <p role="alert">{error}</p>}
+    {notice && <p role="status">{notice}</p>}
+    {!plan && !files.length && draft?.plan && <button type="button" className="outline-button" disabled={pending} onClick={restoreDraft}>Восстановить черновик</button>}
+    {!plan && !files.length && draft?.issue && <p role="alert">{draft.issue}</p>}
     {plan ? <>
       <h3>Проверка перед импортом</h3>
       <div className="project-search-table"><table>
@@ -366,14 +400,23 @@ export function MediaImport({ actions, onCancel, onDone }) {
       </section>}
       <div className="point-row-actions">
         <button className="outline-button" type="button" disabled={pending} onClick={() => setPlan(null)}>Назад к назначению</button>
-        <button className="primary-button" type="button" disabled={pending} onClick={() => perform(async () => onDone(await actions.commit(plan)))}>
+        {actions.saveDraft && <button className="outline-button" type="button" disabled={pending} onClick={() => perform(async () => {
+          const saved = await actions.saveDraft(plan, draft?.fingerprint ?? null);
+          setDraft({ ...saved, plan });
+          setActiveDraftFingerprint(saved.fingerprint);
+          setNotice("Черновик сохранён.");
+        })}>Сохранить черновик</button>}
+        <button className="primary-button" type="button" disabled={pending} onClick={() => perform(async () => onDone(await actions.commit(plan, activeDraftFingerprint)))}>
           {unplaced.length > 0 ? "Завершить без неразмещённых точек" : "Импортировать изображения"}
         </button>
       </div>
     </> : <div className="sample-overview">
       <section className="sample-card">
         <h3>Файлы, образец и шлиф</h3>
-        <button className="outline-button" type="button" disabled={pending} onClick={pick}>Выбрать изображения</button>
+        <div className="point-row-actions">
+          <button className="outline-button" type="button" disabled={pending} onClick={pick}>Выбрать изображения</button>
+          {actions.pickFolder && <button className="outline-button" type="button" disabled={pending} onClick={pickFolder}>Добавить папку</button>}
+        </div>
         <div className="sample-form">
           <label>Физический образец <select value={sampleId} disabled={pending || assignedPoints.size > 0 || Boolean(exceptionPreview)} onChange={(event) => changeSample(event.target.value)}>
             <option value="">Выберите образец</option>

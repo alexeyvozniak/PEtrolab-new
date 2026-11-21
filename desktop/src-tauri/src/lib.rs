@@ -167,6 +167,17 @@ fn pick_media_files() -> Vec<String> {
 }
 
 #[tauri::command]
+async fn pick_media_folder() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .pick_folder()
+            .map(|path| path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|error| format!("Cannot select an image folder: {error}"))
+}
+
+#[tauri::command]
 fn pick_publication_figure() -> Option<String> {
     rfd::FileDialog::new()
         .add_filter("SVG", &["svg"])
@@ -320,6 +331,7 @@ pub fn run() {
             pick_import_file,
             pick_analysis_export_path,
             pick_media_files,
+            pick_media_folder,
             pick_media_export_path,
             pick_publication_figure,
             pick_publication_export_path,

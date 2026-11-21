@@ -264,6 +264,10 @@ def open_project(database_path: str | Path) -> sqlite3.Connection:
         connection.close()
         raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции связей медиа.",
                                  {"incompatible_migration": 19})
+    if 20 in applied and "media_import_draft" not in existing_tables:
+        connection.close()
+        raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции черновиков изображений.",
+                                 {"incompatible_migration": 20})
     meta_exists = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_meta'").fetchone()
     if meta_exists:
         meta = connection.execute("SELECT project_schema_version FROM project_meta WHERE singleton = 1").fetchone()
