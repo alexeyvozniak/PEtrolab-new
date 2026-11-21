@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import "./mediaWorkspace.css";
 
-export function MediaViewer({ image, annotations, onPlace, loadRegion, shape = "point" }) {
+export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, shape = "point" }) {
   const [zoom, setZoom] = useState(100);
   const [start, setStart] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -17,19 +17,25 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, shape = "
     const viewport = viewer.current;
     const bounds = scene.current.getBoundingClientRect();
     if (bounds.width && bounds.height) {
-      anchor.current = [(viewport.scrollLeft + viewport.clientWidth / 2) / bounds.width,
-        (viewport.scrollTop + viewport.clientHeight / 2) / bounds.height];
+      anchor.current = { zoom: value, x: (viewport.scrollLeft + viewport.clientWidth / 2) / bounds.width,
+        y: (viewport.scrollTop + viewport.clientHeight / 2) / bounds.height };
     }
     setZoom(value);
   };
   useLayoutEffect(() => {
-    if (!anchor.current) return;
+    if (!focus) return;
+    anchor.current = { zoom: 2000, x: (focus.x_px + (focus.width_px ?? 0) / 2) / image.width_px,
+      y: (focus.y_px + (focus.height_px ?? 0) / 2) / image.height_px };
+    setZoom(2000);
+  }, [focus, image]);
+  useLayoutEffect(() => {
+    if (anchor.current?.zoom !== zoom) return;
     const viewport = viewer.current;
     const bounds = scene.current.getBoundingClientRect();
-    viewport.scrollLeft = anchor.current[0] * bounds.width - viewport.clientWidth / 2;
-    viewport.scrollTop = anchor.current[1] * bounds.height - viewport.clientHeight / 2;
+    viewport.scrollLeft = anchor.current.x * bounds.width - viewport.clientWidth / 2;
+    viewport.scrollTop = anchor.current.y * bounds.height - viewport.clientHeight / 2;
     anchor.current = null;
-  }, [zoom]);
+  }, [zoom, focus]);
   useEffect(() => {
     setTile(null);
     setTileError("");
@@ -69,7 +75,7 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, shape = "
       resize?.disconnect();
       viewport.removeEventListener("scroll", update);
     };
-  }, [zoom, precision, image]);
+  }, [zoom, precision, image, focus]);
   const position = (event) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     return {
@@ -93,7 +99,7 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, shape = "
       onChange={(event) => changeZoom(Number(event.target.value))} /></label>
     {precision && tileError && <p role="alert">{tileError}</p>}
     <div className="media-viewer" ref={viewer}>
-      <div className="media-scene" ref={scene} style={{ width: `${zoom}%` }}>
+      <div className="media-scene" ref={scene} style={{ width: `${zoom}%`, aspectRatio: `${image.width_px} / ${image.height_px}` }}>
         <img src={image.preview_url} alt="Изображение шлифа" draggable={false} />
         {precision && tile && <img className="media-precision-region" src={tile.preview_url} alt="" draggable={false} style={{
           left: `${tile.region.left * 100 / image.width_px}%`, top: `${tile.region.top * 100 / image.height_px}%`,
@@ -130,15 +136,17 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, shape = "
   </>;
 }
 
-export function MediaGallery({ images, previewMedia, exportOriginal, exportRendered }) {
+export function MediaGallery({ images, previewMedia, exportOriginal, exportRendered, showPoints = false }) {
   const [openId, setOpenId] = useState("");
   const [image, setImage] = useState(null);
   const [status, setStatus] = useState(null);
   const [pending, setPending] = useState(false);
+  const [focus, setFocus] = useState(null);
   const [renderOptions, setRenderOptions] = useState({ points: true, regions: true, labels: true });
   const open = async (id) => {
     setOpenId(id);
     setImage(null);
+    setFocus(null);
     setStatus(null);
     setPending(true);
     try { setImage(await previewMedia(id)); }
@@ -169,9 +177,19 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
     </ul>
     {status && <p role={status.error ? "alert" : "status"}>{status.error || status.notice}</p>}
     {image && <>
-      <MediaViewer key={openId} image={image} loadRegion={(region) => previewMedia(openId, region)} annotations={image.annotations.map((item) => ({
-        ...item, id: item.spatial_annotation_id, kind: item.geometry_kind, label: item.point_name,
-      }))} />
+      <div className={showPoints ? "media-with-points" : undefined}>
+        {showPoints && <section aria-label="Точки снимка">
+          {image.annotations.length > 0 ? <ul className="sample-items">{image.annotations.map((item) => <li key={item.spatial_annotation_id}>
+            <button className="outline-button" type="button" aria-pressed={focus?.spatial_annotation_id === item.spatial_annotation_id}
+              onClick={() => setFocus({ ...item })}>{item.point_name || (item.geometry_kind === "point" ? "Точка" : "Область")}</button>
+          </li>)}</ul> : <p>На снимке нет сохранённых точек или областей.</p>}
+        </section>}
+        <div>
+          <MediaViewer key={openId} image={image} loadRegion={(region) => previewMedia(openId, region)} focus={focus} annotations={image.annotations.map((item) => ({
+            ...item, id: item.spatial_annotation_id, kind: item.geometry_kind, label: item.point_name,
+          }))} />
+        </div>
+      </div>
       {exportRendered && <fieldset className="media-export-options">
         <legend>PNG с метками и подписями</legend>
         {Object.entries({ points: "Точки", regions: "Области", labels: "Подписи" }).map(([key, label]) =>

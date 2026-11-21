@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { AnalysesWorkspace } from "../src/AnalysesWorkspace";
 import { MediaViewer } from "../src/MediaWorkspace";
+import { SampleWorkspace } from "../src/SampleWorkspace";
 import { useState } from "react";
 
 test("thin section precision zoom loads original pixels and places in original coordinates", async () => {
@@ -24,6 +25,37 @@ test("thin section precision zoom loads original pixels and places in original c
   expect(loadRegion).toHaveBeenLastCalledWith({ left: 474, top: 236, width: 52, height: 27 });
   fireEvent(svg, new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 200, clientY: 100 }));
   expect(onPlace).toHaveBeenCalledExactlyOnceWith({ kind: "point", x_px: 500, y_px: 250 });
+});
+
+test("reopening a thin section and choosing a saved point centres on its original pixels", async () => {
+  const sample = { sample_id: "sample", sample_name: "KIV-2", minerals: [], analysis_count: 0, context: {}, notes: [], sources: [],
+    thin_sections: [{ thin_section_id: "section", thin_section_name: "TS1" }], images: [
+      { thin_section_id: "section", media_asset_id: "view", display_name: "bse.png", media_type: "BSE", width_px: 1000, height_px: 500 },
+      { thin_section_id: null, media_asset_id: "other", display_name: "field.png", media_type: "Другое" },
+    ] };
+  const annotation = { spatial_annotation_id: "saved-point", geometry_kind: "point", point_name: "P-07", x_px: 750, y_px: 125 };
+  const previewMedia = vi.fn(async (_id, region) => region ? { region, preview_url: "/region.png" }
+    : { width_px: 1000, height_px: 500, preview_url: "/overview.jpg", annotations: [annotation] });
+  const props = { initialTab: "Шлифы", loadSamples: async () => [sample], loadSample: async () => sample, previewMedia };
+  const user = userEvent.setup();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { container, unmount } = render(<SampleWorkspace {...props} />);
+    await user.click(await screen.findByText("TS1"));
+    expect(screen.queryByText("field.png")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Открыть" }));
+    const point = await screen.findByRole("button", { name: "P-07" });
+    const viewport = container.querySelector(".media-viewer");
+    const scene = container.querySelector(".media-scene");
+    Object.defineProperties(viewport, { clientWidth: { value: 400 }, clientHeight: { value: 200 } });
+    scene.getBoundingClientRect = () => ({ width: parseInt(scene.style.width) * 4, height: parseInt(scene.style.width) * 2 });
+    await user.click(point);
+    expect(point.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("slider", { name: "Масштаб изображения" }).value).toBe("2000");
+    expect(screen.getByLabelText("Аннотации изображения").querySelector("circle").getAttribute("cx")).toBe("750");
+    await waitFor(() => expect(previewMedia).toHaveBeenLastCalledWith("view", { left: 724, top: 111, width: 52, height: 27 }));
+    unmount();
+    previewMedia.mockClear();
+  }
 });
 
 function SelectionTestWorkspace(props) {

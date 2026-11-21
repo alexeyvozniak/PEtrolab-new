@@ -154,9 +154,12 @@ export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote,
           const refreshed = await loadSample(sampleId);
           setSample((item) => item.sample_id === refreshed.sample_id ? refreshed : item);
         }} />}
-      {tab === "Шлифы" && <section className="sample-card"><h3>Шлифы</h3>{current.thin_sections.length ? <ul className="sample-items">
-        {current.thin_sections.map((item) => <li key={item.thin_section_id}>{item.thin_section_name}</li>)}
-      </ul> : <p>У образца нет связанных шлифов.</p>}</section>}
+      {tab === "Шлифы" && <section className="sample-card"><h3>Шлифы</h3>{current.thin_sections.length ?
+        current.thin_sections.map((item) => <details key={item.thin_section_id}>
+          <summary>{item.thin_section_name}</summary>
+          <MediaGallery images={current.images.filter((image) => image.thin_section_id === item.thin_section_id)}
+            previewMedia={previewMedia} showPoints />
+        </details>) : <p>У образца нет связанных шлифов.</p>}</section>}
       {tab === "Изображения" && <section className="sample-card"><h3>Изображения</h3>{gallery}</section>}
     </>}
   </section>;

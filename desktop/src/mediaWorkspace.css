@@ -1,5 +1,8 @@
 .media-items li { flex-wrap: wrap; }
 .media-items + .primary-button { margin-top: 10px; }
+.media-with-points { display: grid; grid-template-columns: minmax(6rem, 11rem) minmax(0, 1fr); gap: 12px; }
+.media-with-points > section { max-height: 65vh; overflow: auto; overflow-wrap: anywhere; }
+.media-with-points button[aria-pressed="true"] { background: #e3f0e7; border-color: #267048; }
 .media-viewer { overflow: auto; max-height: 65vh; margin-top: 7px; border: 1px solid #dae5dc; background: #f0f4f1; }
 .media-scene { position: relative; }
 .media-scene img { width: 100%; height: auto; display: block; user-select: none; }

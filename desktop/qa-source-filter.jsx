@@ -93,7 +93,7 @@ const qaSample = {
 };
 const loadQaSamples = async () => [qaSample];
 const loadQaSample = async () => qaSample;
-function PrecisionFixture() {
+function PrecisionFixture({ reopen = false }) {
   const [point, setPoint] = React.useState(null);
   const image = React.useMemo(() => {
     const canvas = document.createElement("canvas");
@@ -120,6 +120,14 @@ function PrecisionFixture() {
       0, 0, region.width, region.height);
     return { region, preview_url: canvas.toDataURL() };
   };
+  if (reopen) {
+    const sample = { ...qaSample, thin_sections: [{ thin_section_id: 'section', thin_section_name: 'KIV-2-A' }],
+      images: [{ thin_section_id: 'section', media_asset_id: 'bse', display_name: 'KIV-2-A-BSE.png', media_type: 'BSE',
+        width_px: image.width_px, height_px: image.height_px }] };
+    const annotations = [{ spatial_annotation_id: 'annotation-1', geometry_kind: 'point', point_name: 'P-01', x_px: 1080, y_px: 380 }];
+    return <SampleWorkspace initialTab="Шлифы" loadSamples={async () => [sample]} loadSample={async () => sample}
+      previewMedia={(_, region) => region ? loadRegion(region) : Promise.resolve({ ...image, annotations })} />;
+  }
   return <MediaViewer image={image} loadRegion={loadRegion} onPlace={setPoint}
     annotations={point ? [{ ...point, id: "qa-point", label: "P-01" }] : []} />;
 }
@@ -129,4 +137,5 @@ createRoot(document.getElementById('root')).render(navigationMode === 'overview'
     ? <ProjectSearch seed={{mineral:'Апатит'}} queryProject={qaSearch} selectionCount={1} onAddSelection={()=>{}} onOpenAnalysis={()=>{}} />
     : navigationMode === 'plot' ? <PlotFixture /> : navigationMode === 'sample'
       ? <SampleWorkspace loadSamples={loadQaSamples} loadSample={loadQaSample} onOpenAnalyses={()=>{}} />
-      : navigationMode === 'precision' ? <PrecisionFixture /> : <RangeFixture />);
+      : navigationMode === 'precision' || navigationMode === 'precision-reopen'
+        ? <PrecisionFixture reopen={navigationMode === 'precision-reopen'} /> : <RangeFixture />);

@@ -11,6 +11,7 @@ import { join, resolve } from "node:path";
 const bridge = vi.hoisted(() => ({ invoke: null }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args) => bridge.invoke(...args) }));
 import { App } from "../src/App";
+import { invokePetrolab } from "../src/desktopApi";
 configure({ asyncUtilTimeout: 5000 });
 
 let child, folder, first, second, queue, mediaQueue, original, pending, lines, requests;
@@ -550,6 +551,74 @@ test("imports a thin-section image, previews it and exports a byte-for-byte orig
   expect((await readFile(join(folder, "copy-ppl-annotated.png"))).includes(Buffer.from("PetroLab"))).toBe(true);
   expect(await readFile(source)).toEqual(originalImage);
 }, 20000);
+
+test("saves a thin section point placed at 20× and reopens its original area after restarting Python", async () => {
+  const source = join(folder, "bse.png");
+  const originalImage = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAAUElEQVR4nM3OMQEAIAzAsFJleEAI/j/+GaBRkLXvoURiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJMbfgekBmXUBQky7dlsAAAAASUVORK5CYII=", "base64");
+  await writeFile(source, originalImage);
+  await writeFile(second, "Analysis,Sample,SiO2 [wt.%]\nB1,KIV-2,40\nB2,KIV-2,41\n");
+  queue = [second]; mediaQueue = [source];
+  const user = userEvent.setup();
+  let app = render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton(/^(Импортировать таблицу|Сохранить импорт в проект)$/));
+  await screen.findByRole("heading", { name: "Анализы" });
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  const input = await invokePetrolab("project.analyses.list", database);
+  const pointFixture = await invokePetrolab("analytical_point.create", { ...database, sample_name: "KIV-2", point_name: "P-07",
+    analysis_ids: input.result.analyses.map((row) => row.analysis_id), link_type: "same_point" });
+  expect(pointFixture.result.point_name).toBe("P-07");
+  await user.click(await enabledButton("Изображения"));
+  await user.click(await enabledButton("Импорт изображений"));
+  await user.click(await enabledButton("Выбрать изображения"));
+  await user.selectOptions(await screen.findByLabelText("Физический образец"), await screen.findByRole("option", { name: "KIV-2" }));
+  await user.type(screen.getByLabelText("Имя шлифа"), "TS1");
+  await user.click(await enabledButton("bse.png"));
+  await user.selectOptions(await screen.findByLabelText("Аналитическая точка"), await screen.findByRole("option", { name: "P-07" }));
+
+  const mockGeometry = () => {
+    const viewport = app.container.querySelector(".media-viewer");
+    const scene = app.container.querySelector(".media-scene");
+    const svg = screen.getByLabelText("Аннотации изображения");
+    Object.defineProperties(viewport, { clientWidth: { value: 480 }, clientHeight: { value: 320 } });
+    scene.getBoundingClientRect = () => ({ width: parseInt(scene.style.width) * 4.8, height: parseInt(scene.style.width) * 3.2 });
+    svg.getBoundingClientRect = () => ({ ...scene.getBoundingClientRect(), left: -viewport.scrollLeft, top: -viewport.scrollTop });
+    return { viewport, svg };
+  };
+  const { viewport, svg } = mockGeometry();
+  fireEvent.change(screen.getByRole("slider", { name: "Масштаб изображения" }), { target: { value: "2000" } });
+  viewport.scrollLeft = 6960;
+  viewport.scrollTop = 1440;
+  fireEvent.scroll(viewport);
+  await waitFor(() => expect(app.container.querySelector(".media-precision-region")?.src).toContain("data:image/png;base64,"));
+  fireEvent(svg, new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 240, clientY: 160 }));
+  expect(svg.querySelector("circle").getAttribute("cx")).toBe("36");
+  await user.click(await enabledButton("Проверить импорт изображений"));
+  await user.click(await enabledButton("Импортировать изображения"));
+  await screen.findByRole("heading", { name: "Образец KIV-2" });
+  const apply = requests.find((request) => request.command === "media.import.apply");
+  const placement = apply.payload.plan.items[0].placements[0];
+  expect(placement.geometry).toMatchObject({ kind: "point", x_px: 36, y_px: 8 });
+
+  app.unmount();
+  await stopService();
+  startService();
+  app = render(<App />);
+  await user.click(await enabledButton("Образцы"));
+  await user.click(await enabledButton("Шлифы"));
+  await user.click(await screen.findByText("TS1", { exact: true }));
+  await user.click(await enabledButton("Открыть"));
+  const point = await enabledButton("P-07");
+  mockGeometry();
+  await user.click(point);
+  expect(screen.getByRole("slider", { name: "Масштаб изображения" }).value).toBe("2000");
+  const finalSvg = screen.getByLabelText("Аннотации изображения");
+  expect([finalSvg.querySelector("circle").getAttribute("cx"), finalSvg.querySelector("circle").getAttribute("cy")]).toEqual(["36", "8"]);
+  await waitFor(() => expect(app.container.querySelector(".media-precision-region")?.src).toContain("data:image/png;base64,"));
+  const saved = await invokePetrolab("media.preview", { ...database, media_asset_id: apply.payload.plan.items[0].media_asset_id });
+  expect(saved.result.annotations[0].spatial_annotation_id).toBe(placement.spatial_annotation_id);
+  expect(await readFile(source)).toEqual(originalImage);
+}, 30000);
 
 test("real Python mineral review separates conflicts and persists only explicit acceptance", async () => {
   await writeFile(second, "Analysis,Mineral,SiO2 (wt.%),Al2O3 (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%),FeO (wt.%)\nB1,olivine,40,0,50,0,0,0,10\nB2,garnet,40,0,50,0,0,0,10\n");

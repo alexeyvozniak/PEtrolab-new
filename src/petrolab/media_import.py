@@ -303,6 +303,18 @@ def _validate_geometry(geometry: Any, width: int, height: int) -> dict[str, Any]
 
 def _plan_fingerprint(plan: dict[str, Any]) -> str:
     semantic = {key: value for key, value in plan.items() if key != "semantic_fingerprint"}
+    # The desktop JSON round trip turns whole-valued coordinates such as 36.0 into 36.
+    items = []
+    for item in semantic["items"]:
+        placements = []
+        for placement in item["placements"]:
+            geometry = {
+                key: float(value or 0) if type(value) in (int, float) else value
+                for key, value in placement["geometry"].items()
+            }
+            placements.append({**placement, "geometry": geometry})
+        items.append({**item, "placements": placements})
+    semantic["items"] = items
     encoded = json.dumps(semantic, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
