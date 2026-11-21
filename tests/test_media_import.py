@@ -17,8 +17,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from petrolab.import_apply import apply_import_plan, open_project  # noqa: E402
+from petrolab.import_apply import apply_import_plan, latest_active_import, open_project  # noqa: E402
 from petrolab.import_preview import ImportCommandError  # noqa: E402
+from petrolab.manual_analysis import create_manual_analysis  # noqa: E402
 from petrolab.media_display import export_media_original, export_media_rendered, preview_input_media, preview_project_media  # noqa: E402
 from PIL import Image  # noqa: E402
 from petrolab.media_import import (  # noqa: E402
@@ -64,6 +65,39 @@ class MediaImportTests(unittest.TestCase):
         first = create_analytical_point(database, "KIV-2", "P-07", ids[:2], "same_point")
         second = create_analytical_point(database, "OTHER", "P-08", ids[2:4], "same_grain")
         return database, first, second
+
+    def test_manual_analysis_preserves_tokens_and_creates_the_link_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            database, point, _ = self._project_with_points(folder)
+            entry = {"identity": "EPMA-17", "measurement_date": "2026-08-28", "operator": "Иванов",
+                     "method": "EPMA", "measurements": {"SiO2": "43,25", "FeO": "<0.05", "TiO2": "0"}}
+            result = create_manual_analysis(database, point["analytical_point_id"], entry)
+            analysis_id = result["analysis_id"]
+            self.assertEqual(result["journal"]["parameters"]["analysis_ids"], [analysis_id])
+            with closing(open_project(database)) as connection:
+                rows = connection.execute("""SELECT canonical_field, unit, raw_token, detection_limit, value_status, reported_fe_form
+                    FROM measurement WHERE analysis_id = ? ORDER BY canonical_field""", (analysis_id,)).fetchall()
+                self.assertEqual([tuple(row) for row in rows], [
+                    ("FeO", "wt.%", "<0.05", 0.05, "below_detection_limit", "FeO"),
+                    ("SiO2", "wt.%", "43,25", None, "numeric", None), ("TiO2", "wt.%", "0", None, "numeric", None),
+                ])
+                source = connection.execute("SELECT * FROM source_file WHERE source_id = ?", (result["source_id"],)).fetchone()
+                self.assertEqual(source["display_name"], "Ручной ввод.csv")
+                self.assertEqual(source["source_fingerprint_sha256"], hashlib.sha256((folder / source["managed_relative_path"]).read_bytes()).hexdigest())
+                self.assertNotEqual(latest_active_import(connection)["source_id"], result["source_id"])
+                with connection:
+                    connection.execute("""CREATE TRIGGER reject_point_link BEFORE INSERT ON analytical_point_analysis
+                        BEGIN SELECT RAISE(ABORT, 'test failure'); END""")
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "test failure"):
+                create_manual_analysis(database, point["analytical_point_id"], {**entry, "identity": "EPMA-18"})
+            with self.assertRaises(ImportCommandError) as duplicate:
+                create_manual_analysis(database, point["analytical_point_id"], entry)
+            self.assertEqual(duplicate.exception.code, "MANUAL_ANALYSIS_EXISTS")
+            self.assertEqual(len(list((folder / "sources").glob("*.csv"))), 1)
+            with closing(open_project(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM source_file WHERE display_name = 'Ручной ввод.csv'").fetchone()[0], 1)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM analysis WHERE json_extract(identity_json, '$[0]') = 'EPMA-18'").fetchone()[0], 0)
 
     def _assignment(self, image: Path, point_id: str, sample_name: str = "KIV-2", reason: str | None = None) -> dict:
         return {

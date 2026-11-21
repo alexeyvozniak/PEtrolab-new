@@ -617,6 +617,17 @@ test("saves a thin section point placed at 20× and reopens its original area af
   await waitFor(() => expect(app.container.querySelector(".media-precision-region")?.src).toContain("data:image/png;base64,"));
   const saved = await invokePetrolab("media.preview", { ...database, media_asset_id: apply.payload.plan.items[0].media_asset_id });
   expect(saved.result.annotations[0].spatial_annotation_id).toBe(placement.spatial_annotation_id);
+  await user.click(await enabledButton("Создать ручную запись"));
+  await user.type(screen.getByLabelText("ID / номер анализа"), "EPMA-007");
+  fireEvent.change(screen.getByLabelText("Дата измерения"), { target: { value: "2026-08-28" } });
+  await user.type(screen.getByLabelText("Оператор"), "Иванов");
+  await user.type(screen.getByLabelText("FeO"), "<0.05");
+  await user.click(await enabledButton("Создать и связать с P-07"));
+  await screen.findByText("Анализ «EPMA-007» создан и связан с точкой.");
+  const linked = await invokePetrolab("analytical_point.analyses", { ...database, point_id: pointFixture.result.analytical_point_id });
+  const manual = linked.result.find(({ identity }) => identity === "EPMA-007");
+  expect(manual).toMatchObject({ method: "EPMA", source_name: "Ручной ввод.csv", link_type: "same_point" });
+  expect(screen.getByRole("slider", { name: "Масштаб изображения" }).value).toBe("2000");
   expect(await readFile(source)).toEqual(originalImage);
 }, 30000);
 

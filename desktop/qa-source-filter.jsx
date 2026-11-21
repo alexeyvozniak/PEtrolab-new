@@ -135,6 +135,11 @@ function PrecisionFixture({ reopen = false }) {
     return <SampleWorkspace initialTab="Шлифы" loadSamples={async () => [sample]} loadSample={async () => sample}
       pointLinks={{ selectedIds, loadPoint: async () => savedLinks.current,
         queryProject: async (search) => ({ analyses: candidates.filter((row) => row.identity.toLowerCase().includes(search.query.toLowerCase())), has_more: false }),
+        createManualAnalysis: async (_, entry) => {
+          if (Object.values(entry.measurements).includes('неизвестно')) throw new Error('Введите число или значение ниже предела обнаружения.');
+          savedLinks.current = [...savedLinks.current, { analysis_id: `manual-${entry.identity}`, identity: entry.identity,
+            method: entry.method, source_name: 'Ручной ввод.csv', active: true }];
+        },
         changeLink: async (_, ids, type) => { savedLinks.current = type
           ? candidates.filter((row) => ids.includes(row.analysis_id)) : savedLinks.current.filter((row) => row.analysis_id !== ids); },
         addToSelection: (id) => setSelectedIds((current) => [...current, id]), openAnalysis: () => {} }}

@@ -73,7 +73,7 @@ def project_overview(database_path):
                    (SELECT COUNT(*) FROM analysis WHERE import_batch_id = b.import_batch_id) AS analysis_count
             FROM import_batch b JOIN source_file s ON s.source_id = b.source_id
             LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
-            WHERE b.status = 'applied' AND x.import_batch_id IS NULL
+            WHERE b.status = 'applied' AND x.import_batch_id IS NULL AND json_type(b.plan_json, '$.manual_entry') IS NULL
             ORDER BY b.applied_at DESC, b.rowid DESC LIMIT 12
         """).fetchall()
         groups = connection.execute("""

@@ -2,11 +2,38 @@ import { useEffect, useState } from "react";
 
 const PAGE_SIZE = 20;
 const EMPTY_QUERY = { query: "", method: "", mineral: "" };
+const MANUAL_FIELDS = ["SiO2", "MgO", "TiO2", "Al2O3", "FeO"];
+
+function ManualAnalysisForm({ point, pending, onSave, onCancel }) {
+  const [fields, setFields] = useState({ method: "EPMA", identity: "", measurement_date: "", operator: "", comment: "" });
+  const [measurements, setMeasurements] = useState({});
+  const update = (name) => (event) => setFields({ ...fields, [name]: event.target.value });
+  return <form className="sample-form manual-analysis-form" onSubmit={(event) => {
+    event.preventDefault();
+    onSave({ ...fields, measurements: Object.fromEntries(Object.entries(measurements).filter(([, token]) => token.trim())) });
+  }}>
+    <label>Метод<select value={fields.method} onChange={update("method")} disabled={pending}>
+      <option>EPMA</option><option>SEM-EDS</option>
+    </select></label>
+    <label>ID / номер анализа<input value={fields.identity} onChange={update("identity")} required maxLength={120} disabled={pending} /></label>
+    <label>Дата измерения<input type="date" value={fields.measurement_date} onChange={update("measurement_date")} required disabled={pending} /></label>
+    <label className="manual-analysis-wide">Оператор<input value={fields.operator} onChange={update("operator")} required maxLength={120} disabled={pending} /></label>
+    <fieldset className="manual-analysis-wide"><legend>Состав (wt.%)</legend>
+      {MANUAL_FIELDS.map((field) => <label key={field}>{field}<input maxLength={64} value={measurements[field] ?? ""} disabled={pending}
+        onChange={(event) => setMeasurements({ ...measurements, [field]: event.target.value })} /></label>)}
+    </fieldset>
+    <label className="manual-analysis-wide">Комментарий<textarea value={fields.comment} onChange={update("comment")} maxLength={200} disabled={pending} /></label>
+    <p className="manual-analysis-wide">Источник анализа — ручной ввод.</p>
+    <button className="primary-button" disabled={pending || !Object.values(measurements).some((token) => token.trim())}>Создать и связать с {point.point_name}</button>
+    <button className="outline-button" type="button" disabled={pending} onClick={onCancel}>Отмена</button>
+  </form>;
+}
 
 export function ThinSectionLinks({ point, actions }) {
-  const { loadPoint, changeLink, queryProject, selectedIds, addToSelection, openAnalysis } = actions;
+  const { loadPoint, changeLink, queryProject, selectedIds, addToSelection, openAnalysis, createManualAnalysis } = actions;
   const [rows, setRows] = useState(null);
   const [search, setSearch] = useState(false);
+  const [manual, setManual] = useState(false);
   const [fields, setFields] = useState(EMPTY_QUERY);
   const [page, setPage] = useState({ offset: 0, query: EMPTY_QUERY });
   const [results, setResults] = useState(null);
@@ -49,11 +76,25 @@ export function ThinSectionLinks({ point, actions }) {
     finally { setPending(false); }
   };
 
+  const create = async (entry) => {
+    setPending(true);
+    setError("");
+    try {
+      await createManualAnalysis(id, entry);
+      setManual(false);
+      setNotice(`Анализ «${entry.identity.trim()}» создан и связан с точкой.`);
+      try { setRows(await loadPoint(id)); }
+      catch (caught) { setRows(null); setError(caught.message); }
+    } catch (caught) { setError(caught.message); }
+    finally { setPending(false); }
+  };
+
   return <aside className="sample-card thin-section-links" aria-label="Анализы точки">
-    <h3>{search ? `Найти существующий анализ для ${point.point_name}` : `Анализы точки ${point.point_name}`}</h3>
+    <h3>{manual ? `Новая ручная запись для ${point.point_name}` : search ? `Найти существующий анализ для ${point.point_name}` : `Анализы точки ${point.point_name}`}</h3>
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
-    {search ? <>
+    {manual ? <ManualAnalysisForm point={point} pending={pending} onSave={create}
+      onCancel={() => { setManual(false); setError(""); }} /> : search ? <>
       <form className="sample-form" onSubmit={(event) => {
         event.preventDefault(); setMarked([]); setPage({ offset: 0, query: fields });
       }}>
@@ -90,7 +131,11 @@ export function ThinSectionLinks({ point, actions }) {
         <button className="outline-button" disabled={pending} onClick={closeSearch}>Отмена</button>
       </div>
     </> : <>
-      <button className="primary-button" disabled={!rows || pending} onClick={() => { setNotice(""); setSearch(true); }}>Найти существующие анализы</button>
+      <div className="point-row-actions">
+        <button className="primary-button" disabled={!rows || pending} onClick={() => { setNotice(""); setSearch(true); }}>Найти существующие анализы</button>
+        {createManualAnalysis && <button className="outline-button" disabled={!rows || pending}
+          onClick={() => { setNotice(""); setManual(true); }}>Создать ручную запись</button>}
+      </div>
       {!rows && !error && <p role="status">Загружаю анализы точки…</p>}
       {rows?.length === 0 && <p>У этой точки нет связанных анализов.</p>}
       {rows?.length > 0 && <ul className="sample-items">{rows.map((row) => <li key={row.analysis_id}>

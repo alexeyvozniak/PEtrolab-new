@@ -16,6 +16,7 @@ from .table_views import list_table_views, save_table_view
 from .edit_drafts import check_edit_draft, commit_edit_draft, list_edit_drafts, save_edit_draft
 from .project_navigation import project_overview, search_analyses
 from .sample_workspace import add_sample_note, change_point_link, get_point_analyses, get_project_sample, list_project_samples, save_sample_context
+from .manual_analysis import create_manual_analysis
 from .plot_data import list_plot_specifications, open_plot_specification, plot_catalog, query_plot_data, record_plot_visibility, save_plot_specification
 from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe
 from .import_apply import (
@@ -368,6 +369,9 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     )},
     "analytical_point.analyses": lambda params: {"result": get_point_analyses(
         _project_database_path(params), params.get("point_id"),
+    )},
+    "analytical_point.analysis.create_manual": lambda params: {"result": create_manual_analysis(
+        _project_database_path(params), params.get("point_id"), params.get("entry"),
     )},
     "analytical_point.link.set": lambda params: {"result": change_point_link(
         _project_database_path(params), params.get("point_id"), params.get("analysis_id"), params.get("actor"), params.get("link_type"),

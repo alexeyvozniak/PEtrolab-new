@@ -627,7 +627,7 @@ def latest_active_import(connection: sqlite3.Connection) -> dict[str, Any] | Non
             FROM import_batch b
             JOIN source_file s ON s.source_id = b.source_id
             LEFT JOIN import_batch_retraction r ON r.import_batch_id = b.import_batch_id
-            WHERE b.status = 'applied' AND r.import_batch_id IS NULL
+            WHERE b.status = 'applied' AND r.import_batch_id IS NULL AND json_type(b.plan_json, '$.manual_entry') IS NULL
         ), latest AS (
             SELECT * FROM active ORDER BY applied_at DESC, batch_order DESC LIMIT 1
         )

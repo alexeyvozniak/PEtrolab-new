@@ -9,6 +9,9 @@
 .thin-section-links .sample-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .thin-section-links .sample-form > :first-child,
 .thin-section-links .sample-form > button { grid-column: 1 / -1; }
+.manual-analysis-wide { grid-column: 1 / -1; }
+.manual-analysis-form fieldset { min-width: 0; margin: 0; border: 1px solid #dae5dc; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(56px, 1fr)); }
+.manual-analysis-form input, .manual-analysis-form textarea { min-width: 0; }
 .thin-section-links .point-row-actions { flex-wrap: wrap; }
 @media (max-width: 850px) {
   .media-with-inspector { grid-template-columns: minmax(6rem, 9rem) minmax(0, 1fr); }

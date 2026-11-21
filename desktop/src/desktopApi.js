@@ -126,6 +126,8 @@ export const createSamplePoint = (projectDatabasePath, fields) =>
   invokePetrolab("analytical_point.create", { project_database_path: projectDatabasePath, ...fields });
 export const listPointAnalyses = (projectDatabasePath, pointId) =>
   invokePetrolab("analytical_point.analyses", { project_database_path: projectDatabasePath, point_id: pointId });
+export const createManualPointAnalysis = (projectDatabasePath, pointId, entry) =>
+  invokePetrolab("analytical_point.analysis.create_manual", { project_database_path: projectDatabasePath, point_id: pointId, entry });
 export const setPointAnalysisLink = (projectDatabasePath, pointId, analysisId, linkType, actor) =>
   invokePetrolab("analytical_point.link.set", { project_database_path: projectDatabasePath, point_id: pointId,
     ...(Array.isArray(analysisId) ? { analysis_ids: analysisId } : { analysis_id: analysisId }), link_type: linkType, actor });
