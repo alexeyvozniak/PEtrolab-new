@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ThinSectionLinks } from "./ThinSectionLinks";
+import { MediaAttachment } from "./MediaAttachment";
 import "./mediaWorkspace.css";
 
 export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, shape = "point" }) {
@@ -137,22 +138,39 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
   </>;
 }
 
-export function MediaGallery({ images, previewMedia, exportOriginal, exportRendered, showPoints = false, pointLinks }) {
+export function MediaGallery({ images, previewMedia, exportOriginal, exportRendered, showPoints = false, pointLinks, mediaLinks, reloadSample }) {
   const [openId, setOpenId] = useState("");
   const [image, setImage] = useState(null);
   const [status, setStatus] = useState(null);
   const [pending, setPending] = useState(false);
   const [focus, setFocus] = useState(null);
+  const [attachment, setAttachment] = useState(false);
+  const [drawing, setDrawing] = useState(false);
+  const [shape, setShape] = useState("rectangle");
   const inspectPoint = Boolean(pointLinks && focus?.analytical_point_id);
   const [renderOptions, setRenderOptions] = useState({ points: true, regions: true, labels: true });
   const open = async (id) => {
     setOpenId(id);
     setImage(null);
     setFocus(null);
+    setDrawing(false);
+    setAttachment(false);
     setStatus(null);
     setPending(true);
     try { setImage(await previewMedia(id)); }
     catch (error) { setStatus({ error: error.message }); }
+    finally { setPending(false); }
+  };
+  const saveRegion = async (geometry) => {
+    setPending(true);
+    setStatus(null);
+    try {
+      const region = await mediaLinks.createRegion(openId, geometry);
+      setImage((current) => ({ ...current, annotations: [...current.annotations, region] }));
+      setFocus(region);
+      setDrawing(false);
+      setAttachment(true);
+    } catch (error) { setStatus({ error: error.message }); }
     finally { setPending(false); }
   };
   const save = async (exporter, item, options) => {
@@ -179,19 +197,34 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
     </ul>
     {status && <p role={status.error ? "alert" : "status"}>{status.error || status.notice}</p>}
     {image && <>
-      <div className={showPoints ? `media-with-points${inspectPoint ? " media-with-inspector" : ""}` : undefined}>
+      {mediaLinks && <div className="point-row-actions media-attachment-tools">
+        <button type="button" className="outline-button" aria-pressed={attachment} disabled={pending || drawing}
+          onClick={() => setAttachment(!attachment)}>Медиа и привязка</button>
+        <button type="button" className="outline-button" disabled={pending} onClick={() => { setDrawing(!drawing); setAttachment(true); }}>
+          {drawing ? "Отменить выделение" : "Выделить область"}
+        </button>
+        {drawing && <label>Форма области <select value={shape} disabled={pending} onChange={(event) => setShape(event.target.value)}>
+          <option value="rectangle">Прямоугольник</option><option value="square">Квадрат</option>
+        </select></label>}
+      </div>}
+      {drawing && <p role="status">Протяните область на изображении.</p>}
+      <div className={showPoints ? `media-with-points${inspectPoint || attachment ? " media-with-inspector" : ""}` : undefined}>
         {showPoints && <section aria-label="Точки снимка">
           {image.annotations.length > 0 ? <ul className="sample-items">{image.annotations.map((item) => <li key={item.spatial_annotation_id}>
             <button className="outline-button" type="button" aria-pressed={focus?.spatial_annotation_id === item.spatial_annotation_id}
-              onClick={() => setFocus({ ...item })}>{item.point_name || (item.geometry_kind === "point" ? "Точка" : "Область")}</button>
+              disabled={pending} onClick={() => { setDrawing(false); setFocus({ ...item }); }}>{item.point_name || item.label || (item.geometry_kind === "point" ? "Точка" : "Область")}</button>
           </li>)}</ul> : <p>На снимке нет сохранённых точек или областей.</p>}
         </section>}
         <div>
-          <MediaViewer key={openId} image={image} loadRegion={(region) => previewMedia(openId, region)} focus={focus} annotations={image.annotations.map((item) => ({
-            ...item, id: item.spatial_annotation_id, kind: item.geometry_kind, label: item.point_name,
+          <MediaViewer key={openId} image={image} loadRegion={(region) => previewMedia(openId, region)} focus={focus}
+            onPlace={drawing && !pending ? saveRegion : undefined} shape={shape} annotations={image.annotations.map((item) => ({
+            ...item, id: item.spatial_annotation_id, kind: item.geometry_kind, label: item.point_name || item.label,
           }))} />
         </div>
-        {inspectPoint && <ThinSectionLinks key={focus.analytical_point_id} point={focus} actions={pointLinks} />}
+        {attachment && focus && !drawing && <MediaAttachment key={focus.spatial_annotation_id} target={focus}
+          images={images.filter((item) => item.media_asset_id !== openId)} actions={mediaLinks} previewMedia={previewMedia} reloadSample={reloadSample} />}
+        {attachment && (!focus || drawing) && <p className="media-attachment">Выберите точку или выделите область на снимке.</p>}
+        {!attachment && inspectPoint && <ThinSectionLinks key={focus.analytical_point_id} point={focus} actions={pointLinks} />}
       </div>
       {exportRendered && <fieldset className="media-export-options">
         <legend>PNG с метками и подписями</legend>

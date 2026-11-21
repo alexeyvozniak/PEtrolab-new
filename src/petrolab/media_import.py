@@ -463,7 +463,7 @@ def _ensure_sample_and_section(connection: sqlite3.Connection, sample_name: str,
     return sample_id, section_id
 
 
-def apply_media_import_plan(database_path: str | Path, plan: Any) -> dict[str, Any]:
+def apply_media_import_plan(database_path: str | Path, plan: Any, *, attach_to: str | None = None) -> dict[str, Any]:
     if not isinstance(plan, dict) or plan.get("schema_version") != 1 or not isinstance(plan.get("items"), list) or not plan["items"]:
         _fail("PLAN_SCHEMA_INCOMPATIBLE", "Media import plan is invalid.")
     if plan.get("semantic_fingerprint") != _plan_fingerprint(plan):
@@ -480,6 +480,7 @@ def apply_media_import_plan(database_path: str | Path, plan: Any) -> dict[str, A
         created_assets = 0
         reused_assets = 0
         annotation_count = 0
+        link_ids = []
         with connection:
             connection.execute("BEGIN IMMEDIATE")
             for item in plan["items"]:
@@ -529,7 +530,11 @@ def apply_media_import_plan(database_path: str | Path, plan: Any) -> dict[str, A
                         (placement["analytical_point_id"], placement["spatial_annotation_id"], int(is_cross_sample), reason, timestamp),
                     )
                     annotation_count += 1
-        return {"media_import_batch_id": batch_id, "created_media_asset_count": created_assets, "reused_media_asset_count": reused_assets, "spatial_annotation_count": annotation_count, "warnings": plan.get("warnings", [])}
+                if attach_to is not None:
+                    from .media_links import attach_media
+                    link_ids.append(attach_media(connection, attach_to, asset_id))
+        return {"media_import_batch_id": batch_id, "created_media_asset_count": created_assets, "reused_media_asset_count": reused_assets, "spatial_annotation_count": annotation_count,
+                "warnings": plan.get("warnings", []), **({"media_link_ids": link_ids} if attach_to is not None else {})}
     except Exception:
         for path in copied:
             path.unlink(missing_ok=True)

@@ -12,14 +12,16 @@ import unittest
 import zlib
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from petrolab.import_apply import apply_import_plan, latest_active_import, open_project  # noqa: E402
+from petrolab.import_apply import MIGRATIONS, apply_import_plan, latest_active_import, open_project  # noqa: E402
 from petrolab.import_preview import ImportCommandError  # noqa: E402
 from petrolab.manual_analysis import create_manual_analysis  # noqa: E402
+from petrolab.media_links import change_media_link, create_media_region, import_linked_photo, list_media_links  # noqa: E402
 from petrolab.media_display import export_media_original, export_media_rendered, preview_input_media, preview_project_media  # noqa: E402
 from PIL import Image  # noqa: E402
 from petrolab.media_import import (  # noqa: E402
@@ -125,6 +127,49 @@ class MediaImportTests(unittest.TestCase):
             tiff_result = inspect_media_source(tiff)
             self.assertEqual((tiff_result["mime_type"], tiff_result["width_px"], tiff_result["height_px"]), ("image/tiff", 640, 480))
 
+    def test_photo_links_preserve_points_areas_and_originals(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            original, point_photo, region_photo, failed_photo = (folder / name for name in ("bse.png", "point.png", "region.png", "failed.png"))
+            for index, path in enumerate((original, point_photo, region_photo, failed_photo)):
+                write_png(path, width=12 + index, height=8)
+            hashes = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in (original, point_photo, region_photo, failed_photo)}
+            legacy_migrations = folder / "migrations-v18"
+            legacy_migrations.mkdir()
+            for migration in MIGRATIONS.glob("*.sql"):
+                if int(migration.name.split("_", 1)[0]) <= 18:
+                    (legacy_migrations / migration.name).write_bytes(migration.read_bytes())
+            with patch("petrolab.import_apply.MIGRATIONS", legacy_migrations):
+                database, point, _ = self._project_with_points(folder)
+                plan = create_media_import_plan(database, [self._assignment(original, point["analytical_point_id"])])
+                apply_media_import_plan(database, plan)
+            item = plan["items"][0]
+            asset_id = item["media_asset_id"]
+            point_id = item["placements"][0]["spatial_annotation_id"]
+            bounds = {"kind": "square", "x_px": 3.5, "y_px": 2, "width_px": 4, "height_px": 4}
+            area = create_media_region(database, asset_id, bounds)
+            backup, = folder.glob("project.sqlite.before-v19-*.bak")
+            with closing(sqlite3.connect(backup)) as connection:
+                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 18)
+                self.assertEqual(connection.execute("SELECT spatial_annotation_id FROM spatial_annotation").fetchone()[0], point_id)
+            area_id = area["spatial_annotation_id"]
+            point_link = import_linked_photo(database, point_id, point_photo, "PPL", hashes[point_photo])["media_link_ids"][0]
+            area_link = import_linked_photo(database, area_id, region_photo, "XPL", hashes[region_photo])["media_link_ids"][0]
+            saved_photo = list_media_links(database, point_id)[0]["media_asset_id"]
+            self.assertEqual(list_media_links(database, area_id)[0]["media_link_id"], area_link)
+            self.assertEqual(change_media_link(database, point_id, saved_photo, False)["media_link_id"], point_link)
+            self.assertEqual(list_media_links(database, point_id), [])
+            self.assertEqual(preview_project_media(database, saved_photo)["width_px"], 13)
+            self.assertEqual(change_media_link(database, point_id, saved_photo, True)["media_link_id"], point_link)
+            area_after = next(row for row in preview_project_media(database, asset_id)["annotations"] if row["spatial_annotation_id"] == area_id)
+            self.assertEqual((area_after["geometry_kind"], area_after["x_px"], area_after["width_px"]), ("square", 3.5, 4))
+            with closing(open_project(database)) as connection, connection:
+                connection.execute("CREATE TRIGGER reject_media_link BEFORE INSERT ON media_link BEGIN SELECT RAISE(ABORT, 'test link failure'); END")
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "test link failure"):
+                import_linked_photo(database, area_id, failed_photo, "PPL", hashes[failed_photo])
+            self.assertEqual(len(list((folder / "media").glob("*.png"))), 3)
+            self.assertEqual({path: hashlib.sha256(path.read_bytes()).hexdigest() for path in hashes}, hashes)
+
     def test_batch_inspection_reports_duplicate_physical_images(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             directory = Path(directory_name)
@@ -210,7 +255,7 @@ class MediaImportTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM spatial_annotation").fetchone()[0], 1)
                 row = connection.execute("SELECT geometry_kind, x_px, y_px, image_width_px, image_height_px FROM spatial_annotation").fetchone()
                 self.assertEqual(row, ("point", 5.25, 3.5, 12, 8))
-                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 18)
+                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 19)
             self.assertEqual(result["spatial_annotation_count"], 1)
             media_id = plan["items"][0]["media_asset_id"]
             preview = preview_project_media(database, media_id)

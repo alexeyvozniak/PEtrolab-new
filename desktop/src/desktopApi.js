@@ -116,6 +116,19 @@ export const commitMediaImport = (projectDatabasePath, plan) => invokePetrolab("
 export const previewProjectMedia = (projectDatabasePath, mediaAssetId, region) => invokePetrolab("media.preview", {
   project_database_path: projectDatabasePath, media_asset_id: mediaAssetId, region,
 });
+export const createMediaRegion = (projectDatabasePath, id, geometry) => invokePetrolab("media.region.create", {
+  project_database_path: projectDatabasePath, media_asset_id: id, geometry,
+});
+export const listMediaLinks = (projectDatabasePath, id) => invokePetrolab("media.links.list", {
+  project_database_path: projectDatabasePath, spatial_annotation_id: id,
+});
+export const setMediaLink = (projectDatabasePath, id, assetId, attached) => invokePetrolab("media.link.set", {
+  project_database_path: projectDatabasePath, spatial_annotation_id: id, media_asset_id: assetId, attached,
+});
+export const importLinkedPhoto = (projectDatabasePath, id, photo, type) => invokePetrolab("media.link.import_photo", {
+  project_database_path: projectDatabasePath, spatial_annotation_id: id, source_path: photo.source_path,
+  expected_fingerprint: photo.source_fingerprint, media_type: type,
+});
 export const exportMediaOriginal = (projectDatabasePath, mediaAssetId, outputPath) => invokePetrolab("media.export_original", {
   project_database_path: projectDatabasePath, media_asset_id: mediaAssetId, output_path: outputPath,
 });

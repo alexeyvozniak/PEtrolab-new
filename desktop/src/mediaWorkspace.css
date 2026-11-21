@@ -3,6 +3,10 @@
 .media-with-points { display: grid; grid-template-columns: minmax(6rem, 11rem) minmax(0, 1fr); gap: 12px; }
 .media-with-points > section { max-height: 65vh; overflow: auto; overflow-wrap: anywhere; }
 .media-with-inspector { grid-template-columns: minmax(6rem, 9rem) minmax(0, 1.15fr) minmax(0, 1fr); }
+.media-attachment { min-width: 0; overflow-wrap: anywhere; }
+.media-attachment-tools { margin-bottom: 8px; flex-wrap: wrap; }
+.media-attachment .point-row-actions { flex-wrap: wrap; }
+.media-selected-photo img { display: block; max-width: 100%; max-height: 180px; object-fit: contain; }
 .thin-section-links { min-width: 0; overflow-wrap: anywhere; }
 .thin-section-links .project-search-table { margin: 12px 0; overflow: auto; }
 .thin-section-links .project-search-table td, .thin-section-links .project-search-table th { padding: 6px; white-space: normal; overflow-wrap: normal; }
@@ -15,7 +19,7 @@
 .thin-section-links .point-row-actions { flex-wrap: wrap; }
 @media (max-width: 850px) {
   .media-with-inspector { grid-template-columns: minmax(6rem, 9rem) minmax(0, 1fr); }
-  .thin-section-links { grid-column: 1 / -1; }
+  .thin-section-links, .media-attachment { grid-column: 1 / -1; }
 }
 .media-with-points button[aria-pressed="true"] { background: #e3f0e7; border-color: #267048; }
 .media-viewer { overflow: auto; max-height: 65vh; margin-top: 7px; border: 1px solid #dae5dc; background: #f0f4f1; }

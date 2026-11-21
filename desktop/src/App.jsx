@@ -26,6 +26,7 @@ import {
   listProjectSamples, getProjectSample, saveSampleContext, addSampleNote,
   createSamplePoint, listPointAnalyses, setPointAnalysisLink, createManualPointAnalysis,
   pickMediaFiles, pickMediaExportPath, inspectMediaFiles, previewMediaFile, draftMediaImport, commitMediaImport,
+  createMediaRegion, listMediaLinks, setMediaLink, importLinkedPhoto,
   previewProjectMedia, exportMediaOriginal, exportMediaRendered,
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
   getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication,
@@ -438,6 +439,7 @@ export function App() {
   const loadSamples = useCallback(async () => databasePath ? unwrap(await listProjectSamples(databasePath)) : [], [databasePath]);
   const loadSample = useCallback(async (id) => unwrap(await getProjectSample(databasePath, id)), [databasePath]);
   const loadPointAnalyses = useCallback(async (id) => unwrap(await listPointAnalyses(databasePath, id)), [databasePath]);
+  const loadMediaLinks = useCallback(async (id) => unwrap(await listMediaLinks(databasePath, id)), [databasePath]);
   const queryProject = useCallback(async (query) => databasePath
     ? unwrap(await queryProjectAnalyses(databasePath, query)) : { analyses: [], total: 0, has_more: false }, [databasePath]);
   const openSearchSource = (source) => {
@@ -556,6 +558,14 @@ export function App() {
           addNote={async (id, author, body) => unwrap(await addSampleNote(databasePath, id, author, body))}
           onImportMedia={databasePath && desktopRuntimeAvailable ? () => setScreen("Импорт изображений") : undefined}
           previewMedia={async (id, region) => unwrap(await previewProjectMedia(databasePath, id, region))}
+          mediaLinks={{
+            createRegion: async (id, geometry) => unwrap(await createMediaRegion(databasePath, id, geometry)),
+            list: loadMediaLinks,
+            change: async (id, asset, attached) => unwrap(await setMediaLink(databasePath, id, asset, attached)),
+            importPhoto: async (id, photo, type) => unwrap(await importLinkedPhoto(databasePath, id, photo, type)),
+            pick: desktopRuntimeAvailable ? pickMediaFiles : undefined,
+            previewInput: async (path) => unwrap(await previewMediaFile(path)),
+          }}
           exportOriginal={async (image) => {
             const destination = await pickMediaExportPath(image.display_name);
             return destination ? unwrap(await exportMediaOriginal(databasePath, image.media_asset_id, destination)) : null;

@@ -17,6 +17,7 @@ from .edit_drafts import check_edit_draft, commit_edit_draft, list_edit_drafts, 
 from .project_navigation import project_overview, search_analyses
 from .sample_workspace import add_sample_note, change_point_link, get_point_analyses, get_project_sample, list_project_samples, save_sample_context
 from .manual_analysis import create_manual_analysis
+from .media_links import change_media_link, create_media_region, import_linked_photo, list_media_links
 from .plot_data import list_plot_specifications, open_plot_specification, plot_catalog, query_plot_data, record_plot_visibility, save_plot_specification
 from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe
 from .import_apply import (
@@ -379,6 +380,16 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     )},
     "media.preview_input": lambda params: {"result": preview_input_media(
         _source_path(params), params.get("region"), params.get("expected_fingerprint"),
+    )},
+    "media.region.create": lambda params: {"result": create_media_region(
+        _project_database_path(params), params.get("media_asset_id"), params.get("geometry"),
+    )},
+    "media.links.list": lambda params: {"result": list_media_links(_project_database_path(params), params.get("spatial_annotation_id"))},
+    "media.link.set": lambda params: {"result": change_media_link(
+        _project_database_path(params), params.get("spatial_annotation_id"), params.get("media_asset_id"), params.get("attached"),
+    )},
+    "media.link.import_photo": lambda params: {"result": import_linked_photo(
+        _project_database_path(params), params.get("spatial_annotation_id"), _source_path(params), params.get("media_type"), params.get("expected_fingerprint"),
     )},
     "media.preview": lambda params: {"result": preview_project_media(
         _project_database_path(params), params.get("media_asset_id"), params.get("region"),

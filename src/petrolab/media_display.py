@@ -90,7 +90,7 @@ def _annotations(database_path, media_id):
     with closing(open_project(database_path)) as connection:
         rows = connection.execute("""
             SELECT sa.spatial_annotation_id, sa.geometry_kind, sa.x_px, sa.y_px, sa.width_px, sa.height_px,
-                   p.analytical_point_id, p.sample_id AS point_sample_id, p.point_name,
+                   p.analytical_point_id, p.sample_id AS point_sample_id, p.point_name, sa.label,
                    apa.cross_sample_exception, apa.exception_reason
             FROM spatial_annotation sa
             LEFT JOIN analytical_point_annotation apa USING (spatial_annotation_id)
@@ -173,8 +173,9 @@ def export_media_rendered(database_path, media_id, output_path, options):
             else:
                 draw.rectangle((x, y, x + item["width_px"], y + item["height_px"]),
                                outline="#a5edaf", width=line)
-            if options["labels"] and item["point_name"]:
-                draw.text((x + 2 * radius, y), item["point_name"], font=font, fill="#ffffff",
+            label = item["point_name"] or item["label"]
+            if options["labels"] and label:
+                draw.text((x + 2 * radius, y), label, font=font, fill="#ffffff",
                           stroke_width=line, stroke_fill="#152318")
         manifest = {
             "version": 1, "media_asset_id": media_id, "source_sha256": asset["source_fingerprint_sha256"],

@@ -97,6 +97,7 @@ function PrecisionFixture({ reopen = false }) {
   const [point, setPoint] = React.useState(null);
   const [selectedIds, setSelectedIds] = React.useState([]);
   const savedLinks = React.useRef([]);
+  const savedPhotos = React.useRef({});
   const image = React.useMemo(() => {
     const canvas = document.createElement("canvas");
     canvas.width = 1600;
@@ -123,9 +124,11 @@ function PrecisionFixture({ reopen = false }) {
     return { region, preview_url: canvas.toDataURL() };
   };
   if (reopen) {
+    const photo = { thin_section_id: 'section', media_asset_id: 'ppl', display_name: 'PPL-detail.png', media_type: 'PPL',
+      width_px: image.width_px, height_px: image.height_px };
     const sample = { ...qaSample, sample_name: 'KIV-2', thin_sections: [{ thin_section_id: 'section', thin_section_name: 'KIV-2-A' }],
       images: [{ thin_section_id: 'section', media_asset_id: 'bse', display_name: 'KIV-2-A-BSE.png', media_type: 'BSE',
-        width_px: image.width_px, height_px: image.height_px }] };
+        width_px: image.width_px, height_px: image.height_px }, photo] };
     const annotations = [{ spatial_annotation_id: 'annotation-1', analytical_point_id: 'point-1', point_sample_id: sample.sample_id,
       geometry_kind: 'point', point_name: 'P-01', x_px: 1080, y_px: 380 }];
     const candidates = [
@@ -133,6 +136,11 @@ function PrecisionFixture({ reopen = false }) {
       { analysis_id: 'laser', identity: 'LA-ICP-MS #87', method: 'LA-ICP-MS', mineral: 'Флогопит', source_name: 'laser.xlsx', sheet_name: 'Trace', source_row_number: 9, active: true },
     ];
     return <SampleWorkspace initialTab="Шлифы" loadSamples={async () => [sample]} loadSample={async () => sample}
+      mediaLinks={{ list: async (id) => savedPhotos.current[id] ?? [],
+        createRegion: async (_, { kind, ...geometry }) => ({ ...geometry, geometry_kind: kind, spatial_annotation_id: 'area-1', label: 'Z-01' }),
+        change: async (id, asset, attached) => {
+          savedPhotos.current[id] = attached ? [{ ...photo, media_link_id: `${id}-${asset}` }] : [];
+        } }}
       pointLinks={{ selectedIds, loadPoint: async () => savedLinks.current,
         queryProject: async (search) => ({ analyses: candidates.filter((row) => row.identity.toLowerCase().includes(search.query.toLowerCase())), has_more: false }),
         createManualAnalysis: async (_, entry) => {

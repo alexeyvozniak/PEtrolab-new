@@ -13,7 +13,7 @@ const FIELDS = {
 };
 
 export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote, onOpenAnalyses, busy, pointLinks,
-  initialTab = "Обзор", onImportMedia, previewMedia, exportOriginal, exportRendered }) {
+  initialTab = "Обзор", onImportMedia, previewMedia, exportOriginal, exportRendered, mediaLinks }) {
   const [samples, setSamples] = useState(null);
   const [sampleId, setSampleId] = useState("");
   const [sample, setSample] = useState(null);
@@ -40,6 +40,10 @@ export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote,
     return () => { active = false; };
   }, [loadSample, sampleId]);
   const current = sample?.sample_id === sampleId ? sample : null;
+  const reloadSample = async () => {
+    const refreshed = await loadSample(sampleId);
+    setSample((item) => item?.sample_id === refreshed.sample_id ? refreshed : item);
+  };
   const choose = (event) => {
     setDraft(null);
     setName("");
@@ -150,15 +154,12 @@ export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote,
       {tab === "Заметки" && notes}
       {tab === "Источники" && <section className="sample-card"><h3>Источники</h3>{current.sources.length ? sources : <p>У образца нет связанных источников анализов.</p>}</section>}
       {tab === "Точки" && pointLinks && <PointLinks key={sampleId} sample={current} busy={busy} {...pointLinks}
-        reloadSample={async () => {
-          const refreshed = await loadSample(sampleId);
-          setSample((item) => item.sample_id === refreshed.sample_id ? refreshed : item);
-        }} />}
+        reloadSample={reloadSample} />}
       {tab === "Шлифы" && <section className="sample-card"><h3>Шлифы</h3>{current.thin_sections.length ?
         current.thin_sections.map((item) => <details key={item.thin_section_id}>
           <summary>{item.thin_section_name}</summary>
           <MediaGallery images={current.images.filter((image) => image.thin_section_id === item.thin_section_id)}
-            previewMedia={previewMedia} pointLinks={pointLinks} showPoints />
+            previewMedia={previewMedia} pointLinks={pointLinks} mediaLinks={mediaLinks} reloadSample={reloadSample} showPoints />
         </details>) : <p>У образца нет связанных шлифов.</p>}</section>}
       {tab === "Изображения" && <section className="sample-card"><h3>Изображения</h3>{gallery}</section>}
     </>}

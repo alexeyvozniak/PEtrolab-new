@@ -628,6 +628,35 @@ test("saves a thin section point placed at 20× and reopens its original area af
   const manual = linked.result.find(({ identity }) => identity === "EPMA-007");
   expect(manual).toMatchObject({ method: "EPMA", source_name: "Ручной ввод.csv", link_type: "same_point" });
   expect(screen.getByRole("slider", { name: "Масштаб изображения" }).value).toBe("2000");
+  const photoPath = join(folder, "detail.png");
+  const photoBytes = Buffer.concat([originalImage, Buffer.from("detail fixture")]);
+  await writeFile(photoPath, photoBytes);
+  mediaQueue = [photoPath];
+  await user.click(await enabledButton("Медиа и привязка"));
+  await user.click(await enabledButton("Выбрать файл фото"));
+  await screen.findByRole("img", { name: "Выбранная фотография" });
+  await user.click(await enabledButton("Прикрепить фото"));
+  const inspector = within(screen.getByRole("complementary", { name: "Медиа и привязка" }));
+  await inspector.findByText("detail.png");
+  const pointLinks = await invokePetrolab("media.links.list", { ...database, spatial_annotation_id: placement.spatial_annotation_id });
+  expect(pointLinks.result).toHaveLength(1);
+
+  await user.click(await enabledButton("Выделить область"));
+  await user.selectOptions(screen.getByLabelText("Форма области"), "square");
+  const editable = screen.getByLabelText("Аннотации изображения");
+  editable.setPointerCapture = () => {};
+  await waitFor(() => expect(app.container.querySelector(".media-precision-region")?.src).toContain("data:image/png;base64,"));
+  fireEvent(editable, new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 200, clientY: 120 }));
+  fireEvent(editable, new MouseEvent("pointerup", { bubbles: true, button: 0, clientX: 300, clientY: 220 }));
+  await enabledButton("Z-01");
+  await user.selectOptions(await screen.findByLabelText("Фото из проекта"), await screen.findByRole("option", { name: "detail.png" }));
+  await user.click(await enabledButton("Прикрепить из проекта"));
+  await screen.findByText("Связанные фото (1)");
+  await user.click(await enabledButton("Снять привязку"));
+  await screen.findByText("Связанные фото (0)");
+  const pointStillLinked = await invokePetrolab("media.links.list", { ...database, spatial_annotation_id: placement.spatial_annotation_id });
+  expect(pointStillLinked.result).toEqual(pointLinks.result);
+  expect(await readFile(photoPath)).toEqual(photoBytes);
   expect(await readFile(source)).toEqual(originalImage);
 }, 30000);
 
