@@ -14,7 +14,7 @@ import { App } from "../src/App";
 import { invokePetrolab } from "../src/desktopApi";
 configure({ asyncUtilTimeout: 5000 });
 
-let child, folder, first, second, queue, mediaQueue, mediaFolder, original, pending, lines, requests;
+let child, folder, first, second, queue, mediaQueue, mediaFolder, original, pending, lines, requests, plotExports;
 function startService() {
   child = spawn("python", ["-m", "petrolab.ndjson_service"], {
     cwd: resolve(process.cwd(), ".."), windowsHide: true,
@@ -41,7 +41,7 @@ beforeEach(async () => {
   original = "Analysis,Fe (wt.%),F (wt.%)\nA1,10,<DL\nA2,11,n.d.\n";
   await writeFile(first, original);
   await writeFile(second, "Analysis,SiO2 [wt.%]\nB1,40\nB2,41\n");
-  queue = [first, second]; mediaQueue = []; mediaFolder = null; pending = new Map(); requests = [];
+  queue = [first, second]; mediaQueue = []; mediaFolder = null; pending = new Map(); requests = []; plotExports = [];
   startService();
   bridge.invoke = async (command, args) => {
     if (command === "project_database_path") return join(folder, "project.sqlite");
@@ -51,9 +51,9 @@ beforeEach(async () => {
     if (command === "pick_media_export_path") return join(folder, `copy-${args.name}`);
     if (command === "pick_publication_export_path") return join(folder, "petrolab-package.zip");
     if (command === "pick_analysis_export_path") return join(folder, "selection.xlsx");
-    if (command === "save_plot_svg") {
-      const destination = join(folder, "diagram.svg");
-      await writeFile(destination, args.svg);
+    if (command === "pick_plot_export_path") {
+      const destination = join(folder, `diagram-${plotExports.length + 1}-${args.name}`);
+      plotExports.push(destination);
       return destination;
     }
     if (command === "stage_import_file") return { local_path: args.sourcePath, original_path: args.sourcePath };
@@ -81,6 +81,16 @@ async function enabledButton(name) {
     expect(button.disabled, String(name)).toBe(false);
     return button;
   }, name === "Выбрать файл" ? { timeout: 12000 } : undefined);
+}
+
+async function savePlot(user, panelIndex, format = "SVG · Corel-safe") {
+  const open = panelIndex === undefined ? await enabledButton("Выгрузить раскладку")
+    : screen.getAllByRole("button", { name: "Выгрузить панель" })[panelIndex];
+  await user.click(open);
+  await user.click(screen.getByRole("radio", { name: format }));
+  await user.click(await enabledButton("Сохранить графики"));
+  await screen.findByText(/Сохранено: .*diagram-/);
+  return plotExports.at(-1);
 }
 
 test("real Python workspace retains two sources and mapping, identity repair and raw tokens", async () => {
@@ -227,14 +237,10 @@ test("one common selection highlights the same analysis on binary and ternary pl
     expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
   });
   await waitFor(() => expect(screen.getAllByText(/скрыто: 1/)).toHaveLength(3));
-  await user.click(screen.getAllByRole("button", { name: "SVG панели" })[1]);
-  await screen.findByText(/Сохранено: .*diagram.svg/);
-  const readSvg = async () => new DOMParser().parseFromString(await readFile(join(folder, "diagram.svg"), "utf8"), "image/svg+xml");
-  const single = await readSvg();
+  const readSvg = async (path) => new DOMParser().parseFromString(await readFile(path, "utf8"), "image/svg+xml");
+  const single = await readSvg(await savePlot(user, 1));
   expect([...single.querySelectorAll("g")].map((group) => group.id)).toEqual(["panel-b"]);
-  await user.click(await enabledButton("SVG раскладки"));
-  await screen.findByText(/Сохранено: .*diagram.svg/);
-  const layout = await readSvg();
+  const layout = await readSvg(await savePlot(user));
   expect([...layout.querySelectorAll("g")].map((group) => group.id)).toEqual(["panel-a", "panel-b", "panel-c"]);
   expect(layout.querySelector("clipPath, mask, foreignObject, image, circle")).toBeNull();
   expect(layout.querySelector("text")?.textContent).toBe("a");
@@ -270,11 +276,11 @@ test("visible plot fields survive marker hiding and SVG includes their geometry"
   await waitFor(() => expect(container.querySelectorAll(".plot-field")).toHaveLength(2));
   expect(screen.queryByRole("button", { name: "Выбрать точку P1" })).toBeNull();
   expect(screen.getByText("Выбранные анализы · 3")).toBeTruthy();
-  await user.click(await enabledButton("SVG раскладки"));
-  await screen.findByText(/Сохранено: .*diagram.svg/);
-  const svg = new DOMParser().parseFromString(await readFile(join(folder, "diagram.svg"), "utf8"), "image/svg+xml");
+  const svg = new DOMParser().parseFromString(await readFile(await savePlot(user), "utf8"), "image/svg+xml");
   expect(svg.querySelectorAll("polygon")).toHaveLength(2);
   expect(svg.querySelector("circle, clipPath, mask")).toBeNull();
+  const pdf = await readFile(await savePlot(user, 1, "PDF · векторный"));
+  expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
   await user.click(await enabledButton("Скрыть все поля"));
   await waitFor(() => expect(container.querySelectorAll(".plot-field")).toHaveLength(0));
   await user.click(await enabledButton("Показать все поля"));
@@ -285,12 +291,8 @@ test("visible plot fields survive marker hiding and SVG includes their geometry"
     await user.click(await enabledButton("Добавить диаграмму"));
     await user.click(await enabledButton("Добавить диаграмму"));
     await waitFor(() => expect(container.querySelectorAll(".plot-field")).toHaveLength(4));
-    await user.click(screen.getAllByRole("button", { name: "SVG панели" })[1]);
-    await screen.findByText(/Сохранено: .*diagram.svg/);
-    await writeFile(join(evidenceDirectory, "petrolab-panel-b.svg"), await readFile(join(folder, "diagram.svg")));
-    await user.click(await enabledButton("SVG раскладки"));
-    await screen.findByText(/Сохранено: .*diagram.svg/);
-    await writeFile(join(evidenceDirectory, "petrolab-four-panels.svg"), await readFile(join(folder, "diagram.svg")));
+    await writeFile(join(evidenceDirectory, "petrolab-panel-b.svg"), await readFile(await savePlot(user, 1)));
+    await writeFile(join(evidenceDirectory, "petrolab-four-panels.svg"), await readFile(await savePlot(user)));
   }
 }, 20000);
 

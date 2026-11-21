@@ -11,6 +11,8 @@
 
 Быстрый export service доступен из владельца материала. Publication Package является отдельным агрегатом для упорядоченного набора Export Artifacts и журнала. Corel-safe SVG использует плоские редактируемые группы и запрещает clipPath, mask, foreignObject и растеризацию векторных примитивов; валидатор проверяет профиль до записи.
 
+Диаграммы передают одному сервису проверяемый SVG снимка отображённых осей, панелей, точек и полей. Tauri выбирает имя и место записи. Python проверяет SVG, сохраняет редактируемый PDF со встроенным DejaVu Sans или растеризует тот же PDF в PNG/TIFF с выбранным dpi. Экспорт пишет новый файл атомарно. [Связка Svglib и ReportLab](https://github.com/deeplook/svglib), [API PDFium](https://pypdfium2.readthedocs.io/en/stable/python_api.html).
+
 Материал `formula_run` включает неизменяемую запись метода, Measurement ID, отпечаток входа и Derived Values. Пакет добавляет `data/derived_values.csv` с ID расчёта, версиями, единицами и отпечатками отдельно от исходной `data/measurements.jsonl`. Подготовка и запись повторно проверяют актуальность расчёта. Устаревший запуск блокирует сборку.
 
 Plot Specification содержит упорядоченные Plot Layers. Каждый слой хранит точный набор Analysis ID, z-order, point style/opacity/visibility и опциональный Field с методом и параметрами. Plot Visibility исключает Analysis из входа Field; скрытие маркеров слоя не исключает.

@@ -32,7 +32,7 @@ import {
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
   getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication,
   getPlotCatalog, getPlotData, recordPlotVisibility,
-  listPlotSpecifications, openPlotSpecification, savePlotSpecification, savePlotSvg,
+  listPlotSpecifications, openPlotSpecification, savePlotSpecification, pickPlotExportPath, exportPlot,
   isPetrolabDesktop,
   listProjectAnalyses,
   listProjectMineralIdentifications,
@@ -625,7 +625,10 @@ export function App() {
           }} />}
         {screen === "Построение" && <PlotWorkspace loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
           loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}
-          openLayout={restorePlotLayout} onExportSvg={savePlotSvg}
+          openLayout={restorePlotLayout} onExport={async (svg, options) => {
+            const destination = await pickPlotExportPath(options.name);
+            return destination ? unwrap(await exportPlot(svg, options, destination)).output_path : null;
+          }}
           selectedIds={selectedAnalysisIds} setSelectedIds={setSelectedAnalysisIds} onBack={() => setScreen("Анализы")}
           hiddenAnalysisIds={hiddenAnalysisIds} hiddenSourceIds={hiddenSourceIds} busy={busy}
           onSetVisibility={setPlotVisibility}

@@ -3,7 +3,13 @@ export const PLOT_SIZE = { width: 460, height: 280 };
 const COPY_ATTRIBUTES = ["x", "y", "x1", "x2", "y1", "y2", "cx", "cy", "r", "d", "text-anchor", "transform",
   "points", "fill-opacity", "stroke", "stroke-width", "opacity"];
 
-export function buildPlotSvg(canvases) {
+export function plotPanelLabel(index, alphabet = "latin", uppercase = false) {
+  const letters = alphabet === "cyrillic" ? "абвгдежзийклмнопрстуфхцчшщъыьэюя" : "abcdefghijklmnopqrstuvwxyz";
+  const label = (index >= letters.length ? letters[0] : "") + letters[index % letters.length];
+  return uppercase ? label.toUpperCase() : label;
+}
+
+export function buildPlotSvg(canvases, { showLabel = true, alphabet, uppercase, labelPosition } = {}) {
   const { width, height } = PLOT_SIZE;
   const columns = Math.min(canvases.length, 2);
   const rows = Math.ceil(canvases.length / columns);
@@ -19,11 +25,15 @@ export function buildPlotSvg(canvases) {
   for (const [index, { svg, panelIndex }] of canvases.entries()) {
     const offsetX = (index % columns) * width;
     const offsetY = Math.floor(index / columns) * height;
-    const label = panelIndex < 26 ? String.fromCharCode(97 + panelIndex) : `a${String.fromCharCode(97 + panelIndex - 26)}`;
+    const label = plotPanelLabel(panelIndex, alphabet, uppercase);
     const group = create("g", { id: `panel-${label}`, transform: `translate(${offsetX} ${offsetY})` });
-    const letter = create("text", { x: 10, y: 17, fill: "#24392d", "font-size": 13, "font-family": "Arial" });
-    letter.textContent = label;
-    group.append(letter);
+    if (showLabel) {
+      const right = labelPosition === "right";
+      const letter = create("text", { x: right ? width - 12 : 10, y: 17, "text-anchor": right ? "end" : "start",
+        fill: "#24392d", "font-size": 13, "font-family": "Arial" });
+      letter.textContent = label;
+      group.append(letter);
+    }
     for (const source of svg.querySelectorAll("path.plot-frame, line, text, circle.plot-point, polygon.plot-field")) {
       const element = create(source.localName);
       for (const name of COPY_ATTRIBUTES) {

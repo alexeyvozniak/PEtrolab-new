@@ -79,7 +79,7 @@ function PlotFixture() {
     return {...data, points, fields, hidden_count:data.input_count-points.length};
   },[sourceHidden,hidden]);
   return <PlotWorkspace loadCatalog={qaPlotCatalog} loadData={loadData} selectedIds={selectedIds} setSelectedIds={setSelectedIds}
-    loadLayouts={loadLayouts} saveLayout={saveLayout} openLayout={openLayout} onExportSvg={async () => "PetroLab-plot.svg"}
+    loadLayouts={loadLayouts} saveLayout={saveLayout} openLayout={openLayout} onExport={async (_, options) => options.name}
     hiddenSourceIds={sourceHidden ? [qaSource.source_id] : []} onToggleSource={() => setSourceHidden(value => !value)}
     hiddenAnalysisIds={hidden} onSetVisibility={(ids,hide) => setHidden(current => hide ? [...new Set([...current,...ids])] : current.filter(id => !ids.includes(id)))}
     onBack={()=>{}} />;

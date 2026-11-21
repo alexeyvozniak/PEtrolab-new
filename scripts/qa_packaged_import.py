@@ -16,7 +16,6 @@ from zipfile import ZipFile
 
 from openpyxl import Workbook, load_workbook
 from PIL import Image
-from pypdf import PdfWriter
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
@@ -58,14 +57,23 @@ def check_lithos_package(executable: Path, directory: Path, database: str, analy
         "panels": [{"id": str(uuid.uuid4()), "kind": "binary", "axes": catalog["axes"][:2]}],
     })])[0]["result"]
     figure = directory / "submission.pdf"
-    writer = PdfWriter()
-    writer.add_blank_page(width=90 * 72 / 25.4, height=100)
-    writer.write(figure)
+    raster = directory / "submission.tiff"
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60" viewBox="0 0 100 60">'
+           '<g id="panel-a"><text x="10" y="17" font-size="8">QA · Б</text>'
+           '<line x1="5" y1="40" x2="95" y2="40" stroke="#202020"/></g></svg>')
     params = {**project, "name": "QA Lithos", "profile": "lithos", "width_mm": 90, "items": [{
         "kind": "publication_figure", "id": layout["id"], "caption": "QA figure", "source_path": str(figure),
+    }, {
+        "kind": "publication_figure", "id": layout["id"], "caption": "QA raster", "source_path": str(raster),
+        "artwork": "combination",
     }]}
     original_database = Path(database).read_bytes()
-    snapshot = run(executable, [request("publication.prepare", params)])[0]["result"]
+    _, _, response = run(executable, [
+        request("plot.export", {"svg": svg, "width_mm": 90, "format": "pdf", "output_path": str(figure)}),
+        request("plot.export", {"svg": svg, "width_mm": 90, "dpi": 600, "format": "tiff", "output_path": str(raster)}),
+        request("publication.prepare", params),
+    ])
+    snapshot = response["result"]
     destination = directory / "submission.zip"
     run(executable, [request("publication.export", {
         **params, "expected_fingerprint": snapshot["fingerprint"], "output_path": str(destination),
@@ -81,6 +89,8 @@ def check_lithos_package(executable: Path, directory: Path, database: str, analy
             raise AssertionError("Packaged publication lost the checked figure or its provenance")
         if archive.read("figures/Figure_01.pdf") != figure.read_bytes():
             raise AssertionError("Packaged publication changed the attached PDF")
+        if archive.read("figures/Figure_02.tiff") != raster.read_bytes() or manifest["items"][1]["figure"]["effective_dpi"] < 600:
+            raise AssertionError("Packaged publication changed the attached TIFF or its resolution")
         for entry in manifest["files"]:
             if hashlib.sha256(archive.read(entry["path"])).hexdigest() != entry["sha256"]:
                 raise AssertionError(f"Packaged publication checksum mismatch: {entry['path']}")

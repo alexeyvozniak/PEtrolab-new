@@ -14,6 +14,9 @@ dependencies = [
     "openpyxl>=3.1,<4",
     "Pillow>=10.1,<13",
     "pypdf>=6,<7",
+    "reportlab>=4.4,<5",
+    "svglib>=1.5.1,<1.6",
+    "pypdfium2>=5,<6",
 ]
 
 [tool.setuptools]
@@ -21,3 +24,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+petrolab = ["assets/DejaVuSans.ttf", "assets/LICENSE_DEJAVU"]

@@ -9,7 +9,6 @@ from math import isfinite
 from pathlib import Path
 import re
 from tempfile import NamedTemporaryFile
-from xml.etree import ElementTree
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from PIL import Image
@@ -21,16 +20,11 @@ from .formula_service import list_formula_runs, open_formula_run
 from .import_preview import ImportCommandError
 from .media_display import _publish_new_file
 from .plot_data import list_plot_specifications, open_plot_specification
+from .plot_export import SVG_LIMIT, checked_svg
 from .statistics_service import list_calculation_runs, open_calculation_run
 from .work_groups import list_work_groups
 
 
-_SVG = "{http://www.w3.org/2000/svg}"
-_SVG_ELEMENTS = {"svg", "g", "path", "line", "polygon", "rect", "circle", "text"}
-_SVG_ATTRIBUTES = {
-    "id", "width", "height", "viewBox", "transform", "x", "y", "x1", "x2", "y1", "y2", "cx", "cy", "r",
-    "d", "text-anchor", "points", "fill", "fill-opacity", "stroke", "stroke-width", "opacity", "font-size", "font-family",
-}
 _LITHOS_WIDTHS = (90, 180)
 _LITHOS_RASTER_DPI = {"halftone": 300, "combination": 500, "line_art": 1000}
 _LITHOS_FORMATS = {".pdf": "PDF", ".tif": "TIFF", ".tiff": "TIFF", ".png": "PNG"}
@@ -126,24 +120,10 @@ def _read_vector(path):
         raise ImportCommandError("PUBLICATION_FIGURE_FORMAT", "Выберите фигуру в SVG.")
     try:
         with Path(path).open("rb") as file:
-            data = file.read(20 * 1024 * 1024 + 1)
-        if len(data) > 20 * 1024 * 1024:
-            raise ImportCommandError("PUBLICATION_FIGURE_TOO_LARGE", "SVG превышает 20 МиБ.")
-        content = data.decode("utf-8-sig")
-        if "<!DOCTYPE" in content.upper() or "<!ENTITY" in content.upper():
-            raise ElementTree.ParseError("declaration")
-        root = ElementTree.fromstring(content)
-        if root.tag != _SVG + "svg":
-            raise ElementTree.ParseError("namespace")
-        for node in root.iter():
-            if (node.tag not in {_SVG + tag for tag in _SVG_ELEMENTS} or set(node.attrib) - _SVG_ATTRIBUTES
-                    or any("url(" in value.casefold().replace(" ", "") for value in node.attrib.values())):
-                raise ElementTree.ParseError("element or attribute")
-        if any(child.tag not in {_SVG + "g", _SVG + "text"} for child in root) or any(
-                child.tag in {_SVG + "g", _SVG + "svg"} for group in root for child in group):
-            raise ElementTree.ParseError("nested groups")
-    except (OSError, UnicodeDecodeError, ElementTree.ParseError) as error:
-        raise ImportCommandError("PUBLICATION_FIGURE_UNSUPPORTED", "SVG не соответствует редактируемому векторному профилю PetroLab.") from error
+            data = file.read(SVG_LIMIT + 1)
+    except OSError as error:
+        raise ImportCommandError("PUBLICATION_FIGURE_UNSUPPORTED", "Не удалось прочесть SVG.") from error
+    checked_svg(data)
     return data
 
 

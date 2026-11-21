@@ -207,10 +207,14 @@ fn pick_publication_export_path() -> Option<String> {
 
 #[tauri::command]
 fn pick_media_export_path(name: String) -> Option<String> {
-    let name = std::path::Path::new(&name).file_name()?.to_str()?;
+    pick_named_export_path(&name, "Image")
+}
+
+fn pick_named_export_path(name: &str, label: &str) -> Option<String> {
+    let name = std::path::Path::new(name).file_name()?.to_str()?;
     let extension = std::path::Path::new(name).extension()?.to_str()?;
     rfd::FileDialog::new()
-        .add_filter("Image", &[extension])
+        .add_filter(label, &[extension])
         .set_file_name(name)
         .save_file()
         .map(|mut path| {
@@ -222,33 +226,10 @@ fn pick_media_export_path(name: String) -> Option<String> {
 }
 
 #[tauri::command]
-async fn save_plot_svg(svg: String) -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let Some(mut destination) = rfd::FileDialog::new()
-            .add_filter("SVG", &["svg"])
-            .set_file_name("PetroLab-plot.svg")
-            .save_file()
-        else {
-            return Ok(None);
-        };
-        if destination.extension().is_none() {
-            destination.set_extension("svg");
-        }
-        if !destination.extension().is_some_and(|value| value.eq_ignore_ascii_case("svg")) {
-            return Err("Выберите файл с расширением .svg.".to_owned());
-        }
-        let mut file = fs::File::create_new(&destination)
-            .map_err(|error| format!("Не удалось создать новый файл SVG. {error}"))?;
-        let result = file.write_all(svg.as_bytes()).and_then(|()| file.sync_all());
-        drop(file);
-        if let Err(error) = result {
-            let _ = fs::remove_file(&destination);
-            return Err(format!("Не удалось записать SVG. {error}"));
-        }
-        Ok(Some(destination.to_string_lossy().into_owned()))
-    })
-    .await
-    .map_err(|error| format!("Не удалось запустить экспорт SVG. {error}"))?
+async fn pick_plot_export_path(name: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || pick_named_export_path(&name, "PetroLab"))
+        .await
+        .map_err(|error| format!("Не удалось открыть диалог сохранения графика. {error}"))
 }
 
 fn stage_import_copy(root: PathBuf, source: PathBuf) -> Result<Value, String> {
@@ -341,7 +322,7 @@ pub fn run() {
             pick_media_export_path,
             pick_publication_figure,
             pick_publication_export_path,
-            save_plot_svg,
+            pick_plot_export_path,
             stage_import_file,
             clear_import_staging,
             project_database_path

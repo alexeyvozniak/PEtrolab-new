@@ -19,6 +19,7 @@ from .sample_workspace import add_sample_note, change_point_link, get_point_anal
 from .manual_analysis import create_manual_analysis
 from .media_links import change_media_link, create_media_region, import_linked_photo, list_media_links
 from .plot_data import list_plot_specifications, open_plot_specification, plot_catalog, query_plot_data, record_plot_visibility, save_plot_specification
+from .plot_export import export_plot
 from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe
 from .import_apply import (
     apply_import_plan,
@@ -326,6 +327,9 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
         params.get("archive_path"), params.get("destination_path"),
     )},
     "publication.catalog": lambda params: {"result": publication_catalog(_project_database_path(params))},
+    "plot.export": lambda params: {"result": export_plot(
+        params.get("svg"), params.get("format"), params.get("output_path"), params.get("width_mm"), params.get("dpi"),
+    )},
     "publication.prepare": lambda params: {"result": prepare_publication(
         _project_database_path(params), params.get("name"), params.get("items"),
         params.get("profile", "neutral"), params.get("width_mm"),

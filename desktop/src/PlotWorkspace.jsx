@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PLOT_SIZE, buildPlotSvg } from "./plotSvg";
+import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import "./plotWorkspace.css";
 
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
@@ -121,7 +121,7 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
   </svg>;
 }
 
-function PlotPanel({ panel, axes, load, update, remove, selected, onSelect, canRemove, shape, colorFor, exportSvg, layers }) {
+function PlotPanel({ panel, axes, load, update, remove, selected, onSelect, canRemove, shape, colorFor, openExport, layers }) {
   const [projection, setProjection] = useState(null);
   const current = projection?.load === load && projection.panel === panel ? projection : null;
   const data = current?.data;
@@ -147,7 +147,7 @@ function PlotPanel({ panel, axes, load, update, remove, selected, onSelect, canR
   return <article className="plot-panel" id={`plot-${panel.id}`}>
     <header><b>{panel.axes.map((axis) => axis.field).join(" / ")}</b>
       <div className="plot-panel-actions">
-        {exportSvg && <button type="button" className="outline-button" disabled={!data} onClick={exportSvg}>SVG панели</button>}
+        {openExport && <button type="button" className="outline-button" disabled={!data} onClick={openExport}>Выгрузить панель</button>}
         {canRemove && <button type="button" className="outline-button" onClick={remove}>Убрать панель</button>}
       </div>
     </header>
@@ -175,8 +175,63 @@ function PlotPanel({ panel, axes, load, update, remove, selected, onSelect, canR
   </article>;
 }
 
+function PlotExport({ options, onChange, panels, pending, close, submit }) {
+  const raster = ["png", "tiff"].includes(options.format);
+  const panelIndex = panels.findIndex(({ id }) => id === options.panelId);
+  const visibleCount = panels.filter(({ id }) => options.visibleIds.includes(id)).length;
+  const count = options.scope === "panel" ? Number(panelIndex >= 0) : options.scope === "visible" ? visibleCount : panels.length;
+  return <form className="plot-export" aria-label="Выгрузить графики" onSubmit={submit}>
+    <header><h3>Выгрузить графики</h3><button className="outline-button" type="button" disabled={pending}
+      onClick={close} aria-label="Закрыть экспорт">×</button></header>
+    <fieldset disabled={pending}>
+      <legend>Область выгрузки</legend>
+      {panelIndex >= 0 && <label><input type="radio" name="plot-export-scope" checked={options.scope === "panel"}
+        onChange={() => onChange({ scope: "panel" })} />Текущая панель · {plotPanelLabel(panelIndex, options.labels.split("-")[0], options.labels.endsWith("-upper"))}</label>}
+      <label><input type="radio" name="plot-export-scope" checked={options.scope === "visible"} disabled={!visibleCount}
+        onChange={() => onChange({ scope: "visible" })} />Видимые панели · {visibleCount}</label>
+      <label><input type="radio" name="plot-export-scope" checked={options.scope === "layout"}
+        onChange={() => onChange({ scope: "layout" })} />Вся раскладка · {panels.length}</label>
+    </fieldset>
+    <fieldset disabled={pending}>
+      <legend>Формат</legend>
+      {Object.entries({ svg: "SVG · Corel-safe", pdf: "PDF · векторный", png: "PNG", tiff: "TIFF" }).map(([value, label]) =>
+        <label key={value}><input type="radio" name="plot-export-format" checked={options.format === value}
+          onChange={() => onChange({ format: value })} />{label}</label>)}
+      {options.format !== "svg" && <label>Ширина
+        <select value={options.width} onChange={(event) => onChange({ width: Number(event.target.value) })}>
+          <option value={90}>90 мм</option><option value={180}>180 мм</option>
+        </select>
+      </label>}
+      {raster && <label>Разрешение
+        <select value={options.dpi} onChange={(event) => onChange({ dpi: Number(event.target.value) })}>
+          {[300, 500, 600, 1000].map((dpi) => <option value={dpi} key={dpi}>{dpi} dpi</option>)}
+        </select>
+      </label>}
+    </fieldset>
+    <fieldset disabled={pending}>
+      <legend>Подписи панелей</legend>
+      {count === 1 && <label><input type="checkbox" checked={options.showLabel}
+        onChange={(event) => onChange({ showLabel: event.target.checked })} />Сохранить букву панели</label>}
+      {(count !== 1 || options.showLabel) && <>
+        <label>Алфавит и регистр<select value={options.labels} onChange={(event) => onChange({ labels: event.target.value })}>
+          <option value="latin">a, b, c</option><option value="latin-upper">A, B, C</option>
+          <option value="cyrillic">а, б, в</option><option value="cyrillic-upper">А, Б, В</option>
+        </select></label>
+        <label>Положение буквы<select value={options.labelPosition} onChange={(event) => onChange({ labelPosition: event.target.value })}>
+          <option value="left">Сверху слева</option><option value="right">Сверху справа</option>
+        </select></label>
+      </>}
+    </fieldset>
+    <label>Имя файла<input value={options.name} maxLength={100} disabled={pending}
+      onChange={(event) => onChange({ name: event.target.value })} /></label>
+    <button type="submit" className="primary-button" disabled={pending || !options.name.trim() || count === 0}>
+      {pending ? "Сохраняю…" : "Сохранить графики"}
+    </button>
+  </form>;
+}
+
 export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedIds, inputIds, onBack,
-  hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onSetVisibility, busy, loadLayouts, saveLayout, openLayout, onExportSvg }) {
+  hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onSetVisibility, busy, loadLayouts, saveLayout, openLayout, onExport }) {
   const [axes, setAxes] = useState([]);
   const [panels, setPanels] = useState([]);
   const [error, setError] = useState("");
@@ -195,6 +250,7 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
   const loadWithLayers = useCallback((kind, axes) => loadData(kind, axes, layers), [loadData, layers]);
   const [exportStatus, setExportStatus] = useState(null);
   const [exportBusy, setExportBusy] = useState(false);
+  const [exportOptions, setExportOptions] = useState(null);
   const grid = useRef(null);
   const colorFor = (sourceId) => savedColors[sourceId] || sourceColor(sourceId);
   const selected = new Set(selectedIds);
@@ -272,11 +328,22 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
     return ordered;
   });
   const hasVisibleFields = layers.some((layer) => layer.field?.visible);
-  const exportSvg = async (panelIndex) => {
-    const canvases = Array.from(grid.current.children, (panel, index) => ({
-      svg: panel.querySelector(".plot-canvas"), panelIndex: index,
-    }));
-    const requested = panelIndex === undefined ? canvases : [canvases[panelIndex]];
+  const openExport = (panelId) => {
+    const visibleIds = Array.from(grid.current.children).flatMap((node, index) => {
+      const area = node.getBoundingClientRect();
+      return area.right > 0 && area.left < window.innerWidth && area.bottom > 0 && area.top < window.innerHeight
+        ? [panels[index].id] : [];
+    });
+    setExportStatus(null);
+    setExportOptions({ panelId, visibleIds, scope: panelId ? "panel" : "layout", format: "svg",
+      width: panelId ? 90 : 180, dpi: 600, name: "PetroLab-plot", showLabel: true, labels: "latin", labelPosition: "left" });
+  };
+  const submitExport = async (event) => {
+    event.preventDefault();
+    const { scope, panelId, visibleIds, name, format, labels, ...options } = exportOptions;
+    const requested = Array.from(grid.current.children, (node, panelIndex) => ({
+      id: panels[panelIndex].id, svg: node.querySelector(".plot-canvas"), panelIndex,
+    })).filter(({ id }) => scope === "layout" || (scope === "panel" ? id === panelId : visibleIds.includes(id)));
     if (!requested.length || requested.some(({ svg }) => !svg)) {
       setExportStatus({ error: "Дождитесь загрузки выбранных панелей и проверьте настройки их осей." });
       return;
@@ -284,8 +351,14 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
     setExportBusy(true);
     setExportStatus(null);
     try {
-      const file = await onExportSvg(buildPlotSvg(requested));
-      if (file) setExportStatus({ notice: `Сохранено: ${file}` });
+      const svg = buildPlotSvg(requested, { ...options, showLabel: requested.length > 1 || options.showLabel,
+        alphabet: labels.split("-")[0], uppercase: labels.endsWith("-upper") });
+      const base = name.trim().replace(/\.(svg|pdf|png|tiff?)$/i, "");
+      const file = await onExport(svg, { ...options, format, name: `${base || "PetroLab-plot"}.${format}` });
+      if (file) {
+        setExportStatus({ notice: `Сохранено: ${file}` });
+        setExportOptions(null);
+      }
     } catch (caught) {
       setExportStatus({ error: caught.message || String(caught) });
     } finally {
@@ -371,18 +444,22 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
           <option value="replace">Новый отбор</option><option value="union">Добавить к отбору</option><option value="subtract">Исключить из отбора</option>
         </select></label>
         <button className="primary-button" type="button" onClick={add} disabled={axes.length < 2 || panels.length >= 32}>Добавить диаграмму</button>
-        {onExportSvg && <button className="outline-button" type="button" disabled={exportBusy || loading || !panels.length}
-          onClick={() => exportSvg()}>SVG раскладки</button>}
+        {onExport && <button className="outline-button" type="button" disabled={exportBusy || loading || !panels.length}
+          onClick={() => openExport(null)}>Выгрузить раскладку</button>}
       </header>
       {exportStatus && <p role={exportStatus.error ? "alert" : "status"}>{exportStatus.error || exportStatus.notice}</p>}
       {loading && <p role="status">Загружаю поля проекта…</p>}
       {error && <p role="alert">{error}</p>}
       {!loading && !error && !panels.length && <p>Для построения нужны как минимум два поля измерений.</p>}
-      <div className="plot-grid" ref={grid}>
-        {!loading && !error && panels.map((panel, index) => <PlotPanel key={panel.id} panel={panel} axes={axes} load={loadWithLayers} selected={selected} onSelect={select} shape={shape} colorFor={colorFor} layers={layers}
-          exportSvg={onExportSvg && !exportBusy ? () => exportSvg(index) : undefined}
-          update={(next) => setPanels((current) => current.map((item) => item.id === panel.id ? next : item))}
-          canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}
+      <div className={exportOptions ? "plot-content plot-content-export" : "plot-content"}>
+        <div className="plot-grid" ref={grid}>
+          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} load={loadWithLayers} selected={selected} onSelect={select} shape={shape} colorFor={colorFor} layers={layers}
+            openExport={onExport && !exportBusy ? () => openExport(panel.id) : undefined}
+            update={(next) => setPanels((current) => current.map((item) => item.id === panel.id ? next : item))}
+            canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}
+        </div>
+        {exportOptions && <PlotExport options={exportOptions} panels={panels} pending={exportBusy} submit={submitExport}
+          close={() => setExportOptions(null)} onChange={(values) => setExportOptions((current) => ({ ...current, ...values }))} />}
       </div>
       <footer className="plot-selection-footer"><b>Выбранные анализы · {selectedIds.length}</b>
         {onSetVisibility && selectedIds.some((id) => !hiddenAnalysisIds.includes(id)) &&
