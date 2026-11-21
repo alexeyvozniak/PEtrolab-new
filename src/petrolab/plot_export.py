@@ -79,11 +79,9 @@ def _render_raster(pdf, target, format_name, dpi):
                 image.save(target, format=format_name.upper(), dpi=(dpi, dpi), **options)
 
 
-def export_plot(svg, format_name, output_path, width_mm=None, dpi=None):
+def _write_plot(target, svg, format_name, width_mm, dpi):
     if not isinstance(svg, str) or not isinstance(format_name, str) or format_name not in _EXTENSIONS:
         raise ValueError("plot_export")
-    if not isinstance(output_path, str) or Path(output_path).suffix.lower() not in _EXTENSIONS[format_name]:
-        raise ImportCommandError("PLOT_EXPORT_EXTENSION", "Расширение файла должно совпадать с выбранным форматом.")
     data = svg.encode("utf-8")
     root = checked_svg(data)
     raster = format_name in {"tiff", "png"}
@@ -100,7 +98,24 @@ def export_plot(svg, format_name, output_path, width_mm=None, dpi=None):
         size = (points, points * (height / width))
         if not isfinite(size[1]) or size[1] > 14_400 or (raster and ceil(points * dpi / 72) * ceil(size[1] * dpi / 72) > 45_000_000):
             raise ImportCommandError("PLOT_EXPORT_TOO_LARGE", "Фигура слишком велика. Уменьшите число панелей, ширину или dpi.")
+        data = _render_pdf(root, size)
+    if raster:
+        _render_raster(data, target, format_name, dpi)
+    else:
+        target.write(data)
 
+
+def render_plot(svg, format_name, width_mm=None, dpi=None):
+    target = BytesIO()
+    _write_plot(target, svg, format_name, width_mm, dpi)
+    return target.getvalue()
+
+
+def export_plot(svg, format_name, output_path, width_mm=None, dpi=None):
+    if not isinstance(format_name, str) or format_name not in _EXTENSIONS:
+        raise ValueError("plot_export")
+    if not isinstance(output_path, str) or Path(output_path).suffix.lower() not in _EXTENSIONS[format_name]:
+        raise ImportCommandError("PLOT_EXPORT_EXTENSION", "Расширение файла должно совпадать с выбранным форматом.")
     destination = Path(output_path)
     temporary = None
     try:
@@ -108,12 +123,7 @@ def export_plot(svg, format_name, output_path, width_mm=None, dpi=None):
             raise FileExistsError(destination)
         with NamedTemporaryFile(dir=destination.parent, suffix=".plot.tmp", delete=False) as stream:
             temporary = Path(stream.name)
-            if format_name != "svg":
-                data = _render_pdf(root, size)
-            if raster:
-                _render_raster(data, stream, format_name, dpi)
-            else:
-                stream.write(data)
+            _write_plot(stream, svg, format_name, width_mm, dpi)
         digest = sha256()
         with temporary.open("rb") as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -121,7 +131,9 @@ def export_plot(svg, format_name, output_path, width_mm=None, dpi=None):
         _publish_new_file(temporary, destination)
     except FileExistsError as error:
         raise ImportCommandError("EXPORT_FILE_EXISTS", "Файл уже существует. Выберите другое имя.") from error
-    except (OSError, ValueError, RuntimeError, TypeError, AttributeError, ImportError) as error:
+    except ImportCommandError:
+        raise
+    except (OSError, RuntimeError, TypeError, AttributeError, ImportError) as error:
         raise ImportCommandError("EXPORT_FAILED", "Не удалось сохранить графики в выбранном формате.") from error
     finally:
         if temporary is not None:

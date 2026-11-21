@@ -30,7 +30,7 @@ import {
   createMediaRegion, listMediaLinks, setMediaLink, importLinkedPhoto,
   previewProjectMedia, exportMediaOriginal, exportMediaRendered,
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
-  getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication,
+  getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication, capturePublicationPlot,
   getPlotCatalog, getPlotData, recordPlotVisibility,
   listPlotSpecifications, openPlotSpecification, savePlotSpecification, pickPlotExportPath, exportPlot,
   isPetrolabDesktop,
@@ -628,6 +628,14 @@ export function App() {
           openLayout={restorePlotLayout} onExport={async (svg, options) => {
             const destination = await pickPlotExportPath(options.name);
             return destination ? unwrap(await exportPlot(svg, options, destination)).output_path : null;
+          }}
+          onAddPublication={async (capture, caption) => {
+            if (publicationItems.length >= 24) throw new Error("В пакете уже 24 материала.");
+            const item = unwrap(await capturePublicationPlot(databasePath, capture, caption));
+            setPublicationItems((current) => current.some(({ id }) => id === item.id) ? current : [...current, {
+              ...item, draft_id: crypto.randomUUID(), label: `${capture.name}.${capture.format}`, format: capture.format,
+            }]);
+            setScreen("Публикации");
           }}
           selectedIds={selectedAnalysisIds} setSelectedIds={setSelectedAnalysisIds} onBack={() => setScreen("Анализы")}
           hiddenAnalysisIds={hiddenAnalysisIds} hiddenSourceIds={hiddenSourceIds} busy={busy}

@@ -52,10 +52,14 @@ def archive_command(executable: Path, *args) -> dict:
 def check_lithos_package(executable: Path, directory: Path, database: str, analysis_ids: list[str]) -> None:
     project = {"project_database_path": database}
     catalog = run(executable, [request("plot_data.catalog", {**project, "analysis_ids": analysis_ids})])[0]["result"]
-    layout = run(executable, [request("plot_spec.save", {
+    panel = {"id": str(uuid.uuid4()), "kind": "binary", "axes": catalog["axes"][:2]}
+    saved, projected = run(executable, [request("plot_spec.save", {
         **project, "name": "QA Lithos", "analysis_ids": analysis_ids, "colors": {},
-        "panels": [{"id": str(uuid.uuid4()), "kind": "binary", "axes": catalog["axes"][:2]}],
-    })])[0]["result"]
+        "panels": [panel],
+    }), request("plot_data.query", {
+        **project, "analysis_ids": analysis_ids, "kind": panel["kind"], "axes": panel["axes"],
+    })])
+    layout, projection = saved["result"], projected["result"]
     figure = directory / "submission.pdf"
     raster = directory / "submission.tiff"
     svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60" viewBox="0 0 100 60">'
@@ -68,12 +72,17 @@ def check_lithos_package(executable: Path, directory: Path, database: str, analy
         "artwork": "combination",
     }]}
     original_database = Path(database).read_bytes()
-    _, _, response = run(executable, [
+    _, _, captured = run(executable, [
         request("plot.export", {"svg": svg, "width_mm": 90, "format": "pdf", "output_path": str(figure)}),
         request("plot.export", {"svg": svg, "width_mm": 90, "dpi": 600, "format": "tiff", "output_path": str(raster)}),
-        request("publication.prepare", params),
+        request("publication.capture_plot", {**project, "caption": "QA direct plot", "capture": {
+            "name": "QA direct plot", "svg": svg, "format": "pdf", "width_mm": 90, "dpi": 600, "include_csv": True,
+            "analysis_ids": analysis_ids, "colors": {}, "hidden_analysis_ids": [], "hidden_source_ids": [], "layers": [],
+            "panels": [{**panel, "projection_sha256": projection["projection_sha256"]}],
+        }}),
     ])
-    snapshot = response["result"]
+    params["items"].append(captured["result"])
+    snapshot = run(executable, [request("publication.prepare", params)])[0]["result"]
     destination = directory / "submission.zip"
     run(executable, [request("publication.export", {
         **params, "expected_fingerprint": snapshot["fingerprint"], "output_path": str(destination),
@@ -91,6 +100,11 @@ def check_lithos_package(executable: Path, directory: Path, database: str, analy
             raise AssertionError("Packaged publication changed the attached PDF")
         if archive.read("figures/Figure_02.tiff") != raster.read_bytes() or manifest["items"][1]["figure"]["effective_dpi"] < 600:
             raise AssertionError("Packaged publication changed the attached TIFF or its resolution")
+        direct = manifest["items"][2]
+        exact_ids = [point["analysis_id"] for point in projection["points"]]
+        if (direct["analysis_ids"] != exact_ids or archive.read("figures/Figure_03.pdf") != figure.read_bytes()
+                or not all(identifier in archive.read("data/03-plot_capture.csv").decode() for identifier in exact_ids)):
+            raise AssertionError("Packaged publication lost direct plot content or analysis IDs")
         for entry in manifest["files"]:
             if hashlib.sha256(archive.read(entry["path"])).hexdigest() != entry["sha256"]:
                 raise AssertionError(f"Packaged publication checksum mismatch: {entry['path']}")

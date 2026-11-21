@@ -99,6 +99,9 @@ export const pickMediaFiles = () => desktopInvoke("pick_media_files");
 export const pickPublicationFigure = (format) => desktopInvoke("pick_publication_figure", { format });
 export const pickPublicationExportPath = () => desktopInvoke("pick_publication_export_path");
 export const getPublicationCatalog = (projectDatabasePath) => invokePetrolab("publication.catalog", { project_database_path: projectDatabasePath });
+export const capturePublicationPlot = (projectDatabasePath, capture, caption) => invokePetrolab("publication.capture_plot", {
+  project_database_path: projectDatabasePath, capture, caption,
+});
 export const preparePublication = (projectDatabasePath, name, items, { profile, width }) => invokePetrolab("publication.prepare", {
   project_database_path: projectDatabasePath, name, items, profile, width_mm: width,
 });

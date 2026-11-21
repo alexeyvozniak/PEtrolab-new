@@ -104,7 +104,7 @@ export function PublicationWorkspace({ load, pickFigure, check, exportZip, items
         </select></label>}
         <ol className="publication-items">{items.map((item, index) => <li key={item.draft_id}>
           <b>{item.label}</b>
-          {["tiff", "png"].includes(item.format) && <label>Тип изображения<select value={item.artwork || "line_art"} disabled={pending}
+          {lithos && ["tiff", "png"].includes(item.format) && <label>Тип изображения<select value={item.artwork || "line_art"} disabled={pending}
             onChange={(event) => update(items.map((entry) => entry.draft_id === item.draft_id
               ? { ...entry, artwork: event.target.value } : entry))}>
             <option value="line_art">Линейная графика</option>

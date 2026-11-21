@@ -297,6 +297,22 @@ test("visible plot fields survive marker hiding and SVG includes their geometry"
     await writeFile(join(evidenceDirectory, "petrolab-panel-b.svg"), await readFile(await savePlot(user, 1)));
     await writeFile(join(evidenceDirectory, "petrolab-four-panels.svg"), await readFile(await savePlot(user)));
   }
+  await user.click(screen.getAllByRole("button", { name: "Выгрузить панель" })[1]);
+  await user.click(screen.getByRole("radio", { name: "PDF · векторный" }));
+  await user.click(screen.getByRole("checkbox", { name: "Добавить данные CSV" }));
+  await user.type(screen.getByRole("textbox", { name: "Подпись фигуры" }), "Рисунок b");
+  await user.click(await enabledButton("Добавить в пакет"));
+  await screen.findByRole("heading", { name: "Состав пакета" });
+  expect(screen.getByRole("textbox", { name: "Подпись материала 1" }).value).toBe("Рисунок b");
+  await user.type(screen.getByRole("textbox", { name: "Название пакета" }), "Lithos QA");
+  await user.selectOptions(screen.getByLabelText("Профиль журнала"), "lithos");
+  await user.click(await enabledButton("Проверить пакет"));
+  await screen.findByText("data/01-plot_capture.csv");
+  await screen.findByText("figures/Figure_01.pdf");
+  await user.click(await enabledButton("Собрать ZIP"));
+  await screen.findByText(/Пакет сохранён: .*petrolab-package.zip/);
+  expect(requests.find(({ command }) => command === "publication.capture_plot").payload.capture.panels).toHaveLength(1);
+  expect((await readFile(join(folder, "petrolab-package.zip"))).subarray(0, 2).toString()).toBe("PK");
 }, 20000);
 
 test("reviewing a cross-file match allows one save to import both included files", async () => {

@@ -86,6 +86,7 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
   };
   const clear = () => { drag.current = null; setRubber(null); };
   return <svg className="plot-canvas" viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} aria-label="Диаграмма"
+    data-plot-projection={data.projection_sha256}
     onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={clear} onLostPointerCapture={clear}>
     {data.kind === "ternary" ? <>
       <path className="plot-frame" d={`M ${VIEW.left} ${VIEW.bottom} L ${px(0.5)} ${VIEW.top} L ${VIEW.right} ${VIEW.bottom} Z`} />
@@ -175,7 +176,7 @@ function PlotPanel({ panel, axes, load, update, remove, selected, onSelect, canR
   </article>;
 }
 
-function PlotExport({ options, onChange, panels, pending, close, submit }) {
+function PlotExport({ options, onChange, panels, pending, close, submit, canAddPublication }) {
   const raster = ["png", "tiff"].includes(options.format);
   const panelIndex = panels.findIndex(({ id }) => id === options.panelId);
   const visibleCount = panels.filter(({ id }) => options.visibleIds.includes(id)).length;
@@ -222,16 +223,28 @@ function PlotExport({ options, onChange, panels, pending, close, submit }) {
         </select></label>
       </>}
     </fieldset>
+    {canAddPublication && <fieldset disabled={pending}>
+      <legend>Для пакета публикации</legend>
+      <label><input type="checkbox" checked={options.includeCsv}
+        onChange={(event) => onChange({ includeCsv: event.target.checked })} />Добавить данные CSV</label>
+      <label>Подпись фигуры<textarea maxLength={2000} value={options.caption}
+        onChange={(event) => onChange({ caption: event.target.value })} /></label>
+    </fieldset>}
     <label>Имя файла<input value={options.name} maxLength={100} disabled={pending}
       onChange={(event) => onChange({ name: event.target.value })} /></label>
-    <button type="submit" className="primary-button" disabled={pending || !options.name.trim() || count === 0}>
-      {pending ? "Сохраняю…" : "Сохранить графики"}
-    </button>
+    <div className="plot-export-actions">
+      <button type="submit" className="primary-button" disabled={pending || !options.name.trim() || count === 0}>
+        {pending ? "Подготавливаю…" : "Сохранить графики"}
+      </button>
+      {canAddPublication && <button type="submit" value="package" className="outline-button"
+        disabled={pending || !options.name.trim() || count === 0}>Добавить в пакет</button>}
+    </div>
   </form>;
 }
 
 export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedIds, inputIds, onBack,
-  hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onSetVisibility, busy, loadLayouts, saveLayout, openLayout, onExport }) {
+  hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onSetVisibility, busy, loadLayouts, saveLayout, openLayout,
+  onExport, onAddPublication }) {
   const [axes, setAxes] = useState([]);
   const [panels, setPanels] = useState([]);
   const [error, setError] = useState("");
@@ -336,11 +349,13 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
     });
     setExportStatus(null);
     setExportOptions({ panelId, visibleIds, scope: panelId ? "panel" : "layout", format: "svg",
-      width: panelId ? 90 : 180, dpi: 600, name: "PetroLab-plot", showLabel: true, labels: "latin", labelPosition: "left" });
+      width: panelId ? 90 : 180, dpi: 600, name: "PetroLab-plot", showLabel: true, labels: "latin",
+      labelPosition: "left", includeCsv: false, caption: "" });
   };
   const submitExport = async (event) => {
     event.preventDefault();
-    const { scope, panelId, visibleIds, name, format, labels, ...options } = exportOptions;
+    const addToPackage = event.nativeEvent.submitter?.value === "package";
+    const { scope, panelId, visibleIds, name, format, labels, caption, includeCsv, ...options } = exportOptions;
     const requested = Array.from(grid.current.children, (node, panelIndex) => ({
       id: panels[panelIndex].id, svg: node.querySelector(".plot-canvas"), panelIndex,
     })).filter(({ id }) => scope === "layout" || (scope === "panel" ? id === panelId : visibleIds.includes(id)));
@@ -354,6 +369,19 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
       const svg = buildPlotSvg(requested, { ...options, showLabel: requested.length > 1 || options.showLabel,
         alphabet: labels.split("-")[0], uppercase: labels.endsWith("-upper") });
       const base = name.trim().replace(/\.(svg|pdf|png|tiff?)$/i, "");
+      if (addToPackage) {
+        await onAddPublication({
+          name: base || "PetroLab-plot", format, svg, width_mm: options.width, dpi: options.dpi, include_csv: includeCsv,
+          analysis_ids: inputIds, layers, hidden_analysis_ids: hiddenAnalysisIds, hidden_source_ids: hiddenSourceIds,
+          colors: Object.fromEntries(sources.map(({ source_id }) => [source_id, colorFor(source_id)])),
+          panels: requested.map(({ panelIndex, svg: canvas }) => ({
+            ...panels[panelIndex], projection_sha256: canvas.dataset.plotProjection,
+          })),
+        }, caption);
+        setExportStatus({ notice: "Фигура добавлена в пакет." });
+        setExportOptions(null);
+        return;
+      }
       const file = await onExport(svg, { ...options, format, name: `${base || "PetroLab-plot"}.${format}` });
       if (file) {
         setExportStatus({ notice: `Сохранено: ${file}` });
@@ -459,6 +487,7 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}
         </div>
         {exportOptions && <PlotExport options={exportOptions} panels={panels} pending={exportBusy} submit={submitExport}
+          canAddPublication={Boolean(onAddPublication)}
           close={() => setExportOptions(null)} onChange={(values) => setExportOptions((current) => ({ ...current, ...values }))} />}
       </div>
       <footer className="plot-selection-footer"><b>Выбранные анализы · {selectedIds.length}</b>

@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 from contextlib import closing
+from hashlib import sha256
 import json
 from math import isfinite
 import re
@@ -180,9 +181,13 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
             message = "Для поля нужны как минимум три неколлинеарные точки."
         fields.append({"layer_id": layer["id"], "analysis_ids": [point["analysis_id"] for point in included],
                        "vertices": vertices, "message": message})
-    return {"kind": kind, "axes": axes, "points": points, "ticks": ticks, "fields": fields,
-            "input_count": len(active_analyses), "hidden_count": len(active_analyses) - len(visible),
-            "excluded_count": len(visible) - len(points)}
+    result = {"kind": kind, "axes": axes, "points": points, "ticks": ticks, "fields": fields,
+              "input_analysis_ids": sorted(row["analysis_id"] for row in active_analyses),
+              "input_count": len(active_analyses), "hidden_count": len(active_analyses) - len(visible),
+              "excluded_count": len(visible) - len(points)}
+    result["projection_sha256"] = sha256(json.dumps(result, ensure_ascii=False, sort_keys=True,
+                                                     allow_nan=False).encode()).hexdigest()
+    return result
 
 
 def record_plot_visibility(database_path, analysis_ids, hidden):

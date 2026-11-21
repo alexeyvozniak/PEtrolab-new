@@ -13,12 +13,52 @@ from pypdf.generic import DictionaryObject, NameObject
 from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe
 from petrolab.import_apply import apply_import_plan
 from petrolab.import_preview import ImportCommandError
-from petrolab.plot_data import plot_catalog, save_plot_specification
-from petrolab.publication import export_publication, prepare_publication
+from petrolab.plot_data import plot_catalog, query_plot_data, save_plot_specification
+from petrolab.publication import capture_publication_plot, export_publication, prepare_publication
 from petrolab.work_groups import create_work_group
 
 
 class PublicationPackageTests(unittest.TestCase):
+    def test_direct_plot_capture_keeps_exact_panels_and_source_scope(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "input.csv"
+            source.write_text("Analysis,SiO2 [wt.%],Al2O3 [wt.%]\nP1,2,10\nP2,4,12\nP3,<1,9\n", encoding="utf-8")
+            database = root / "petrolab.sqlite"
+            apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
+            axes = plot_catalog(database)["axes"]
+            projected = query_plot_data(database, "binary", axes)
+            capture = {
+                "name": "Panel b", "format": "svg", "width_mm": 90, "dpi": 600, "include_csv": True,
+                "svg": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><g id="panel-b"><text x="1" y="2">b</text></g></svg>',
+                "analysis_ids": None, "hidden_analysis_ids": [], "hidden_source_ids": [], "layers": [], "colors": {},
+                "panels": [{"id": str(uuid4()), "kind": "binary", "axes": axes, "projection_sha256": projected["projection_sha256"]}],
+            }
+            before = database.read_bytes()
+            item = capture_publication_plot(database, capture, "Панель b")
+            self.assertEqual(database.read_bytes(), before)
+            self.assertEqual(item["capture"]["analysis_ids"], projected["input_analysis_ids"])
+            incoming = root / "other.csv"
+            incoming.write_text("Analysis,SiO2 [wt.%],Al2O3 [wt.%]\nP4,40,22\n", encoding="utf-8")
+            apply_import_plan(database, incoming, suggest_import_recipe(incoming)["recipe"])
+            ready = prepare_publication(database, "Материалы", [item])
+            exported = root / "package.zip"
+            export_publication(database, "Материалы", [item], ready["fingerprint"], str(exported))
+            with ZipFile(exported) as archive:
+                snapshot = json.loads(archive.read("materials/01-plot_capture.json"))
+                self.assertEqual(snapshot["panels"][0]["svg_group"], "panel-b")
+                self.assertEqual(snapshot["analysis_ids"], projected["input_analysis_ids"])
+                exact_ids = [point["analysis_id"] for point in projected["points"]]
+                self.assertEqual(ready["manifest"]["items"][0]["analysis_ids"], exact_ids)
+                csv_text = archive.read("data/01-plot_capture.csv").decode()
+                self.assertEqual(len(csv_text.splitlines()), 5)
+                self.assertTrue(all(analysis_id in csv_text for analysis_id in exact_ids))
+                self.assertEqual(archive.read("figures/01-plot_capture.svg"), capture["svg"].encode())
+            altered = {**capture, "panels": [{**capture["panels"][0], "projection_sha256": "0" * 64}]}
+            with self.assertRaises(ImportCommandError) as stale:
+                capture_publication_plot(database, altered, "Панель b")
+            self.assertEqual(stale.exception.code, "PUBLICATION_PLOT_CHANGED")
+
     def test_lithos_figures_have_ordered_captions_and_verified_width_and_resolution(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)

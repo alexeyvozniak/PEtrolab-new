@@ -19,8 +19,8 @@ from .import_apply import open_project
 from .formula_service import list_formula_runs, open_formula_run
 from .import_preview import ImportCommandError
 from .media_display import _publish_new_file
-from .plot_data import list_plot_specifications, open_plot_specification
-from .plot_export import SVG_LIMIT, checked_svg
+from .plot_data import list_plot_specifications, open_plot_specification, query_plot_data
+from .plot_export import SVG_LIMIT, checked_svg, render_plot
 from .statistics_service import list_calculation_runs, open_calculation_run
 from .work_groups import list_work_groups
 
@@ -28,6 +28,7 @@ from .work_groups import list_work_groups
 _LITHOS_WIDTHS = (90, 180)
 _LITHOS_RASTER_DPI = {"halftone": 300, "combination": 500, "line_art": 1000}
 _LITHOS_FORMATS = {".pdf": "PDF", ".tif": "TIFF", ".tiff": "TIFF", ".png": "PNG"}
+_CAPTURE_FORMATS = {"svg", "pdf", "tiff", "png"}
 
 
 def _pdf_fonts_embedded(resources, visited):
@@ -62,6 +63,14 @@ def _read_lithos_figure(path, width_mm, artwork):
     try:
         with Path(path).open("rb") as stream:
             data = stream.read(40 * 1024 * 1024 + 1)
+    except OSError as error:
+        raise ImportCommandError("PUBLICATION_FIGURE_UNSUPPORTED", "Не удалось прочитать файл фигуры.") from error
+    checks, warnings = _check_lithos_figure(data, extension, width_mm, artwork)
+    return data, checks, warnings
+
+
+def _check_lithos_figure(data, extension, width_mm, artwork):
+    try:
         if len(data) > 40 * 1024 * 1024:
             raise ImportCommandError("PUBLICATION_FIGURE_TOO_LARGE", "Фигура превышает 40 МиБ.")
         if extension == ".pdf":
@@ -75,7 +84,7 @@ def _read_lithos_figure(path, width_mm, artwork):
                 raise ImportCommandError("PUBLICATION_FIGURE_WIDTH", f"Ширина страницы PDF должна быть {width_mm} мм (±1 мм).")
             if not _pdf_fonts_embedded(page.get("/Resources"), set()):
                 raise ImportCommandError("PUBLICATION_FIGURE_FONTS", "В PDF обнаружены невстроенные шрифты.")
-            return data, {"format": "PDF", "page_width_mm": round(actual_width, 2)}, []
+            return {"format": "PDF", "page_width_mm": round(actual_width, 2)}, []
         with Image.open(BytesIO(data), formats=[_LITHOS_FORMATS[extension]]) as image:
             if image.n_frames != 1:
                 raise ValueError("expected one raster frame")
@@ -91,12 +100,72 @@ def _read_lithos_figure(path, width_mm, artwork):
     if actual_dpi < minimum:
         raise ImportCommandError("PUBLICATION_FIGURE_DPI", f"При ширине {width_mm} мм разрешение составляет {actual_dpi:.1f} dpi. Для выбранного типа нужно не менее {minimum} dpi.")
     warnings = ["PNG включён как копия для просмотра. Для подачи добавьте PDF или TIFF."] if extension == ".png" else []
-    return data, {"format": _LITHOS_FORMATS[extension], "width_px": width, "height_px": height,
-                  "artwork": artwork, "effective_dpi": round(actual_dpi, 2), "minimum_dpi": minimum}, warnings
+    return {"format": _LITHOS_FORMATS[extension], "width_px": width, "height_px": height,
+            "artwork": artwork, "effective_dpi": round(actual_dpi, 2), "minimum_dpi": minimum}, warnings
 
 
 def _json_bytes(value):
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+
+
+def _plot_capture(database_path, capture):
+    if (not isinstance(capture, dict) or set(capture) != {
+            "name", "svg", "format", "width_mm", "dpi", "include_csv", "panels",
+            "analysis_ids", "colors", "hidden_analysis_ids", "hidden_source_ids", "layers",
+    } or not isinstance(capture["name"], str) or not 1 <= len(capture["name"]) <= 120
+            or not isinstance(capture["svg"], str) or not isinstance(capture["format"], str)
+            or capture["format"] not in _CAPTURE_FORMATS or type(capture["include_csv"]) is not bool
+            or capture["width_mm"] not in _LITHOS_WIDTHS or capture["dpi"] not in (300, 500, 600, 1000)
+            or not isinstance(capture["panels"], list) or not 1 <= len(capture["panels"]) <= 32
+            or not isinstance(capture["colors"], dict)
+            or any(not isinstance(color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", color) for color in capture["colors"].values())):
+        raise ValueError("plot_capture")
+    root = checked_svg(capture["svg"].encode())
+    if len(root) != len(capture["panels"]) or any(not node.tag.endswith("}g") for node in root):
+        raise ValueError("plot_capture_panels")
+    snapshots = []
+    contributors = {}
+    scope = capture["analysis_ids"]
+    for panel, node in zip(capture["panels"], root):
+        if not isinstance(panel, dict) or set(panel) != {"id", "kind", "axes", "projection_sha256"}:
+            raise ValueError("plot_capture_panel")
+        projection = query_plot_data(database_path, panel["kind"], panel["axes"], scope,
+                                     capture["hidden_analysis_ids"], capture["hidden_source_ids"], capture["layers"])
+        if projection["projection_sha256"] != panel["projection_sha256"]:
+            raise ImportCommandError("PUBLICATION_PLOT_CHANGED", "Данные диаграммы изменились. Обновите панели и добавьте фигуру заново.")
+        scope = projection["input_analysis_ids"]
+        ids = [point["analysis_id"] for point in projection["points"]]
+        contributors.update(dict.fromkeys(ids))
+        snapshots.append({**panel, "svg_group": node.get("id"), "analysis_ids": ids, "points": projection["points"],
+                          "ticks": projection["ticks"], "fields": projection["fields"]})
+    if not contributors:
+        raise ImportCommandError("PUBLICATION_EMPTY_PLOT", "В выбранных панелях нет анализов для публикации.")
+    result = {key: value for key, value in capture.items() if key != "svg"}
+    result["analysis_ids"] = scope
+    result["panels"] = snapshots
+    result["schema_version"] = 1
+    return result, list(contributors)
+
+
+def capture_publication_plot(database_path, capture, caption):
+    if not isinstance(caption, str) or len(caption) > 2000:
+        raise ValueError("publication_caption")
+    snapshot, _ = _plot_capture(database_path, capture)
+    capture = {**capture, "analysis_ids": snapshot["analysis_ids"]}
+    return {"kind": "plot_capture", "id": sha256(_json_bytes(capture)).hexdigest(),
+            "caption": caption.strip(), "capture": capture}
+
+
+def _plot_values_csv(panels):
+    stream = StringIO(newline="")
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(["panel", "analysis_id", "field", "unit", "measurement_set", "method", "value"])
+    for panel in panels:
+        for point in panel["points"]:
+            writer.writerows((panel["svg_group"], point["analysis_id"], axis["field"], axis["unit"],
+                              axis["measurement_set"], axis["method"], value)
+                             for axis, value in zip(panel["axes"], point["values"]))
+    return stream.getvalue().encode("utf-8")
 
 
 def publication_catalog(database_path):
@@ -171,7 +240,7 @@ def _build_package(database_path, name, items, profile, width_mm):
     figures = []
     for index, item in enumerate(items, 1):
         if (not isinstance(item, dict) or not {"kind", "id", "caption"} <= item.keys()
-                or item.keys() - {"kind", "id", "caption", "source_path", "artwork"}):
+                or item.keys() - {"kind", "id", "caption", "source_path", "artwork", "capture"}):
             raise ValueError("publication_item")
         kind, identifier, caption = item["kind"], item["id"], item["caption"]
         if not isinstance(identifier, str) or not isinstance(caption, str) or len(caption) > 2000:
@@ -194,12 +263,21 @@ def _build_package(database_path, name, items, profile, width_mm):
         elif kind in ("plot_specification", "svg_figure", "publication_figure"):
             result = open_plot_specification(database_path, identifier)
             label, ids = result["name"], result["input"]["analysis_ids"]
+        elif kind == "plot_capture":
+            capture = item.get("capture")
+            result, ids = _plot_capture(database_path, capture)
+            if identifier != sha256(_json_bytes(capture)).hexdigest():
+                raise ImportCommandError("PUBLICATION_PLOT_CHANGED", "Снимок фигуры изменился. Добавьте фигуру заново.")
+            label = result["name"]
         else:
             raise ValueError("publication_item_kind")
+        if ("capture" in item) != (kind == "plot_capture") or (kind == "plot_capture" and "source_path" in item):
+            raise ValueError("publication_item_capture")
         stem = f"{index:02d}-{kind}"
         paths = [f"materials/{stem}.json"]
         files[paths[0]] = _json_bytes(result)
         figure = None
+        figure_data = None
         if kind == "svg_figure":
             if "artwork" in item:
                 raise ValueError("publication_item_artwork")
@@ -207,6 +285,36 @@ def _build_package(database_path, name, items, profile, width_mm):
             files[paths[-1]] = _read_vector(item.get("source_path"))
             if profile == "lithos":
                 warnings.append(f"Материал {index} · SVG включён для редактирования. Для подачи добавьте PDF или TIFF.")
+        elif kind == "plot_capture":
+            format_name = capture["format"]
+            target_width = capture["width_mm"]
+            artwork = item.get("artwork", "line_art")
+            if not isinstance(artwork, str) or artwork not in _LITHOS_RASTER_DPI:
+                raise ValueError("publication_figure_artwork")
+            if profile == "lithos" and format_name != "svg" and target_width != width_mm:
+                raise ImportCommandError("PUBLICATION_FIGURE_WIDTH", f"Материал {index} сохранён с другой шириной. Выберите {width_mm} мм в окне выгрузки графиков.")
+            try:
+                data = render_plot(capture["svg"], format_name, capture["width_mm"], capture["dpi"])
+            except ImportCommandError:
+                raise
+            except (OSError, RuntimeError, TypeError, AttributeError, ImportError) as error:
+                raise ImportCommandError("EXPORT_FAILED", "Не удалось построить фигуру для пакета.") from error
+            if format_name == "svg":
+                paths.append(f"figures/{stem}.svg")
+                files[paths[-1]] = data
+                if profile == "lithos":
+                    warnings.append(f"Материал {index} · SVG включён для редактирования. Для подачи добавьте PDF или TIFF.")
+            else:
+                checks = {"format": format_name.upper()}
+                notices = []
+                if profile == "lithos":
+                    checks, notices = _check_lithos_figure(data, "." + format_name, width_mm, artwork)
+                elif format_name in {"png", "tiff"}:
+                    checks["effective_dpi"] = capture["dpi"]
+                figure_data = data, target_width, checks, notices
+            if capture["include_csv"]:
+                paths.append(f"data/{stem}.csv")
+                files[paths[-1]] = _plot_values_csv(result["panels"])
         elif kind == "publication_figure":
             artwork = item.get("artwork", "line_art")
             if profile != "lithos" or not isinstance(artwork, str) or artwork not in _LITHOS_RASTER_DPI:
@@ -214,15 +322,20 @@ def _build_package(database_path, name, items, profile, width_mm):
             if not caption.strip():
                 raise ImportCommandError("PUBLICATION_FIGURE_CAPTION", f"Добавьте подпись к фигуре в строке {index}.")
             data, checks, notices = _read_lithos_figure(item.get("source_path"), width_mm, artwork)
+            figure_data = data, width_mm, checks, notices
+        elif "source_path" in item or "artwork" in item:
+            raise ValueError("publication_item_path")
+        if figure_data is not None:
+            data, target_width, checks, notices = figure_data
+            if profile == "lithos" and not caption.strip():
+                raise ImportCommandError("PUBLICATION_FIGURE_CAPTION", f"Добавьте подпись к фигуре в строке {index}.")
             number = len(figures) + 1
             extension = {"PDF": "pdf", "TIFF": "tiff", "PNG": "png"}[checks["format"]]
             paths.append(f"figures/Figure_{number:02d}.{extension}")
             files[paths[-1]] = data
             warnings.extend(f"Figure {number} · {notice}" for notice in notices)
-            figure = {"number": number, "target_width_mm": width_mm, **checks}
+            figure = {"number": number, "target_width_mm": target_width, **checks}
             figures.append((figure, caption.strip()))
-        elif "source_path" in item or "artwork" in item:
-            raise ValueError("publication_item_path")
         if not caption.strip():
             warnings.append(f"Материал {index} «{label}» без подписи.")
         manifest_items.append({"order": index, "kind": kind, "reference_id": identifier, "label": label,
@@ -233,10 +346,10 @@ def _build_package(database_path, name, items, profile, width_mm):
     if profile == "lithos":
         if not any(figure["format"] in {"PDF", "TIFF"} for figure, _ in figures):
             warnings.append("В пакете пока нет PDF или TIFF для подачи.")
-        if figures:
-            files["figures/captions.txt"] = ("\n\n".join(
-                f"Figure {figure['number']}. {caption}" for figure, caption in figures
-            ) + "\n").encode()
+    if figures:
+        files["figures/captions.txt"] = ("\n\n".join(
+            f"Figure {figure['number']}. {caption}" for figure, caption in figures
+        ) + "\n").encode()
     if all_ids:
         files.update(_supplementary_data(database_path, list(all_ids)))
     if formulas:

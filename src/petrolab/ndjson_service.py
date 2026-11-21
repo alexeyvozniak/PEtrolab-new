@@ -43,7 +43,7 @@ from .media_display import export_media_original, export_media_rendered, preview
 from .statistics_service import list_calculation_runs, open_calculation_run, review_statistics, run_clustering, save_calculated_cluster
 from .formula_service import list_formula_runs, open_formula_run, review_formula, run_formula
 from .olivine_formula import OLIVINE
-from .publication import export_publication, prepare_publication, publication_catalog
+from .publication import capture_publication_plot, export_publication, prepare_publication, publication_catalog
 from .project_archive import export_project_archive, restore_project_archive
 from .workspace_snapshots import apply_analysis_template, list_workspace_snapshots, open_workspace_snapshot, save_analysis_template, save_workspace_snapshot
 
@@ -327,6 +327,9 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
         params.get("archive_path"), params.get("destination_path"),
     )},
     "publication.catalog": lambda params: {"result": publication_catalog(_project_database_path(params))},
+    "publication.capture_plot": lambda params: {"result": capture_publication_plot(
+        _project_database_path(params), params.get("capture"), params.get("caption", ""),
+    )},
     "plot.export": lambda params: {"result": export_plot(
         params.get("svg"), params.get("format"), params.get("output_path"), params.get("width_mm"), params.get("dpi"),
     )},
