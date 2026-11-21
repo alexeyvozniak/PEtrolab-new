@@ -15,10 +15,11 @@ import { invokePetrolab } from "../src/desktopApi";
 configure({ asyncUtilTimeout: 5000 });
 
 let child, folder, first, second, queue, mediaQueue, mediaFolder, original, pending, lines, requests, plotExports;
-function startService() {
+async function startService() {
   child = spawn("python", ["-m", "petrolab.ndjson_service"], {
     cwd: resolve(process.cwd(), ".."), windowsHide: true,
-    env: { ...process.env, PYTHONPATH: resolve(process.cwd(), "../src"), PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+    env: { ...process.env, PYTHONPATH: resolve(process.cwd(), "../src"), PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8",
+      OPENBLAS_NUM_THREADS: "1" },
   });
   lines = createInterface({ input: child.stdout });
   lines.on("line", (line) => {
@@ -27,6 +28,8 @@ function startService() {
     if (callback) { pending.delete(response.request_id); callback(response); }
   });
   child.on("error", (error) => { throw error; });
+  const readiness = await invokePetrolab("import.inspect_source", { source_path: first });
+  expect(readiness.result?.source_fingerprint, JSON.stringify(readiness.error)).toBeTruthy();
 }
 
 async function stopService() {
@@ -42,7 +45,6 @@ beforeEach(async () => {
   await writeFile(first, original);
   await writeFile(second, "Analysis,SiO2 [wt.%]\nB1,40\nB2,41\n");
   queue = [first, second]; mediaQueue = []; mediaFolder = null; pending = new Map(); requests = []; plotExports = [];
-  startService();
   bridge.invoke = async (command, args) => {
     if (command === "project_database_path") return join(folder, "project.sqlite");
     if (command === "pick_import_file") return queue.shift() || null;
@@ -66,7 +68,8 @@ beforeEach(async () => {
     });
   };
   window.__TAURI_INTERNALS__ = { invoke: () => {} };
-});
+  await startService();
+}, 30000);
 
 afterEach(async () => {
   cleanup();
@@ -246,7 +249,7 @@ test("one common selection highlights the same analysis on binary and ternary pl
   expect(layout.querySelector("text")?.textContent).toBe("a");
   app.unmount();
   await stopService();
-  startService();
+  await startService();
   render(<App />);
   await user.click(await enabledButton("Построение"));
   await user.click(screen.getByText("Сохранённые раскладки", { exact: true }));
@@ -326,7 +329,7 @@ test("opening PetroLab again restores the queue and the saved skip decision", as
 
   app.unmount();
   await stopService();
-  startService();
+  await startService();
   render(<App />);
   await screen.findByText("Черновик импорта восстановлен.");
   await enabledButton("Включить источник second.csv");
@@ -370,7 +373,7 @@ test("a saved work group restores the exact selection after reopening the applic
 
   app.unmount();
   await stopService();
-  startService();
+  await startService();
   render(<App />);
   await user.click(await enabledButton("Анализы"));
   const reopened = within(await screen.findByRole("table"));
@@ -404,7 +407,7 @@ test("an edit draft survives reopening and reports external source changes witho
   app.unmount();
   await stopService();
   await writeFile(second, "Analysis,SiO2 [wt.%]\nB1,99\nB2,41\n");
-  startService();
+  await startService();
   render(<App />);
   await user.click(await enabledButton("Анализы"));
   await user.click(within(await screen.findByRole("table")).getByText("B1"));
@@ -624,7 +627,7 @@ test("saves a thin section point placed at 20× and reopens its original area af
 
   app.unmount();
   await stopService();
-  startService();
+  await startService();
   app = render(<App />);
   await user.click(await enabledButton("Образцы"));
   await user.click(await enabledButton("Шлифы"));
@@ -742,7 +745,7 @@ test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed p
   await screen.findByText("Черновик сохранён.");
   app.unmount();
   await stopService();
-  startService();
+  await startService();
   app = render(<App />);
   await user.click(await enabledButton("Изображения"));
   await user.click(await enabledButton("Импорт изображений"));
