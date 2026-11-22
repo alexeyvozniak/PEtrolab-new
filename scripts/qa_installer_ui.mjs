@@ -100,10 +100,15 @@ async function withWindow(check) {
   const port = await debuggingPort();
   const profile = await mkdtemp(join(workspace, "webview-"));
   const child = spawn(executable, [], {
-    cwd: dirname(executable), windowsHide: true, stdio: "ignore",
+    cwd: dirname(executable), stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, PETROLAB_PROJECT_DATABASE: database, WEBVIEW2_USER_DATA_FOLDER: profile,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1` },
   });
+  let appOutput = "";
+  for (const stream of [child.stdout, child.stderr]) {
+    stream.setEncoding("utf8");
+    stream.on("data", (chunk) => { appOutput = (appOutput + chunk).slice(-4000); });
+  }
   let socket, screenshot;
   let discovery = "no requests made";
   try {
@@ -152,9 +157,17 @@ async function withWindow(check) {
       const inspect = `
         $port = ${port}
         $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
-        $workers = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" |
-          Where-Object { $_.CommandLine -like "*--remote-debugging-port=$port*" })
-        @{ listeners = $listeners.Count; webviewProcessesWithPort = $workers.Count } | ConvertTo-Json -Compress
+        $app = Get-Process -Id ${child.pid} -ErrorAction SilentlyContinue
+        $workers = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'")
+        $ours = @($workers | Where-Object { $_.ParentProcessId -eq ${child.pid} })
+        @{
+          appSession = $app.SessionId
+          appHasWindow = [bool]$app.MainWindowHandle
+          appWindowTitle = $app.MainWindowTitle
+          listeners = $listeners.Count
+          webviewChildren = $ours.Count
+          webviewChildrenWithRequestedPort = @($ours | Where-Object { $_.CommandLine -like "*--remote-debugging-port=$port*" }).Count
+        } | ConvertTo-Json -Compress
       `;
       let hostState;
       try {
@@ -162,7 +175,7 @@ async function withWindow(check) {
           encoding: "utf8", windowsHide: true, timeout: 8000,
         }));
       } catch { hostState = null; }
-      const diagnostic = { port, pid: child.pid, discovery, hostState };
+      const diagnostic = { port, pid: child.pid, discovery, hostState, appOutput };
       await writeFile(join(evidence, "webview-startup-failure.json"), JSON.stringify(diagnostic, null, 2));
       console.error("AT-14 WebView startup:", diagnostic);
     }

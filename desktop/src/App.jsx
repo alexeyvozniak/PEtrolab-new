@@ -104,6 +104,8 @@ async function attachMineralIdentifications(path, project) {
   };
 }
 
+const previewMediaSource = async (path, region, fingerprint) => unwrap(await previewMediaFile(path, region, fingerprint));
+
 export function App() {
   const desktopRuntimeAvailable = isPetrolabDesktop();
   const [screen, setScreen] = useState("Обзор");
@@ -623,7 +625,7 @@ export function App() {
           pickFolder: pickMediaFolder, inspectFolder: async (path) => unwrap(await inspectMediaFolder(path)),
           loadDraft: loadMediaDraft, saveDraft: async (plan, prior) => unwrap(await saveMediaImportDraft(databasePath, plan, prior)),
           inspect: async (paths) => unwrap(await inspectMediaFiles(paths)),
-          preview: async (path, region, fingerprint) => unwrap(await previewMediaFile(path, region, fingerprint)),
+          preview: previewMediaSource,
           plan: async (assignments) => unwrap(await draftMediaImport(databasePath, assignments)),
           commit: async (plan, draftFingerprint) => unwrap(await commitMediaImport(databasePath, plan, draftFingerprint)),
         }} onCancel={() => setScreen("Изображения")} onDone={(result) => {

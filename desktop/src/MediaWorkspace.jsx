@@ -289,6 +289,104 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
   </>;
 }
 
+function MediaImportReview({ plan, initialPath, preview, onBack, onSaveDraft, onCommit, pending }) {
+  const [selectedId, setSelectedId] = useState(() =>
+    plan.items.find((item) => item.source_path === initialPath)?.media_asset_id ?? plan.items[0].media_asset_id);
+  const selected = plan.items.find((item) => item.media_asset_id === selectedId);
+  const [loaded, setLoaded] = useState(null);
+  useEffect(() => {
+    let current = true;
+    preview(selected.source_path, undefined, selected.source_fingerprint)
+      .then((image) => {
+        if (image.source_fingerprint !== selected.source_fingerprint) throw new Error("Изображение изменилось. Добавьте файл заново.");
+        if (current) setLoaded({ selected, image });
+      })
+      .catch((error) => { if (current) setLoaded({ selected, error: error.message }); });
+    return () => { current = false; };
+  }, [selected, preview]);
+
+  const previewState = loaded?.selected === selected ? loaded : null;
+  const groups = new Map();
+  let placementCount = 0;
+  let exceptionCount = 0;
+  for (const item of plan.items) {
+    const key = JSON.stringify([item.sample_name, item.thin_section_name]);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+    placementCount += item.placements.length;
+    exceptionCount += item.placements.filter((point) => point.cross_sample_exception_reason).length;
+  }
+  const unplaced = plan.unplaced_points || [];
+  return <>
+    <h3>Проверка перед импортом</h3>
+    <div className="media-review">
+      <aside className="sample-card media-review-files" aria-label="Файлы пакета">
+        <h4>Файлы пакета</h4>
+        {[...groups].map(([key, items]) => <section key={key}>
+          <h5>{items[0].sample_name} · {items[0].thin_section_name}</h5>
+          <ul className="media-review-list">{items.map((item) => <li key={item.media_asset_id}>
+            <button className="outline-button" type="button" aria-label={`Показать снимок ${item.display_name}`}
+              aria-pressed={selected === item} onClick={() => setSelectedId(item.media_asset_id)}>
+              <span>{item.display_name}</span><small>{item.media_type}</small>
+            </button>
+          </li>)}</ul>
+        </section>)}
+      </aside>
+      <div className="project-search-table media-review-table"><table>
+        <thead><tr><th>Файл</th><th>Образец</th><th>Шлиф</th><th>Тип</th><th>Размещено точек</th><th>Исключения</th></tr></thead>
+        <tbody>{plan.items.map((item) => <tr key={item.media_asset_id} className={selected === item ? "marked" : undefined}>
+          <td><button className="outline-button" type="button" aria-pressed={selected === item}
+            onClick={() => setSelectedId(item.media_asset_id)}>{item.display_name}</button></td>
+          <td>{item.sample_name}</td><td>{item.thin_section_name}</td><td>{item.media_type}</td>
+          <td>{item.placements.length}</td><td>{item.placements.filter((point) => point.cross_sample_exception_reason).length}</td>
+        </tr>)}</tbody>
+      </table>
+        {plan.items.some((item) => !item.placements.length) && <p>В пакете есть изображения без размещённых точек.</p>}
+      </div>
+      <aside className="media-review-inspector" aria-label="Выбранный снимок">
+        <section className="sample-card">
+          <h4>{selected.display_name}</h4>
+          {previewState?.error && <p role="alert">{previewState.error}</p>}
+          {!previewState && <p role="status">Загружается предпросмотр…</p>}
+          {previewState?.image && <MediaViewer key={selectedId} image={previewState.image}
+            annotations={selected.placements.map((point) => ({ ...point.geometry, id: point.spatial_annotation_id, label: point.point_name }))} />}
+          <h5>Размещённые точки ({selected.placements.length})</h5>
+          {selected.placements.length === 0 ? <p>На снимке нет размещённых точек.</p> :
+            <ul className="media-review-list">{selected.placements.map((point) => <li key={point.spatial_annotation_id}>
+              {point.point_name} · {point.point_sample_name}
+            </li>)}</ul>}
+          {selected.placements.filter((point) => point.cross_sample_exception_reason).map((point) =>
+            <p className="media-review-exception" key={point.spatial_annotation_id}>
+              {selected.display_name} · {point.point_sample_name} / {point.point_name} · {point.cross_sample_exception_reason}
+            </p>)}
+        </section>
+        {unplaced.length > 0 && <section className="sample-card media-import-warning">
+          <h4>Неразмещённые точки ({unplaced.length})</h4>
+          <ul className="media-review-list">{unplaced.map((point) => <li key={`${point.analytical_point_id}-${point.thin_section_name}`}>
+            {point.sample_name} · {point.thin_section_name} · {point.point_name}
+          </li>)}</ul>
+          <p>Эти точки сохранят существующие связи с анализами.</p>
+        </section>}
+      </aside>
+    </div>
+    <footer className="sample-card media-review-footer">
+      <dl aria-label="Сводка пакета">
+        <div><dt>Снимки</dt><dd>{plan.items.length}</dd></div>
+        <div><dt>Размещения</dt><dd>{placementCount}</dd></div>
+        <div><dt>Исключения</dt><dd>{exceptionCount}</dd></div>
+        <div><dt>Неразмещённые точки</dt><dd>{unplaced.length}</dd></div>
+      </dl>
+      <div className="point-row-actions">
+        <button className="outline-button" type="button" disabled={pending} onClick={onBack}>Назад к назначению</button>
+        {onSaveDraft && <button className="outline-button" type="button" disabled={pending} onClick={onSaveDraft}>Сохранить черновик</button>}
+        <button className="primary-button" type="button" disabled={pending} onClick={onCommit}>
+          {unplaced.length > 0 ? "Завершить без неразмещённых точек" : "Импортировать изображения"}
+        </button>
+      </div>
+    </footer>
+  </>;
+}
+
 export function MediaImport({ actions, onCancel, onDone }) {
   const [files, setFiles] = useState([]);
   const [samples, setSamples] = useState([]);
@@ -319,7 +417,6 @@ export function MediaImport({ actions, onCancel, onDone }) {
   const assignedPoints = new Set(files.flatMap((item) => item.placements.map((placement) => placement.analytical_point_id)));
   const orderedPoints = [...points].sort((a, b) => Number(Boolean(a.placed || assignedPoints.has(a.analytical_point_id))) -
     Number(Boolean(b.placed || assignedPoints.has(b.analytical_point_id))));
-  const unplaced = plan?.unplaced_points || [];
   const clearException = () => { setExceptionPreview(null); setExceptionReason(""); setExceptionNote(""); };
   useEffect(() => {
     if (!actions.loadDraft) return;
@@ -426,40 +523,16 @@ export function MediaImport({ actions, onCancel, onDone }) {
     {notice && <p role="status">{notice}</p>}
     {!plan && !files.length && draft?.plan && <button type="button" className="outline-button" disabled={pending} onClick={restoreDraft}>Восстановить черновик</button>}
     {!plan && !files.length && draft?.issue && <p role="alert">{draft.issue}</p>}
-    {plan ? <>
-      <h3>Проверка перед импортом</h3>
-      <div className="project-search-table"><table>
-        <thead><tr><th>Файл</th><th>Образец</th><th>Шлиф</th><th>Тип</th><th>Размещено точек</th><th>Исключения</th></tr></thead>
-        <tbody>{plan.items.map((item) => <tr key={item.media_asset_id}>
-          <td>{item.display_name}</td><td>{item.sample_name}</td><td>{item.thin_section_name}</td><td>{item.media_type}</td>
-          <td>{item.placements.length}</td><td>{item.placements.filter((placement) => placement.cross_sample_exception_reason).length}</td>
-        </tr>)}</tbody>
-      </table></div>
-      {plan.items.some((item) => !item.placements.length) && <p>В пакете есть изображения без размещённых точек.</p>}
-      {plan.items.flatMap((item) => item.placements.filter((placement) => placement.cross_sample_exception_reason)
-        .map((placement) => <p key={placement.spatial_annotation_id}>
-          {item.display_name} · {placement.point_sample_name} / {placement.point_name} · {placement.cross_sample_exception_reason}
-        </p>))}
-      {unplaced.length > 0 && <section className="sample-card media-import-warning">
-        <h4>Неразмещённые точки ({unplaced.length})</h4>
-        <ul className="sample-items">{unplaced.map((point) => <li key={`${point.analytical_point_id}-${point.thin_section_name}`}>
-          {point.sample_name} · {point.thin_section_name} · {point.point_name}
-        </li>)}</ul>
-        <p>Эти точки сохранят существующие связи с анализами.</p>
-      </section>}
-      <div className="point-row-actions">
-        <button className="outline-button" type="button" disabled={pending} onClick={() => setPlan(null)}>Назад к назначению</button>
-        {actions.saveDraft && <button className="outline-button" type="button" disabled={pending} onClick={() => perform(async () => {
+    {plan ? <MediaImportReview plan={plan} initialPath={activePath} preview={actions.preview} pending={pending}
+        onBack={() => setPlan(null)}
+        onSaveDraft={actions.saveDraft && (() => perform(async () => {
           const saved = await actions.saveDraft(plan, draft?.fingerprint ?? null);
           setDraft({ ...saved, plan });
           setActiveDraftFingerprint(saved.fingerprint);
           setNotice("Черновик сохранён.");
-        })}>Сохранить черновик</button>}
-        <button className="primary-button" type="button" disabled={pending} onClick={() => perform(async () => onDone(await actions.commit(plan, activeDraftFingerprint)))}>
-          {unplaced.length > 0 ? "Завершить без неразмещённых точек" : "Импортировать изображения"}
-        </button>
-      </div>
-    </> : <div className="sample-overview">
+        }))}
+        onCommit={() => perform(async () => onDone(await actions.commit(plan, activeDraftFingerprint)))} />
+    : <div className="sample-overview">
       <section className="sample-card">
         <h3>Файлы, образец и шлиф</h3>
         <div className="point-row-actions">

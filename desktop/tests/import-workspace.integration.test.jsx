@@ -1029,6 +1029,18 @@ test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed p
   expect(rows.map((row) => row.textContent)).toEqual(expect.arrayContaining([
     "BSE.pngKIV-2KIV-2-ABSE21", "PPL.pngKIV-2KIV-2-APPL00", "XPL.pngKIV-2KIV-2-AXPL00",
   ]));
+  const inspector = within(screen.getByRole("complementary", { name: "Выбранный снимок" }));
+  const packageFiles = within(screen.getByRole("complementary", { name: "Файлы пакета" }));
+  expect(packageFiles.getByRole("heading", { name: "KIV-2 · KIV-2-A" })).toBeTruthy();
+  expect((await inspector.findByLabelText("Аннотации изображения")).querySelectorAll("circle")).toHaveLength(2);
+  await user.click(packageFiles.getByRole("button", { name: "Показать снимок PPL.png" }));
+  await inspector.findByRole("heading", { name: "PPL.png" });
+  expect(inspector.getByText("На снимке нет размещённых точек.")).toBeTruthy();
+  expect(inspector.queryByText(/Изображение охватывает другой образец/)).toBeNull();
+  expect(inspector.getByText("KIV-2 · KIV-2-A · P-08")).toBeTruthy();
+  expect([...screen.getByLabelText("Сводка пакета").querySelectorAll("dd")].map((value) => value.textContent))
+    .toEqual(["3", "2", "1", "1"]);
+  expect(requests.some(({ command }) => command === "media.import.apply")).toBe(false);
   await user.click(await enabledButton("Сохранить черновик"));
   await screen.findByText("Черновик сохранён.");
   app.unmount();
