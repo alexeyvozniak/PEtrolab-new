@@ -125,6 +125,11 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "The installed candidate did not safely migrate the historical project." }
     }
 
+    if ($UiEvidence) {
+        & node (Join-Path $PSScriptRoot "qa_installer_ui.mjs") $appExecutable.FullName $UiEvidence
+        if ($LASTEXITCODE -ne 0) { throw "Installed PetroLab failed the AT-14 native workflow." }
+    }
+
     Write-Host "Launching $($appExecutable.FullName)"
     $appProcess = Start-Process -FilePath $appExecutable.FullName -PassThru
     $windowReady = $false
@@ -185,11 +190,6 @@ try {
             throw "Installed scientific service stayed active after closing PetroLab."
         }
         Start-Sleep -Milliseconds 250
-    }
-
-    if ($UiEvidence) {
-        & node (Join-Path $PSScriptRoot "qa_installer_ui.mjs") $appExecutable.FullName $UiEvidence
-        if ($LASTEXITCODE -ne 0) { throw "Installed PetroLab failed the AT-14 native workflow." }
     }
 
     $beforeUninstall = (Get-FileHash -Algorithm SHA256 -LiteralPath $database).Hash

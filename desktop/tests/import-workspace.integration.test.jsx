@@ -755,6 +755,70 @@ test("opens field context and exports a byte-for-byte photo original and a decor
   expect((await readFile(join(folder, "petrolab-package.zip"))).includes(Buffer.from("images/01-media_capture.png"))).toBe(true);
 }, 20000);
 
+test("AT-10 carries an explicitly selected thin-section analysis into the table and both plots", async () => {
+  const image = join(folder, "at10-bse.png");
+  const pixels = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAAGklEQVR4nO3BAQEAAACCIP+vbkhAAQAAAPBsEiAAAZJII8cAAAAASUVORK5CYII=", "base64");
+  const epma = "Analysis,Sample,Method,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\nEPMA-07,KIV-2,EPMA,52,18,10\nPrior,KIV-2,EPMA,48,20,14\n";
+  const trace = "Analysis,Sample,Method,La [ppm],Ce [ppm]\nLA-07,KIV-2,LA-ICP-MS,7,14\n";
+  await Promise.all([writeFile(image, pixels), writeFile(first, epma), writeFile(second, trace)]);
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  for (const source_path of [first, second]) {
+    const { result: { recipe } } = await invokePetrolab("import.recipe.suggest", { source_path });
+    expect((await invokePetrolab("import.plan.apply", { ...database, source_path, recipe })).error).toBeUndefined();
+  }
+  const before = (await invokePetrolab("project.analyses.list", database)).result.analyses;
+  const ids = Object.fromEntries(before.map(({ identity, analysis_id }) => [identity.Analysis, analysis_id]));
+  const point = (await invokePetrolab("analytical_point.create", { ...database, sample_name: "KIV-2", point_name: "P-07",
+    analysis_ids: [ids["EPMA-07"], ids["LA-07"]], link_type: "same_point" })).result;
+  const { result: plan } = await invokePetrolab("media.import.plan", { ...database, assignments: [{
+    source_path: image, ownership_mode: "managed_copy", media_type: "BSE", sample_name: "KIV-2", thin_section_name: "TS1",
+    placements: [{ analytical_point_id: point.analytical_point_id, geometry: { kind: "point", x_px: 36, y_px: 8 }, cross_sample_exception_reason: null }],
+  }] });
+  expect((await invokePetrolab("media.import.apply", { ...database, plan })).result.created_media_asset_count).toBe(1);
+  const preview = await invokePetrolab("media.preview", { ...database, media_asset_id: plan.items[0].media_asset_id });
+  expect(preview.result?.annotations, JSON.stringify(preview.error)).toMatchObject([{ point_name: "P-07" }]);
+
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Анализы"));
+  await user.click(await screen.findByRole("checkbox", { name: "Выбрать Prior" }));
+  await user.click(await enabledButton("Образцы"));
+  await user.click(await enabledButton("Шлифы"));
+  await user.click(await screen.findByText("TS1", { exact: true }));
+  await user.click(await enabledButton("Открыть"));
+  await user.click(await enabledButton("P-07"));
+  const links = within(await screen.findByRole("complementary", { name: "Анализы точки" }));
+  const epmaLink = within((await links.findByText(/^EPMA-07\b/)).closest("li"));
+  const traceLink = within((await links.findByText(/^LA-07\b/)).closest("li"));
+  expect(epmaLink.getByRole("button", { name: "Добавить в отбор" }).disabled).toBe(false);
+  expect(traceLink.getByRole("button", { name: "Добавить в отбор" }).disabled).toBe(false);
+  await user.click(epmaLink.getByRole("button", { name: "Добавить в отбор" }));
+  expect(epmaLink.getByRole("button", { name: "Добавить в отбор" }).disabled).toBe(true);
+  expect(traceLink.getByRole("button", { name: "Добавить в отбор" }).disabled).toBe(false);
+  await user.click(epmaLink.getByRole("button", { name: "Открыть анализ" }));
+
+  const table = within(await screen.findByRole("table"));
+  for (const [label, checked] of [["EPMA-07", true], ["Prior", true], ["LA-07", false]]) {
+    expect(table.getByRole("checkbox", { name: `Выбрать ${label}` }).checked).toBe(checked);
+  }
+  const detail = within(screen.getByRole("complementary", { name: "Подробности анализа" }));
+  expect(detail.getAllByText("EPMA-07", { exact: true }).length).toBeGreaterThan(0);
+  await user.click(await enabledButton("Построить диаграммы"));
+  await waitFor(() => {
+    const markers = screen.getAllByRole("button", { name: /^Выбрать точку EPMA-07\b/, pressed: true });
+    expect(markers).toHaveLength(2);
+    expect(markers.map((marker) => marker.dataset.analysisId)).toEqual([ids["EPMA-07"], ids["EPMA-07"]]);
+  });
+  expect(screen.queryByRole("button", { name: /^Выбрать точку LA-07\b/ })).toBeNull();
+  for (const kind of ["binary", "ternary"]) {
+    expect(requests.findLast(({ command, payload }) => command === "plot_data.query" && payload.kind === kind).payload.analysis_ids)
+      .toEqual([ids.Prior, ids["EPMA-07"]]);
+  }
+  const final = (await invokePetrolab("project.analyses.list", database)).result.analyses;
+  expect(final.map(({ measurement_list }) => measurement_list)).toEqual(before.map(({ measurement_list }) => measurement_list));
+  expect(await Promise.all([readFile(first, "utf8"), readFile(second, "utf8"), readFile(image)])).toEqual([epma, trace, pixels]);
+}, 30000);
+
 test("saves a thin section point placed at 20× and reopens its original area after restarting Python", async () => {
   const source = join(folder, "bse.png");
   const originalImage = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAAUElEQVR4nM3OMQEAIAzAsFJleEAI/j/+GaBRkLXvoURiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJEZiJMbfgekBmXUBQky7dlsAAAAASUVORK5CYII=", "base64");

@@ -93,6 +93,7 @@ jobs:
           path: |
             ${{ runner.temp }}/petrolab-at14/*.png
             ${{ runner.temp }}/petrolab-at14/acceptance.json
+            ${{ runner.temp }}/petrolab-at14/webview-startup-failure.json
           if-no-files-found: ignore
           retention-days: 14
       - name: Record the clean-tested MSI checksum

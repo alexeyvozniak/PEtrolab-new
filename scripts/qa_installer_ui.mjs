@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { get } from "node:http";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -53,6 +54,25 @@ async function debuggingPort() {
   return port;
 }
 
+function debugTargets(port) {
+  // This request is confined to the machine running the installed app.
+  // A per-request agent keeps CI proxy settings out of local discovery.
+  return new Promise((resolve, reject) => {
+    const request = get({ hostname: "127.0.0.1", port, path: "/json/list", agent: false }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { body += chunk; });
+      response.on("error", reject);
+      response.on("end", () => {
+        if (response.statusCode !== 200) return reject(new Error(`WebView endpoint HTTP ${response.statusCode}`));
+        try { resolve(JSON.parse(body)); } catch (error) { reject(error); }
+      });
+    });
+    request.on("error", reject);
+    request.setTimeout(2000, () => request.destroy(new Error("WebView endpoint request timed out")));
+  });
+}
+
 function connect(socket) {
   let id = 0;
   const pending = new Map();
@@ -78,20 +98,29 @@ function connect(socket) {
 
 async function withWindow(check) {
   const port = await debuggingPort();
+  const profile = await mkdtemp(join(workspace, "webview-"));
   const child = spawn(executable, [], {
     cwd: dirname(executable), windowsHide: true, stdio: "ignore",
-    env: { ...process.env, PETROLAB_PROJECT_DATABASE: database, WEBVIEW2_USER_DATA_FOLDER: join(workspace, "webview"),
+    env: { ...process.env, PETROLAB_PROJECT_DATABASE: database, WEBVIEW2_USER_DATA_FOLDER: profile,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1` },
   });
   let socket, screenshot;
+  let discovery = "no requests made";
   try {
     await once(child, "spawn");
     const target = await until("native WebView endpoint", async () => {
       assert.equal(child.exitCode, null, "PetroLab exited on startup");
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
-      const pages = response?.ok ? await response.json() : [];
-      return pages.find(({ type, url }) => type === "page" && url.includes("tauri.localhost"));
-    });
+      try {
+        const pages = await debugTargets(port);
+        const targets = pages.map((page) => ({ ...page, origin: URL.parse(page.url) }));
+        discovery = `${pages.length} target(s) [${targets.map(({ type, origin }) =>
+          `${type}: ${origin?.hostname || origin?.protocol || "empty"}`).join(", ")}]`;
+        return targets.find(({ type, origin }) => type === "page" && origin?.hostname === "tauri.localhost");
+      } catch (error) {
+        discovery = `${error.code || "request failed"}: ${error.message}`;
+        return null;
+      }
+    }, 60000);
     const address = new URL(target.webSocketDebuggerUrl);
     assert.equal(address.hostname, "127.0.0.1");
     socket = new WebSocket(address);
@@ -119,6 +148,24 @@ async function withWindow(check) {
     execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", close], { windowsHide: true, timeout: 18000 });
   } catch (error) {
     if (screenshot) await screenshot("failure").catch(() => {});
+    if (!socket) {
+      const inspect = `
+        $port = ${port}
+        $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
+        $workers = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" |
+          Where-Object { $_.CommandLine -like "*--remote-debugging-port=$port*" })
+        @{ listeners = $listeners.Count; webviewProcessesWithPort = $workers.Count } | ConvertTo-Json -Compress
+      `;
+      let hostState;
+      try {
+        hostState = JSON.parse(execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", inspect], {
+          encoding: "utf8", windowsHide: true, timeout: 8000,
+        }));
+      } catch { hostState = null; }
+      const diagnostic = { port, pid: child.pid, discovery, hostState };
+      await writeFile(join(evidence, "webview-startup-failure.json"), JSON.stringify(diagnostic, null, 2));
+      console.error("AT-14 WebView startup:", diagnostic);
+    }
     throw error;
   } finally {
     socket?.close();
