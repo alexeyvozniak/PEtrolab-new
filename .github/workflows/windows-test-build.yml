@@ -9,10 +9,6 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        installer-check: [clean, upgrade]
     env:
       PYTHONUTF8: "1"
       PYTHONPATH: ${{ github.workspace }}\\src
@@ -87,11 +83,75 @@ jobs:
         working-directory: desktop
         run: npm run tauri build
       - name: Install and launch packaged Windows app
-        if: matrix.installer-check == 'clean'
         shell: pwsh
         run: ./scripts/smoke_windows_installer.ps1
+      - name: Record the clean-tested MSI checksum
+        shell: pwsh
+        run: |
+          $bundle = "desktop/src-tauri/target/release/bundle"
+          $candidate = @(Get-ChildItem -LiteralPath $bundle -Recurse -File -Filter "PetroLab_*_x64_en-US.msi")
+          if ($candidate.Count -ne 1) { throw "Expected exactly one candidate MSI." }
+          (Get-FileHash -Algorithm SHA256 -LiteralPath $candidate[0].FullName).Hash |
+            Set-Content -LiteralPath (Join-Path $bundle "candidate-msi.sha256") -Encoding ascii
+      - name: Upload test installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: PetroLab-Windows-test-${{ github.sha }}
+          path: desktop/src-tauri/target/release/bundle/**
+          if-no-files-found: error
+          retention-days: 14
+
+  upgrade:
+    name: Verify upgrade with the clean-tested MSI
+    needs: build
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+      PYTHONPATH: ${{ github.workspace }}\\src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: 14b29fb0cfe7832a633059973f12a980fe7539b4
+          path: historical-source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: PetroLab-Windows-test-${{ github.sha }}
+          path: ${{ runner.temp }}/petrolab-candidate
+      - name: Verify downloaded MSI and extract the service for the baseline
+        shell: pwsh
+        run: |
+          $bundle = Join-Path $env:RUNNER_TEMP "petrolab-candidate"
+          $msi = @(Get-ChildItem -LiteralPath $bundle -Recurse -File -Filter "PetroLab_*_x64_en-US.msi")
+          if ($msi.Count -ne 1) { throw "Expected exactly one candidate MSI." }
+          $expectedHash = (Get-Content -LiteralPath (Join-Path $bundle "candidate-msi.sha256") -Raw).Trim()
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath $msi[0].FullName).Hash -ne $expectedHash) {
+            throw "The downloaded MSI differs from the clean-tested installer."
+          }
+          $imagePath = Join-Path $env:RUNNER_TEMP "petrolab-baseline-image"
+          $arguments = @("/a", ('"{0}"' -f $msi[0].FullName), ('TARGETDIR="{0}"' -f $imagePath), "/qn", "/norestart")
+          $image = Start-Process -FilePath "msiexec.exe" -WindowStyle Hidden -ArgumentList $arguments -Wait -PassThru
+          if ($image.ExitCode -ne 0) { throw "MSI administrative extraction failed: $($image.ExitCode)." }
+          $service = @(Get-ChildItem -LiteralPath $imagePath -Recurse -File -Filter "petrolab-service.exe")
+          if ($service.Count -ne 1) { throw "Expected exactly one packaged scientific service." }
+          $binaries = New-Item -ItemType Directory -Force -Path "desktop/src-tauri/binaries"
+          Copy-Item -LiteralPath $service[0].FullName -Destination $binaries.FullName
+      - name: Prepare baseline build dependencies
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          python -m pip install --disable-pip-version-check .
+          npm --prefix desktop ci
       - name: Build baseline MSI for upgrade rehearsal
-        if: matrix.installer-check == 'upgrade'
         working-directory: desktop
         shell: pwsh
         run: |
@@ -103,29 +163,13 @@ jobs:
           npm run tauri -- build --bundles msi --config $override
           $baseline = "src-tauri/target/release/bundle/msi/PetroLab_${baselineVersion}_x64_en-US.msi"
           Move-Item -LiteralPath $baseline -Destination (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi")
-      - name: Fetch the historical 0.1.6 source for migration acceptance
-        if: matrix.installer-check == 'upgrade'
-        uses: actions/checkout@v4
-        with:
-          ref: 14b29fb0cfe7832a633059973f12a980fe7539b4
-          path: historical-source
-          persist-credentials: false
       - name: Verify upgrade preserves the project and uninstall retains it
-        if: matrix.installer-check == 'upgrade'
         shell: pwsh
-        run: ./scripts/smoke_windows_installer.ps1 -BaselineMsi (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi") -HistoricalSource historical-source
-      - name: Upload test installer
-        if: matrix.installer-check == 'clean'
-        uses: actions/upload-artifact@v4
-        with:
-          name: PetroLab-Windows-test-${{ github.sha }}
-          path: desktop/src-tauri/target/release/bundle/**
-          if-no-files-found: error
-          retention-days: 14
+        run: ./scripts/smoke_windows_installer.ps1 -BundleRoot (Join-Path $env:RUNNER_TEMP "petrolab-candidate") -BaselineMsi (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi") -HistoricalSource historical-source
 
   verified-msi:
     name: Collect verified Windows MSI
-    needs: build
+    needs: [build, upgrade]
     runs-on: windows-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -142,6 +186,9 @@ jobs:
           Copy-Item -LiteralPath $msi[0].FullName -Destination $package.FullName
           $installer = Join-Path $package.FullName $msi[0].Name
           $checksum = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
+          if ($checksum -ne (Get-Content -LiteralPath (Join-Path $candidate "candidate-msi.sha256") -Raw).Trim()) {
+            throw "The MSI differs from the tested installer."
+          }
           "$checksum  $($msi[0].Name)" | Set-Content -LiteralPath (Join-Path $package.FullName "SHA256SUMS.txt") -Encoding ascii
           @{
             commit = $env:GITHUB_SHA

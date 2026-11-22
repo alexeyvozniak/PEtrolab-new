@@ -66,7 +66,7 @@ $env:PETROLAB_PROJECT_DATABASE = 'D:\PetroLab-Project\project.sqlite'
 
 ## Проверочная сборка Windows
 
-В успешном прогоне [Windows test build](https://github.com/alexeyvozniak/PEtrolab-new/actions/workflows/windows-test-build.yml) архив `PetroLab-Windows-verified-MSI-<коммит>` появляется после прохождения заданий чистой установки и обновления. В нём находятся MSI, контрольная сумма `SHA256SUMS.txt` и `build-info.json` с номером прогона и коммитом. Для проверки скачанного MSI из папки архива выполните:
+В успешном прогоне [Windows test build](https://github.com/alexeyvozniak/PEtrolab-new/actions/workflows/windows-test-build.yml) архив `PetroLab-Windows-verified-MSI-<коммит>` появляется после чистой установки и обновления одним и тем же MSI. В нём находятся MSI, контрольная сумма `SHA256SUMS.txt` и `build-info.json` с номером прогона и коммитом. Для проверки скачанного MSI из папки архива выполните:
 
 ```powershell
 $candidateInfo = Get-Content -LiteralPath build-info.json -Raw | ConvertFrom-Json
