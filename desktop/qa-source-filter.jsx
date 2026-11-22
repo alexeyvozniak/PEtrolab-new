@@ -34,7 +34,7 @@ function RangeFixture() {
     save: async () => exampleDraft,
     commit: async () => ({applied:true,draft:{...exampleDraft,status:'committed'},operation:{parameters:{backup_path:'C:/QA/example.xlsx.before-edit.bak'}}}),
   };
-  return <div style={{height:'100vh',padding:16}}><AnalysesWorkspace project={project} selectedIds={selectedIds} setSelectedIds={setSelectedIds} onListWorkGroups={async () => ({groups: groups.current})} onCreateWorkGroup={createGroup} onExportSelection={()=>{}} onListTableViews={async () => ({views: views.current, data_universe_fingerprint: 'qa'})} onSaveTableView={saveView} editDraftActions={fixtureEdit} busy={false} onRefresh={()=>{}} onAddData={()=>{}} onLoadMore={()=>{}} /></div>;
+  return <div style={{height:'100vh',padding:16}}><AnalysesWorkspace project={project} selectedIds={selectedIds} setSelectedIds={setSelectedIds} onListWorkGroups={async () => ({groups: groups.current})} onCreateWorkGroup={createGroup} onExportSelection={()=>{}} onPublishSelection={()=>{}} onListTableViews={async () => ({views: views.current, data_universe_fingerprint: 'qa'})} onSaveTableView={saveView} editDraftActions={fixtureEdit} busy={false} onRefresh={()=>{}} onAddData={()=>{}} onLoadMore={()=>{}} /></div>;
 }
 const navigationMode = new URLSearchParams(location.search).get('screen');
 const qaSource = {import_batch_id:'qa-import', source_id:sources[0], source_name:'Полевой журнал.xlsx', applied_at:'2026-11-20T12:00:00Z', analysis_count:5};
@@ -135,6 +135,7 @@ function PrecisionFixture({ reopen = false, importBatch = false, exportPhoto = f
     return <SampleWorkspace loadSamples={async () => [sample]} loadSample={async () => sample}
       previewMedia={(_, region) => region ? loadRegion(region) : Promise.resolve({ ...image, annotations })}
       exportOriginal={async () => ({ output_path: 'SM-01B_field.png' })}
+      addPublication={async () => {}}
       exportRendered={async () => ({ output_path: 'SM-01B_field-annotated.png' })} />;
   }
   if (importBatch) {

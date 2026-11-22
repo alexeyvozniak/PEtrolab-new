@@ -405,6 +405,14 @@ test("a saved work group restores the exact selection after reopening the applic
   expect(reopened.getByRole("textbox", { name: "Фильтр Analysis" }).value).toBe("B1");
   expect(reopened.queryByRole("checkbox", { name: "Выбрать B2" })).toBeNull();
   expect(screen.getByText("Скрыто фильтром: 1")).toBeTruthy();
+  await user.click(await enabledButton("Добавить таблицу в пакет"));
+  await screen.findByRole("heading", { name: "Состав пакета" });
+  expect(requests.find(({ command }) => command === "publication.capture_table").payload.analysis_ids)
+    .toEqual(persisted.payload.analysis_ids);
+  await user.type(screen.getByLabelText("Название пакета"), "Материалы отбора");
+  await user.click(await enabledButton("Проверить пакет"));
+  await screen.findByText("tables/01-selection_table.xlsx");
+  expect(screen.getByText("Анализов · 1")).toBeTruthy();
 }, 20000);
 
 test("an edit draft survives reopening and reports external source changes without changing the analysis", async () => {
@@ -591,6 +599,14 @@ test("opens field context and exports a byte-for-byte photo original and a decor
   expect(rendered.includes(Buffer.from('"rendered_scale": {"pixels": 12, "length": 2.0, "unit": "cm"}'))).toBe(true);
   expect(rendered.includes(Buffer.from('"rendered_legend": {"points": 0, "regions": 0}'))).toBe(true);
   expect(await readFile(source)).toEqual(originalImage);
+  await user.click(await enabledButton("Добавить снимок с разметкой в пакет"));
+  await screen.findByRole("heading", { name: "Состав пакета" });
+  await user.type(screen.getByLabelText("Название пакета"), "Полевой материал");
+  await user.click(await enabledButton("Проверить пакет"));
+  await screen.findByText("images/01-media_capture.png");
+  await user.click(await enabledButton("Собрать ZIP"));
+  await screen.findByText(/Пакет сохранён:/);
+  expect((await readFile(join(folder, "petrolab-package.zip"))).includes(Buffer.from("images/01-media_capture.png"))).toBe(true);
 }, 20000);
 
 test("saves a thin section point placed at 20× and reopens its original area after restarting Python", async () => {

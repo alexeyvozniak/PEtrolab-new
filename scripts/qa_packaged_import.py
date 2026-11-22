@@ -11,6 +11,7 @@ import sys
 import tempfile
 import uuid
 from contextlib import closing
+from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -62,6 +63,20 @@ def check_lithos_package(executable: Path, directory: Path, database: str, analy
     layout, projection = saved["result"], projected["result"]
     figure = directory / "submission.pdf"
     raster = directory / "submission.tiff"
+    photo = directory / "supplement.png"
+    Image.new("RGB", (64, 48), "#69727e").save(photo)
+    point = run(executable, [request("analytical_point.create", {
+        **project, "sample_name": "KIV-2", "point_name": "QA publication",
+        "analysis_ids": analysis_ids[:2], "link_type": "same_point",
+    })])[0]["result"]
+    plan = run(executable, [request("media.import.plan", {**project, "assignments": [{
+        "source_path": str(photo), "ownership_mode": "managed_copy", "media_type": "BSE",
+        "sample_name": "KIV-2", "thin_section_name": "QA publication",
+        "placements": [{"analytical_point_id": point["analytical_point_id"],
+                        "geometry": {"kind": "point", "x_px": 12, "y_px": 14}, "cross_sample_exception_reason": None}],
+    }]})])[0]["result"]
+    run(executable, [request("media.import.apply", {**project, "plan": plan})])
+    media_id = plan["items"][0]["media_asset_id"]
     svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60" viewBox="0 0 100 60">'
            '<g id="panel-a"><text x="10" y="17" font-size="8">QA · Б</text>'
            '<line x1="5" y1="40" x2="95" y2="40" stroke="#202020"/></g></svg>')
@@ -72,7 +87,7 @@ def check_lithos_package(executable: Path, directory: Path, database: str, analy
         "artwork": "combination",
     }]}
     original_database = Path(database).read_bytes()
-    _, _, captured = run(executable, [
+    _, _, *captured = run(executable, [
         request("plot.export", {"svg": svg, "width_mm": 90, "format": "pdf", "output_path": str(figure)}),
         request("plot.export", {"svg": svg, "width_mm": 90, "dpi": 600, "format": "tiff", "output_path": str(raster)}),
         request("publication.capture_plot", {**project, "caption": "QA direct plot", "capture": {
@@ -80,8 +95,11 @@ def check_lithos_package(executable: Path, directory: Path, database: str, analy
             "analysis_ids": analysis_ids, "colors": {}, "hidden_analysis_ids": [], "hidden_source_ids": [], "layers": [],
             "panels": [{**panel, "projection_sha256": projection["projection_sha256"]}],
         }}),
+        request("publication.capture_table", {**project, "analysis_ids": analysis_ids[:2][::-1]}),
+        request("publication.capture_media", {**project, "media_asset_id": media_id,
+            "options": {"points": True, "regions": False, "labels": True, "legend": True}}),
     ])
-    params["items"].append(captured["result"])
+    params["items"].extend(item["result"] for item in captured)
     snapshot = run(executable, [request("publication.prepare", params)])[0]["result"]
     destination = directory / "submission.zip"
     run(executable, [request("publication.export", {
@@ -105,6 +123,15 @@ def check_lithos_package(executable: Path, directory: Path, database: str, analy
         if (direct["analysis_ids"] != exact_ids or archive.read("figures/Figure_03.pdf") != figure.read_bytes()
                 or not all(identifier in archive.read("data/03-plot_capture.csv").decode() for identifier in exact_ids)):
             raise AssertionError("Packaged publication lost direct plot content or analysis IDs")
+        with closing(load_workbook(BytesIO(archive.read("tables/04-selection_table.xlsx")), read_only=True)) as book:
+            if [row[0] for row in list(book["Analyses"].values)[1:]] != analysis_ids[:2][::-1]:
+                raise AssertionError("Packaged publication changed the selection table")
+        with Image.open(BytesIO(archive.read("images/05-media_capture.png"))) as annotated:
+            media = json.loads(annotated.info["PetroLab"])
+            if media["source_sha256"] != hashlib.sha256(photo.read_bytes()).hexdigest() or len(media["annotation_ids"]) != 1:
+                raise AssertionError("Packaged publication lost source identity or annotation")
+        if set(manifest["items"][4]["analysis_ids"]) != set(analysis_ids[:2]):
+            raise AssertionError("Packaged publication lost linked analyses")
         for entry in manifest["files"]:
             if hashlib.sha256(archive.read(entry["path"])).hexdigest() != entry["sha256"]:
                 raise AssertionError(f"Packaged publication checksum mismatch: {entry['path']}")

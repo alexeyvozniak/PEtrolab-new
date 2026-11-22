@@ -13,6 +13,7 @@ import zlib
 from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
+from zipfile import ZipFile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,8 @@ from petrolab.manual_analysis import create_manual_analysis  # noqa: E402
 from petrolab.media_links import change_media_link, create_media_region, import_linked_photo, list_media_links  # noqa: E402
 from petrolab.media_display import export_media_original, export_media_rendered, preview_input_media, preview_project_media  # noqa: E402
 from PIL import Image  # noqa: E402
+from openpyxl import load_workbook  # noqa: E402
+from petrolab.publication import capture_publication_media, capture_publication_table, export_publication, prepare_publication  # noqa: E402
 from petrolab.media_import import (  # noqa: E402
     apply_media_import_plan,
     create_analytical_point,
@@ -216,6 +219,35 @@ class MediaImportTests(unittest.TestCase):
             subset = export_media_rendered(database, asset_id, str(folder / "area-only.png"), {**settings, "annotation_ids": [area_id]})
             self.assertEqual(subset["annotation_ids"], [area_id])
             self.assertEqual(subset["rendered_legend"], {"points": 0, "regions": 1})
+            selected_ids = point["analysis_ids"][::-1]
+            items = [
+                capture_publication_table(database, selected_ids),
+                capture_publication_media(database, asset_id),
+                capture_publication_media(database, asset_id, {**settings, "annotation_ids": [point_id]}),
+                capture_publication_media(database, saved_photo),
+            ]
+            prepared = prepare_publication(database, "QA", items)
+            package = folder / "publication.zip"
+            export_publication(database, "QA", items, prepared["fingerprint"], str(package))
+            with ZipFile(package) as archive:
+                with closing(load_workbook(BytesIO(archive.read("tables/01-selection_table.xlsx")), read_only=True)) as workbook:
+                    self.assertEqual([row[0] for row in list(workbook["Analyses"].values)[1:]], selected_ids)
+                self.assertEqual(archive.read("images/02-media_capture.png"), original.read_bytes())
+                rendered_metadata = json.loads(archive.read("materials/03-media_capture.json"))
+                self.assertEqual(rendered_metadata["source_sha256"], hashes[original])
+                self.assertEqual(rendered_metadata["rendition"]["annotation_ids"], [point_id])
+                self.assertEqual({link["analysis_id"] for link in rendered_metadata["analysis_links"]}, set(selected_ids))
+                with Image.open(BytesIO(archive.read("images/03-media_capture.png"))) as rendered:
+                    self.assertEqual(json.loads(rendered.info["PetroLab"])["rendered_scale"]["length"], 15.0)
+                self.assertEqual(archive.read("images/04-media_capture.png"), point_photo.read_bytes())
+                attached_metadata = json.loads(archive.read("materials/04-media_capture.json"))
+                self.assertEqual(attached_metadata["attachments"][0]["media_link_id"], point_link)
+                self.assertEqual({link["analysis_id"] for link in attached_metadata["analysis_links"]}, set(selected_ids))
+            change_media_link(database, point_id, saved_photo, False)
+            with self.assertRaises(ImportCommandError) as stale:
+                prepare_publication(database, "QA", items)
+            self.assertEqual(stale.exception.code, "PUBLICATION_CAPTURE_CHANGED")
+            change_media_link(database, point_id, saved_photo, True)
             with closing(open_project(database)) as connection, connection:
                 connection.execute("CREATE TRIGGER reject_media_link BEFORE INSERT ON media_link BEGIN SELECT RAISE(ABORT, 'test link failure'); END")
             with self.assertRaisesRegex(sqlite3.IntegrityError, "test link failure"):

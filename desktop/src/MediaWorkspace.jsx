@@ -138,7 +138,7 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
   </>;
 }
 
-export function MediaGallery({ images, previewMedia, exportOriginal, exportRendered, showPoints = false, pointLinks, mediaLinks, reloadSample }) {
+export function MediaGallery({ images, previewMedia, exportOriginal, exportRendered, addPublication, showPoints = false, pointLinks, mediaLinks, reloadSample }) {
   const [openId, setOpenId] = useState("");
   const [image, setImage] = useState(null);
   const [status, setStatus] = useState(null);
@@ -195,6 +195,12 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
     } catch (error) { setStatus({ error: error.message }); }
     finally { setPending(false); }
   };
+  const annotatedOptions = () => ({
+    ...renderOptions,
+    annotation_ids: image.annotations.map(({ spatial_annotation_id }) => spatial_annotation_id)
+      .filter((id) => !excludedAnnotations.includes(id)),
+    ...(calibrated ? { calibration: { reference_length: Number(referenceLength), reference_pixels: Number(referencePixels), unit: scaleUnit } } : {}),
+  });
   if (!images.length) return <p>У образца нет связанных изображений.</p>;
   return <>
     <ul className="sample-items media-items">
@@ -205,6 +211,8 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
             onClick={() => open(item.media_asset_id)}>Открыть</button>}
           {exportOriginal && <button className="outline-button" type="button" disabled={pending}
             onClick={() => save(exportOriginal, item)}>Выгрузить оригинал</button>}
+          {addPublication && <button className="outline-button" type="button" disabled={pending}
+            onClick={() => save(addPublication, item)}>Добавить оригинал в пакет</button>}
         </div>
       </li>)}
     </ul>
@@ -240,7 +248,7 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
         {attachment && (!focus || drawing) && <p className="media-attachment">Выберите точку или выделите область на снимке.</p>}
         {!attachment && inspectPoint && <ThinSectionLinks key={focus.analytical_point_id} point={focus} actions={pointLinks} />}
       </div>
-      {exportRendered && <fieldset className="media-export-options">
+      {(exportRendered || addPublication) && <fieldset className="media-export-options">
         <legend>PNG с метками и подписями</legend>
         {Object.entries({ points: "Точки", regions: "Области", labels: "Подписи", scale_bar: "Масштабная линейка", legend: "Легенда" }).map(([key, label]) =>
           <label key={key}><input type="checkbox" checked={renderOptions[key]} disabled={pending}
@@ -265,15 +273,16 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
               onChange={(event) => setReferencePixels(event.target.value)} /></label>
           </>}
         </div>}
-        <button className="outline-button" type="button" disabled={pending || (calibrated && !calibrationReady)}
-          onClick={() => save(exportRendered, images.find(({ media_asset_id }) => media_asset_id === openId), {
-            ...renderOptions,
-            ...(excludedAnnotations.length > 0 ? { annotation_ids: image.annotations.map(({ spatial_annotation_id }) => spatial_annotation_id)
-              .filter((id) => !excludedAnnotations.includes(id)) } : {}),
-            ...(calibrated ? { calibration: { reference_length: Number(referenceLength), reference_pixels: Number(referencePixels), unit: scaleUnit } } : {}),
-          })}>
-          Выгрузить с разметкой
-        </button>
+        <div className="point-row-actions">
+          {exportRendered && <button className="outline-button" type="button" disabled={pending || (calibrated && !calibrationReady)}
+            onClick={() => save(exportRendered, images.find(({ media_asset_id }) => media_asset_id === openId), annotatedOptions())}>
+            Выгрузить с разметкой
+          </button>}
+          {addPublication && <button className="outline-button" type="button" disabled={pending || (calibrated && !calibrationReady)}
+            onClick={() => save(addPublication, images.find(({ media_asset_id }) => media_asset_id === openId), annotatedOptions())}>
+            Добавить снимок с разметкой в пакет
+          </button>}
+        </div>
       </fieldset>}
     </>}
   </>;

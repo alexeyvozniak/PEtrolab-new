@@ -31,6 +31,7 @@ import {
   previewProjectMedia, exportMediaOriginal, exportMediaRendered,
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
   getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication, capturePublicationPlot,
+  capturePublicationTable, capturePublicationMedia,
   getPlotCatalog, getPlotData, recordPlotVisibility,
   listPlotSpecifications, openPlotSpecification, savePlotSpecification, pickPlotExportPath, exportPlot,
   isPetrolabDesktop,
@@ -508,6 +509,28 @@ export function App() {
     }
   };
 
+  const addPublicationItem = async (capture, label, format) => {
+    if (publicationItems.length >= 24) throw new Error("В пакете уже 24 материала.");
+    const item = unwrap(await capture());
+    setPublicationItems((current) => current.some(({ id }) => id === item.id) ? current : [...current, {
+      ...item, draft_id: crypto.randomUUID(), label, format,
+    }]);
+    setScreen("Публикации");
+  };
+
+  const publishSelection = async () => {
+    if (busy || !databasePath || !selectedAnalysisIds.length) return;
+    setBusy(true);
+    setError("");
+    try {
+      await addPublicationItem(() => capturePublicationTable(databasePath, selectedAnalysisIds), "Таблица отбора · XLSX");
+    } catch (caught) {
+      setError(caught.message || String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -578,6 +601,10 @@ export function App() {
             const destination = await pickMediaExportPath(`${base}-annotated.png`);
             return destination ? unwrap(await exportMediaRendered(databasePath, image.media_asset_id, destination, options)) : null;
           }}
+          addPublication={(image, options) => addPublicationItem(
+            () => capturePublicationMedia(databasePath, image.media_asset_id, options),
+            options ? `${image.display_name} · с разметкой` : image.display_name,
+          )}
           pointLinks={{
             loadPoint: loadPointAnalyses,
             queryProject,
@@ -629,14 +656,9 @@ export function App() {
             const destination = await pickPlotExportPath(options.name);
             return destination ? unwrap(await exportPlot(svg, options, destination)).output_path : null;
           }}
-          onAddPublication={async (capture, caption) => {
-            if (publicationItems.length >= 24) throw new Error("В пакете уже 24 материала.");
-            const item = unwrap(await capturePublicationPlot(databasePath, capture, caption));
-            setPublicationItems((current) => current.some(({ id }) => id === item.id) ? current : [...current, {
-              ...item, draft_id: crypto.randomUUID(), label: `${capture.name}.${capture.format}`, format: capture.format,
-            }]);
-            setScreen("Публикации");
-          }}
+          onAddPublication={(capture, caption) => addPublicationItem(
+            () => capturePublicationPlot(databasePath, capture, caption), `${capture.name}.${capture.format}`, capture.format,
+          )}
           selectedIds={selectedAnalysisIds} setSelectedIds={setSelectedAnalysisIds} onBack={() => setScreen("Анализы")}
           hiddenAnalysisIds={hiddenAnalysisIds} hiddenSourceIds={hiddenSourceIds} busy={busy}
           onSetVisibility={setPlotVisibility}
@@ -714,6 +736,7 @@ export function App() {
             onListWorkGroups={async () => unwrap(await listWorkGroups(databasePath))}
             onCreateWorkGroup={async (metadata) => unwrap(await createWorkGroup(databasePath, metadata))}
             onExportSelection={exportSelection}
+            onPublishSelection={publishSelection}
             onOpenPlots={() => openPlots()}
             hiddenPlotAnalysisIds={hiddenAnalysisIds}
             onSetPlotVisibility={setPlotVisibility}

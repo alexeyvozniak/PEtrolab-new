@@ -1,15 +1,19 @@
 """XLSX export of a snapshot of explicitly selected project analyses."""
 
 from contextlib import closing
+from datetime import datetime, timezone
+from io import BytesIO
 import json
 import os
 from pathlib import Path
 import sqlite3
 from tempfile import NamedTemporaryFile
 from uuid import UUID
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+from openpyxl.writer.excel import ExcelWriter
 
 from .import_preview import ImportCommandError
 
@@ -32,17 +36,11 @@ def _append_projection(workbook, name, cursor):
     sheet.auto_filter.ref = sheet.dimensions
 
 
-def export_selection_xlsx(database_path, analysis_ids, output_path):
+def _selection_workbook(database_path, analysis_ids):
     if (not isinstance(analysis_ids, list) or not analysis_ids
             or not all(isinstance(item, str) and str(UUID(item)) == item for item in analysis_ids)
             or len(set(analysis_ids)) != len(analysis_ids)):
         raise ValueError("analysis_ids")
-    if not isinstance(output_path, str) or not output_path.strip() or Path(output_path).suffix.lower() != ".xlsx":
-        raise ValueError("output_path")
-    destination = Path(output_path).resolve()
-    if destination.exists():
-        raise ImportCommandError("EXPORT_FILE_EXISTS", "Файл уже существует. Выберите новое имя для экспорта.")
-
     parameters = (json.dumps(analysis_ids),)
     selected = "WITH selected AS (SELECT key AS position, value AS analysis_id FROM json_each(?))"
     workbook = Workbook()
@@ -91,22 +89,49 @@ def export_selection_xlsx(database_path, analysis_ids, output_path):
                 ORDER BY selected.position, m.source_column_index, m.rowid
             """, parameters))
 
-        temporary = None
-        try:
+    except BaseException:
+        workbook.close()
+        raise
+    return workbook
+
+
+def selection_xlsx_bytes(database_path, analysis_ids):
+    """Serialize identical selected data to identical workbook bytes across runs."""
+    with closing(_selection_workbook(database_path, analysis_ids)) as workbook:
+        epoch = datetime(1980, 1, 1, tzinfo=timezone.utc)
+        workbook.properties.created = workbook.properties.modified = epoch
+        source = BytesIO()
+        ExcelWriter(workbook, ZipFile(source, "w", compression=ZIP_DEFLATED)).save()
+        result = BytesIO()
+        with ZipFile(source) as original, ZipFile(result, "w") as stable:
+            for name in original.namelist():
+                member = ZipInfo(name)
+                member.compress_type = ZIP_DEFLATED
+                stable.writestr(member, original.read(name))
+        return result.getvalue()
+
+
+def export_selection_xlsx(database_path, analysis_ids, output_path):
+    if not isinstance(output_path, str) or not output_path.strip() or Path(output_path).suffix.lower() != ".xlsx":
+        raise ValueError("output_path")
+    destination = Path(output_path).resolve()
+    if destination.exists():
+        raise ImportCommandError("EXPORT_FILE_EXISTS", "Файл уже существует. Выберите новое имя для экспорта.")
+    temporary = None
+    try:
+        with closing(_selection_workbook(database_path, analysis_ids)) as workbook:
             with NamedTemporaryFile(dir=destination.parent, suffix=".xlsx.tmp", delete=False) as stream:
                 temporary = Path(stream.name)
             workbook.save(temporary)
-            if os.name == "nt":
-                temporary.rename(destination)
-            else:
-                os.link(temporary, destination)
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
+        if os.name == "nt":
+            temporary.rename(destination)
+        else:
+            os.link(temporary, destination)
     except FileExistsError as error:
         raise ImportCommandError("EXPORT_FILE_EXISTS", "Файл уже существует. Выберите новое имя для экспорта.") from error
     except (OSError, sqlite3.Error) as error:
         raise ImportCommandError("EXPORT_FAILED", "Не удалось выгрузить отбор в XLSX.") from error
     finally:
-        workbook.close()
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return {"output_path": str(destination), "analysis_count": len(analysis_ids)}

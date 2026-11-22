@@ -8,7 +8,7 @@ import json
 from math import isfinite
 from pathlib import Path
 import re
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from PIL import Image
@@ -18,9 +18,10 @@ from pypdf.errors import PdfReadError
 from .import_apply import open_project
 from .formula_service import list_formula_runs, open_formula_run
 from .import_preview import ImportCommandError
-from .media_display import _publish_new_file
+from .media_display import _annotations, _asset_source, _publish_new_file, export_media_original, export_media_rendered
 from .plot_data import list_plot_specifications, open_plot_specification, query_plot_data
 from .plot_export import SVG_LIMIT, checked_svg, render_plot
+from .selection_export import selection_xlsx_bytes
 from .statistics_service import list_calculation_runs, open_calculation_run
 from .work_groups import list_work_groups
 
@@ -156,6 +157,71 @@ def capture_publication_plot(database_path, capture, caption):
             "caption": caption.strip(), "capture": capture}
 
 
+def _table_material(database_path, analysis_ids):
+    workbook = selection_xlsx_bytes(database_path, analysis_ids)
+    result = {"schema_version": 1, "name": "Таблица отбора", "analysis_ids": analysis_ids,
+              "xlsx_sha256": sha256(workbook).hexdigest()}
+    return result, analysis_ids, ".xlsx", workbook
+
+
+def _media_material(database_path, media_id, options):
+    asset, source = _asset_source(database_path, media_id)
+    extension = source.suffix.lower() if options is None else ".png"
+    with TemporaryDirectory(prefix="petrolab-publication-") as folder:
+        path = Path(folder) / ("image" + extension)
+        if options is None:
+            exported = export_media_original(database_path, media_id, str(path))
+        else:
+            exported = export_media_rendered(database_path, media_id, str(path), options)
+        with path.open("rb") as stream:
+            data = stream.read(40 * 1024 * 1024 + 1)
+    if len(data) > 40 * 1024 * 1024:
+        raise ImportCommandError("PUBLICATION_FIGURE_TOO_LARGE", "Изображение превышает 40 МиБ.")
+    selected = exported.get("annotation_ids")
+    annotations = [item for item in _annotations(database_path, media_id)
+                   if selected is None or item["spatial_annotation_id"] in selected]
+    with closing(open_project(database_path)) as connection:
+        connection.execute("BEGIN")
+        attachments = [dict(row) for row in connection.execute("""
+            SELECT ml.media_link_id, sa.spatial_annotation_id, sa.media_asset_id AS annotated_media_asset_id,
+                   ma.source_fingerprint_sha256 AS annotated_source_sha256,
+                   sa.geometry_kind, sa.x_px, sa.y_px, sa.width_px, sa.height_px, sa.label, apa.analytical_point_id
+            FROM media_link ml JOIN spatial_annotation sa USING (spatial_annotation_id)
+            JOIN media_asset ma ON ma.media_asset_id = sa.media_asset_id
+            LEFT JOIN analytical_point_annotation apa USING (spatial_annotation_id)
+            WHERE ml.media_asset_id = ? AND ml.detached_at IS NULL
+            ORDER BY ml.media_link_id
+        """, (media_id,))]
+        points = list(dict.fromkeys(item["analytical_point_id"] for item in [*annotations, *attachments]
+                                    if item["analytical_point_id"]))
+        links = connection.execute("""
+            SELECT l.analytical_point_id, l.analysis_id, l.link_type
+            FROM analytical_point_analysis l JOIN json_each(?) points ON points.value = l.analytical_point_id
+            ORDER BY l.analytical_point_id, l.analysis_id, l.link_type
+        """, (json.dumps(points),)).fetchall()
+    linked = [dict(row) for row in links]
+    ids = list(dict.fromkeys(row["analysis_id"] for row in linked))
+    result = {key: asset[key] for key in ("media_asset_id", "sample_id", "thin_section_id", "media_type", "mime_type",
+                                         "width_px", "height_px")}
+    result.update(schema_version=1, name=asset["display_name"], source_sha256=asset["source_fingerprint_sha256"],
+                  rendition={key: value for key, value in exported.items() if key != "output_path"},
+                  mode="original" if options is None else "annotated", annotations=annotations,
+                  attachments=attachments, analysis_links=linked)
+    return result, ids, extension, data
+
+
+def capture_publication_table(database_path, analysis_ids):
+    result, _, _, _ = _table_material(database_path, analysis_ids)
+    return {"kind": "selection_table", "id": sha256(_json_bytes(result)).hexdigest(), "caption": "",
+            "capture": {"analysis_ids": analysis_ids}}
+
+
+def capture_publication_media(database_path, media_id, options=None):
+    result, _, _, _ = _media_material(database_path, media_id, options)
+    return {"kind": "media_capture", "id": sha256(_json_bytes(result)).hexdigest(), "caption": "",
+            "capture": {"media_asset_id": media_id, "options": options}}
+
+
 def _plot_values_csv(panels):
     stream = StringIO(newline="")
     writer = csv.writer(stream, lineterminator="\n")
@@ -245,6 +311,7 @@ def _build_package(database_path, name, items, profile, width_mm):
         kind, identifier, caption = item["kind"], item["id"], item["caption"]
         if not isinstance(identifier, str) or not isinstance(caption, str) or len(caption) > 2000:
             raise ValueError("publication_item")
+        material_file = None
         if kind == "work_group":
             group = library.get(identifier)
             if group is None or group["unavailable_analysis_ids"]:
@@ -269,16 +336,38 @@ def _build_package(database_path, name, items, profile, width_mm):
             if identifier != sha256(_json_bytes(capture)).hexdigest():
                 raise ImportCommandError("PUBLICATION_PLOT_CHANGED", "Снимок фигуры изменился. Добавьте фигуру заново.")
             label = result["name"]
+        elif kind in ("selection_table", "media_capture"):
+            capture = item.get("capture")
+            if not isinstance(capture, dict):
+                raise ValueError("publication_capture")
+            if kind == "selection_table" and set(capture) == {"analysis_ids"}:
+                result, ids, extension, data = _table_material(database_path, capture["analysis_ids"])
+            elif kind == "media_capture" and set(capture) == {"media_asset_id", "options"}:
+                result, ids, extension, data = _media_material(database_path, capture["media_asset_id"], capture["options"])
+            else:
+                raise ValueError("publication_capture")
+            if identifier != sha256(_json_bytes(result)).hexdigest():
+                raise ImportCommandError("PUBLICATION_CAPTURE_CHANGED", "Исходные данные материала изменились. Добавьте его в пакет заново.")
+            label = result["name"]
+            material_file = extension, data
         else:
             raise ValueError("publication_item_kind")
-        if ("capture" in item) != (kind == "plot_capture") or (kind == "plot_capture" and "source_path" in item):
+        has_capture = kind in ("plot_capture", "selection_table", "media_capture")
+        if ("capture" in item) != has_capture or (has_capture and "source_path" in item):
             raise ValueError("publication_item_capture")
         stem = f"{index:02d}-{kind}"
         paths = [f"materials/{stem}.json"]
         files[paths[0]] = _json_bytes(result)
         figure = None
         figure_data = None
-        if kind == "svg_figure":
+        if material_file is not None:
+            extension, data = material_file
+            directory = "tables" if kind == "selection_table" else "images"
+            paths.append(f"{directory}/{stem}{extension}")
+            files[paths[-1]] = data
+            if profile == "lithos" and kind == "media_capture":
+                warnings.append(f"Материал {index} · изображение включено в дополнительные материалы. Для проверки журнальной фигуры приложите PDF или TIFF.")
+        elif kind == "svg_figure":
             if "artwork" in item:
                 raise ValueError("publication_item_artwork")
             paths.append(f"figures/{stem}.svg")

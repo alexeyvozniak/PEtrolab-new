@@ -102,6 +102,12 @@ export const getPublicationCatalog = (projectDatabasePath) => invokePetrolab("pu
 export const capturePublicationPlot = (projectDatabasePath, capture, caption) => invokePetrolab("publication.capture_plot", {
   project_database_path: projectDatabasePath, capture, caption,
 });
+export const capturePublicationTable = (projectDatabasePath, analysisIds) => invokePetrolab("publication.capture_table", {
+  project_database_path: projectDatabasePath, analysis_ids: analysisIds,
+});
+export const capturePublicationMedia = (projectDatabasePath, mediaId, options) => invokePetrolab("publication.capture_media", {
+  project_database_path: projectDatabasePath, media_asset_id: mediaId, options,
+});
 export const preparePublication = (projectDatabasePath, name, items, { profile, width }) => invokePetrolab("publication.prepare", {
   project_database_path: projectDatabasePath, name, items, profile, width_mm: width,
 });

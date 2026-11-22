@@ -245,7 +245,7 @@ function AnalysisDetail({ analysis, editDraftActions, hiddenPlotAnalysisIds, onS
   );
 }
 
-export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, onExportSelection, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
+export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, onExportSelection, onPublishSelection, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
   const analyses = project.analyses || [];
   const mineralStatusCounts = project.mineral_status_counts || {};
   const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
@@ -764,6 +764,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setS
             {onCreateWorkGroup && <button className="primary-button" type="button" disabled={busy || groupBusy} onClick={() => setGroupForm(true)}>Сохранить как рабочую группу</button>}
             {onOpenPlots && <button className="outline-button" type="button" disabled={busy} onClick={onOpenPlots}>Построить диаграммы</button>}
             {onExportSelection && <button className="outline-button" type="button" disabled={busy} onClick={onExportSelection}>Экспорт отбора XLSX</button>}
+            {onPublishSelection && <button className="outline-button" type="button" disabled={busy} onClick={onPublishSelection}>Добавить таблицу в пакет</button>}
             <button className="outline-button" type="button" onClick={() => { selectionAnchor.current = null; setSelectedIds([]); }}>Очистить выбор</button>
           </div>
         </div>

@@ -13,7 +13,7 @@ const FIELDS = {
 };
 
 export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote, onOpenAnalyses, busy, pointLinks,
-  initialTab = "Обзор", onImportMedia, previewMedia, exportOriginal, exportRendered, mediaLinks }) {
+  initialTab = "Обзор", onImportMedia, previewMedia, exportOriginal, exportRendered, addPublication, mediaLinks }) {
   const [samples, setSamples] = useState(null);
   const [sampleId, setSampleId] = useState("");
   const [sample, setSample] = useState(null);
@@ -113,7 +113,7 @@ export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote,
     <button className="outline-button" type="button" disabled={busy} onClick={() => onOpenAnalyses(current, source)}>Открыть анализы источника</button>
   </li>)}</ul>;
   const gallery = current && <MediaGallery key={sampleId} images={current.images} previewMedia={previewMedia}
-    exportOriginal={exportOriginal} exportRendered={exportRendered} />;
+    exportOriginal={exportOriginal} exportRendered={exportRendered} addPublication={addPublication} />;
   return <section className="sample-workspace">
     <div className="sample-header">
       <div>
@@ -159,7 +159,8 @@ export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote,
         current.thin_sections.map((item) => <details key={item.thin_section_id}>
           <summary>{item.thin_section_name}</summary>
           <MediaGallery images={current.images.filter((image) => image.thin_section_id === item.thin_section_id)}
-            previewMedia={previewMedia} pointLinks={pointLinks} mediaLinks={mediaLinks} reloadSample={reloadSample} showPoints />
+            previewMedia={previewMedia} pointLinks={pointLinks} mediaLinks={mediaLinks} reloadSample={reloadSample}
+            exportOriginal={exportOriginal} exportRendered={exportRendered} addPublication={addPublication} showPoints />
         </details>) : <p>У образца нет связанных шлифов.</p>}</section>}
       {tab === "Изображения" && <section className="sample-card"><h3>Изображения</h3>{gallery}</section>}
     </>}
