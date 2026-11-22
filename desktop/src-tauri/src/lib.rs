@@ -142,17 +142,12 @@ fn pick_import_file() -> Option<String> {
 }
 
 #[tauri::command]
-fn pick_analysis_export_path() -> Option<String> {
-    rfd::FileDialog::new()
-        .add_filter("Excel workbook", &["xlsx"])
-        .set_file_name("PetroLab-selection.xlsx")
-        .save_file()
-        .map(|mut destination| {
-            if destination.extension().is_none() {
-                destination.set_extension("xlsx");
-            }
-            destination.to_string_lossy().into_owned()
-        })
+fn pick_analysis_export_path(format: Option<String>) -> Option<String> {
+    if format.as_deref() == Some("csv") {
+        pick_named_export_path("PetroLab-selection.csv", "CSV")
+    } else {
+        pick_named_export_path("PetroLab-selection.xlsx", "Excel workbook")
+    }
 }
 
 #[tauri::command]

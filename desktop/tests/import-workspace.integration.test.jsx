@@ -52,7 +52,7 @@ beforeEach(async () => {
     if (command === "pick_media_folder") return mediaFolder;
     if (command === "pick_media_export_path") return join(folder, `copy-${args.name}`);
     if (command === "pick_publication_export_path") return join(folder, "petrolab-package.zip");
-    if (command === "pick_analysis_export_path") return join(folder, "selection.xlsx");
+    if (command === "pick_analysis_export_path") return join(folder, `selection.${args?.format || "xlsx"}`);
     if (command === "pick_plot_export_path") {
       const destination = join(folder, `diagram-${plotExports.length + 1}-${args.name}`);
       plotExports.push(destination);
@@ -375,6 +375,11 @@ test("a saved work group restores the exact selection after reopening the applic
   await user.click(await enabledButton("Экспорт отбора XLSX"));
   await screen.findByText(/Экспортировано анализов: 1/);
   expect((await readFile(join(folder, "selection.xlsx"))).subarray(0, 2).toString()).toBe("PK");
+  await user.click(await enabledButton("Экспорт отбора CSV"));
+  await screen.findByText(/Экспортировано анализов: 1.*selection.csv/);
+  const csv = await readFile(join(folder, "selection.csv"), "utf8");
+  expect(csv).toContain('raw_token,unit,value_status');
+  expect(csv).toContain('SiO2,41,wt.%');
   expect(screen.getByText("Скрыто фильтром: 1")).toBeTruthy();
   await user.click(await enabledButton("Сохранить как рабочую группу"));
   const form = within(screen.getByRole("form", { name: "Новая рабочая группа" }));
@@ -385,6 +390,8 @@ test("a saved work group restores the exact selection after reopening the applic
   const persisted = requests.find((item) => item.command === "work_group.create");
   expect(persisted.payload.analysis_ids).toHaveLength(1);
   expect(requests.find((item) => item.command === "analysis.selection.export_xlsx").payload.analysis_ids)
+    .toEqual(persisted.payload.analysis_ids);
+  expect(requests.find((item) => item.command === "analysis.selection.export_csv").payload.analysis_ids)
     .toEqual(persisted.payload.analysis_ids);
 
   app.unmount();

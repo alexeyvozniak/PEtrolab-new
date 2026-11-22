@@ -489,17 +489,17 @@ export function App() {
     }
   };
 
-  const exportSelection = async () => {
+  const exportSelection = async (format) => {
     if (busy || !databasePath || !selectedAnalysisIds.length) return;
     const ids = [...selectedAnalysisIds];
     setBusy(true);
     setError("");
     setSuccess("");
     try {
-      const destination = await pickAnalysisExportPath();
+      const destination = await pickAnalysisExportPath(format);
       if (!destination) return;
-      setActivity("Выгружаю отбор в XLSX…");
-      const result = unwrap(await exportAnalysisSelection(databasePath, ids, destination));
+      setActivity(`Выгружаю отбор в ${format.toUpperCase()}…`);
+      const result = unwrap(await exportAnalysisSelection(databasePath, ids, destination, format));
       setSuccess(`Экспортировано анализов: ${result.analysis_count}. ${result.output_path}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));

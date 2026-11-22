@@ -1,6 +1,7 @@
 """XLSX export of a snapshot of explicitly selected project analyses."""
 
 from contextlib import closing
+import csv
 from datetime import datetime, timezone
 from io import BytesIO
 import json
@@ -111,8 +112,27 @@ def selection_xlsx_bytes(database_path, analysis_ids):
         return result.getvalue()
 
 
-def export_selection_xlsx(database_path, analysis_ids, output_path):
-    if not isinstance(output_path, str) or not output_path.strip() or Path(output_path).suffix.lower() != ".xlsx":
+def _write_selection_csv(workbook, path):
+    analyses = iter(workbook["Analyses"].values)
+    analysis_header = next(analyses)
+    measurements = iter(workbook["Measurements"].values)
+    measurement_header = next(measurements)
+    current = next(measurements, None)
+    with path.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.writer(stream, lineterminator="\r\n")
+        writer.writerow((*analysis_header, *(f"measurement_{name}" if name in analysis_header else name
+                                              for name in measurement_header[1:])))
+        for analysis in analyses:
+            if current is None or current[0] != analysis[0]:
+                writer.writerow((*analysis, *([None] * (len(measurement_header) - 1))))
+                continue
+            while current is not None and current[0] == analysis[0]:
+                writer.writerow((*analysis, *current[1:]))
+                current = next(measurements, None)
+
+
+def _export_selection(database_path, analysis_ids, output_path, format_name):
+    if not isinstance(output_path, str) or not output_path.strip() or Path(output_path).suffix.lower() != f".{format_name}":
         raise ValueError("output_path")
     destination = Path(output_path).resolve()
     if destination.exists():
@@ -120,9 +140,12 @@ def export_selection_xlsx(database_path, analysis_ids, output_path):
     temporary = None
     try:
         with closing(_selection_workbook(database_path, analysis_ids)) as workbook:
-            with NamedTemporaryFile(dir=destination.parent, suffix=".xlsx.tmp", delete=False) as stream:
+            with NamedTemporaryFile(dir=destination.parent, suffix=f".{format_name}.tmp", delete=False) as stream:
                 temporary = Path(stream.name)
-            workbook.save(temporary)
+            if format_name == "csv":
+                _write_selection_csv(workbook, temporary)
+            else:
+                workbook.save(temporary)
         if os.name == "nt":
             temporary.rename(destination)
         else:
@@ -130,8 +153,16 @@ def export_selection_xlsx(database_path, analysis_ids, output_path):
     except FileExistsError as error:
         raise ImportCommandError("EXPORT_FILE_EXISTS", "Файл уже существует. Выберите новое имя для экспорта.") from error
     except (OSError, sqlite3.Error) as error:
-        raise ImportCommandError("EXPORT_FAILED", "Не удалось выгрузить отбор в XLSX.") from error
+        raise ImportCommandError("EXPORT_FAILED", f"Не удалось выгрузить отбор в {format_name.upper()}.") from error
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
     return {"output_path": str(destination), "analysis_count": len(analysis_ids)}
+
+
+def export_selection_xlsx(database_path, analysis_ids, output_path):
+    return _export_selection(database_path, analysis_ids, output_path, "xlsx")
+
+
+def export_selection_csv(database_path, analysis_ids, output_path):
+    return _export_selection(database_path, analysis_ids, output_path, "csv")

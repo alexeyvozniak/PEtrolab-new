@@ -763,7 +763,10 @@ export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setS
           <div className="analysis-selection-actions">
             {onCreateWorkGroup && <button className="primary-button" type="button" disabled={busy || groupBusy} onClick={() => setGroupForm(true)}>Сохранить как рабочую группу</button>}
             {onOpenPlots && <button className="outline-button" type="button" disabled={busy} onClick={onOpenPlots}>Построить диаграммы</button>}
-            {onExportSelection && <button className="outline-button" type="button" disabled={busy} onClick={onExportSelection}>Экспорт отбора XLSX</button>}
+            {onExportSelection && <>
+              <button className="outline-button" type="button" disabled={busy} onClick={() => onExportSelection("xlsx")}>Экспорт отбора XLSX</button>
+              <button className="outline-button" type="button" disabled={busy} onClick={() => onExportSelection("csv")}>Экспорт отбора CSV</button>
+            </>}
             {onPublishSelection && <button className="outline-button" type="button" disabled={busy} onClick={onPublishSelection}>Добавить таблицу в пакет</button>}
             <button className="outline-button" type="button" onClick={() => { selectionAnchor.current = null; setSelectedIds([]); }}>Очистить выбор</button>
           </div>

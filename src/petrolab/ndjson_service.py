@@ -11,7 +11,7 @@ from typing import Any, TextIO
 from .clean_table import classify_clean_table
 from .import_workspace import ImportWorkspaceStore
 from .work_groups import create_work_group, list_work_groups
-from .selection_export import export_selection_xlsx
+from .selection_export import export_selection_csv, export_selection_xlsx
 from .table_views import list_table_views, save_table_view
 from .edit_drafts import check_edit_draft, commit_edit_draft, list_edit_drafts, save_edit_draft
 from .project_navigation import project_overview, search_analyses
@@ -447,6 +447,9 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     )},
     "table_view.list": lambda params: {"result": list_table_views(_project_database_path(params))},
     "analysis.selection.export_xlsx": lambda params: {"result": export_selection_xlsx(
+        _project_database_path(params), params.get("analysis_ids"), params.get("output_path"),
+    )},
+    "analysis.selection.export_csv": lambda params: {"result": export_selection_csv(
         _project_database_path(params), params.get("analysis_ids"), params.get("output_path"),
     )},
     "work_group.create": lambda params: {"result": create_work_group(
