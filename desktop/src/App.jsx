@@ -415,8 +415,8 @@ export function App() {
     setHiddenSourceIds((current) => [...current.filter((sourceId) => !sources.has(sourceId)), ...layout.hidden_source_ids]);
     return layout;
   };
-  const loadPlotData = useCallback(async (kind, axes, layers) =>
-    unwrap(await getPlotData(databasePath, plotInputIds, kind, axes, hiddenAnalysisIds, hiddenSourceIds, layers)),
+  const loadPlotData = useCallback(async (kind, axes, layers, normalization) =>
+    unwrap(await getPlotData(databasePath, plotInputIds, kind, axes, hiddenAnalysisIds, hiddenSourceIds, layers, normalization)),
   [databasePath, plotInputIds, hiddenAnalysisIds, hiddenSourceIds]);
   const setPlotVisibility = async (ids, hidden) => {
     if (busy || !databasePath) return;

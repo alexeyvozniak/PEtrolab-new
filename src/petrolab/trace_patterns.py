@@ -1,6 +1,6 @@
 """Reference compositions and normalized coordinates for trace-element patterns."""
 
-from math import isfinite, log10
+from math import ceil, floor, isfinite, log10
 
 
 PATTERN_ORDERS = {
@@ -71,7 +71,7 @@ def pattern_coordinates(series):
     positions = [log10(vertex["ratio"]) for point in series for vertex in point["vertices"] if vertex["ratio"] is not None]
     if not positions:
         return []
-    low, high = min(positions), max(positions)
+    low, high = floor(min(positions)), ceil(max(positions))
     if high == low:
         low -= 1
         high += 1
@@ -81,8 +81,9 @@ def pattern_coordinates(series):
             if ratio is not None:
                 vertex["v"] = (log10(ratio) - low) / (high - low)
 
-    # Label the axis in ratios, retaining scientific notation at float limits.
+    step = max(1, ceil((high - low) / 7))
     return [
-        {"at": at, "label": f"10^{log_ratio:.4g}"}
-        for at, log_ratio in ((0, low), (0.5, (low + high) / 2), (1, high))
+        {"at": (power - low) / (high - low),
+         "label": f"{10 ** power:g}" if -3 <= power <= 3 else f"1e{power}"}
+        for power in range(low, high + 1, step)
     ]

@@ -8,6 +8,42 @@ const py = (value) => VIEW.bottom - value * (VIEW.bottom - VIEW.top);
 const axisKey = (axis) => JSON.stringify([axis.field, axis.unit, axis.measurement_set, axis.method]);
 const axisLabel = (axis) => [axis.field, axis.unit, axis.measurement_set, axis.method].filter(Boolean).join(" · ");
 const SERIES_COLORS = ["#3b70a0", "#a75d32", "#7654a3", "#34796d", "#ae4563", "#755b36", "#4a6584", "#84506d"];
+const PATTERN_LABELS = { ree_pattern: "Диаграмма РЗЭ", spider: "Спайдер-диаграмма" };
+const REFERENCE_LABELS = { "C1 chondrite": "Хондрит C1", "Primitive mantle (diagram values)": "Примитивная мантия" };
+const referenceLabel = (reference) => REFERENCE_LABELS[reference.label] || reference.label;
+const measurementGroup = (axis) => JSON.stringify([axis.method, axis.measurement_set]);
+const panelTitle = (panel) => PATTERN_LABELS[panel.kind] || panel.axes.map((axis) => axis.field).join(" / ");
+
+function patternGroups(axes, pattern) {
+  const groups = new Map();
+  for (const axis of axes) {
+    if (!["ppm", "ppb"].includes(axis.unit) || !pattern.elements.includes(axis.field)) continue;
+    const key = measurementGroup(axis);
+    if (!groups.has(key)) groups.set(key, { key, label: [axis.method, axis.measurement_set].filter(Boolean).join(" · ") || "Без обозначения", fields: new Map() });
+    const { fields } = groups.get(key);
+    if (!fields.has(axis.field)) fields.set(axis.field, []);
+    fields.get(axis.field).push(axis);
+  }
+  return [...groups.values()].filter(({ fields }) => fields.size >= 2).map((group) => ({ ...group,
+    axes: pattern.elements.flatMap((element) => {
+      const candidates = group.fields.get(element);
+      return candidates ? [candidates.find((axis) => axis.unit === "ppm") || candidates[0]] : [];
+    }),
+  }));
+}
+
+function patternPath(vertices) {
+  let connected = false;
+  return vertices.map(({ u, v }) => {
+    if (v === null) {
+      connected = false;
+      return "";
+    }
+    const command = connected ? "L" : "M";
+    connected = true;
+    return `${command} ${px(u)} ${py(v)}`;
+  }).filter(Boolean).join(" ");
+}
 
 function sourceColor(id = "") {
   const hash = Array.from(id).reduce((current, character) => (current * 31 + character.charCodeAt(0)) >>> 0, 0);
@@ -37,6 +73,13 @@ function initialPanels(axes) {
 function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
   const drag = useRef(null);
   const [rubber, setRubber] = useState(null);
+  const isPattern = Boolean(data.normalization);
+  const denseLabels = isPattern && data.axes.length > 20;
+  const markers = points.flatMap((point) => isPattern ? point.vertices.filter(({ v }) => v !== null).map((vertex, index) => ({
+    ...vertex, analysis_id: point.analysis_id, source_id: point.source_id, opacity: point.opacity,
+    tabIndex: index === 0 ? 0 : -1,
+    label: `${point.label} · ${vertex.element}`, title: `${point.label} · ${point.source_name} · ${vertex.element}: ${vertex.ratio.toPrecision(5)}`,
+  })) : [{ ...point, title: `${point.label} · ${point.source_name} · ${point.values.join(" / ")}` }]);
   const position = (event) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     return { x: (event.clientX - bounds.left) * VIEW.width / bounds.width,
@@ -45,7 +88,7 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
   const start = (event) => {
     if (event.button !== 0 || (event.pointerType === "touch" && !event.isPrimary)) return;
     const point = position(event);
-    drag.current = { origin: point, pointer: event.pointerId, trail: [point] };
+    drag.current = { origin: point, pointer: event.pointerId, trail: [point], analysisId: event.target.dataset?.analysisId };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const move = (event) => {
@@ -68,21 +111,23 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
     if (drag.current?.pointer !== event.pointerId) return;
     const first = drag.current.origin;
     const trail = drag.current.trail;
+    const pressedAnalysisId = drag.current.analysisId;
     const last = position(event);
     drag.current = null;
     setRubber(null);
     const freehand = shape === "lasso" && trail.length >= 3;
     if (!freehand && Math.hypot(first.x - last.x, first.y - last.y) < 4) {
-      const hit = points.findLast((point) => Math.hypot(px(point.u) - last.x, py(point.v) - last.y) <= 7);
-      if (hit) onSelect([hit.analysis_id]);
+      const hit = markers.findLast((point) => Math.hypot(px(point.u) - last.x, py(point.v) - last.y) <= 7);
+      const id = hit?.analysis_id || pressedAnalysisId;
+      if (id) onSelect([id]);
       return;
     }
     if (shape === "lasso" && !freehand) return;
     const inside = (current, a, b) => current >= Math.min(a, b) && current <= Math.max(a, b);
-    onSelect(points.filter((point) => freehand
+    onSelect([...new Set(markers.filter((point) => freehand
       ? insidePolygon({ x: px(point.u), y: py(point.v) }, [...trail, last])
       : inside(px(point.u), first.x, last.x) && inside(py(point.v), first.y, last.y))
-      .map((point) => point.analysis_id));
+      .map((point) => point.analysis_id))]);
   };
   const clear = () => { drag.current = null; setRubber(null); };
   return <svg className="plot-canvas" viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} aria-label="Диаграмма"
@@ -96,33 +141,39 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
       <path className="plot-frame" d={`M ${VIEW.left} ${VIEW.top} V ${VIEW.bottom} H ${VIEW.right}`} />
       {(data.ticks[0] || []).map(({ at, label }) => <g key={at}>
         <line x1={px(at)} x2={px(at)} y1={VIEW.top} y2={VIEW.bottom} />
-        <text x={px(at)} y={VIEW.bottom + 14} textAnchor="middle">{label}</text>
+        <text x={px(at)} y={VIEW.bottom + 14} textAnchor={denseLabels ? "end" : "middle"}
+          transform={denseLabels ? `rotate(-45 ${px(at)} ${VIEW.bottom + 14})` : undefined}>{label}</text>
       </g>)}
       {(data.ticks[1] || []).map(({ at, label }) => <g key={at}>
         <line x1={VIEW.left} x2={VIEW.right} y1={py(at)} y2={py(at)} />
         <text x={VIEW.left - 5} y={py(at) + 3} textAnchor="end">{label}</text>
       </g>)}
-      <text x={px(0.5)} y={VIEW.bottom + 34} textAnchor="middle">{data.axes[0].field} ({data.axes[0].unit})</text>
-      <text transform={`translate(12 ${py(0.5)}) rotate(-90)`} textAnchor="middle">{data.axes[1].field} ({data.axes[1].unit})</text>
+      <text x={px(0.5)} y={VIEW.bottom + (isPattern ? 39 : 34)} textAnchor="middle">{isPattern ? `${referenceLabel(data.normalization)} · Sun и McDonough, 1989`
+        : `${data.axes[0].field} (${data.axes[0].unit})`}</text>
+      <text transform={`translate(12 ${py(0.5)}) rotate(-90)`} textAnchor="middle">{isPattern ? "Отношение к эталону"
+        : `${data.axes[1].field} (${data.axes[1].unit})`}</text>
     </>}
     {(data.fields || []).filter((field) => field.vertices.length >= 3).map((field) =>
       <polygon key={field.layer_id} className="plot-field" fill="#99b9a0" fillOpacity={0.26}
         stroke="#5c7d66" strokeWidth={1} points={field.vertices.map(([u, v]) => `${px(u)},${py(v)}`).join(" ")} />)}
-    {points.map((point) => <g key={point.analysis_id}>
-      <circle className="plot-point" fill={colorFor(point.source_id)} cx={px(point.u)} cy={py(point.v)} r={3.5} role="button" tabIndex={0}
+    {isPattern && points.map((point) => <path key={point.analysis_id} className="plot-series" data-analysis-id={point.analysis_id}
+      d={patternPath(point.vertices)} fill="none" stroke={colorFor(point.source_id)} strokeWidth={1.25} opacity={point.opacity} />)}
+    {markers.map((point) => <g key={`${point.analysis_id}:${point.element || ""}`}>
+      <circle className="plot-point" data-analysis-id={point.analysis_id} fill={colorFor(point.source_id)}
+        cx={px(point.u)} cy={py(point.v)} r={isPattern ? 2.5 : 3.5} role="button" tabIndex={point.tabIndex ?? 0}
         opacity={point.opacity}
         aria-label={`Выбрать точку ${point.label}`} aria-pressed={selected.has(point.analysis_id)}
         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect([point.analysis_id]); } }}>
-        <title>{point.label} · {point.source_name} · {point.values.join(" / ")}</title>
+        <title>{point.title}</title>
       </circle>
     </g>)}
-    {points.filter((point) => selected.has(point.analysis_id)).map((point) =>
-      <circle key={point.analysis_id} className="plot-halo" cx={px(point.u)} cy={py(point.v)} r={6} />)}
+    {markers.filter((point) => selected.has(point.analysis_id)).map((point) =>
+      <circle key={`${point.analysis_id}:${point.element || ""}`} className="plot-halo" cx={px(point.u)} cy={py(point.v)} r={isPattern ? 4.5 : 6} />)}
     {rubber && (rubber.path ? <polygon className="plot-rubber" points={rubber.path} /> : <rect className="plot-rubber" {...rubber} />)}
   </svg>;
 }
 
-function PlotPanel({ panel, axes, load, update, remove, selected, onSelect, canRemove, shape, colorFor, openExport, layers }) {
+function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, canRemove, shape, colorFor, openExport, layers }) {
   const [projection, setProjection] = useState(null);
   const current = projection?.load === load && projection.panel === panel ? projection : null;
   const data = current?.data;
@@ -133,20 +184,28 @@ function PlotPanel({ panel, axes, load, update, remove, selected, onSelect, canR
   const points = (data?.points || []).map((point) => ({ ...point, ...(styles.get(point.analysis_id) || { opacity: 1, order: -1 }) }))
     .filter((point) => point.opacity > 0).sort((a, b) => a.order - b.order);
   const status = current ? current.error : "Загружаю диаграмму…";
+  const pattern = patterns[panel.kind];
+  const group = pattern?.groups.find(({ key }) => key === measurementGroup(panel.axes[0]));
   useEffect(() => {
     let active = true;
-    load(panel.kind, panel.axes).then((result) => {
+    load(panel.kind, panel.axes, panel.normalization).then((result) => {
       if (active) setProjection({ load, panel, data: result });
     }).catch((error) => { if (active) setProjection({ load, panel, error: error.message }); });
     return () => { active = false; };
   }, [load, panel]);
   const updateKind = (kind) => {
+    if (patterns[kind]) {
+      const { groups, default_normalization } = patterns[kind];
+      update({ id: panel.id, kind, axes: groups[0].axes, normalization: default_normalization });
+      return;
+    }
     const next = initialPanels(axes).find((item) => item.kind === kind);
-    update({ ...panel, kind, axes: next ? next.axes : axes.slice(0, 3) });
+    update({ id: panel.id, kind, axes: next ? next.axes : axes.slice(0, 3) });
   };
+  const updateAxis = (index, axis) => update({ ...panel, axes: panel.axes.map((value, position) => position === index ? axis : value) });
 
   return <article className="plot-panel" id={`plot-${panel.id}`}>
-    <header><b>{panel.axes.map((axis) => axis.field).join(" / ")}</b>
+    <header><b>{panelTitle(panel)}</b>
       <div className="plot-panel-actions">
         {openExport && <button type="button" className="outline-button" disabled={!data} onClick={openExport}>Выгрузить панель</button>}
         {canRemove && <button type="button" className="outline-button" onClick={remove}>Убрать панель</button>}
@@ -156,17 +215,30 @@ function PlotPanel({ panel, axes, load, update, remove, selected, onSelect, canR
       <select aria-label="Тип диаграммы" value={panel.kind} onChange={(event) => updateKind(event.target.value)}>
         <option value="binary">Бинарная</option>
         <option value="ternary" disabled={axes.length < 3}>Тройная</option>
+        {Object.entries(PATTERN_LABELS).map(([kind, label]) =>
+          <option key={kind} value={kind} disabled={!patterns[kind]?.groups.length}>{label}</option>)}
       </select>
-      {panel.axes.map((axis, index) => <select key={index} aria-label={`Ось ${index + 1}`} value={axisKey(axis)}
-        onChange={(event) => update({ ...panel, axes: panel.axes.map((value, position) => position === index
-          ? axes.find((item) => axisKey(item) === event.target.value) : value) })}>
-        {axes.map((item) => <option key={axisKey(item)} value={axisKey(item)}>{axisLabel(item)}</option>)}
-      </select>)}
+      {pattern && <select aria-label="Эталон нормировки" value={panel.normalization}
+        onChange={(event) => update({ ...panel, normalization: event.target.value })}>
+        {pattern.normalizations.map((reference) => <option key={reference.id} value={reference.id}>{referenceLabel(reference)}</option>)}
+      </select>}
+      {pattern && pattern.groups.length > 1 && <select aria-label="Аналитический набор спектра" value={group?.key}
+        onChange={(event) => update({ ...panel, axes: pattern.groups.find(({ key }) => key === event.target.value).axes })}>
+        {pattern.groups.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}
+      </select>}
+      {panel.axes.map((axis, index) => {
+        const candidates = pattern ? group?.fields.get(axis.field) || [] : axes;
+        if (pattern && candidates.length < 2) return null;
+        return <select key={index} aria-label={pattern ? `Предпочтительная единица ${axis.field}` : `Ось ${index + 1}`} value={axisKey(axis)}
+          onChange={(event) => updateAxis(index, candidates.find((item) => axisKey(item) === event.target.value))}>
+          {candidates.map((item) => <option key={axisKey(item)} value={axisKey(item)}>{axisLabel(item)}</option>)}
+        </select>;
+      })}
     </div>
     {status && <p role="status">{status}</p>}
     {data && <>
       <PlotCanvas data={data} selected={selected} onSelect={onSelect} shape={shape} colorFor={colorFor} points={points} />
-      <small>Точек: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
+      <small>{pattern ? "Спектров" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
         {data.hidden_count ? ` · скрыто: ${data.hidden_count}` : ""}
         {data.points.length > points.length ? ` · скрыто стилем слоя: ${data.points.length - points.length}` : ""}
         {data.kind === "ternary" ? " · доли от суммы трёх компонентов" : ""}</small>
@@ -246,6 +318,7 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
   hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onSetVisibility, busy, loadLayouts, saveLayout, openLayout,
   onExport, onAddPublication }) {
   const [axes, setAxes] = useState([]);
+  const [patterns, setPatterns] = useState({});
   const [panels, setPanels] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -260,7 +333,7 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
   const [layers, setLayers] = useState([]);
   const [layerName, setLayerName] = useState("");
   const layerInput = inputIds ? selectedIds.filter((id) => inputIds.includes(id)) : selectedIds;
-  const loadWithLayers = useCallback((kind, axes) => loadData(kind, axes, layers), [loadData, layers]);
+  const loadWithLayers = useCallback((kind, axes, normalization) => loadData(kind, axes, layers, normalization), [loadData, layers]);
   const [exportStatus, setExportStatus] = useState(null);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportOptions, setExportOptions] = useState(null);
@@ -274,6 +347,8 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
     loadCatalog().then((catalog) => {
       if (active) {
         setAxes(catalog.axes);
+        setPatterns(Object.fromEntries(Object.entries(catalog.patterns || {}).map(([kind, definition]) =>
+          [kind, { ...definition, groups: patternGroups(catalog.axes, definition) }])));
         setSources(catalog.sources || []);
         setPanels((current) => current.length ? current : initialPanels(catalog.axes));
       }
@@ -313,8 +388,9 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
     setLayoutStatus(null);
     try {
       const saved = await openLayout(id);
-      setPanels(saved.panels.map(({ id: panelId, kind, axes: savedAxes }) => ({
+      setPanels(saved.panels.map(({ id: panelId, kind, axes: savedAxes, normalization }) => ({
         id: panelId, kind, axes: savedAxes.map(({ field, unit, method, measurement_set }) => ({ field, unit, method, measurement_set })),
+        ...(PATTERN_LABELS[kind] ? { normalization } : {}),
       })));
       setSavedColors(Object.fromEntries(saved.legend.entries.map(({ value, color }) => [value, color])));
       setLayers(saved.layers || []);
@@ -398,7 +474,7 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
     <aside>
       <button className="outline-button" type="button" onClick={onBack}>Назад к анализам</button>
       <h3>Раскладка</h3>
-      {panels.map((panel, index) => <a href={`#plot-${panel.id}`} key={panel.id}>{index + 1}. {panel.axes.map((axis) => axis.field).join(" / ")}</a>)}
+      {panels.map((panel, index) => <a href={`#plot-${panel.id}`} key={panel.id}>{index + 1}. {panelTitle(panel)}</a>)}
       <p>{inputIds ? `Входной набор: ${inputIds.length} анализов` : "Входной набор: проект"}</p>
       <section className="plot-source-legend" aria-label="Легенда источников">
         <h3>Источники</h3>
@@ -481,7 +557,7 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
       {!loading && !error && !panels.length && <p>Для построения нужны как минимум два поля измерений.</p>}
       <div className={exportOptions ? "plot-content plot-content-export" : "plot-content"}>
         <div className="plot-grid" ref={grid}>
-          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} load={loadWithLayers} selected={selected} onSelect={select} shape={shape} colorFor={colorFor} layers={layers}
+          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} shape={shape} colorFor={colorFor} layers={layers}
             openExport={onExport && !exportBusy ? () => openExport(panel.id) : undefined}
             update={(next) => setPanels((current) => current.map((item) => item.id === panel.id ? next : item))}
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}

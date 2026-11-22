@@ -64,6 +64,7 @@ class NdjsonServiceTests(unittest.TestCase):
             self.assertAlmostEqual(pr["ratio"], 1)
             self.assertAlmostEqual(pr["v"], 0.5)
             self.assertAlmostEqual(nd["ratio"], 0.1)
+            self.assertEqual(ree["ticks"][1], [{"at": 0, "label": "0.1"}, {"at": 0.5, "label": "1"}, {"at": 1, "label": "10"}])
             self.assertEqual(series["M2"]["vertices"][0]["status"], "nonpositive")
             self.assertAlmostEqual(series["M2"]["vertices"][1]["ratio"], 10)
             self.assertIsNone(series["M2"]["vertices"][2]["ratio"])
@@ -97,6 +98,14 @@ class NdjsonServiceTests(unittest.TestCase):
             self.assertEqual(invalid["error"]["code"], "INVALID_REQUEST")
             invalid = call("plot_data.query", kind="ree_pattern", axes=ree_axes, normalization="unknown")
             self.assertEqual(invalid["error"]["code"], "INVALID_REQUEST")
+            alternate = root / "alternate.csv"
+            alternate.write_text("Analysis,La (ppb),Ce (ppm)\nM4,2370,6.12\n", encoding="utf-8")
+            self.assertIn("result", call("import.plan.apply", source_path=str(alternate), recipe=suggest_import_recipe(alternate)["recipe"]))
+            combined = call("plot_data.query", kind="ree_pattern", axes=ree_axes)["result"]
+            mixed = next(point["vertices"] for point in combined["points"] if point["label"] == "M4")
+            self.assertEqual([vertex["measurements"][0]["unit"] for vertex in mixed[:2]], ["ppb", "ppm"])
+            self.assertAlmostEqual(mixed[0]["ratio"], 10)
+            self.assertAlmostEqual(mixed[1]["ratio"], 10)
             self.assertEqual(source.read_bytes(), before)
 
     def test_plot_coordinates_respect_units_selection_and_censored_values(self) -> None:

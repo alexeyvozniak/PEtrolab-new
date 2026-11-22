@@ -175,9 +175,9 @@ export const savePlotSpecification = (projectDatabasePath, layout) =>
   invokePetrolab("plot_spec.save", { project_database_path: projectDatabasePath, ...layout });
 export const openPlotSpecification = (projectDatabasePath, id) =>
   invokePetrolab("plot_spec.open", { project_database_path: projectDatabasePath, id });
-export const getPlotData = (projectDatabasePath, analysisIds, kind, axes, hiddenAnalysisIds, hiddenSourceIds, layers) =>
+export const getPlotData = (projectDatabasePath, analysisIds, kind, axes, hiddenAnalysisIds, hiddenSourceIds, layers, normalization) =>
   invokePetrolab("plot_data.query", { project_database_path: projectDatabasePath, analysis_ids: analysisIds, kind, axes,
-    hidden_analysis_ids: hiddenAnalysisIds, hidden_source_ids: hiddenSourceIds, layers });
+    hidden_analysis_ids: hiddenAnalysisIds, hidden_source_ids: hiddenSourceIds, layers, normalization });
 export const recordPlotVisibility = (projectDatabasePath, analysisIds, hidden) =>
   invokePetrolab(hidden ? "plot_visibility.hide" : "plot_visibility.restore", {
     project_database_path: projectDatabasePath, analysis_ids: analysisIds,

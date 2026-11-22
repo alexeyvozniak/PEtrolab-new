@@ -26,7 +26,7 @@
 .plot-canvas text { fill: #31473a; font-size: 10px; }
 .plot-canvas line { stroke: #e2e8e2; }
 .plot-frame { fill: none; stroke: #76897b; }
-.plot-point { cursor: pointer; }
+.plot-point, .plot-series { cursor: pointer; }
 .plot-halo { fill: none; stroke: #0c613e; stroke-width: 2; pointer-events: none; }
 .plot-rubber { fill: #396f5227; stroke: #396f52; pointer-events: none; }
 .plot-selection-footer { position: sticky; bottom: 0; z-index: 2; }

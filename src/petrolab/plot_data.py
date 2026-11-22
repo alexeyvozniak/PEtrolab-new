@@ -106,13 +106,18 @@ def _linear_coordinates(values):
     ]
 
 
+def _alternate_concentration_key(key):
+    element, unit, measurement_set, method = key
+    return element, "ppb" if unit == "ppm" else "ppm", measurement_set, method
+
+
 def _pattern_vertices(record, keys, concentrations):
     vertices = []
     for index, key in enumerate(keys):
         element, unit, _, _ = key
-        rows = record[key]
+        rows = record[key] or record[_alternate_concentration_key(key)]
         value = _measurement_numeric_value(rows[0]) if len(rows) == 1 else None
-        ratio = normalized_pattern_value(value, unit, concentrations[element])
+        ratio = normalized_pattern_value(value, rows[0]["unit"] if rows else unit, concentrations[element])
         status = "missing"
         if len(rows) > 1:
             status = "duplicate_measurements"
@@ -125,7 +130,7 @@ def _pattern_vertices(record, keys, concentrations):
                 status = "nonpositive" if value <= 0 else "ratio_out_of_range"
             else:
                 status = "numeric"
-        measurements = [{field: row[field] for field in ("measurement_id", "raw_token", "qualifier", "detection_limit")}
+        measurements = [{field: row[field] for field in ("measurement_id", "unit", "raw_token", "qualifier", "detection_limit")}
                         for row in rows]
         vertices.append({"element": element, "u": index / (len(keys) - 1), "v": None, "ratio": ratio,
                          "status": status, "measurements": measurements})
@@ -145,6 +150,8 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
     hidden_analyses = set(hidden_analysis_ids or [])
     hidden_sources = set(hidden_source_ids or [])
     key_set = set(keys)
+    if reference is not None:
+        key_set.update(map(_alternate_concentration_key, keys))
     fields = json.dumps([axis["field"] for axis in axes])
     with closing(open_project(database_path)) as connection:
         connection.execute("BEGIN")

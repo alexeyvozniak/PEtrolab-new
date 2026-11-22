@@ -257,6 +257,79 @@ test("one common selection highlights the same analysis on binary and ternary pl
   await waitFor(() => expect(screen.getAllByText(/скрыто: 1/)).toHaveLength(3));
 }, 20000);
 
+test("mineral patterns share selection and keep censored gaps through SVG export and layout restore", async () => {
+  const content = "Analysis,Cs (ppm),La (ppm),Ce (ppb),Pr (ppm),Nd (ppm)\n"
+    + "M1,0.079,2.37,<100,0.095,0.0467\nM2,0.0079,0.237,6120,0.19,0.467\n";
+  await writeFile(second, content);
+  queue = [second];
+  const user = userEvent.setup();
+  const app = render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton(/^(Импортировать таблицу|Сохранить импорт в проект)$/));
+  await screen.findByRole("heading", { name: "Анализы" });
+  await user.click(await enabledButton("Построение"));
+  const [reeType, spiderType] = await screen.findAllByRole("combobox", { name: "Тип диаграммы" });
+  await user.selectOptions(reeType, "ree_pattern");
+  await user.selectOptions(spiderType, "spider");
+  const ree = within(reeType.closest("article"));
+  const spider = within(spiderType.closest("article"));
+  expect(ree.getByRole("combobox", { name: "Эталон нормировки" }).selectedOptions[0].textContent).toBe("Хондрит C1");
+  expect(spider.getByRole("combobox", { name: "Эталон нормировки" }).selectedOptions[0].textContent).toBe("Примитивная мантия");
+  const m1 = await ree.findByRole("button", { name: "Выбрать точку M1 · La" });
+  expect(ree.queryByRole("button", { name: "Выбрать точку M1 · Ce" })).toBeNull();
+  const path = reeType.closest("article").querySelector(`path.plot-series[data-analysis-id="${m1.dataset.analysisId}"]`);
+  const pathGeometry = path.getAttribute("d");
+  expect(pathGeometry.match(/\bM\b/g)).toHaveLength(2);
+  expect(pathGeometry.match(/\bL\b/g)).toHaveLength(1);
+  const canvas = m1.ownerSVGElement;
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 460, height: 280 });
+  canvas.setPointerCapture = () => {};
+  const x = Number(m1.getAttribute("cx"));
+  const y = Number(m1.getAttribute("cy"));
+  for (const [type, offset] of [["pointerdown", -5], ["pointerup", 5]]) {
+    const event = new MouseEvent(type, { bubbles: true, clientX: x + offset, clientY: y + offset });
+    Object.defineProperty(event, "pointerId", { value: 1 });
+    fireEvent(canvas, event);
+  }
+  expect((await spider.findByRole("button", { name: "Выбрать точку M1 · La" })).getAttribute("aria-pressed")).toBe("true");
+  expect(spider.getByRole("button", { name: "Выбрать точку M2 · Ce" }).getAttribute("aria-pressed")).toBe("false");
+  const exported = new DOMParser().parseFromString(await readFile(await savePlot(user, 0), "utf8"), "image/svg+xml");
+  const exportedPath = exported.querySelector(`path[d="${pathGeometry}"]`);
+  expect(exportedPath.getAttribute("stroke")).toBe(path.getAttribute("stroke"));
+  expect(exportedPath.getAttribute("fill")).toBe("none");
+  expect(exported.querySelector("clipPath, mask, foreignObject, image")).toBeNull();
+
+  await user.selectOptions(ree.getByRole("combobox", { name: "Эталон нормировки" }), "sun_mcdonough_1989_mantle_diagram_v1");
+  await ree.findByText("Примитивная мантия · Sun и McDonough, 1989");
+  await user.click(screen.getByText("Сохранённые раскладки", { exact: true }));
+  await user.type(screen.getByLabelText("Название раскладки"), "Спектры минералов");
+  await user.click(await enabledButton("Сохранить раскладку"));
+  await screen.findByText("Сохранена раскладка «Спектры минералов».");
+  await user.click(await enabledButton("Открыть в анализах"));
+  const table = within(await screen.findByRole("table"));
+  expect(table.getByRole("checkbox", { name: "Выбрать M1" }).checked).toBe(true);
+  expect(table.getByRole("checkbox", { name: "Выбрать M2" }).checked).toBe(false);
+  app.unmount();
+  render(<App />);
+  await user.click(await enabledButton("Построение"));
+  await user.click(screen.getByText("Сохранённые раскладки", { exact: true }));
+  await user.click(await enabledButton("Открыть «Спектры минералов»"));
+  await screen.findByText("Открыта раскладка «Спектры минералов».");
+  await waitFor(() => expect(screen.getAllByRole("combobox", { name: "Тип диаграммы" }).map((select) => select.value))
+    .toEqual(["ree_pattern", "spider"]));
+  expect(screen.getAllByRole("combobox", { name: "Эталон нормировки" })[0].selectedOptions[0].textContent).toBe("Примитивная мантия");
+  const restored = screen.getAllByRole("combobox", { name: "Тип диаграммы" })[0].closest("article");
+  await waitFor(() => expect(within(restored).getByRole("button", { name: "Выгрузить панель" }).disabled).toBe(false));
+  await user.click(within(restored).getByRole("button", { name: "Выгрузить панель" }));
+  await user.click(screen.getByRole("checkbox", { name: "Добавить данные CSV" }));
+  await user.click(await enabledButton("Добавить в пакет"));
+  await screen.findByRole("heading", { name: "Состав пакета" });
+  const request = requests.findLast(({ command }) => command === "publication.capture_plot");
+  expect(request.payload.capture.panels[0].normalization).toBe("sun_mcdonough_1989_mantle_diagram_v1");
+  expect(request.payload.capture.include_csv).toBe(true);
+  expect(await readFile(second, "utf8")).toBe(content);
+}, 35000);
+
 test("visible plot fields survive marker hiding and SVG includes their geometry", async () => {
   await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\nP1,20,30,50\nP2,10,80,10\nP3,55,35,10\n");
   queue = [second];

@@ -34,14 +34,14 @@ export function buildPlotSvg(canvases, { showLabel = true, alphabet, uppercase, 
       letter.textContent = label;
       group.append(letter);
     }
-    for (const source of svg.querySelectorAll("path.plot-frame, line, text, circle.plot-point, polygon.plot-field")) {
+    for (const source of svg.querySelectorAll("path.plot-frame, path.plot-series, line, text, circle.plot-point, polygon.plot-field")) {
       const element = create(source.localName);
       for (const name of COPY_ATTRIBUTES) {
         if (source.hasAttribute(name)) element.setAttribute(name, source.getAttribute(name));
       }
       if (source.localName === "path") {
         element.setAttribute("fill", "none");
-        element.setAttribute("stroke", "#76897b");
+        if (source.classList.contains("plot-frame")) element.setAttribute("stroke", "#76897b");
       } else if (source.localName === "line") {
         element.setAttribute("stroke", "#e2e8e2");
       } else if (source.localName === "text") {
