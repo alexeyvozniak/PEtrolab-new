@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { cleanup, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -421,6 +421,72 @@ test("a saved work group restores the exact selection after reopening the applic
   await screen.findByText("tables/01-selection_table.xlsx");
   expect(screen.getByText("Анализов · 1")).toBeTruthy();
 }, 20000);
+
+test("AT-36 exports exactly 17 selected analyses across loaded pages with unchanged state and provenance", async () => {
+  const labels = Array.from({ length: 502 }, (_, index) => {
+    if (index < 15) return `PICK-${String(index + 1).padStart(2, "0")}`;
+    if (index >= 500) return `PICK-${index - 484}`;
+    return `Other-${index}`;
+  });
+  const content = `Analysis,SiO2 [wt.%],F [wt.%]\n${labels.map((label, index) => `${label},${40 + index % 6},${index ? "0" : "<0.01"}`).join("\n")}\n`;
+  await writeFile(second, content);
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  const suggested = (await invokePetrolab("import.recipe.suggest", { source_path: second })).result;
+  const seeded = await invokePetrolab("import.plan.apply", { ...database, source_path: second, recipe: suggested.recipe });
+  expect(seeded.result.analysis_count).toBe(502);
+  const pages = await Promise.all([0, 500].map((offset) => invokePetrolab("project.analyses.list", { ...database, limit: 500, offset })));
+  const selected = pages.flatMap(({ result }) => result.analyses).filter(({ identity }) => identity.Analysis.startsWith("PICK-"));
+  const group = await invokePetrolab("work_group.create", { ...database, name: "До экспорта",
+    analysis_ids: [selected[0].analysis_id], created_by: "QA" });
+  expect(group.result).toBeTruthy();
+  const beforeGroups = (await invokePetrolab("work_group.list", database)).result;
+
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Анализы"));
+  const table = within(await screen.findByRole("table"));
+  fireEvent.change(table.getByRole("textbox", { name: "Фильтр Analysis" }), { target: { value: "PICK-" } });
+  await user.click(screen.getByText("Представления таблицы", { exact: true }));
+  await user.type(within(screen.getByRole("form", { name: "Новое представление таблицы" })).getByLabelText("Название представления"), "Отбор по двум страницам");
+  await user.click(await enabledButton("Сохранить представление"));
+  await screen.findByText("Сохранено представление «Отбор по двум страницам».");
+  const beforeViews = (await invokePetrolab("table_view.list", database)).result;
+  expect(table.queryByRole("checkbox", { name: "Выбрать PICK-16", exact: true })).toBeNull();
+  await user.click(table.getByRole("checkbox", { name: "Выбрать показанные анализы" }));
+  expect(table.getByRole("checkbox", { name: "Выбрать PICK-15", exact: true }).checked).toBe(true);
+  await user.click(await enabledButton("Загрузить ещё анализы"));
+  await table.findByRole("checkbox", { name: "Выбрать PICK-17", exact: true });
+  expect(table.getByRole("checkbox", { name: "Выбрать PICK-15", exact: true }).checked).toBe(true);
+  await user.click(table.getByRole("checkbox", { name: "Выбрать PICK-16", exact: true }));
+  await user.click(table.getByRole("checkbox", { name: "Выбрать PICK-17", exact: true }));
+  await user.click(table.getByText("PICK-01", { exact: true }));
+  await user.click(await enabledButton("Скрыть этот анализ на графиках"));
+  await enabledButton("Вернуть этот анализ на графики");
+  const requestStart = requests.length;
+  await user.click(await enabledButton("Экспорт отбора XLSX"));
+  await screen.findByText(/Экспортировано анализов: 17/);
+  const exportRequest = requests.slice(requestStart).find(({ command }) => command === "analysis.selection.export_xlsx");
+  expect(exportRequest.payload.analysis_ids).toEqual(selected.map(({ analysis_id }) => analysis_id));
+  expect(table.getByRole("textbox", { name: "Фильтр Analysis" }).value).toBe("PICK-");
+  expect(table.getAllByRole("checkbox", { name: /^Выбрать PICK-/ }).every((checkbox) => checkbox.checked)).toBe(true);
+  await enabledButton("Вернуть этот анализ на графики");
+  expect((await invokePetrolab("work_group.list", database)).result).toEqual(beforeGroups);
+  expect((await invokePetrolab("table_view.list", database)).result).toEqual(beforeViews);
+
+  const workbook = JSON.parse(execFileSync("python", ["-c", [
+    "import json, sys",
+    "from openpyxl import load_workbook",
+    "book = load_workbook(sys.argv[1], read_only=True)",
+    "print(json.dumps({sheet.title: list(sheet.values) for sheet in book}))",
+    "book.close()",
+  ].join("\n"), join(folder, "selection.xlsx")], { encoding: "utf8", windowsHide: true, timeout: 15000 }));
+  const [headers, ...records] = workbook.Analyses;
+  expect(records.map((row) => row[headers.indexOf("analysis_id")])).toEqual(exportRequest.payload.analysis_ids);
+  expect(records.map((row) => row[headers.indexOf("source_row_number")])).toEqual(selected.map(({ source_row_number }) => source_row_number));
+  expect(records.every((row) => /^[a-f0-9]{64}$/.test(row[headers.indexOf("source_sha256")]))).toBe(true);
+  expect(workbook.Measurements.some((row) => row.includes("<0.01") && row.includes("below_detection_limit"))).toBe(true);
+  expect(await readFile(second, "utf8")).toBe(content);
+}, 45000);
 
 test("an edit draft survives reopening and reports external source changes without changing the analysis", async () => {
   queue = [second];
