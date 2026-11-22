@@ -50,6 +50,69 @@ def archive_command(executable: Path, *args) -> dict:
     return json.loads(completed.stdout)
 
 
+def check_workspace_archive(executable: Path, directory: Path) -> None:
+    source = directory / "workspace.csv"
+    original = b"Analysis,SiO2 [wt.%],Al2O3 [wt.%]\nA,10,20\nB,12,21\nC,39,22\nD,45,24\n"
+    source.write_bytes(original)
+    database = directory / "workspace.sqlite"
+    project = {"project_database_path": str(database)}
+    _, listed, catalog = run(executable, [
+        request("import.plan.apply", {**project, "source_path": str(source), "recipe": suggest_import_recipe(source)["recipe"]}),
+        request("project.analyses.list", project),
+        request("plot_data.catalog", project),
+    ])
+    rows = listed["result"]["analyses"]
+    ids = [row["analysis_id"] for row in rows]
+    features = catalog["result"]["axes"]
+    calculation_input = {"kind": "analysis_snapshot", "analysis_ids": ids}
+    review, table, plot = [entry["result"] for entry in run(executable, [
+        request("statistics.review", {**project, "input": calculation_input, "features": features}),
+        request("table_view.save", {**project, "name": "QA workspace table",
+            "columns": [{"field": "source", "order": 0, "visible": True, "width_px": None}],
+            "sort": [{"field": "source", "direction": "descending"}], "filters": []}),
+        request("plot_spec.save", {**project, "name": "QA workspace plot", "analysis_ids": ids, "colors": {},
+            "panels": [{"id": str(uuid.uuid4()), "kind": "binary", "axes": features} for _ in range(3)]}),
+    ])]
+    calculation = run(executable, [request("statistics.cluster.run", {
+        **project, "input": calculation_input, "features": features, "review_fingerprint": review["input_fingerprint"],
+        "parameters": {"transform": "euclidean", "scaling": "standard", "clusters": 2, "seed": 42},
+    })])[0]["result"]
+    state = {
+        "data_universe": {"dataset_ids": [], "work_group_ids": [], "analysis_ids": ids},
+        "table_view_id": table["id"], "plot_specification_ids": [plot["id"]],
+        "source_visibility": [{"source_id": rows[0]["source_id"], "visible": False}],
+        "selection_restore_policy": "restore_exact_if_available", "selection_analysis_ids": ids[:2],
+        "active_calculation_run_id": calculation["id"], "active_surface": "statistics",
+    }
+    snapshot, template = [entry["result"] for entry in run(executable, [
+        request("workspace.snapshot.save", {**project, "name": "QA workspace", "state": state}),
+        request("workspace.template.save", {**project, "name": "QA template",
+            "plot_id": plot["id"], "table_view_id": table["id"], "calculation_run_id": calculation["id"]}),
+    ])]
+    if any(identifier in json.dumps(template) for identifier in [*ids, rows[0]["source_id"], calculation["id"]]):
+        raise AssertionError("Analysis template retained concrete IDs")
+    original_database = database.read_bytes()
+    archive = directory / "workspace.petrolab"
+    archive_command(executable, "export", database, archive, "--level", "full")
+    restored = archive_command(executable, "restore", archive, directory / "workspace-restored")
+    destination = {"project_database_path": restored["project_database_path"]}
+    opened, applied = [entry["result"] for entry in run(executable, [
+        request("workspace.snapshot.open", {**destination, "id": snapshot["id"]}),
+        request("workspace.template.apply", {**destination, "id": template["id"],
+            "name": "QA applied", "analysis_ids": ids[2:]}),
+    ])]
+    if opened != {"snapshot": snapshot, "migration_report": []}:
+        raise AssertionError("Restored workspace differs from the saved state")
+    if (len(applied["plot"]["panels"]) != 3 or applied["table_view"]["sort"] != table["sort"]
+            or applied["plot"]["input"]["analysis_ids"] != ids[2:]):
+        raise AssertionError("Restored template did not preserve the transferable layout")
+    rerun = run(executable, [request("statistics.cluster.run", {**destination, **applied["method_plans"][0]})])[0]["result"]
+    if rerun["input"]["analysis_ids"] != ids[2:] or rerun["id"] == calculation["id"]:
+        raise AssertionError("Template did not start a separate calculation on the new selection")
+    if source.read_bytes() != original or database.read_bytes() != original_database:
+        raise AssertionError("Workspace archive operations changed the original files")
+
+
 def check_lithos_package(executable: Path, directory: Path, database: str, analysis_ids: list[str]) -> None:
     project = {"project_database_path": database}
     catalog = run(executable, [request("plot_data.catalog", {**project, "analysis_ids": analysis_ids})])[0]["result"]
@@ -187,6 +250,7 @@ def main() -> None:
             raise AssertionError("Packaged service changed work group membership after restart")
         check_lithos_package(executable, Path(directory), database,
                              [row["analysis_id"] for row in reopened["result"]["analyses"]])
+        check_workspace_archive(executable, Path(directory))
         image = Path(directory) / "thin-section.png"
         Image.new("RGB", (48, 32), "#627758").save(image)
         archive = Path(directory) / "portable.petrolab"
