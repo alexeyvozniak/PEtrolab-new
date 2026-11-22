@@ -91,6 +91,7 @@ function mergeStatusCounts(...counts) {
 }
 
 async function attachMineralIdentifications(path, project) {
+  if (!project.analyses.length) return { ...project, mineral_status_counts: {} };
   const review = unwrap(await listProjectMineralIdentifications(path, project.returned || project.analyses.length, project.offset || 0));
   const byId = new Map((review.identifications || []).map((item) => [item.analysis_id, item]));
   return {
@@ -222,6 +223,7 @@ export function App() {
         if (cancelled) return;
         setDatabasePath(path);
         const result = unwrap(await listProjectAnalyses(path, ANALYSES_PAGE_SIZE, 0));
+        if (cancelled) return;
         const enriched = await attachMineralIdentifications(path, result);
         if (cancelled) return;
         setProject(enriched);

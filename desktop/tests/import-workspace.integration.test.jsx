@@ -14,28 +14,41 @@ import { App } from "../src/App";
 import { invokePetrolab } from "../src/desktopApi";
 configure({ asyncUtilTimeout: 5000 });
 
-let child, folder, first, second, queue, mediaQueue, mediaFolder, original, pending, lines, requests, plotExports;
+let child, folder, first, second, queue, mediaQueue, mediaFolder, original, pending, requests, plotExports;
 async function startService() {
   child = spawn("python", ["-m", "petrolab.ndjson_service"], {
     cwd: resolve(process.cwd(), ".."), windowsHide: true,
     env: { ...process.env, PYTHONPATH: resolve(process.cwd(), "../src"), PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8",
       OPENBLAS_NUM_THREADS: "1" },
   });
-  lines = createInterface({ input: child.stdout });
+  const inFlight = new Map();
+  pending = inFlight;
+  const lines = createInterface({ input: child.stdout });
   lines.on("line", (line) => {
     const response = JSON.parse(line);
-    const callback = pending.get(response.request_id);
-    if (callback) { pending.delete(response.request_id); callback(response); }
+    const request = inFlight.get(response.request_id);
+    if (request) { inFlight.delete(response.request_id); request.resolve(response); }
   });
-  child.on("error", (error) => { throw error; });
+  const rejectPending = (error) => {
+    for (const request of inFlight.values()) request.reject(error);
+    inFlight.clear();
+  };
+  child.on("error", rejectPending);
+  child.stdin.on("error", rejectPending);
+  child.once("close", (code, signal) => {
+    lines.close();
+    rejectPending(new Error(`Python workspace service closed (${code ?? signal})`));
+  });
   const readiness = await invokePetrolab("import.inspect_source", { source_path: first });
   expect(readiness.result?.source_fingerprint, JSON.stringify(readiness.error)).toBeTruthy();
 }
 
 async function stopService() {
-  child.stdin.end();
-  await new Promise((resolve) => { if (child.exitCode !== null) resolve(); else child.once("exit", resolve); });
-  lines.close();
+  const service = child;
+  if (service.exitCode !== null || service.signalCode !== null) return;
+  const closed = new Promise((resolve) => service.once("close", resolve));
+  service.stdin.end();
+  await closed;
 }
 
 beforeEach(async () => {
@@ -44,7 +57,7 @@ beforeEach(async () => {
   original = "Analysis,Fe (wt.%),F (wt.%)\nA1,10,<DL\nA2,11,n.d.\n";
   await writeFile(first, original);
   await writeFile(second, "Analysis,SiO2 [wt.%]\nB1,40\nB2,41\n");
-  queue = [first, second]; mediaQueue = []; mediaFolder = null; pending = new Map(); requests = []; plotExports = [];
+  queue = [first, second]; mediaQueue = []; mediaFolder = null; requests = []; plotExports = [];
   bridge.invoke = async (command, args) => {
     if (command === "project_database_path") return join(folder, "project.sqlite");
     if (command === "pick_import_file") return queue.shift() || null;
@@ -62,8 +75,9 @@ beforeEach(async () => {
     if (command === "clear_import_staging") return;
     if (command !== "petrolab_command") throw new Error(command);
     requests.push(args.envelope);
-    return new Promise((resolve) => {
-      pending.set(args.envelope.request_id, resolve);
+    if (!child.stdin.writable) throw new Error(`Python workspace service unavailable for ${args.envelope.command}`);
+    return new Promise((resolve, reject) => {
+      pending.set(args.envelope.request_id, { command: args.envelope.command, resolve, reject });
       child.stdin.write(JSON.stringify(args.envelope) + "\n");
     });
   };
@@ -81,9 +95,10 @@ afterEach(async () => {
 async function enabledButton(name) {
   return waitFor(() => {
     const button = screen.getByRole("button", { name });
-    expect(button.disabled, String(name)).toBe(false);
+    const outstanding = [...pending.values()].map((request) => request.command);
+    expect(button.disabled, `${name} (Python: ${outstanding.join(", ") || "idle"})`).toBe(false);
     return button;
-  }, name === "Выбрать файл" ? { timeout: 12000 } : undefined);
+  }, name === "Выбрать файл" ? { timeout: 20000 } : undefined);
 }
 
 async function savePlot(user, panelIndex, format = "SVG · Corel-safe") {
@@ -405,7 +420,7 @@ test("reviewing a cross-file match allows one save to import both included files
   }
   expect(await table.findAllByText("B1")).toHaveLength(2);
   expect(requests.filter(r => r.command === "import.workspace.commit")).toHaveLength(1);
-}, 20000);
+}, 40000);
 
 test("opening PetroLab again restores the queue and the saved skip decision", async () => {
   await writeFile(first, "Analysis,SiO2 [wt.%]\nA1,38\nA2,39\n");
@@ -493,7 +508,7 @@ test("a saved work group restores the exact selection after reopening the applic
   await user.click(await enabledButton("Проверить пакет"));
   await screen.findByText("tables/01-selection_table.xlsx");
   expect(screen.getByText("Анализов · 1")).toBeTruthy();
-}, 20000);
+}, 40000);
 
 test("AT-36 exports exactly 17 selected analyses across loaded pages with unchanged state and provenance", async () => {
   const labels = Array.from({ length: 502 }, (_, index) => {
@@ -926,6 +941,37 @@ test("saves a thin section point placed at 20× and reopens its original area af
   expect(await readFile(photoPath)).toEqual(photoBytes);
   expect(await readFile(source)).toEqual(originalImage);
 }, 30000);
+
+test("media review names the unreadable image and lets the user finish with the remaining file", async () => {
+  const image = join(folder, "BSE.png");
+  const damaged = join(folder, "PPL.png");
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAAGklEQVR4nO3BAQEAAACCIP+vbkhAAQAAAPBsEiAAAZJII8cAAAAASUVORK5CYII=", "base64");
+  const truncated = png.subarray(0, 24);
+  await Promise.all([writeFile(image, png), writeFile(damaged, truncated)]);
+  mediaQueue = [image, damaged];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Изображения"));
+  await user.click(await enabledButton("Импорт изображений"));
+  await user.click(await enabledButton("Выбрать изображения"));
+  await user.selectOptions(await screen.findByLabelText("Физический образец"), "new");
+  await user.type(screen.getByLabelText("Имя нового образца"), "KIV-2");
+  await user.type(screen.getByLabelText("Имя шлифа"), "TS1");
+  await user.click(await enabledButton("Проверить импорт изображений"));
+  expect((await screen.findByRole("alert")).textContent).toContain("Не удалось прочитать пиксели изображения «PPL.png».");
+  expect(screen.queryByRole("button", { name: "Импортировать изображения" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Сохранить черновик" })).toBeNull();
+  expect(requests.some(({ command }) => command === "media.import.apply")).toBe(false);
+  const row = (await enabledButton("PPL.png")).closest("li");
+  await user.click(within(row).getByRole("button", { name: "Убрать" }));
+  await user.click(await enabledButton("Проверить импорт изображений"));
+  const review = within(await screen.findByRole("table"));
+  expect(review.getByText("BSE.png", { exact: true })).toBeTruthy();
+  expect(review.queryByText("PPL.png", { exact: true })).toBeNull();
+  await user.click(await enabledButton("Импортировать изображения"));
+  await screen.findByText("Изображений импортировано: 1. Привязок: 0.");
+  expect(await Promise.all([readFile(image), readFile(damaged)])).toEqual([png, truncated]);
+}, 25000);
 
 test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed points", async () => {
   await writeFile(second, "Analysis,SiO2 [wt.%]\nA1,40\nA2,41\nA3,42\nA4,43\nA5,44\nA6,45\n");

@@ -28,6 +28,7 @@ from PIL import Image  # noqa: E402
 from openpyxl import load_workbook  # noqa: E402
 from petrolab.publication import capture_publication_media, capture_publication_table, export_publication, prepare_publication  # noqa: E402
 from petrolab.media_import import (  # noqa: E402
+    _plan_fingerprint,
     apply_media_import_plan,
     create_analytical_point,
     create_media_import_plan,
@@ -167,6 +168,63 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual((inspect_media_source(png)["width_px"], inspect_media_source(png)["height_px"]), (12, 8))
             tiff_result = inspect_media_source(tiff)
             self.assertEqual((tiff_result["mime_type"], tiff_result["width_px"], tiff_result["height_px"]), ("image/tiff", 640, 480))
+
+    def test_readable_formats_keep_original_bytes_and_header_geometry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "project.sqlite"
+            with closing(open_project(database)):
+                pass
+            assignments = []
+            for suffix, options in (("jpg", {}), ("bmp", {}), ("png", {}), ("tif", {"tiffinfo": {274: 6}})):
+                source = root / f"image.{suffix}"
+                Image.new("RGB", (24, 12)).save(source, **options)
+                assignments.append({"source_path": str(source), "ownership_mode": "managed_copy", "media_type": "BSE",
+                                    "sample_name": "KIV-2", "thin_section_name": "TS1", "placements": []})
+            plan = create_media_import_plan(database, assignments)
+            apply_media_import_plan(database, plan)
+            for item in plan["items"]:
+                source = Path(item["source_path"])
+                self.assertEqual((item["width_px"], item["height_px"]), (24, 12))
+                managed = root / "media" / f"{item['media_asset_id']}{source.suffix}"
+                self.assertEqual(managed.read_bytes(), source.read_bytes())
+
+    def test_corrupt_pixels_block_review_and_replay_of_a_legacy_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "project.sqlite"
+            with closing(open_project(database)):
+                pass
+            usable = root / "bse.png"
+            damaged = root / "ppl.png"
+            write_png(usable)
+            write_png(damaged, width=16, height=10)
+
+            def assignment(source, media_type):
+                return {"source_path": str(source), "ownership_mode": "managed_copy", "media_type": media_type,
+                        "sample_name": "KIV-2", "thin_section_name": "TS1", "placements": []}
+
+            assignments = [assignment(usable, "BSE"), assignment(damaged, "PPL")]
+            legacy_plan = create_media_import_plan(database, assignments)
+            # Keep the header and valid chunk CRCs while breaking the pixel stream.
+            corrupt = (damaged.read_bytes()[:33] + _png_chunk(b"IDAT", b"not a deflate stream")
+                       + _png_chunk(b"IEND", b""))
+            damaged.write_bytes(corrupt)
+            legacy_plan["items"][1]["source_fingerprint"] = hashlib.sha256(corrupt).hexdigest()
+            legacy_plan["semantic_fingerprint"] = _plan_fingerprint(legacy_plan)
+            database_bytes = database.read_bytes()
+            usable_bytes = usable.read_bytes()
+
+            for attempt in (lambda: create_media_import_plan(database, assignments),
+                            lambda: apply_media_import_plan(database, legacy_plan)):
+                with self.assertRaises(ImportCommandError) as error:
+                    attempt()
+                self.assertEqual(error.exception.code, "MEDIA_UNREADABLE")
+                self.assertEqual(error.exception.details["path"], str(damaged))
+            self.assertEqual(database.read_bytes(), database_bytes)
+            self.assertEqual(usable.read_bytes(), usable_bytes)
+            self.assertEqual(damaged.read_bytes(), corrupt)
+            self.assertFalse((root / "media").exists())
 
     def test_photo_links_preserve_points_areas_and_originals(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -49,6 +49,7 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
       const current = ++sequence;
       clearTimeout(timer);
       timer = setTimeout(async () => {
+        if (!scene.current) return;
         const { width: displayedWidth, height: displayedHeight } = scene.current.getBoundingClientRect();
         if (!displayedWidth || !displayedHeight) return;
         const px = image.width_px / displayedWidth;

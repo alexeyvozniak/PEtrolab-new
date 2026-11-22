@@ -1,7 +1,7 @@
 """M2 batch media import and source-coordinate point placement.
 
-The module owns validation and persistence projections.  It never decodes or
-changes source pixels, and it deliberately does not know about viewport zoom.
+The module owns validation and persistence projections. It checks whether source
+pixels can be decoded and does not know about viewport zoom.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ import uuid
 from contextlib import closing
 from pathlib import Path
 from typing import Any, Iterable
+
+from PIL import Image
 
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
@@ -144,6 +146,15 @@ def inspect_media_source(source_path: str | Path) -> dict[str, Any]:
         "width_px": width,
         "height_px": height,
     }
+
+
+def _require_readable_pixels(inspection: dict[str, Any]) -> None:
+    source = Path(inspection["source_path"])
+    try:
+        with Image.open(source, formats=[inspection["format"].upper()]) as image:
+            image.load()
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
+        _fail("MEDIA_UNREADABLE", f"Не удалось прочитать пиксели изображения «{source.name}».", path=str(source))
 
 
 def inspect_media_sources(source_paths: Iterable[str | Path]) -> dict[str, Any]:
@@ -351,6 +362,7 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
             if previous is not None:
                 _fail("DUPLICATE_MEDIA_SOURCE", "The same physical image occurs more than once in the batch.", first_path=previous, duplicate_path=inspection["source_path"])
             seen_fingerprints[inspection["source_fingerprint"]] = inspection["source_path"]
+            _require_readable_pixels(inspection)
             ownership = assignment["ownership_mode"]
             if ownership not in OWNERSHIP_MODES:
                 _fail("INVALID_ASSIGNMENT", "Media ownership mode is invalid.")
@@ -496,7 +508,7 @@ def _ensure_sample_and_section(connection: sqlite3.Connection, sample_name: str,
     return sample_id, section_id
 
 
-def _verify_media_plan_sources(plan):
+def _verify_media_plan_sources(plan, *, check_pixels=False):
     if not isinstance(plan, dict) or plan.get("schema_version") != 1 or not isinstance(plan.get("items"), list) or not plan["items"]:
         _fail("PLAN_SCHEMA_INCOMPATIBLE", "Media import plan is invalid.")
     if plan.get("semantic_fingerprint") != _plan_fingerprint(plan):
@@ -505,6 +517,8 @@ def _verify_media_plan_sources(plan):
         current = inspect_media_source(item["source_path"])
         if current["source_fingerprint"] != item["source_fingerprint"] or current["width_px"] != item["width_px"] or current["height_px"] != item["height_px"]:
             _fail("SOURCE_FINGERPRINT_MISMATCH", "Image changed after planning.", path=item["source_path"])
+        if check_pixels:
+            _require_readable_pixels(current)
 
 
 def load_media_import_draft(database_path):
@@ -539,7 +553,7 @@ def save_media_import_draft(database_path, plan, expected_fingerprint=None):
 
 def apply_media_import_plan(database_path: str | Path, plan: Any, *, attach_to: str | None = None,
                             draft_fingerprint: str | None = None) -> dict[str, Any]:
-    _verify_media_plan_sources(plan)
+    _verify_media_plan_sources(plan, check_pixels=True)
     connection = open_project(database_path)
     copied: list[Path] = []
     try:
