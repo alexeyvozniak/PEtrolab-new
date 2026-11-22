@@ -388,6 +388,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "plot_data.query": lambda params: {"result": query_plot_data(
         _project_database_path(params), params.get("kind"), params.get("axes"), params.get("analysis_ids"),
         params.get("hidden_analysis_ids"), params.get("hidden_source_ids"), params.get("layers"),
+        normalization=params.get("normalization"),
     )},
     "project.overview": lambda params: {"result": project_overview(_project_database_path(params))},
     "project.samples.list": lambda params: {"result": list_project_samples(_project_database_path(params))},

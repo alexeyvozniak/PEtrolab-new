@@ -1,4 +1,6 @@
 from hashlib import sha256
+import csv
+from io import StringIO
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -19,6 +21,39 @@ from petrolab.work_groups import create_work_group
 
 
 class PublicationPackageTests(unittest.TestCase):
+    def test_trace_pattern_package_keeps_reference_ratios_and_censored_gap(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "trace.csv"
+            source.write_text("Analysis,La (ppm),Ce (ppb),Pr (ppm)\nM1,6.87,<100,0.276\n", encoding="utf-8")
+            database = root / "petrolab.sqlite"
+            apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
+            by_element = {axis["field"]: axis for axis in plot_catalog(database)["axes"]}
+            axes = [by_element[element] for element in ("La", "Ce", "Pr")]
+            normalization = "sun_mcdonough_1989_mantle_diagram_v1"
+            projected = query_plot_data(database, "ree_pattern", axes, normalization=normalization)
+            capture = {
+                "name": "РЗЭ", "format": "svg", "width_mm": 90, "dpi": 600, "include_csv": True,
+                "svg": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><g id="panel-a"><text x="1" y="2">a</text></g></svg>',
+                "analysis_ids": None, "hidden_analysis_ids": [], "hidden_source_ids": [], "layers": [], "colors": {},
+                "panels": [{"id": str(uuid4()), "kind": "ree_pattern", "axes": axes, "normalization": normalization,
+                            "projection_sha256": projected["projection_sha256"]}],
+            }
+            item = capture_publication_plot(database, capture, "Минерал M1")
+            ready = prepare_publication(database, "Спектры", [item])
+            exported = root / "package.zip"
+            export_publication(database, "Спектры", [item], ready["fingerprint"], str(exported))
+            with ZipFile(exported) as archive:
+                panel, = json.loads(archive.read("materials/01-plot_capture.json"))["panels"]
+                self.assertEqual(panel["normalization"], projected["normalization"])
+                self.assertEqual(panel["points"], projected["points"])
+                rows = list(csv.DictReader(StringIO(archive.read("data/01-plot_capture.csv").decode())))
+                self.assertEqual([row["field"] for row in rows], ["La", "Ce", "Pr"])
+                self.assertTrue(all(row["normalization_id"] == normalization for row in rows))
+                self.assertAlmostEqual(float(rows[0]["value"]), 10)
+                self.assertEqual((rows[1]["value"], rows[1]["status"]), ("", "below_detection_limit"))
+                self.assertAlmostEqual(float(rows[2]["value"]), 1)
+
     def test_direct_plot_capture_keeps_exact_panels_and_source_scope(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)

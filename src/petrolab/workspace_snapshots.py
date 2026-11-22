@@ -9,6 +9,7 @@ from .desktop_workflow import analysis_identity
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
 from .plot_data import _layout_input, open_plot_specification, plot_catalog, save_plot_specification
+from .trace_patterns import PATTERN_ORDERS
 from .statistics_core import feature_domain
 from .statistics_service import _METHOD, open_calculation_run, review_statistics
 from .table_views import _fingerprint as table_universe_fingerprint
@@ -177,8 +178,12 @@ def save_analysis_template(database_path, name, plot_id=None, table_view_id=None
             names.append(key)
         return names
 
-    panels = [{"kind": panel["kind"], "title": panel["title"], "axes": fields(panel["axes"])}
-              for panel in (plot["panels"] if plot else [])]
+    panels = []
+    for panel in (plot["panels"] if plot else []):
+        definition = {"kind": panel["kind"], "title": panel["title"], "axes": fields(panel["axes"])}
+        if panel["kind"] in PATTERN_ORDERS:
+            definition["normalization"] = panel["normalization"]
+        panels.append(definition)
     columns, sort, methods, filters_omitted = [], [], [], False
     if table_view_id is not None:
         _uuid(table_view_id)
@@ -301,8 +306,12 @@ def apply_analysis_template(database_path, template_id, analysis_ids, name=None)
                 else:
                     methods.append(plan)
     if name is not None and not any(item["action"] == "blocked" for item in report):
-        panels = [{"id": _id(), "kind": panel["kind"], "axes": [compatible[field] for field in panel["axes"]]}
-                  for panel in template["panel_templates"]]
+        panels = []
+        for panel in template["panel_templates"]:
+            definition = {"id": _id(), "kind": panel["kind"], "axes": [compatible[field] for field in panel["axes"]]}
+            if "normalization" in panel:
+                definition["normalization"] = panel["normalization"]
+            panels.append(definition)
         try:
             with closing(open_project(database_path)) as connection, connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -314,7 +323,8 @@ def apply_analysis_template(database_path, template_id, analysis_ids, name=None)
                     columns = [{**column, "width_px": None} for column in template["table_columns"]]
                     table = save_table_view(database_path, name, columns, template["table_sort"], [], transaction=connection)
         except ImportCommandError as error:
-            if error.code not in {"PLOT_TERNARY_INCOMPATIBLE_AXES", "PLOT_LAYOUT_AXES_UNAVAILABLE", "PLOT_LAYOUT_INPUT_UNAVAILABLE"}:
+            if error.code not in {"PLOT_TERNARY_INCOMPATIBLE_AXES", "PLOT_PATTERN_INCOMPATIBLE_AXES",
+                                  "PLOT_LAYOUT_AXES_UNAVAILABLE", "PLOT_LAYOUT_INPUT_UNAVAILABLE"}:
                 raise
             field = "analysis_ids" if error.code == "PLOT_LAYOUT_INPUT_UNAVAILABLE" else "panel_templates"
             report.append({"field": field, "action": "blocked", "reason": error.message})

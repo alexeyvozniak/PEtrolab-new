@@ -128,17 +128,21 @@ def _plot_capture(database_path, capture):
     contributors = {}
     scope = capture["analysis_ids"]
     for panel, node in zip(capture["panels"], root):
-        if not isinstance(panel, dict) or set(panel) != {"id", "kind", "axes", "projection_sha256"}:
+        if not isinstance(panel, dict) or set(panel) - {"normalization"} != {"id", "kind", "axes", "projection_sha256"}:
             raise ValueError("plot_capture_panel")
         projection = query_plot_data(database_path, panel["kind"], panel["axes"], scope,
-                                     capture["hidden_analysis_ids"], capture["hidden_source_ids"], capture["layers"])
+                                     capture["hidden_analysis_ids"], capture["hidden_source_ids"], capture["layers"],
+                                     normalization=panel.get("normalization"))
         if projection["projection_sha256"] != panel["projection_sha256"]:
             raise ImportCommandError("PUBLICATION_PLOT_CHANGED", "Данные диаграммы изменились. Обновите панели и добавьте фигуру заново.")
         scope = projection["input_analysis_ids"]
         ids = [point["analysis_id"] for point in projection["points"]]
         contributors.update(dict.fromkeys(ids))
-        snapshots.append({**panel, "svg_group": node.get("id"), "analysis_ids": ids, "points": projection["points"],
-                          "ticks": projection["ticks"], "fields": projection["fields"]})
+        snapshot = {**panel, "svg_group": node.get("id"), "analysis_ids": ids, "points": projection["points"],
+                    "ticks": projection["ticks"], "fields": projection["fields"]}
+        if "normalization" in projection:
+            snapshot.update(normalization=projection["normalization"], exclusions=projection["exclusions"])
+        snapshots.append(snapshot)
     if not contributors:
         raise ImportCommandError("PUBLICATION_EMPTY_PLOT", "В выбранных панелях нет анализов для публикации.")
     result = {key: value for key, value in capture.items() if key != "svg"}
@@ -225,11 +229,21 @@ def capture_publication_media(database_path, media_id, options=None):
 def _plot_values_csv(panels):
     stream = StringIO(newline="")
     writer = csv.writer(stream, lineterminator="\n")
-    writer.writerow(["panel", "analysis_id", "field", "unit", "measurement_set", "method", "value"])
+    headers = ["panel", "analysis_id", "field", "unit", "measurement_set", "method", "value"]
+    has_patterns = any(isinstance(panel.get("normalization"), dict) for panel in panels)
+    writer.writerow(headers + (["normalization_id", "status"] if has_patterns else []))
     for panel in panels:
+        reference = panel.get("normalization")
+        if isinstance(reference, dict):
+            for point in [*panel["points"], *panel["exclusions"]]:
+                writer.writerows((panel["svg_group"], point["analysis_id"], axis["field"], "1",
+                                  axis["measurement_set"], axis["method"], vertex["ratio"],
+                                  reference["id"], vertex["status"])
+                                 for axis, vertex in zip(panel["axes"], point["vertices"]))
+            continue
         for point in panel["points"]:
             writer.writerows((panel["svg_group"], point["analysis_id"], axis["field"], axis["unit"],
-                              axis["measurement_set"], axis["method"], value)
+                              axis["measurement_set"], axis["method"], value) + ((None, None) if has_patterns else ())
                              for axis, value in zip(panel["axes"], point["values"]))
     return stream.getvalue().encode("utf-8")
 

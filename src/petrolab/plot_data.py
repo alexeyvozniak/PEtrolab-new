@@ -12,6 +12,7 @@ from .desktop_workflow import _measurement_numeric_value
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
 from .plot_fields import clip_to_plot_rectangle, convex_hull, normal_probability_ellipse
+from .trace_patterns import PATTERN_ORDERS, normalized_pattern_value, pattern_catalog, pattern_coordinates, pattern_reference
 
 
 _ACTIVE_MEASUREMENTS = """
@@ -53,7 +54,8 @@ def plot_catalog(database_path, analysis_ids=None):
             f"SELECT DISTINCT s.source_id, s.display_name AS source_name {_ACTIVE_MEASUREMENTS} ORDER BY source_name, s.source_id",
             parameters,
         ).fetchall()
-        return {"axes": [dict(row) for row in rows], "sources": [dict(row) for row in sources]}
+        return {"axes": [dict(row) for row in rows], "sources": [dict(row) for row in sources],
+                "patterns": pattern_catalog()}
 
 
 def _axis_key(axis):
@@ -67,13 +69,20 @@ def _axis_key(axis):
 
 
 def _plot_keys(kind, axes):
-    if kind not in ("binary", "ternary") or not isinstance(axes, list) or len(axes) != (2 if kind == "binary" else 3):
+    if not isinstance(kind, str) or not isinstance(axes, list):
+        raise ValueError("plot")
+    if kind in PATTERN_ORDERS:
+        if not 2 <= len(axes) <= len(PATTERN_ORDERS[kind]):
+            raise ValueError("plot")
+    elif kind not in ("binary", "ternary") or len(axes) != (2 if kind == "binary" else 3):
         raise ValueError("plot")
     keys = [_axis_key(axis) for axis in axes]
     if len(set(keys)) != len(keys):
         raise ValueError("axes")
     if kind == "ternary" and (len({key[1:] for key in keys}) != 1 or keys[0][1] not in {"wt.%", "ppm", "ppb"}):
         raise ImportCommandError("PLOT_TERNARY_INCOMPATIBLE_AXES", "Для тройной диаграммы выберите компоненты в одной единице и одном аналитическом наборе.")
+    if kind in PATTERN_ORDERS and (len({key[2:] for key in keys}) != 1 or any(key[1] not in {"ppm", "ppb"} for key in keys)):
+        raise ImportCommandError("PLOT_PATTERN_INCOMPATIBLE_AXES", "Для спектра выберите концентрации в ppm или ppb из одного аналитического набора и метода.")
     return keys
 
 
@@ -97,8 +106,36 @@ def _linear_coordinates(values):
     ]
 
 
-def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysis_ids=None, hidden_source_ids=None, layers=None):
+def _pattern_vertices(record, keys, concentrations):
+    vertices = []
+    for index, key in enumerate(keys):
+        element, unit, _, _ = key
+        rows = record[key]
+        value = _measurement_numeric_value(rows[0]) if len(rows) == 1 else None
+        ratio = normalized_pattern_value(value, unit, concentrations[element])
+        status = "missing"
+        if len(rows) > 1:
+            status = "duplicate_measurements"
+        elif rows:
+            if value is None:
+                status = rows[0]["value_status"] or "unusable_measurement"
+                if status == "numeric":
+                    status = "unusable_measurement"
+            elif ratio is None:
+                status = "nonpositive" if value <= 0 else "ratio_out_of_range"
+            else:
+                status = "numeric"
+        measurements = [{field: row[field] for field in ("measurement_id", "raw_token", "qualifier", "detection_limit")}
+                        for row in rows]
+        vertices.append({"element": element, "u": index / (len(keys) - 1), "v": None, "ratio": ratio,
+                         "status": status, "measurements": measurements})
+    return vertices
+
+
+def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysis_ids=None, hidden_source_ids=None,
+                    layers=None, *, normalization=None):
     keys = _plot_keys(kind, axes)
+    reference = pattern_reference(kind, [key[0] for key in keys], normalization) if kind in PATTERN_ORDERS else None
     layers = _validated_layers(layers)
     parameter, selection = _selection(analysis_ids)
     if any(value is not None and not isinstance(value, list) for value in (hidden_analysis_ids, hidden_source_ids)):
@@ -107,6 +144,7 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
     _selection(hidden_source_ids or None)
     hidden_analyses = set(hidden_analysis_ids or [])
     hidden_sources = set(hidden_source_ids or [])
+    key_set = set(keys)
     fields = json.dumps([axis["field"] for axis in axes])
     with closing(open_project(database_path)) as connection:
         connection.execute("BEGIN")
@@ -117,7 +155,7 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
                    if row["analysis_id"] not in hidden_analyses and row["source_id"] not in hidden_sources}
         rows = connection.execute(f"""
             SELECT {_AXIS_PROJECTION}, a.analysis_id, a.identity_json, s.source_id, s.display_name AS source_name,
-                   m.raw_token, m.qualifier, m.value_status
+                   m.raw_token, m.qualifier, m.value_status, m.measurement_id, m.detection_limit
             {_ACTIVE_MEASUREMENTS} AND m.canonical_field IN (SELECT value FROM json_each(?))
             ORDER BY a.analysis_id, m.rowid
         """, (parameter, selection, fields))
@@ -125,23 +163,33 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
         metadata = {}
         for row in rows:
             key = tuple(row[field] for field in _AXIS_FIELDS)
-            if key not in keys:
+            if key not in key_set:
                 continue
             analysis_id = row["analysis_id"]
             if analysis_id not in visible:
                 continue
-            observed.setdefault(analysis_id, defaultdict(list))[key].append(_measurement_numeric_value(row))
+            value = row if reference is not None else _measurement_numeric_value(row)
+            observed.setdefault(analysis_id, defaultdict(list))[key].append(value)
             metadata[analysis_id] = row
 
     points = []
+    pattern_exclusions = []
     for analysis_id, record in observed.items():
-        values = [record[key][0] if len(record[key]) == 1 else None for key in keys]
-        if any(value is None or not isfinite(value) for value in values):
-            continue
         row = metadata[analysis_id]
         identity = " · ".join(token for token in json.loads(row["identity_json"]) if token)
         point = {"analysis_id": analysis_id, "label": identity, "source_id": row["source_id"],
-                 "source_name": row["source_name"], "values": values}
+                 "source_name": row["source_name"]}
+        if reference is not None:
+            vertices = _pattern_vertices(record, keys, reference["concentrations"])
+            if any(vertex["ratio"] is not None for vertex in vertices):
+                points.append({**point, "vertices": vertices})
+            else:
+                pattern_exclusions.append({"analysis_id": analysis_id, "reason": "no_positive_ratio", "vertices": vertices})
+            continue
+        values = [record[key][0] if len(record[key]) == 1 else None for key in keys]
+        if any(value is None or not isfinite(value) for value in values):
+            continue
+        point["values"] = values
         if kind == "ternary":
             magnitude = max(values)
             if magnitude <= 0 or min(values) < 0:
@@ -161,11 +209,20 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
             ticks.append(axis_ticks)
         for point, u, v in zip(points, *coordinates):
             point.update(u=u, v=v)
+    if reference is not None:
+        ticks = [[{"at": index / (len(keys) - 1), "label": key[0]} for index, key in enumerate(keys)],
+                 pattern_coordinates(points)]
+        pattern_exclusions.extend({"analysis_id": analysis_id, "reason": "no_matching_axes", "vertices": []}
+                                  for analysis_id in sorted(visible - observed.keys()))
     by_id = {point["analysis_id"]: point for point in points}
     fields = []
     for layer in layers:
         field = layer["field"]
         if field is None or not field["visible"]:
+            continue
+        if reference is not None:
+            fields.append({"layer_id": layer["id"], "analysis_ids": [], "vertices": [],
+                           "message": "Поля доступны для бинарных и тройных диаграмм."})
             continue
         included = [by_id[analysis_id] for analysis_id in layer["analysis_ids"] if analysis_id in by_id]
         coordinates = [(point["u"], point["v"]) for point in included]
@@ -185,6 +242,8 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
               "input_analysis_ids": sorted(row["analysis_id"] for row in active_analyses),
               "input_count": len(active_analyses), "hidden_count": len(active_analyses) - len(visible),
               "excluded_count": len(visible) - len(points)}
+    if reference is not None:
+        result.update(normalization=reference, exclusions=pattern_exclusions)
     result["projection_sha256"] = sha256(json.dumps(result, ensure_ascii=False, sort_keys=True,
                                                      allow_nan=False).encode()).hexdigest()
     return result
@@ -273,14 +332,19 @@ def save_plot_specification(database_path, name, analysis_ids, panels, colors, h
     panel_keys = set()
     saved_panels = []
     for panel in panels:
-        if not isinstance(panel, dict) or set(panel) != {"id", "kind", "axes"}:
+        if not isinstance(panel, dict) or set(panel) - {"normalization"} != {"id", "kind", "axes"}:
             raise ValueError("panels")
         panel_ids.append(panel["id"])
-        panel_keys.update(_plot_keys(panel["kind"], panel["axes"]))
+        kind = panel["kind"]
+        keys = _plot_keys(kind, panel["axes"])
+        panel_keys.update(keys)
+        normalization = "sum_of_three_components" if kind == "ternary" else None
+        if kind in PATTERN_ORDERS:
+            normalization = pattern_reference(kind, [key[0] for key in keys], panel.get("normalization"))["id"]
         saved_panels.append({
             **panel, "title": " / ".join(axis["field"] for axis in panel["axes"]),
             "axes": [{**axis, "scale": "linear", "manual_range": None} for axis in panel["axes"]],
-            "normalization": "sum_of_three_components" if panel["kind"] == "ternary" else None,
+            "normalization": normalization,
         })
     _selection(panel_ids)
     with (closing(open_project(database_path)) if transaction is None else nullcontext(transaction)) as connection:

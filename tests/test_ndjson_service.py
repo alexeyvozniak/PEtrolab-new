@@ -22,6 +22,83 @@ from test_media_import import write_png  # noqa: E402
 
 
 class NdjsonServiceTests(unittest.TestCase):
+    def test_mineral_trace_patterns_normalize_units_and_keep_gaps(self) -> None:
+        from petrolab.desktop_workflow import suggest_import_recipe
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = str(root / "project.sqlite")
+            source = root / "trace.csv"
+            source.write_text(
+                "Analysis,Cs (ppm),La (ppm),Ce (ppb),Pb (ppm),Pr (ppm),Nd (ppm)\n"
+                "M1,0.079,2.37,<100,0.71,0.095,0.0467\n"
+                "M2,0.0079,0,6120,0.071,,0.467\n"
+                "M3,0,0,<100,0,,0\n", encoding="utf-8",
+            )
+            before = source.read_bytes()
+
+            def call(command, **payload):
+                return handle_request({"protocol_version": PROTOCOL_VERSION, "request_id": str(uuid.uuid4()),
+                    "command": command, "payload": {"project_database_path": database, **payload}})
+
+            imported = call("import.plan.apply", source_path=str(source), recipe=suggest_import_recipe(source)["recipe"])
+            self.assertIn("result", imported, imported)
+            catalog = call("plot_data.catalog")["result"]
+            axes = {axis["field"]: axis for axis in catalog["axes"]}
+            ree_axes = [axes[element] for element in ("La", "Ce", "Pr", "Nd")]
+            ree = call("plot_data.query", kind="ree_pattern", axes=ree_axes)["result"]
+            self.assertEqual(ree["normalization"]["id"], "sun_mcdonough_1989_c1_v1")
+            self.assertEqual(catalog["patterns"]["ree_pattern"]["default_normalization"], ree["normalization"]["id"])
+            self.assertEqual(ree["excluded_count"], 1)
+            self.assertEqual(ree["exclusions"][0]["reason"], "no_positive_ratio")
+            series = {point["label"]: point for point in ree["points"]}
+            la, ce, pr, nd = series["M1"]["vertices"]
+            self.assertAlmostEqual(la["ratio"], 10)
+            self.assertEqual(ce["status"], "below_detection_limit")
+            measurement, = ce["measurements"]
+            self.assertTrue(measurement["measurement_id"])
+            self.assertEqual(measurement["raw_token"], "<100")
+            self.assertEqual(measurement["detection_limit"], 100)
+            self.assertIsNone(ce["ratio"])
+            self.assertIsNone(ce["v"])
+            self.assertAlmostEqual(pr["ratio"], 1)
+            self.assertAlmostEqual(pr["v"], 0.5)
+            self.assertAlmostEqual(nd["ratio"], 0.1)
+            self.assertEqual(series["M2"]["vertices"][0]["status"], "nonpositive")
+            self.assertAlmostEqual(series["M2"]["vertices"][1]["ratio"], 10)
+            self.assertIsNone(series["M2"]["vertices"][2]["ratio"])
+            hidden = call("plot_data.query", kind="ree_pattern", axes=ree_axes,
+                          hidden_analysis_ids=[series["M2"]["analysis_id"]])["result"]
+            self.assertEqual(hidden["hidden_count"], 1)
+            self.assertEqual([point["label"] for point in hidden["points"]], ["M1"])
+            self.assertNotEqual(hidden["projection_sha256"], ree["projection_sha256"])
+
+            spider = call("plot_data.query", kind="spider", axes=[axes["Cs"], axes["Pb"]])["result"]
+            self.assertEqual(spider["normalization"]["concentrations"], {"Cs": 0.0079, "Pb": 0.071})
+            for vertex in next(point["vertices"] for point in spider["points"] if point["label"] == "M1"):
+                self.assertAlmostEqual(vertex["ratio"], 10)
+            normalization = spider["normalization"]["id"]
+            saved = call("plot_spec.save", name="Минералы", colors={}, panels=[{
+                "id": str(uuid.uuid4()), "kind": "ree_pattern", "axes": ree_axes, "normalization": normalization,
+            }])["result"]
+            reopened = call("plot_spec.open", id=saved["id"])["result"]
+            panel, = reopened["panels"]
+            self.assertEqual(panel["normalization"], normalization)
+            self.assertEqual([axis["field"] for axis in panel["axes"]], ["La", "Ce", "Pr", "Nd"])
+            template = call("workspace.template.save", name="Шаблон РЗЭ", plot_id=saved["id"])["result"]
+            applied = call("workspace.template.apply", id=template["id"], name="Спектр из шаблона",
+                           analysis_ids=reopened["input"]["analysis_ids"])["result"]
+            self.assertEqual(applied["plot"]["panels"][0]["normalization"], normalization)
+            projected = call("plot_data.query", kind=panel["kind"], axes=ree_axes,
+                             analysis_ids=reopened["input"]["analysis_ids"], normalization=panel["normalization"])["result"]
+            projected_la = next(point["vertices"][0] for point in projected["points"] if point["label"] == "M1")
+            self.assertAlmostEqual(projected_la["ratio"], 2.37 / 0.687)
+            invalid = call("plot_data.query", kind="ree_pattern", axes=[axes["Ce"], axes["La"]])
+            self.assertEqual(invalid["error"]["code"], "INVALID_REQUEST")
+            invalid = call("plot_data.query", kind="ree_pattern", axes=ree_axes, normalization="unknown")
+            self.assertEqual(invalid["error"]["code"], "INVALID_REQUEST")
+            self.assertEqual(source.read_bytes(), before)
+
     def test_plot_coordinates_respect_units_selection_and_censored_values(self) -> None:
         from petrolab.desktop_workflow import suggest_import_recipe
 

@@ -33,9 +33,15 @@
         "id": {"type": "string", "format": "uuid"},
         "kind": {"type": "string", "enum": ["binary", "ternary", "spider", "ree_pattern", "histogram"]},
         "title": {"type": "string", "minLength": 1},
-        "axes": {"type": "array", "items": {"$ref": "#/$defs/axis"}, "minItems": 1, "maxItems": 3},
+        "axes": {"type": "array", "items": {"$ref": "#/$defs/axis"}, "minItems": 1},
         "normalization": {"type": ["string", "null"]}
-      }
+      },
+      "if": {"properties": {"kind": {"enum": ["ree_pattern", "spider"]}}},
+      "then": {"properties": {
+        "axes": {"minItems": 2, "maxItems": 36},
+        "normalization": {"enum": ["sun_mcdonough_1989_c1_v1", "sun_mcdonough_1989_mantle_diagram_v1"]}
+      }},
+      "else": {"properties": {"axes": {"maxItems": 3}}}
     }
   },
   "properties": {
