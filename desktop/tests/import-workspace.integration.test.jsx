@@ -1021,13 +1021,17 @@ test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed p
   await user.selectOptions(screen.getByLabelText("Причина исключения"), "Изображение охватывает другой образец");
   await user.click(await enabledButton("Подтвердить исключение и сохранить связь"));
   expect(svg.querySelector(".media-provisional")).toBeNull();
+  await user.click(await enabledButton("PPL.png"));
+  await user.click(await screen.findByRole("checkbox", { name: "BSE.png · P-07" }));
+  await user.click(screen.getByRole("checkbox", { name: "BSE.png · P-03" }));
+  await user.click(await enabledButton("BSE.png"));
   await user.click(await enabledButton("Проверить импорт изображений"));
   await screen.findByText("Неразмещённые точки (1)");
   expect(screen.getByText("KIV-2 · KIV-2-A · P-08")).toBeTruthy();
   expect(screen.getByText(/BSE.png · KIV-5 \/ P-03 · Изображение охватывает другой образец/)).toBeTruthy();
   const rows = within(screen.getByRole("table")).getAllByRole("row");
   expect(rows.map((row) => row.textContent)).toEqual(expect.arrayContaining([
-    "BSE.pngKIV-2KIV-2-ABSE21", "PPL.pngKIV-2KIV-2-APPL00", "XPL.pngKIV-2KIV-2-AXPL00",
+    "BSE.pngKIV-2KIV-2-ABSE201", "PPL.pngKIV-2KIV-2-APPL020", "XPL.pngKIV-2KIV-2-AXPL000",
   ]));
   const inspector = within(screen.getByRole("complementary", { name: "Выбранный снимок" }));
   const packageFiles = within(screen.getByRole("complementary", { name: "Файлы пакета" }));
@@ -1037,9 +1041,11 @@ test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed p
   await inspector.findByRole("heading", { name: "PPL.png" });
   expect(inspector.getByText("На снимке нет размещённых точек.")).toBeTruthy();
   expect(inspector.queryByText(/Изображение охватывает другой образец/)).toBeNull();
+  expect(inspector.getByText("PPL.png → BSE.png · P-07")).toBeTruthy();
+  expect(inspector.getByText("PPL.png → BSE.png · P-03")).toBeTruthy();
   expect(inspector.getByText("KIV-2 · KIV-2-A · P-08")).toBeTruthy();
   expect([...screen.getByLabelText("Сводка пакета").querySelectorAll("dd")].map((value) => value.textContent))
-    .toEqual(["3", "2", "1", "1"]);
+    .toEqual(["3", "2", "2", "1", "1"]);
   expect(requests.some(({ command }) => command === "media.import.apply")).toBe(false);
   await user.click(await enabledButton("Сохранить черновик"));
   await screen.findByText("Черновик сохранён.");
@@ -1053,8 +1059,13 @@ test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed p
   await screen.findByText("Черновик восстановлен.");
   expect(screen.getByText("Неразмещённые точки (1)")).toBeTruthy();
   expect(screen.getByText(/BSE.png · KIV-5 \/ P-03 · Изображение охватывает другой образец/)).toBeTruthy();
+  await user.click(await enabledButton("Назад к назначению"));
+  await user.click(await enabledButton("PPL.png"));
+  expect((await screen.findByRole("checkbox", { name: "BSE.png · P-07" })).checked).toBe(true);
+  expect(screen.getByRole("checkbox", { name: "BSE.png · P-03" }).checked).toBe(true);
+  await user.click(await enabledButton("Проверить импорт изображений"));
   await user.click(await enabledButton("Завершить без неразмещённых точек"));
-  await screen.findByText("Изображений импортировано: 3. Привязок: 2.");
+  await screen.findByText("Изображений импортировано: 3. Привязок: 2. Связей фото: 2.");
   const apply = requests.find((request) => request.command === "media.import.apply").payload.plan;
   const bse = apply.items.find((item) => item.media_type === "BSE");
   const saved = (await invokePetrolab("media.preview", { ...database, media_asset_id: bse.media_asset_id })).result.annotations;
@@ -1062,6 +1073,11 @@ test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed p
   expect(saved.find((item) => item.point_name === "P-03")).toMatchObject({
     point_sample_id: points[2].result.sample_id, cross_sample_exception: 1, exception_reason: "Изображение охватывает другой образец",
   });
+  const detail = apply.items.find((item) => item.media_type === "PPL");
+  for (const annotation of saved) {
+    const linked = (await invokePetrolab("media.links.list", { ...database, spatial_annotation_id: annotation.spatial_annotation_id })).result;
+    expect(linked).toEqual([expect.objectContaining({ media_asset_id: detail.media_asset_id })]);
+  }
   expect((await invokePetrolab("media.import.draft.load", database)).result).toBeNull();
   for (const [path, bytes] of Object.entries(photos)) expect(await readFile(path)).toEqual(bytes);
   expect(app.container.querySelector(".media-provisional")).toBeNull();

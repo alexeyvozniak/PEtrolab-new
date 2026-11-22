@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from petrolab.import_apply import MIGRATIONS, apply_import_plan, latest_active_import, open_project  # noqa: E402
 from petrolab.import_preview import ImportCommandError  # noqa: E402
 from petrolab.manual_analysis import create_manual_analysis  # noqa: E402
-from petrolab.media_links import change_media_link, create_media_region, import_linked_photo, list_media_links  # noqa: E402
+from petrolab.media_links import attach_media, change_media_link, create_media_region, import_linked_photo, list_media_links  # noqa: E402
 from petrolab.media_display import export_media_original, export_media_rendered, preview_input_media, preview_project_media  # noqa: E402
 from PIL import Image  # noqa: E402
 from openpyxl import load_workbook  # noqa: E402
@@ -225,6 +225,64 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(usable.read_bytes(), usable_bytes)
             self.assertEqual(damaged.read_bytes(), corrupt)
             self.assertFalse((root / "media").exists())
+
+    def test_batch_photo_links_resolve_against_reviewed_placements_and_commit_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database, first, second = self._project_with_points(root)
+            overview, detail = root / "overview.png", root / "detail.png"
+            write_png(overview)
+            write_png(detail, width=16)
+            anchor = self._assignment(overview, first["analytical_point_id"])
+            second_assignment = self._assignment(overview, second["analytical_point_id"], reason="Снимок охватывает оба образца")
+            region = {**second_assignment["placements"][0],
+                      "geometry": {"kind": "rectangle", "x_px": 1, "y_px": 2, "width_px": 6, "height_px": 4}}
+            anchor["placements"].append(region)
+            references = [{"source_fingerprint": hashlib.sha256(overview.read_bytes()).hexdigest(),
+                           "analytical_point_id": point["analytical_point_id"]} for point in (first, second)]
+            photo = {**anchor, "source_path": str(detail), "media_type": "Другое", "placements": [],
+                     "attach_to_placements": references}
+            for invalid, code in (
+                ({**photo, "thin_section_name": "another section"}, "MEDIA_LINK_SCOPE"),
+                ({**photo, "attach_to_placements": [references[0], references[0]]}, "INVALID_ASSIGNMENT"),
+                ({**photo, "attach_to_placements": [{**references[0], "source_fingerprint": "0" * 64}]}, "MEDIA_LINK_UNAVAILABLE"),
+            ):
+                with self.assertRaises(ImportCommandError) as error:
+                    create_media_import_plan(database, [anchor, invalid])
+                self.assertEqual(error.exception.code, code)
+            plan = create_media_import_plan(database, [photo, anchor])
+            self.assertEqual(plan["schema_version"], 2)
+            asset_id = plan["items"][0]["media_asset_id"]
+            self.assertEqual(plan["media_links"], [
+                {"media_asset_id": asset_id, "spatial_annotation_id": placement["spatial_annotation_id"]}
+                for placement in plan["items"][1]["placements"]
+            ])
+            draft = save_media_import_draft(database, plan)
+            self.assertEqual(load_media_import_draft(database)["plan"], plan)
+            first_link, second_link = (link["spatial_annotation_id"] for link in plan["media_links"])
+
+            def fail_second_link(connection, annotation_id, media_id):
+                if annotation_id == second_link:
+                    raise ImportCommandError("TEST_ROLLBACK", "Link insertion failed.")
+                return attach_media(connection, annotation_id, media_id)
+
+            originals = [overview.read_bytes(), detail.read_bytes()]
+            with patch("petrolab.media_links.attach_media", side_effect=fail_second_link):
+                with self.assertRaisesRegex(ImportCommandError, "Link insertion failed"):
+                    apply_media_import_plan(database, plan, draft_fingerprint=draft["fingerprint"])
+            self.assertEqual(load_media_import_draft(database)["plan"], plan)
+            self.assertEqual(list((root / "media").glob("*")), [])
+            with closing(open_project(database)) as connection:
+                for table in ("media_asset", "media_import_batch", "spatial_annotation", "media_link"):
+                    self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0)
+
+            result = apply_media_import_plan(database, plan, draft_fingerprint=draft["fingerprint"])
+            self.assertEqual(len(result["media_link_ids"]), 2)
+            for annotation_id, link_id in zip((first_link, second_link), result["media_link_ids"], strict=True):
+                links = list_media_links(database, annotation_id)
+                self.assertEqual([(link["media_asset_id"], link["media_link_id"]) for link in links], [(asset_id, link_id)])
+            self.assertIsNone(load_media_import_draft(database))
+            self.assertEqual([overview.read_bytes(), detail.read_bytes()], originals)
 
     def test_photo_links_preserve_points_areas_and_originals(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

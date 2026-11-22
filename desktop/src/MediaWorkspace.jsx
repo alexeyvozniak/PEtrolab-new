@@ -327,6 +327,10 @@ function MediaImportReview({ plan, initialPath, preview, onBack, onSaveDraft, on
     exceptionCount += item.placements.filter((point) => point.cross_sample_exception_reason).length;
   }
   const unplaced = plan.unplaced_points || [];
+  const mediaLinks = plan.media_links || [];
+  const assets = new Map(plan.items.map((item) => [item.media_asset_id, item]));
+  const placements = new Map(plan.items.flatMap((item) => item.placements.map((point) => [point.spatial_annotation_id, { item, point }])));
+  const selectedLinks = mediaLinks.filter((link) => link.media_asset_id === selectedId || placements.get(link.spatial_annotation_id).item === selected);
   return <>
     <h3>Проверка перед импортом</h3>
     <div className="media-review">
@@ -343,12 +347,13 @@ function MediaImportReview({ plan, initialPath, preview, onBack, onSaveDraft, on
         </section>)}
       </aside>
       <div className="project-search-table media-review-table"><table>
-        <thead><tr><th>Файл</th><th>Образец</th><th>Шлиф</th><th>Тип</th><th>Размещено точек</th><th>Исключения</th></tr></thead>
+        <thead><tr><th>Файл</th><th>Образец</th><th>Шлиф</th><th>Тип</th><th>Размещено точек</th><th>Связи фото</th><th>Исключения</th></tr></thead>
         <tbody>{plan.items.map((item) => <tr key={item.media_asset_id} className={selected === item ? "marked" : undefined}>
           <td><button className="outline-button" type="button" aria-pressed={selected === item}
             onClick={() => setSelectedId(item.media_asset_id)}>{item.display_name}</button></td>
           <td>{item.sample_name}</td><td>{item.thin_section_name}</td><td>{item.media_type}</td>
-          <td>{item.placements.length}</td><td>{item.placements.filter((point) => point.cross_sample_exception_reason).length}</td>
+          <td>{item.placements.length}</td><td>{mediaLinks.filter((link) => link.media_asset_id === item.media_asset_id).length}</td>
+          <td>{item.placements.filter((point) => point.cross_sample_exception_reason).length}</td>
         </tr>)}</tbody>
       </table>
         {plan.items.some((item) => !item.placements.length) && <p>В пакете есть изображения без размещённых точек.</p>}
@@ -369,6 +374,16 @@ function MediaImportReview({ plan, initialPath, preview, onBack, onSaveDraft, on
             <p className="media-review-exception" key={point.spatial_annotation_id}>
               {selected.display_name} · {point.point_sample_name} / {point.point_name} · {point.cross_sample_exception_reason}
             </p>)}
+          {selectedLinks.length > 0 && <>
+            <h5>Связи детальных фото ({selectedLinks.length})</h5>
+            <ul className="media-review-list">{selectedLinks.map((link) => {
+              const { item, point } = placements.get(link.spatial_annotation_id);
+              const photo = assets.get(link.media_asset_id);
+              return <li key={`${link.media_asset_id}:${link.spatial_annotation_id}`}>
+                {photo.display_name} → {item.display_name} · {point.point_name}
+              </li>;
+            })}</ul>
+          </>}
         </section>
         {unplaced.length > 0 && <section className="sample-card media-import-warning">
           <h4>Неразмещённые точки ({unplaced.length})</h4>
@@ -383,6 +398,7 @@ function MediaImportReview({ plan, initialPath, preview, onBack, onSaveDraft, on
       <dl aria-label="Сводка пакета">
         <div><dt>Снимки</dt><dd>{plan.items.length}</dd></div>
         <div><dt>Размещения</dt><dd>{placementCount}</dd></div>
+        <div><dt>Связи фото</dt><dd>{mediaLinks.length}</dd></div>
         <div><dt>Исключения</dt><dd>{exceptionCount}</dd></div>
         <div><dt>Неразмещённые точки</dt><dd>{unplaced.length}</dd></div>
       </dl>
@@ -399,6 +415,7 @@ function MediaImportReview({ plan, initialPath, preview, onBack, onSaveDraft, on
 
 export function MediaImport({ actions, onCancel, onDone }) {
   const [files, setFiles] = useState([]);
+  const [photoLinks, setPhotoLinks] = useState([]);
   const [samples, setSamples] = useState([]);
   const [sampleId, setSampleId] = useState("");
   const [newSample, setNewSample] = useState("");
@@ -422,6 +439,12 @@ export function MediaImport({ actions, onCancel, onDone }) {
   const pickedSample = samples.find(({ sample_id }) => sample_id === sampleId);
   const sampleName = pickedSample?.sample_name || newSample.trim();
   const active = files.find(({ source_path }) => source_path === activePath);
+  const linkTargets = files.filter((item) => item !== active).flatMap((item) =>
+    item.placements.map((placement) => ({
+      source_fingerprint: item.source_fingerprint,
+      analytical_point_id: placement.analytical_point_id,
+      name: `${item.display_name} · ${placement.pointLabel}`,
+    })));
   const points = pointSampleId ? (pointContext?.sample_id === pointSampleId ? pointContext.points : [])
     : context?.sample_id === sampleId ? context.points : [];
   const assignedPoints = new Set(files.flatMap((item) => item.placements.map((placement) => placement.analytical_point_id)));
@@ -493,6 +516,13 @@ export function MediaImport({ actions, onCancel, onDone }) {
     setNewSample(first.sample_name);
     setSection(first.thin_section_name);
     setFiles(saved.items.map((item) => ({ ...item, placements: item.placements.map((placement) => ({ ...placement, pointLabel: placement.point_name })) })));
+    const placements = new Map(saved.items.flatMap((item) => item.placements.map((point) => [point.spatial_annotation_id, { item, point }])));
+    const assets = new Map(saved.items.map((item) => [item.media_asset_id, item]));
+    setPhotoLinks((saved.media_links || []).map((link) => {
+      const { item, point } = placements.get(link.spatial_annotation_id);
+      return { photo_fingerprint: assets.get(link.media_asset_id).source_fingerprint,
+        source_fingerprint: item.source_fingerprint, analytical_point_id: point.analytical_point_id };
+    }));
     setActiveDraftFingerprint(draft.fingerprint);
     setPlan(saved);
     setNotice("Черновик восстановлен.");
@@ -523,6 +553,8 @@ export function MediaImport({ actions, onCancel, onDone }) {
       media_type: item.media_type, sample_name: sampleName, thin_section_name: section.trim(),
       placements: item.placements.map(({ analytical_point_id, geometry, cross_sample_exception_reason }) =>
         ({ analytical_point_id, geometry, cross_sample_exception_reason })),
+      attach_to_placements: photoLinks.filter((link) => link.photo_fingerprint === item.source_fingerprint)
+        .map(({ source_fingerprint, analytical_point_id }) => ({ source_fingerprint, analytical_point_id })),
       sample_target: { mode: sampleId === "new" ? "new" : "existing", sample_id: sampleId === "new" ? null : sampleId },
     }))));
   });
@@ -571,6 +603,8 @@ export function MediaImport({ actions, onCancel, onDone }) {
           <button className="outline-button" type="button" disabled={pending || Boolean(exceptionPreview)} onClick={() => {
             if (item.source_path === activePath) { setActivePath(""); setImage(null); }
             setFiles((current) => current.filter(({ source_path }) => source_path !== item.source_path));
+            setPhotoLinks((current) => current.filter((link) =>
+              link.photo_fingerprint !== item.source_fingerprint && link.source_fingerprint !== item.source_fingerprint));
           }}>Убрать</button>
         </li>)}</ul>
         <button className="primary-button" type="button" disabled={pending || !sampleId || !sampleName || !section.trim() || !files.length || Boolean(exceptionPreview)}
@@ -619,9 +653,27 @@ export function MediaImport({ actions, onCancel, onDone }) {
           </fieldset>}
           <ul className="sample-items">{active.placements.map(({ analytical_point_id: id, pointLabel }) => <li key={id}>
             <span>{pointLabel}</span>
-            <button className="outline-button" type="button" disabled={pending} onClick={() =>
-              changeFile(activePath, { placements: active.placements.filter((item) => item.analytical_point_id !== id) })}>Снять предварительную привязку</button>
+            <button className="outline-button" type="button" disabled={pending} onClick={() => {
+              changeFile(activePath, { placements: active.placements.filter((item) => item.analytical_point_id !== id) });
+              setPhotoLinks((current) => current.filter((link) =>
+                link.source_fingerprint !== active.source_fingerprint || link.analytical_point_id !== id));
+            }}>Снять предварительную привязку</button>
           </li>)}</ul>
+          {linkTargets.length > 0 && <fieldset className="sample-form media-import-links" disabled={pending || Boolean(exceptionPreview)}>
+            <legend>Привязать этот снимок к размещениям</legend>
+            {linkTargets.map(({ source_fingerprint, analytical_point_id, name }) => {
+              const photo_fingerprint = active.source_fingerprint;
+              const matches = (link) => link.photo_fingerprint === photo_fingerprint
+                && link.source_fingerprint === source_fingerprint && link.analytical_point_id === analytical_point_id;
+              return <label key={`${source_fingerprint}:${analytical_point_id}`}>
+                <input type="checkbox" checked={photoLinks.some(matches)} onChange={(event) => {
+                  const checked = event.target.checked;
+                  setPhotoLinks((current) => checked ? [...current, { photo_fingerprint, source_fingerprint, analytical_point_id }]
+                    : current.filter((link) => !matches(link)));
+                }} /> {name}
+              </label>;
+            })}
+          </fieldset>}
         </>}
       </section>
     </div>}

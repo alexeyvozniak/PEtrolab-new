@@ -629,7 +629,9 @@ export function App() {
           plan: async (assignments) => unwrap(await draftMediaImport(databasePath, assignments)),
           commit: async (plan, draftFingerprint) => unwrap(await commitMediaImport(databasePath, plan, draftFingerprint)),
         }} onCancel={() => setScreen("Изображения")} onDone={(result) => {
-          setSuccess(`Изображений импортировано: ${result.created_media_asset_count}. Привязок: ${result.spatial_annotation_count}.`);
+          const photoLinks = result.media_link_ids?.length || 0;
+          setSuccess(`Изображений импортировано: ${result.created_media_asset_count}. Привязок: ${result.spatial_annotation_count}.`
+            + (photoLinks ? ` Связей фото: ${photoLinks}.` : ""));
           setScreen("Изображения");
         }} />}
         {screen === "Статистика" && <StatisticsWorkspace selectedIds={selectedAnalysisIds}

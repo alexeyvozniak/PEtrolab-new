@@ -340,6 +340,36 @@ def _plan_fingerprint(plan: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _plan_media_links(plan_items, assignments):
+    placements = {
+        (item["source_fingerprint"], point["analytical_point_id"]): (item, point)
+        for item in plan_items for point in item["placements"]
+    }
+    links = []
+    for photo, assignment in zip(plan_items, assignments, strict=True):
+        references = assignment.get("attach_to_placements", [])
+        if not isinstance(references, list):
+            _fail("INVALID_ASSIGNMENT", "Media Link targets must be an array.")
+        seen = set()
+        for reference in references:
+            if not isinstance(reference, dict) or set(reference) != {"source_fingerprint", "analytical_point_id"}:
+                _fail("INVALID_ASSIGNMENT", "Media Link target fields are invalid.")
+            point_id = _uuid(reference["analytical_point_id"], "analytical_point_id")
+            fingerprint = _text(reference["source_fingerprint"], "source_fingerprint", 64)
+            target = placements.get((fingerprint, point_id))
+            if target is None:
+                _fail("MEDIA_LINK_UNAVAILABLE", "Целевая точка или область больше не входит в план импорта.")
+            parent, placement = target
+            if parent is photo or (parent["sample_name"], parent["thin_section_name"]) != (photo["sample_name"], photo["thin_section_name"]):
+                _fail("MEDIA_LINK_SCOPE", "Выберите точку или область на другом снимке того же шлифа.")
+            annotation_id = placement["spatial_annotation_id"]
+            if annotation_id in seen:
+                _fail("INVALID_ASSIGNMENT", "Фотография уже привязана к этому размещению в плане.")
+            seen.add(annotation_id)
+            links.append({"media_asset_id": photo["media_asset_id"], "spatial_annotation_id": annotation_id})
+    return links
+
+
 def create_media_import_plan(database_path: str | Path, assignments: Any) -> dict[str, Any]:
     if not isinstance(assignments, list) or not assignments:
         _fail("INVALID_ASSIGNMENT", "assignments must be a non-empty array.")
@@ -351,7 +381,7 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
         for assignment in assignments:
             required = {"source_path", "ownership_mode", "media_type", "sample_name", "thin_section_name", "placements"}
             if (not isinstance(assignment, dict) or not required <= set(assignment)
-                    or set(assignment) - required - {"expected_source_fingerprint", "sample_target"}):
+                    or set(assignment) - required - {"expected_source_fingerprint", "sample_target", "attach_to_placements"}):
                 _fail("INVALID_ASSIGNMENT", "Media assignment fields are invalid.")
             inspection = inspect_media_source(assignment["source_path"])
             if ("expected_source_fingerprint" in assignment
@@ -440,6 +470,8 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                 plan_items[-1]["sample_target"] = target
         plan = {"schema_version": 1, "semantic_fingerprint": "", "items": plan_items, "warnings": warnings,
                 "unplaced_points": _unplaced_points(connection, plan_items)}
+        if links := _plan_media_links(plan_items, assignments):
+            plan.update(schema_version=2, media_links=links)
         plan["semantic_fingerprint"] = _plan_fingerprint(plan)
         return plan
     finally:
@@ -509,10 +541,26 @@ def _ensure_sample_and_section(connection: sqlite3.Connection, sample_name: str,
 
 
 def _verify_media_plan_sources(plan, *, check_pixels=False):
-    if not isinstance(plan, dict) or plan.get("schema_version") != 1 or not isinstance(plan.get("items"), list) or not plan["items"]:
+    if not isinstance(plan, dict) or plan.get("schema_version") not in (1, 2) or not isinstance(plan.get("items"), list) or not plan["items"]:
         _fail("PLAN_SCHEMA_INCOMPATIBLE", "Media import plan is invalid.")
     if plan.get("semantic_fingerprint") != _plan_fingerprint(plan):
         _fail("PLAN_FINGERPRINT_MISMATCH", "Media import plan changed after review.")
+    links = plan.get("media_links")
+    if ((plan["schema_version"] == 1 and "media_links" in plan)
+            or (plan["schema_version"] == 2 and (not isinstance(links, list) or not links))):
+        _fail("PLAN_SCHEMA_INCOMPATIBLE", "Media Link list is invalid.")
+    if links:
+        assets = {item["media_asset_id"] for item in plan["items"]}
+        annotations = {point["spatial_annotation_id"] for item in plan["items"] for point in item["placements"]}
+        seen = set()
+        for link in links:
+            if not isinstance(link, dict) or set(link) != {"media_asset_id", "spatial_annotation_id"}:
+                _fail("PLAN_SCHEMA_INCOMPATIBLE", "Media Link fields are invalid.")
+            asset = _uuid(link["media_asset_id"], "media_asset_id")
+            annotation = _uuid(link["spatial_annotation_id"], "spatial_annotation_id")
+            if asset not in assets or annotation not in annotations or (asset, annotation) in seen:
+                _fail("PLAN_SCHEMA_INCOMPATIBLE", "Media Link target is duplicated or outside the import plan.")
+            seen.add((asset, annotation))
     for item in plan["items"]:
         current = inspect_media_source(item["source_path"])
         if current["source_fingerprint"] != item["source_fingerprint"] or current["width_px"] != item["width_px"] or current["height_px"] != item["height_px"]:
@@ -553,6 +601,8 @@ def save_media_import_draft(database_path, plan, expected_fingerprint=None):
 
 def apply_media_import_plan(database_path: str | Path, plan: Any, *, attach_to: str | None = None,
                             draft_fingerprint: str | None = None) -> dict[str, Any]:
+    from .media_links import attach_media
+
     _verify_media_plan_sources(plan, check_pixels=True)
     connection = open_project(database_path)
     copied: list[Path] = []
@@ -617,12 +667,13 @@ def apply_media_import_plan(database_path: str | Path, plan: Any, *, attach_to: 
                     )
                     annotation_count += 1
                 if attach_to is not None:
-                    from .media_links import attach_media
                     link_ids.append(attach_media(connection, attach_to, asset_id))
+            for link in plan.get("media_links", []):
+                link_ids.append(attach_media(connection, link["spatial_annotation_id"], link["media_asset_id"]))
             if draft_fingerprint is not None:
                 connection.execute("DELETE FROM media_import_draft WHERE singleton = 1 AND fingerprint = ?", (draft_fingerprint,))
         return {"media_import_batch_id": batch_id, "created_media_asset_count": created_assets, "reused_media_asset_count": reused_assets, "spatial_annotation_count": annotation_count,
-                "warnings": plan.get("warnings", []), **({"media_link_ids": link_ids} if attach_to is not None else {})}
+                "warnings": plan.get("warnings", []), **({"media_link_ids": link_ids} if link_ids else {})}
     except Exception:
         for path in copied:
             path.unlink(missing_ok=True)
