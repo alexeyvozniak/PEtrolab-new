@@ -3,7 +3,13 @@
 import argparse
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
+import sqlite3
+import subprocess
+import sys
+from contextlib import closing
+from tempfile import TemporaryDirectory
 from uuid import uuid4
 from zipfile import ZipFile
 
@@ -65,15 +71,63 @@ def verify(executable, database, state_file):
             raise AssertionError(f"Upgrade changed a managed source: {managed.name}")
 
 
+def verify_historical(executable, historical_source):
+    historical_source = historical_source.resolve(strict=True)
+    with TemporaryDirectory(prefix="petrolab-historical-") as directory:
+        root = Path(directory)
+        database = root / "project.sqlite"
+        source = root / "source.csv"
+        original_source = b"Analysis,SiO2 (wt.%),Al2O3 (wt.%)\nA1,40,21\nA2,41,22\nA3,42,23\nA4,43,24\n"
+        source.write_bytes(original_source)
+        subprocess.run([sys.executable, "-c", """
+import sys
+from petrolab.desktop_workflow import suggest_import_recipe
+from petrolab.import_apply import apply_import_plan
+database, source = sys.argv[1:]
+apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
+""", str(database), str(source)], cwd=historical_source,
+            env={**os.environ, "PYTHONPATH": str(historical_source / "src")}, check=True, timeout=60)
+
+        def read_project(path):
+            with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+                if connection.execute("PRAGMA integrity_check").fetchone() != ("ok",):
+                    raise AssertionError(f"SQLite integrity check failed: {path.name}")
+                version = connection.execute("SELECT MAX(version) FROM schema_migration").fetchone()[0]
+                rows = connection.execute("""
+                    SELECT a.analysis_id, a.identity_json, a.source_id, a.sheet_name, a.source_row_number,
+                           m.measurement_id, m.canonical_field, m.raw_token, m.unit, m.source_cell
+                    FROM analysis a JOIN measurement m USING (analysis_id)
+                    ORDER BY a.analysis_id, m.measurement_id
+                """).fetchall()
+                return version, rows
+
+        old_version, old_rows = read_project(database)
+        if old_version != 8 or len(old_rows) != 8:
+            raise AssertionError("The historical 0.1.6 source did not produce the expected schema and measurements")
+        result = run(executable, [request("project.analyses.list", {"project_database_path": str(database)})])[0]["result"]
+        new_version, new_rows = read_project(database)
+        if result["total"] != 4 or new_version <= old_version or new_rows != old_rows:
+            raise AssertionError("The installed candidate changed or lost historical analyses")
+        backups = list(root.glob("project.sqlite.before-v9-*.bak"))
+        if len(backups) != 1 or read_project(backups[0]) != (old_version, old_rows) or source.read_bytes() != original_source:
+            raise AssertionError("The historical database backup or original source was not preserved")
+    print("The candidate migrated a historical 0.1.6 project and preserved its measurements and backup.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("seed", "verify"))
+    parser.add_argument("action", choices=("seed", "verify", "historical"))
     parser.add_argument("executable", type=Path)
     parser.add_argument("database", type=Path)
-    parser.add_argument("state", type=Path)
+    parser.add_argument("state", type=Path, nargs="?")
     args = parser.parse_args()
-    action = seed if args.action == "seed" else verify
-    action(args.executable, args.database, args.state)
+    if args.action == "historical":
+        verify_historical(args.executable, args.database)
+    else:
+        if args.state is None:
+            parser.error("seed and verify require the state file")
+        action = seed if args.action == "seed" else verify
+        action(args.executable, args.database, args.state)
 
 
 if __name__ == "__main__":

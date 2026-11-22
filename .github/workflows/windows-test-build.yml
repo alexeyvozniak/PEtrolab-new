@@ -103,10 +103,17 @@ jobs:
           npm run tauri -- build --bundles msi --config $override
           $baseline = "src-tauri/target/release/bundle/msi/PetroLab_${baselineVersion}_x64_en-US.msi"
           Move-Item -LiteralPath $baseline -Destination (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi")
+      - name: Fetch the historical 0.1.6 source for migration acceptance
+        if: matrix.installer-check == 'upgrade'
+        uses: actions/checkout@v4
+        with:
+          ref: 14b29fb0cfe7832a633059973f12a980fe7539b4
+          path: historical-source
+          persist-credentials: false
       - name: Verify upgrade preserves the project and uninstall retains it
         if: matrix.installer-check == 'upgrade'
         shell: pwsh
-        run: ./scripts/smoke_windows_installer.ps1 -BaselineMsi (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi")
+        run: ./scripts/smoke_windows_installer.ps1 -BaselineMsi (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi") -HistoricalSource historical-source
       - name: Upload test installer
         if: matrix.installer-check == 'clean'
         uses: actions/upload-artifact@v4

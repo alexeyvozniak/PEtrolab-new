@@ -264,6 +264,8 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(workflow, /installer-check: \[clean, upgrade\]/);
   assert.match(workflow, /smoke_windows_installer\.ps1 -BaselineMsi/);
   assert.match(smoke, /qa_installer_project\.py"\) verify/);
+  assert.match(workflow, /-HistoricalSource historical-source/);
+  assert.match(smoke, /qa_installer_project\.py"\) historical/);
   assert.match(smoke, /Uninstall removed persistent project data/);
   assert.match(workflow, /npm run test:ui/);
   assert.match(smoke, /msiexec\.exe/);

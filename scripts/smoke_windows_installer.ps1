@@ -1,6 +1,7 @@
 param(
     [string]$BundleRoot = "desktop/src-tauri/target/release/bundle",
-    [string]$BaselineMsi
+    [string]$BaselineMsi,
+    [string]$HistoricalSource
 )
 
 $ErrorActionPreference = "Stop"
@@ -116,6 +117,11 @@ try {
     if ($baselinePath) {
         & python (Join-Path $PSScriptRoot "qa_installer_project.py") verify $installedService $database $upgradeState
         if ($LASTEXITCODE -ne 0) { throw "The upgrade changed or lost the baseline project." }
+    }
+
+    if ($HistoricalSource) {
+        & python (Join-Path $PSScriptRoot "qa_installer_project.py") historical $installedService $HistoricalSource
+        if ($LASTEXITCODE -ne 0) { throw "The installed candidate did not safely migrate the historical project." }
     }
 
     Write-Host "Launching $($appExecutable.FullName)"
