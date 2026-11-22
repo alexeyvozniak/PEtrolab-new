@@ -1,0 +1,21 @@
+{
+  "scenario": "AT-24",
+  "build": "8c911d5",
+  "imageIds": [
+    "c077a2f0-7c44-4813-b484-493111eb18c5",
+    "67ae124e-b27f-4712-861b-94584b1c27f6",
+    "465d7005-ac9e-4506-af34-b054a04c8c5e"
+  ],
+  "sourceSha256": [
+    "951b7590b7553a9aa1719c86608d415301183bc95c0a313674c390ea91481edb",
+    "9d7faad556860f5fc8fe20e21121d53f1d6a48119a8a746499e1030164d9df1b",
+    "82152a89d0b671471489da43382ae5142645f17f07e6ca45cedc5c6f7f603624"
+  ],
+  "placementIds": [
+    "2bb25bcc-a5c7-42ec-a666-9964206df191",
+    "71006758-2114-429d-adb6-dc0ffa0b5f7b"
+  ],
+  "unplacedPointId": "7c2a85d0-e806-45e6-8faa-bfa52a462aef",
+  "sourceBytesUnchanged": true,
+  "analysesUnchanged": true
+}
