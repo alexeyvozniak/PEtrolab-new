@@ -381,6 +381,34 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(len(result["items"]), 2)
             self.assertEqual(len(result["duplicate_groups"]), 1)
 
+    def test_export_legend_and_scale_do_not_cover_selected_annotations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            database, point, _ = self._project_with_points(folder)
+            source = folder / "outcrop.png"
+            Image.new("RGB", (720, 480), "#34423b").save(source)
+            source_bytes = source.read_bytes()
+            assignment = self._assignment(source, point["analytical_point_id"])
+            assignment["placements"][0]["geometry"] = {"kind": "point", "x_px": 40, "y_px": 445}
+            plan = create_media_import_plan(database, [assignment])
+            apply_media_import_plan(database, plan)
+            asset_id = plan["items"][0]["media_asset_id"]
+            area = create_media_region(database, asset_id,
+                                       {"kind": "rectangle", "x_px": 100, "y_px": 408, "width_px": 55, "height_px": 46})
+            plain = str(folder / "annotations.png")
+            decorated = str(folder / "annotations-and-key.png")
+            settings = {"points": True, "regions": True, "labels": True}
+            export_media_rendered(database, asset_id, plain, settings)
+            result = export_media_rendered(database, asset_id, decorated, {**settings, "legend": True, "scale_bar": True})
+            with Image.open(plain) as expected, Image.open(decorated) as actual:
+                self.assertEqual(actual.width, expected.width)
+                self.assertGreater(actual.height, expected.height)
+                self.assertEqual(actual.crop((0, 0, *expected.size)).tobytes(), expected.tobytes())
+            self.assertEqual(result["rendered_legend"], {"points": 1, "regions": 1})
+            self.assertEqual(result["rendered_scale"], {"pixels": 180, "length": 180, "unit": "px"})
+            self.assertIn(area["spatial_annotation_id"], result["annotation_ids"])
+            self.assertEqual(source.read_bytes(), source_bytes)
+
     def test_preview_and_original_export_preserve_bytes_and_require_current_fingerprint(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             directory = Path(directory_name)

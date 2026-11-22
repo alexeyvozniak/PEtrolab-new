@@ -151,7 +151,7 @@ def _export_scale(rendered, calibration):
     return {"pixels": pixels, "length": distance, "unit": calibration["unit"]}
 
 
-def _draw_export_key(rendered, font, line, scale, legend):
+def _draw_export_key(rendered, font, line, scale, legend, protected_bounds):
     if not scale and legend is None:
         return rendered
     draw = ImageDraw.Draw(rendered)
@@ -173,9 +173,13 @@ def _draw_export_key(rendered, font, line, scale, legend):
         widths.append(max(scale["pixels"], float(draw.textlength(scale_label, font=font))))
     panel_width = math.ceil(max(widths)) + 2 * padding
     panel_height = len(legend_rows) * row_height + 2 * padding + (row_height + marker + padding if scale else 0)
-    if panel_width + 2 * padding <= rendered.width and panel_height * 2 <= rendered.height:
-        left, top = padding, rendered.height - panel_height - padding
-    else:
+    left, top = padding, rendered.height - panel_height - padding
+    right, bottom = left + panel_width - 1, top + panel_height - 1
+    overlaps_annotation = any(
+        x0 <= right and x1 >= left and y0 <= bottom and y1 >= top
+        for x0, y0, x1, y1 in protected_bounds
+    )
+    if panel_width + 2 * padding > rendered.width or panel_height * 2 > rendered.height or overlaps_annotation:
         left, top = 0, rendered.height
         extended = Image.new("RGB", (max(rendered.width, panel_width), rendered.height + panel_height), "#16231b")
         extended.paste(rendered, (0, 0))
@@ -241,24 +245,28 @@ def export_media_rendered(database_path, media_id, output_path, options):
                 break
             except OSError:
                 continue
+        protected_bounds = []
         for item in annotations:
             x, y = item["x_px"], item["y_px"]
             if item["geometry_kind"] == "point":
-                draw.ellipse((x - radius, y - radius, x + radius, y + radius),
-                             outline="#a5edaf", width=line)
+                bounds = (x - radius, y - radius, x + radius, y + radius)
+                draw.ellipse(bounds, outline="#a5edaf", width=line)
             else:
-                draw.rectangle((x, y, x + item["width_px"], y + item["height_px"]),
-                               outline="#a5edaf", width=line)
+                bounds = (x, y, x + item["width_px"], y + item["height_px"])
+                draw.rectangle(bounds, outline="#a5edaf", width=line)
+            protected_bounds.append(bounds)
             label = item["point_name"] or item["label"]
             if options["labels"] and label:
-                draw.text((x + 2 * radius, y), label, font=font, fill="#ffffff",
+                position = (x + 2 * radius, y)
+                draw.text(position, label, font=font, fill="#ffffff",
                           stroke_width=line, stroke_fill="#152318")
+                protected_bounds.append(draw.textbbox(position, label, font=font, stroke_width=line))
         scale = _export_scale(rendered, options.get("calibration")) if options.get("scale_bar") else None
         legend = None
         if options.get("legend"):
             count = sum(item["geometry_kind"] == "point" for item in annotations)
             legend = {"points": count, "regions": len(annotations) - count}
-        rendered = _draw_export_key(rendered, font, line, scale, legend)
+        rendered = _draw_export_key(rendered, font, line, scale, legend, protected_bounds)
         manifest = {
             "version": 1, "media_asset_id": media_id, "source_sha256": asset["source_fingerprint_sha256"],
             "annotation_ids": [item["spatial_annotation_id"] for item in annotations], "options": options,

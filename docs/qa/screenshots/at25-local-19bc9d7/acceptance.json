@@ -1,0 +1,71 @@
+{
+  "scenario": "AT-25",
+  "build": "19bc9d7",
+  "sampleId": "91482091-b0df-42a5-a439-e12e0e3b7dbb",
+  "originalUnchanged": true,
+  "sampleAndMeasurementsUnchanged": true,
+  "originalSha256": "951b7590b7553a9aa1719c86608d415301183bc95c0a313674c390ea91481edb",
+  "withoutMarkup": {
+    "meta": {
+      "version": 2,
+      "media_asset_id": "0f6ed7aa-0937-40c7-bad2-e2063a1cb356",
+      "source_sha256": "9d7faad556860f5fc8fe20e21121d53f1d6a48119a8a746499e1030164d9df1b",
+      "annotation_ids": [],
+      "options": {
+        "annotation_ids": [],
+        "labels": true,
+        "legend": true,
+        "points": true,
+        "regions": true,
+        "scale_bar": true
+      },
+      "rendered_scale": {
+        "pixels": 180,
+        "length": 180,
+        "unit": "px"
+      },
+      "rendered_legend": {
+        "points": 0,
+        "regions": 0
+      }
+    },
+    "overlay": true
+  },
+  "withMarkup": {
+    "meta": {
+      "version": 2,
+      "media_asset_id": "53f410d4-461d-453a-88de-f218e032b06a",
+      "source_sha256": "951b7590b7553a9aa1719c86608d415301183bc95c0a313674c390ea91481edb",
+      "annotation_ids": [
+        "bd0fe7f5-472f-4f84-ae0f-1cae88424c89",
+        "d3eacf15-eb0c-4318-87ab-8c589c0e85ce"
+      ],
+      "options": {
+        "annotation_ids": [
+          "bd0fe7f5-472f-4f84-ae0f-1cae88424c89",
+          "d3eacf15-eb0c-4318-87ab-8c589c0e85ce"
+        ],
+        "calibration": {
+          "reference_length": 100,
+          "reference_pixels": 240,
+          "unit": "µm"
+        },
+        "labels": true,
+        "legend": true,
+        "points": true,
+        "regions": true,
+        "scale_bar": true
+      },
+      "rendered_scale": {
+        "pixels": 180,
+        "length": 75,
+        "unit": "µm"
+      },
+      "rendered_legend": {
+        "points": 1,
+        "regions": 1
+      }
+    },
+    "overlay": true
+  }
+}
