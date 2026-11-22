@@ -1,0 +1,138 @@
+{
+  "scenarios": [
+    "AT-01",
+    "AT-06",
+    "AT-07",
+    "AT-09"
+  ],
+  "selected": [
+    {
+      "label": "P2",
+      "analysisId": "db5327e0-7ff2-4a30-b805-fbaf9be47fea"
+    },
+    {
+      "label": "P6",
+      "analysisId": "a0365487-9bb3-477d-a32b-dbc4066eabf8"
+    },
+    {
+      "label": "P4",
+      "analysisId": "609cedf3-3e95-4213-a434-c17e57019f18"
+    },
+    {
+      "label": "P1",
+      "analysisId": "e52a220c-dbc3-4b53-8c77-b568a17f120a"
+    },
+    {
+      "label": "P7",
+      "analysisId": "83d4b2ac-bbb1-473b-8439-f8bb08d0c496"
+    }
+  ],
+  "workGroup": {
+    "id": "1798250e-ef98-4174-a96f-59693222c4af",
+    "project_id": "f36fb9bc-754b-46a0-8e6a-4bb600a3098a",
+    "name": "AT-14 рабочая группа",
+    "description": "",
+    "created_by": "QA",
+    "created_at": "2026-11-22T15:51:59Z",
+    "analysis_ids": [
+      "db5327e0-7ff2-4a30-b805-fbaf9be47fea",
+      "a0365487-9bb3-477d-a32b-dbc4066eabf8",
+      "609cedf3-3e95-4213-a434-c17e57019f18",
+      "e52a220c-dbc3-4b53-8c77-b568a17f120a",
+      "83d4b2ac-bbb1-473b-8439-f8bb08d0c496"
+    ],
+    "revision": 1
+  },
+  "plotSpecification": {
+    "id": "c6cbf2e2-d670-4bde-9e2f-53250d8fd0bd",
+    "project_id": "f36fb9bc-754b-46a0-8e6a-4bb600a3098a",
+    "name": "AT-14 две диаграммы",
+    "schema_version": 1,
+    "input": {
+      "kind": "analysis_snapshot",
+      "analysis_ids": [
+        "db5327e0-7ff2-4a30-b805-fbaf9be47fea",
+        "a0365487-9bb3-477d-a32b-dbc4066eabf8",
+        "609cedf3-3e95-4213-a434-c17e57019f18",
+        "e52a220c-dbc3-4b53-8c77-b568a17f120a",
+        "83d4b2ac-bbb1-473b-8439-f8bb08d0c496"
+      ]
+    },
+    "panels": [
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "MgO",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "114ff2a5-74a8-4e0c-8db9-6024860747b8",
+        "kind": "binary",
+        "title": "Al2O3 / MgO",
+        "normalization": null
+      },
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "MgO",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "SiO2",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "512ac891-9235-4609-a5db-dfc81e0efcae",
+        "kind": "ternary",
+        "title": "Al2O3 / MgO / SiO2",
+        "normalization": "sum_of_three_components"
+      }
+    ],
+    "legend": {
+      "group_by": "source",
+      "entries": [
+        {
+          "value": "03fd7c21-f383-48ea-a29b-b24ac222fbd2",
+          "label": "at14-analyses.csv",
+          "color": "#3b70a0",
+          "symbol": "circle"
+        }
+      ]
+    },
+    "filters": [],
+    "layers": [],
+    "hidden_analysis_ids": [],
+    "hidden_source_ids": [],
+    "created_at": "2026-11-22T15:51:59Z",
+    "updated_at": "2026-11-22T15:51:59Z"
+  },
+  "sourceSha256": "2c55fd1324c5b927772e7c6074b2a8c10a1a7224fdd0ee46f6af5c32fb3d1e0c"
+}

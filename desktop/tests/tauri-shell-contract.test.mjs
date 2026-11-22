@@ -260,6 +260,9 @@ test("Windows release gate installs and launches the packaged application", asyn
   const smoke = await read("../scripts/smoke_windows_installer.ps1");
   const uiSmoke = await read("tests/import-ui.e2e.test.jsx");
   assert.match(workflow, /Install and launch packaged Windows app/);
+  assert.match(workflow, /smoke_windows_installer\.ps1 -UiEvidence/);
+  assert.match(workflow, /petrolab-at14\/acceptance\.json/);
+  assert.match(smoke, /qa_installer_ui\.mjs"\) \$appExecutable\.FullName \$UiEvidence/);
   assert.match(workflow, /smoke_windows_installer\.ps1/);
   assert.match(workflow, /upgrade:\s+name: Verify upgrade with the clean-tested MSI\s+needs: build/);
   assert.match(workflow, /smoke_windows_installer\.ps1 -BundleRoot .* -BaselineMsi/);

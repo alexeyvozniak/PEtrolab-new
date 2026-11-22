@@ -1,7 +1,8 @@
 param(
     [string]$BundleRoot = "desktop/src-tauri/target/release/bundle",
     [string]$BaselineMsi,
-    [string]$HistoricalSource
+    [string]$HistoricalSource,
+    [string]$UiEvidence
 )
 
 $ErrorActionPreference = "Stop"
@@ -184,6 +185,11 @@ try {
             throw "Installed scientific service stayed active after closing PetroLab."
         }
         Start-Sleep -Milliseconds 250
+    }
+
+    if ($UiEvidence) {
+        & node (Join-Path $PSScriptRoot "qa_installer_ui.mjs") $appExecutable.FullName $UiEvidence
+        if ($LASTEXITCODE -ne 0) { throw "Installed PetroLab failed the AT-14 native workflow." }
     }
 
     $beforeUninstall = (Get-FileHash -Algorithm SHA256 -LiteralPath $database).Hash
