@@ -1,0 +1,31 @@
+{
+  "test": "AT-36",
+  "inputRows": 502,
+  "ids": [
+    "6946b174-466e-4799-806f-9e6181faed18",
+    "b75d32cd-8dfb-4f36-b709-ad38c2d9a0d1",
+    "1c6281b3-68f6-43e0-8a77-5cd9667dbaff",
+    "ce5b48d9-3125-451c-87b3-02b6c1f21e06",
+    "771e6c2f-eddd-42f9-8361-bee3449da70b",
+    "6e89d7ae-39e0-4846-9cdb-a173cef98e73",
+    "c9bf8dbe-bf4e-46d9-8268-b16a8bfa7fc8",
+    "eef70391-4570-4435-8009-9bcea8fbef44",
+    "9994d3f9-021e-4940-ab11-5bebdc4547d0",
+    "eb09cd94-e77e-4263-b2ff-915bccabe6e7",
+    "94040fb0-cd22-4460-8595-ca1f981ef6c6",
+    "f4654a58-dd2c-4233-97f9-009923d90af9",
+    "9405cc47-09db-482c-9415-dcd036f65255",
+    "c727d259-5928-4e71-819b-111c6d99c9f3",
+    "4276aeff-2214-4ef5-94fc-1236a3509f26",
+    "a87207ee-e53b-4d45-90e5-fa65d1c02ed2",
+    "02ce4d1e-d364-4164-bfd7-a2f31bbb7835"
+  ],
+  "sourceSha256": "2d7334a3bf175a9a339345b5fecbccc44206024f424ccef664d844f8d759a755",
+  "xlsxSha256": "a404903fb4abf2143fe223e5b6cb8eebf85e45a13098c04ef2cc13b62722e84a",
+  "measurementsPreserved": true,
+  "filterAndSelectionPreserved": true,
+  "workGroupPreserved": true,
+  "plotVisibilityPreserved": true,
+  "tableViewPreserved": true,
+  "build": "3355daa"
+}
