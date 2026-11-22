@@ -1,0 +1,45 @@
+{
+  "scenario": "AT-24",
+  "build": "19bc9d7",
+  "photo": "b578f663-ebb4-4e9e-a65e-957c215bbc99",
+  "links": [
+    {
+      "media_link_id": "0c3c1b76-ef1d-4813-ba94-8ed0a5903c11",
+      "spatial_annotation_id": "1b36bbd5-7b50-4d2b-a58d-8a91d24ea30d",
+      "media_asset_id": "b578f663-ebb4-4e9e-a65e-957c215bbc99",
+      "display_name": "KIV-2-A_PPL.png",
+      "media_type": "PPL",
+      "width_px": 720,
+      "height_px": 480,
+      "created_at": "2026-11-22T23:42:12Z"
+    },
+    {
+      "media_link_id": "ee8ae3fe-0119-47ea-b0b0-795f6359d42b",
+      "spatial_annotation_id": "e7bedfaa-ab75-4cf6-9eff-a0c84e1d28c3",
+      "media_asset_id": "b578f663-ebb4-4e9e-a65e-957c215bbc99",
+      "display_name": "KIV-2-A_PPL.png",
+      "media_type": "PPL",
+      "width_px": 720,
+      "height_px": 480,
+      "created_at": "2026-11-22T23:42:12Z"
+    }
+  ],
+  "sourceSha256": [
+    "951b7590b7553a9aa1719c86608d415301183bc95c0a313674c390ea91481edb",
+    "9d7faad556860f5fc8fe20e21121d53f1d6a48119a8a746499e1030164d9df1b",
+    "82152a89d0b671471489da43382ae5142645f17f07e6ca45cedc5c6f7f603624"
+  ],
+  "draftRestoredAfterRestart": true,
+  "bothLinksVisibleAfterRestart": true,
+  "analysesUnchanged": true,
+  "sourceBytesUnchanged": true,
+  "unplaced": [
+    {
+      "analytical_point_id": "70ce5a5c-25d0-4d6b-8957-20e6f2dc33bd",
+      "point_name": "P-08",
+      "sample_name": "KIV-2",
+      "thin_section_name": "KIV-2-A"
+    }
+  ],
+  "exception": "Изображение охватывает другой образец"
+}
