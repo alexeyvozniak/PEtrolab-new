@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict
+from contextlib import closing
 from decimal import Decimal, InvalidOperation
 import hashlib
 import math
@@ -627,19 +628,47 @@ def list_project_mineral_identifications(database_path: str | Path, limit: int =
     projection = list_project_analyses(database_path, limit, offset)
     from .mineral_verification import verify_record
 
+    scope = json.dumps([analysis["analysis_id"] for analysis in projection["analyses"]])
+    with closing(open_project(database_path)) as connection:
+        connection.execute("BEGIN")
+        semantics = {row["analysis_id"]: row for row in connection.execute("""
+            SELECT analysis_id, reported_mineral_json, mineral_assignment_json, mineral_verification_json
+            FROM analysis_import_semantics WHERE analysis_id IN (SELECT value FROM json_each(?))
+        """, (scope,))}
+        measurements = defaultdict(list)
+        # Use the original import field names and write order so an existing
+        # acceptance is checked against exactly the evidence it approved.
+        for row in connection.execute("""
+            SELECT analysis_id, canonical_field AS field, unit, raw_token, qualifier, detection_limit,
+                   value_status, reported_fe_form, fe_handling, source_column_name AS source_header,
+                   source_column_index, source_row_number AS physical_source_row_number,
+                   physical_source_column_index, source_cell, measurement_set, method
+            FROM measurement WHERE analysis_id IN (SELECT value FROM json_each(?)) ORDER BY rowid
+        """, (scope,)):
+            evidence = dict(row)
+            measurements[evidence.pop("analysis_id")].append(evidence)
+
     identifications: list[dict[str, Any]] = []
     for analysis in projection["analyses"]:
-        reported = analysis.get("reported_mineral")
-        if not reported:
+        analysis_id = analysis["analysis_id"]
+        stored = semantics.get(analysis_id)
+        reported = json.loads(stored["reported_mineral_json"] or "null") if stored else None
+        assignment = json.loads(stored["mineral_assignment_json"] or "null") if stored else None
+        saved_review = json.loads(stored["mineral_verification_json"] or "null") if stored else None
+        accepted = (saved_review or {}).get("accepted")
+        if not reported and accepted is None:
             for field, value in analysis.get("source_metadata", {}).items():
                 if str(field).split(" · ", 1)[0].casefold() == "mineral" and value not in (None, ""):
                     reported = {"value": value, "origin": "source_metadata"}
                     break
         verification = verify_record({
-            "preview_id": analysis["analysis_id"],
-            "measurements": analysis.get("measurement_list", []),
+            "preview_id": analysis_id,
+            "measurements": measurements[analysis_id],
             "reported_mineral": reported,
-        }, accepted=analysis.get("mineral_assignment"))
+            "mineral_assignment": assignment,
+        }, accepted=accepted)
+        if accepted is not None and verification["accepted"] is None:
+            verification.update(status="stale", previous_acceptance=accepted)
         identifications.append({
             "analysis_id": analysis["analysis_id"],
             "source_id": analysis["source_id"],

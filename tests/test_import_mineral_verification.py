@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from petrolab.desktop_workflow import list_project_analyses, list_project_mineral_identifications
 from petrolab.import_workspace import ImportWorkspaceStore
 from petrolab.import_preview import ImportCommandError
 from petrolab.import_apply import apply_import_plan, open_project
@@ -59,6 +61,16 @@ class ImportMineralVerificationTests(unittest.TestCase):
             self.assertEqual(json.loads(values[0][1])['accepted']['target'], 'olivine')
             self.assertEqual(json.loads(values[1][0])['value'], 'garnet')
             self.assertIsNone(json.loads(values[1][1])['accepted'])
+        reopened = list_project_mineral_identifications(database)
+        self.assertEqual([row['status'] for row in reopened['identifications']], ['verified', 'conflict', 'missing_reported'])
+        self.assertEqual(reopened['identifications'][0]['accepted'], records[0]['mineral_verification']['accepted'])
+        with patch('petrolab.mineral_verification.EXTENDED_RULESET_VERSION', 'qa-next-ruleset'):
+            reviewed = list_project_mineral_identifications(database)['identifications'][0]
+        self.assertEqual(reviewed['status'], 'stale')
+        self.assertIsNone(reviewed['accepted'])
+        self.assertEqual(reviewed['previous_acceptance'], reopened['identifications'][0]['accepted'])
+        self.assertIn('accepted_assignment_stale', reviewed['issues'])
+        self.assertEqual(list_project_mineral_identifications(database), reopened)
         self.assertEqual(self.path.read_bytes(), self.original)
 
     def test_missing_censored_wrong_units_and_iron_are_not_zero(self):
@@ -71,6 +83,51 @@ class ImportMineralVerificationTests(unittest.TestCase):
             self.assertEqual(result['status'], 'insufficient_input')
             self.assertIsNone(result['prediction'])
         self.assertEqual(self.path.read_bytes(), self.original)
+
+    def test_published_epma_rows_keep_phase_labels_and_unresolved_cases(self):
+        fixtures = Path(__file__).resolve().parents[1] / 'fixtures/import/mineral-recognition'
+        expected = {
+            'bec-dovaga.csv': [('olivine', 'high', 'consistent'), ('olivine', 'high', 'consistent')],
+            'mount-agri.csv': [('orthopyroxene', 'medium', 'low_confidence'),
+                               ('orthopyroxene', 'medium', 'low_confidence'),
+                               ('clinopyroxene', 'medium', 'low_confidence')],
+            'epma-averages.csv': [('plagioclase', 'high', 'consistent'),
+                                  (None, 'ambiguous', 'low_confidence'),
+                                  ('Ti-rich calcic amphibole', 'medium', 'low_confidence'),
+                                  (None, 'unresolved', 'insufficient_input')],
+        }
+        for name, target_cases in expected.items():
+            with self.subTest(source=name):
+                fixture = fixtures / name
+                source = Path(self.temp.name) / name
+                original = fixture.read_bytes()
+                source.write_bytes(original)
+                self.current = self.store.command('create', {'sources': [{'staged_path': str(source)}]})
+                self.decide(kind='verify_minerals')
+                reviewed = self.current['active']['plan']['planned_records']
+                outcomes = [record['mineral_verification'] for record in reviewed]
+                self.assertEqual([(r['prediction'], r['confidence'], r['status']) for r in outcomes], target_cases)
+                self.assertTrue(all(r['accepted'] is None for r in outcomes))
+                if name == 'epma-averages.csv':
+                    self.assertEqual({r['target'] for r in outcomes[1]['candidates']}, {'clinopyroxene', 'calcic amphibole'})
+                    with self.assertRaises(ImportCommandError) as error:
+                        self.decide(kind='accept_mineral', preview_id=reviewed[1]['preview_id'])
+                    self.assertEqual(error.exception.code, 'MINERAL_UNRESOLVED')
+                    self.decide(kind='accept_mineral', scope_id=self.current['active']['mineral_acceptance_scopes'][0]['scope_id'])
+
+                database = source.with_suffix('.sqlite')
+                apply_import_plan(database, source, self.current['active']['recipe'])
+                saved = list_project_mineral_identifications(database)['identifications']
+                self.assertEqual([row['reported_mineral'] for row in saved], [row['reported_mineral'] for row in outcomes])
+                if name == 'epma-averages.csv':
+                    self.assertEqual(saved[0]['accepted']['target'], 'plagioclase')
+                    self.assertEqual([r['status'] for r in saved], ['verified', 'low_confidence', 'low_confidence', 'insufficient_input'])
+                    row = list_project_analyses(database)['analyses'][-1]
+                    self.assertEqual(row['measurements']['K2O']['raw_token'], 'bdl')
+                    self.assertIsNone(row['measurements']['K2O']['numeric_value'])
+                    self.assertEqual(row['measurements']['FeOt']['raw_token'], '7.22')
+                    self.assertEqual(row['measurements']['FeOt']['source_cell'], 'J5')
+                self.assertEqual(source.read_bytes(), original)
 
     def test_accepted_assignment_is_invalidated_by_changed_evidence(self):
         self.decide(kind='verify_minerals')

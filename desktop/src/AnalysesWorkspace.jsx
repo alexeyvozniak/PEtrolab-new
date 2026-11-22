@@ -32,6 +32,7 @@ function columnId(kind, field) {
 const MINERAL_STATUS_LABELS = {
   consistent: "совпадает",
   verified: "принято",
+  stale: "нужно перепроверить",
   conflict: "конфликт",
   missing_reported: "нет названия",
   low_confidence: "неоднозначно",
@@ -56,7 +57,7 @@ function confidenceLabel(value) {
 function reportedMineral(analysis) {
   const value = analysis.reported_mineral;
   if (value && typeof value === "object") return value.value || "";
-  return value || analysis.source_metadata?.Mineral || "";
+  return value || analysis.mineral_verification?.reported_mineral || analysis.source_metadata?.Mineral || "";
 }
 
 function mineralLabel(analysis) {
@@ -170,6 +171,8 @@ function AnalysisMineralReview({ analysis }) {
       <div><dt>В источнике</dt><dd>{reported || "Не указан"}</dd></div>
       <div><dt>Предложение</dt><dd>{verification.prediction || "Не определено"} · {confidenceLabel(verification.confidence)}</dd></div>
       <div><dt>Принято</dt><dd>{verification.accepted?.target || "Не принято"}</dd></div>
+      {verification.previous_acceptance && <div><dt>Ранее принято</dt><dd>{verification.previous_acceptance.target}
+        {` · правила ${verification.previous_acceptance.ruleset_version}`}</dd></div>}
     </dl>
     {(verification.candidates || []).length > 0 && <div className="analysis-mineral-candidates">
       <b>Кандидаты</b>
@@ -663,7 +666,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setS
             {mineralReviewedCount === 0
               ? "Проверка минералов ожидает данных"
               : mineralAttentionCount
-                ? `${mineralAttentionCount} требуют проверки`
+                ? `Нужно проверить · ${mineralAttentionCount}`
                 : "Все загруженные минералы проверены"}
           </span>
           <details className="analysis-columns-menu">

@@ -950,7 +950,7 @@ test("real Python mineral review separates conflicts and persists only explicit 
   const raw = await readFile(second, "utf8");
   queue = [second];
   const user = userEvent.setup();
-  render(<App />);
+  const app = render(<App />);
   await user.click(await enabledButton("Выбрать файл"));
   await user.click(await enabledButton("2 · Проверить минералы"));
   await screen.findByText("Расхождение с источником");
@@ -959,6 +959,17 @@ test("real Python mineral review separates conflicts and persists only explicit 
   await user.click(screen.getByLabelText("Показать все результаты"));
   await waitFor(() => expect(screen.getAllByText("Принято пользователем")).toHaveLength(2));
   expect(screen.getAllByText("garnet").length).toBeGreaterThan(0);
+  await user.click(await enabledButton(/^(Импортировать таблицу|Сохранить импорт в проект)$/));
+  await screen.findByRole("heading", { name: "Анализы" });
+  app.unmount();
+  render(<App />);
+  await user.click(await enabledButton("Анализы"));
+  const table = within(await screen.findByRole("table"));
+  await user.click(table.getByText("B2", { exact: true }));
+  const detail = (await screen.findByRole("heading", { name: "Идентификация минерала" })).closest("section");
+  expect(within(detail).getByText("принято", { exact: true })).toBeTruthy();
+  expect(within(detail).getByText("В источнике", { exact: true }).nextElementSibling.textContent).toBe("garnet");
+  expect(within(detail).getByText("Принято", { exact: true }).nextElementSibling.textContent).toBe("olivine");
   expect(await readFile(second, "utf8")).toBe(raw);
 }, 20000);
 

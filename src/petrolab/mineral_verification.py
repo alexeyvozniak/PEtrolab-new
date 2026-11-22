@@ -32,8 +32,6 @@ def fingerprint(value):
 
 def verify_record(record, accepted=None):
     evidence = record.get('measurements') or []
-    if accepted is None and isinstance(record.get('mineral_assignment'), dict):
-        accepted = record.get('mineral_assignment')
     inputs = {}
     problems = []
     for measurement in evidence:
