@@ -220,7 +220,7 @@ class MediaImportTests(unittest.TestCase):
                 with self.assertRaises(ImportCommandError) as error:
                     attempt()
                 self.assertEqual(error.exception.code, "MEDIA_UNREADABLE")
-                self.assertEqual(error.exception.details["path"], str(damaged))
+                self.assertEqual(Path(error.exception.details["path"]).resolve(), damaged.resolve())
             self.assertEqual(database.read_bytes(), database_bytes)
             self.assertEqual(usable.read_bytes(), usable_bytes)
             self.assertEqual(damaged.read_bytes(), corrupt)
