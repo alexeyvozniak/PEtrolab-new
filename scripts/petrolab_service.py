@@ -15,7 +15,7 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
 
 from petrolab.ndjson_service import serve  # noqa: E402
 from petrolab.import_preview import ImportCommandError  # noqa: E402
-from petrolab.project_archive import export_project_archive, restore_project_archive  # noqa: E402
+from petrolab.project_archive import export_project_archive, replace_project_from_archive, restore_project_archive  # noqa: E402
 
 
 def _force_utf8_stdio() -> None:
@@ -49,16 +49,22 @@ def main() -> int:
     restore = actions.add_parser("restore", help="Восстановить в новый каталог")
     restore.add_argument("archive", type=Path)
     restore.add_argument("destination", type=Path)
+    restore.add_argument("--replace", action="store_true",
+                         help="Подтвердить замену закрытого проекта и сохранить прежний каталог как резервную копию")
     args = parser.parse_args()
     try:
         if args.action == "export":
             if not args.database.is_file():
                 parser.error("Указанная база проекта не найдена.")
             result = export_project_archive(str(args.database), str(args.output), args.level)
+        elif args.replace:
+            result = replace_project_from_archive(str(args.archive), str(args.destination))
         else:
             result = restore_project_archive(str(args.archive), str(args.destination))
     except ImportCommandError as error:
         print(f"{error.code}: {error.message}", file=sys.stderr)
+        if error.details and error.details.get("backup_path"):
+            print(error.details["backup_path"], file=sys.stderr)
         return 1
     except ValueError:
         parser.error("Проверьте пути, расширение архива и уровень переноса.")

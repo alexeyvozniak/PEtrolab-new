@@ -7,7 +7,9 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import sqlite3
+from stat import FILE_ATTRIBUTE_REPARSE_POINT
 from tempfile import NamedTemporaryFile, TemporaryDirectory
+from uuid import uuid4
 from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
 
 from .import_apply import _source_path_for_revision, open_project
@@ -229,3 +231,63 @@ def restore_project_archive(archive_path, destination_path):
     except OSError as error:
         raise ImportCommandError("PROJECT_ARCHIVE_FAILED", "Не удалось восстановить проект в новый каталог.") from error
     return {"project_database_path": str(destination / _DB), "manifest": manifest}
+
+
+def replace_project_from_archive(archive_path, destination_path):
+    """Replace an offline portable workspace and retain the entire original directory."""
+    destination = Path(destination_path).absolute()
+    if (not destination.is_dir() or destination.is_symlink()
+            or getattr(destination.lstat(), "st_file_attributes", 0) & FILE_ATTRIBUTE_REPARSE_POINT):
+        _archive_error("Для замены выберите отдельный каталог PetroLab с файлом project.sqlite.",
+                       "PROJECT_ARCHIVE_REPLACE_TARGET")
+    destination = destination.resolve()
+    original_database = destination / _DB
+    if not original_database.is_file() or original_database.is_symlink():
+        _archive_error("Для замены выберите отдельный каталог PetroLab с файлом project.sqlite.",
+                       "PROJECT_ARCHIVE_REPLACE_TARGET")
+    if Path(archive_path).resolve().is_relative_to(destination.resolve()):
+        _archive_error("Перед заменой переместите архив в другой каталог.", "PROJECT_ARCHIVE_REPLACE_TARGET")
+
+    def verify_target():
+        if any(original_database.with_name(_DB + suffix).exists() for suffix in ("-wal", "-shm", "-journal")):
+            _archive_error("Закройте проект PetroLab и завершите операции с базой перед заменой.",
+                           "PROJECT_ARCHIVE_PROJECT_IN_USE")
+        try:
+            uri = original_database.resolve().as_uri() + "?mode=ro"
+            with closing(sqlite3.connect(uri, uri=True, timeout=0)) as connection:
+                row = connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()
+                if row is None:
+                    _archive_error("В каталоге отсутствует идентификатор проекта PetroLab.", "PROJECT_ARCHIVE_REPLACE_TARGET")
+                return original_database.stat()
+        except (OSError, sqlite3.Error) as error:
+            raise ImportCommandError("PROJECT_ARCHIVE_REPLACE_TARGET", "Не удалось проверить существующий проект PetroLab.") from error
+
+    original = verify_target()
+    backup = destination.with_name(f"{destination.name}.backup-{uuid4().hex}")
+    try:
+        with TemporaryDirectory(dir=destination.parent, prefix="petrolab-replacement-") as scratch:
+            candidate = Path(scratch) / "verified"
+            restored = restore_project_archive(archive_path, str(candidate))
+            current = verify_target()
+            if (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns) != (
+                    original.st_dev, original.st_ino, original.st_size, original.st_mtime_ns):
+                _archive_error("Проект изменился во время проверки архива. Замена отменена.", "PROJECT_ARCHIVE_PROJECT_IN_USE")
+            destination.rename(backup)
+            try:
+                candidate.rename(destination)
+            except OSError:
+                try:
+                    if not destination.exists() and not destination.is_symlink():
+                        backup.rename(destination)
+                except OSError as rollback_error:
+                    raise ImportCommandError("PROJECT_ARCHIVE_ROLLBACK_FAILED",
+                                             "Не удалось вернуть проект. Исходный каталог сохранён в резервной копии.",
+                                             {"backup_path": str(backup)}) from rollback_error
+                if backup.exists():
+                    raise ImportCommandError("PROJECT_ARCHIVE_ROLLBACK_FAILED",
+                                             "Путь назначения занят. Исходный каталог сохранён в резервной копии.",
+                                             {"backup_path": str(backup)})
+                raise
+    except OSError as error:
+        raise ImportCommandError("PROJECT_ARCHIVE_FAILED", "Не удалось заменить проект из архива.") from error
+    return {**restored, "project_database_path": str(original_database), "backup_path": str(backup)}

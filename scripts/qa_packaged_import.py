@@ -202,6 +202,15 @@ def main() -> None:
         if (exported["manifest"] != unpacked["manifest"]
                 or reopened_copy["result"]["analyses"] != reopened["result"]["analyses"]):
             raise AssertionError("Packaged service changed project data during archive round-trip")
+        previous_file = restored / "original-notes.txt"
+        previous_file.write_bytes(b"Original workspace")
+        previous_database = Path(unpacked["project_database_path"]).read_bytes()
+        replacement = archive_command(executable, "restore", archive, restored, "--replace")
+        backup = Path(replacement["backup_path"])
+        if (replacement["manifest"] != unpacked["manifest"] or previous_file.exists()
+                or (backup / previous_file.name).read_bytes() != b"Original workspace"
+                or (backup / "project.sqlite").read_bytes() != previous_database):
+            raise AssertionError("Replacing the workspace did not preserve the complete previous directory")
         selection_book = Path(directory) / "selection.xlsx"
         run(executable, [request("analysis.selection.export_xlsx", {
             "project_database_path": database, "analysis_ids": members, "output_path": str(selection_book),

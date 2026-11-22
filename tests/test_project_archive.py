@@ -17,7 +17,8 @@ from PIL import Image
 from petrolab.desktop_workflow import suggest_import_recipe
 from petrolab.import_apply import MIGRATIONS, open_project
 from petrolab.ndjson_service import handle_request
-from petrolab.project_archive import export_project_archive
+from petrolab.import_preview import ImportCommandError
+from petrolab.project_archive import export_project_archive, replace_project_from_archive
 
 
 class ProjectArchiveTests(unittest.TestCase):
@@ -68,6 +69,50 @@ class ProjectArchiveTests(unittest.TestCase):
             second = cli("restore", archive, restored)
             self.assertEqual(second.returncode, 1)
             self.assertIn("PROJECT_ARCHIVE_DESTINATION_EXISTS", second.stderr)
+            note = restored / "notes.txt"
+            note.write_bytes(b"keep original")
+            replaced = cli("restore", archive, restored, "--replace")
+            self.assertEqual(replaced.returncode, 0, replaced.stderr)
+            backup = Path(json.loads(replaced.stdout)["backup_path"])
+            self.assertEqual((backup / "notes.txt").read_bytes(), b"keep original")
+            self.assertFalse(note.exists())
+
+    def test_replace_validates_first_and_rolls_back_failed_promotion(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "project"
+            target.mkdir()
+            database = target / "project.sqlite"
+            with closing(open_project(database)):
+                pass
+            original = database.read_bytes()
+            archive = root / "valid.petrolab"
+            export_project_archive(database, str(archive), "project")
+            broken = root / "broken.petrolab"
+            broken.write_bytes(b"invalid zip")
+            with self.assertRaises(ImportCommandError) as invalid:
+                replace_project_from_archive(str(broken), str(target))
+            self.assertEqual(invalid.exception.code, "PROJECT_ARCHIVE_INVALID")
+            self.assertEqual(database.read_bytes(), original)
+            self.assertEqual(list(root.glob("project.backup-*")), [])
+            journal = target / "project.sqlite-wal"
+            journal.touch()
+            with self.assertRaises(ImportCommandError) as busy:
+                replace_project_from_archive(str(archive), str(target))
+            self.assertEqual(busy.exception.code, "PROJECT_ARCHIVE_PROJECT_IN_USE")
+            journal.unlink()
+            rename = Path.rename
+
+            def fail_promotion(path, destination):
+                if path.name == "verified":
+                    raise PermissionError("injected promotion failure")
+                return rename(path, destination)
+
+            with patch.object(Path, "rename", fail_promotion), self.assertRaises(ImportCommandError) as failed:
+                replace_project_from_archive(str(archive), str(target))
+            self.assertEqual(failed.exception.code, "PROJECT_ARCHIVE_FAILED")
+            self.assertEqual(database.read_bytes(), original)
+            self.assertEqual(list(root.glob("project.backup-*")), [])
 
     def test_three_archive_levels_and_rejection_leave_original_untouched(self):
         with TemporaryDirectory() as directory:
