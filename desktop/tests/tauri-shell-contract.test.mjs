@@ -263,6 +263,8 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(workflow, /smoke_windows_installer\.ps1/);
   assert.match(workflow, /installer-check: \[clean, upgrade\]/);
   assert.match(workflow, /smoke_windows_installer\.ps1 -BaselineMsi/);
+  assert.match(workflow, /verified-msi:\s+name: Collect verified Windows MSI\s+needs: build/);
+  assert.match(workflow, /SHA256SUMS\.txt/);
   assert.match(smoke, /qa_installer_project\.py"\) verify/);
   assert.match(workflow, /-HistoricalSource historical-source/);
   assert.match(smoke, /qa_installer_project\.py"\) historical/);

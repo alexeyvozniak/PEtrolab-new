@@ -122,3 +122,37 @@ jobs:
           path: desktop/src-tauri/target/release/bundle/**
           if-no-files-found: error
           retention-days: 14
+
+  verified-msi:
+    name: Collect verified Windows MSI
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: PetroLab-Windows-test-${{ github.sha }}
+          path: ${{ runner.temp }}/petrolab-candidate
+      - name: Record installer checksum and build identity
+        shell: pwsh
+        run: |
+          $candidate = Join-Path $env:RUNNER_TEMP "petrolab-candidate"
+          $msi = @(Get-ChildItem -LiteralPath $candidate -Recurse -File -Filter "PetroLab_*_x64_en-US.msi")
+          if ($msi.Count -ne 1) { throw "Expected exactly one candidate MSI." }
+          $package = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP "petrolab-verified")
+          Copy-Item -LiteralPath $msi[0].FullName -Destination $package.FullName
+          $installer = Join-Path $package.FullName $msi[0].Name
+          $checksum = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
+          "$checksum  $($msi[0].Name)" | Set-Content -LiteralPath (Join-Path $package.FullName "SHA256SUMS.txt") -Encoding ascii
+          @{
+            commit = $env:GITHUB_SHA
+            run_id = $env:GITHUB_RUN_ID
+            attempt = $env:GITHUB_RUN_ATTEMPT
+            installer = $msi[0].Name
+            sha256 = $checksum
+          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $package.FullName "build-info.json") -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PetroLab-Windows-verified-MSI-${{ github.sha }}
+          path: ${{ runner.temp }}/petrolab-verified/
+          if-no-files-found: error
+          retention-days: 14
