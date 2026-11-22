@@ -5,12 +5,14 @@ from hashlib import sha256
 import json
 from uuid import UUID
 
+from .desktop_workflow import analysis_identity
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
-from .plot_data import open_plot_specification, plot_catalog, save_plot_specification
+from .plot_data import _layout_input, open_plot_specification, plot_catalog, save_plot_specification
 from .statistics_core import feature_domain
-from .statistics_service import open_calculation_run
+from .statistics_service import _METHOD, open_calculation_run, review_statistics
 from .table_views import _fingerprint as table_universe_fingerprint
+from .table_views import save_table_view
 
 
 _SURFACES = {"overview", "import", "analyses", "samples", "thin_sections", "search", "plotting", "statistics", "publication"}
@@ -148,24 +150,67 @@ def open_workspace_snapshot(database_path, snapshot_id):
         return {"snapshot": None if report else snapshot, "migration_report": report}
 
 
-def save_analysis_template(database_path, name, plot_id):
+_TEMPLATE_CONTENT = ("requirements", "table_columns", "panel_templates", "method_templates")
+_METHOD_PARAMETERS = ("transform", "scaling", "clusters", "seed")
+_TABLE_COLUMNS = {"source", "sheet", "origin", "mineral", "mineral-status"}
+
+
+def save_analysis_template(database_path, name, plot_id=None, table_view_id=None, calculation_run_id=None):
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 160:
         raise ValueError("template_name")
-    plot = open_plot_specification(database_path, plot_id)
+    if all(identifier is None for identifier in (plot_id, table_view_id, calculation_run_id)):
+        raise ValueError("template_components")
+    plot = open_plot_specification(database_path, plot_id) if plot_id is not None else None
+    version = 1 if table_view_id is None and calculation_run_id is None else 2
     requirements = {}
-    panels = []
-    for panel in plot["panels"]:
-        fields = []
-        for axis in panel["axes"]:
+
+    def fields(axes):
+        names = []
+        for axis in axes:
             key = axis["field"]
             requirement = {"field": key, "semantic_domain": feature_domain(axis), "allowed_units": [axis["unit"]], "required": True}
+            if version == 2:
+                requirement.update(measurement_set=axis["measurement_set"], method=axis["method"])
             if requirement["semantic_domain"] == "other" or (key in requirements and requirements[key] != requirement):
                 raise ImportCommandError("TEMPLATE_FIELD_AMBIGUOUS", f"Домен или единица признака {key} неоднозначны.")
             requirements[key] = requirement
-            fields.append(key)
-        panels.append({"kind": panel["kind"], "title": panel["title"], "axes": fields})
-    content = {"requirements": list(requirements.values()), "table_columns": [], "panel_templates": panels, "method_templates": []}
-    template = {**content, "id": _id(), "name": name.strip(), "schema_version": 1,
+            names.append(key)
+        return names
+
+    panels = [{"kind": panel["kind"], "title": panel["title"], "axes": fields(panel["axes"])}
+              for panel in (plot["panels"] if plot else [])]
+    columns, sort, methods, filters_omitted = [], [], [], False
+    if table_view_id is not None:
+        _uuid(table_view_id)
+        with closing(open_project(database_path)) as connection:
+            row = connection.execute("SELECT definition_json FROM table_view WHERE id = ?", (table_view_id,)).fetchone()
+        if row is None:
+            raise ImportCommandError("TEMPLATE_TABLE_UNAVAILABLE", "Представление таблицы недоступно.")
+        view = json.loads(row[0])
+        columns = [{key: column[key] for key in ("field", "order", "visible")} for column in view["columns"]]
+        sort = view["sort"]
+        filters_omitted = bool(view["filters"])
+        catalog = plot_catalog(database_path)["axes"]
+        for column in columns:
+            kind, _, key = column["field"].partition(":")
+            if kind == "measurement":
+                matches = [axis for axis in catalog if axis["field"] == key]
+                if not matches:
+                    raise ImportCommandError("TEMPLATE_FIELD_AMBIGUOUS", f"Измерение {key} недоступно.")
+                fields(matches)
+    if calculation_run_id is not None:
+        run = open_calculation_run(database_path, calculation_run_id)
+        if run.get("status") != "current":
+            raise ImportCommandError("TEMPLATE_METHOD_UNAVAILABLE", "Исходный расчёт устарел.")
+        params = run["parameters"]
+        methods.append({"method_id": run["method_id"], "method_version": run["method_version"],
+                        "parameters": {**{key: params[key] for key in _METHOD_PARAMETERS}, "features": fields(params["features"])}})
+    content = {"requirements": list(requirements.values()), "table_columns": columns,
+               "panel_templates": panels, "method_templates": methods}
+    if version == 2:
+        content["table_sort"] = sort
+        content["table_filters_omitted"] = filters_omitted
+    template = {**content, "id": _id(), "name": name.strip(), "schema_version": version,
                 "semantic_fingerprint": _payload(content), "created_at": _now()}
     with closing(open_project(database_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -174,6 +219,29 @@ def save_analysis_template(database_path, name, plot_id):
         connection.execute("INSERT INTO analysis_template VALUES (?, ?, ?)",
                            (template["id"], template["name"], json.dumps(template, ensure_ascii=False)))
     return template
+
+
+def _template_table_columns(connection, analysis_ids, axes):
+    available = _TABLE_COLUMNS | {f"measurement:{axis['field']}" for axis in axes}
+    rows = connection.execute("""
+        SELECT a.analysis_id, a.identity_json, a.sheet_name, a.block_id, r.recipe_json
+        FROM json_each(?) ids JOIN analysis a ON a.analysis_id = ids.value
+        JOIN import_batch b USING (import_batch_id)
+        JOIN import_recipe_revision r ON r.recipe_revision_id = b.recipe_revision_id
+    """, (json.dumps(analysis_ids),))
+    for row in rows:
+        available.update(f"identity:{field}" for field in analysis_identity(row))
+    seen = set()
+    for row in connection.execute("""
+        SELECT m.analysis_id, m.canonical_field, m.source_header
+        FROM json_each(?) ids JOIN analysis_source_metadata m ON m.analysis_id = ids.value
+        ORDER BY m.analysis_id, m.source_column_index, m.rowid
+    """, (json.dumps(analysis_ids),)):
+        key = row["analysis_id"], row["canonical_field"]
+        field = row["canonical_field"] if key not in seen else f"{row['canonical_field']} · {row['source_header']}"
+        seen.add(key)
+        available.add(f"metadata:{field}")
+    return available
 
 
 def apply_analysis_template(database_path, template_id, analysis_ids, name=None):
@@ -186,11 +254,13 @@ def apply_analysis_template(database_path, template_id, analysis_ids, name=None)
     if not row:
         raise ImportCommandError("TEMPLATE_UNAVAILABLE", "Шаблон недоступен.")
     template = json.loads(row[0])
-    if template.get("schema_version") != 1:
+    version = template.get("schema_version")
+    if version not in (1, 2):
         return {"plot": None, "migration_report": [
             {"field": "schema_version", "action": "blocked", "reason": "Версия шаблона не поддерживается."}
         ]}
-    content = {key: template[key] for key in ("requirements", "table_columns", "panel_templates", "method_templates")}
+    keys = _TEMPLATE_CONTENT + (("table_sort", "table_filters_omitted") if version == 2 else ())
+    content = {key: template[key] for key in keys}
     if _payload(content) != template["semantic_fingerprint"]:
         raise ImportCommandError("TEMPLATE_DAMAGED", "Контрольная сумма шаблона не совпадает.")
     axes = plot_catalog(database_path, analysis_ids)["axes"]
@@ -199,21 +269,82 @@ def apply_analysis_template(database_path, template_id, analysis_ids, name=None)
     for requirement in template["requirements"]:
         field = requirement["field"]
         matches = [axis for axis in axes if axis["field"] == field and axis["unit"] in requirement["allowed_units"]
-                   and feature_domain(axis) == requirement["semantic_domain"]]
+                   and feature_domain(axis) == requirement["semantic_domain"]
+                   and all(axis[key] == requirement[key] for key in ("measurement_set", "method") if key in requirement)]
         if len(matches) == 1:
             compatible[field] = matches[0]
             report.append({"field": field, "action": "unchanged", "reason": "Домен, единица и аналитический контекст однозначны."})
         else:
             report.append({"field": field, "action": "blocked",
                            "reason": "Нет совместимой единицы или домена." if not matches else "Есть несколько аналитических контекстов."})
+    table = None
+    methods = []
     plot = None
-    if name is not None and all(item["action"] == "unchanged" for item in report):
+    if version == 2:
+        with closing(open_project(database_path)) as connection:
+            try:
+                _layout_input(connection, analysis_ids)
+            except ImportCommandError as error:
+                report.append({"field": "analysis_ids", "action": "blocked", "reason": error.message})
+            available = _template_table_columns(connection, analysis_ids, axes)
+        for column in template["table_columns"]:
+            field = column["field"]
+            if field not in available:
+                report.append({"field": field, "action": "blocked", "reason": "Колонка отсутствует в выбранном наборе."})
+        if template["table_filters_omitted"]:
+            report.append({"field": "table_filters", "action": "omitted", "reason": "Фильтры исходного представления не входят в переносимый шаблон."})
+        if not any(item["action"] == "blocked" for item in report):
+            for method in template["method_templates"]:
+                plan, issue = _review_template_method(database_path, method, analysis_ids, compatible)
+                if issue:
+                    report.append({"field": "method_templates", "action": "blocked", "reason": issue})
+                else:
+                    methods.append(plan)
+    if name is not None and not any(item["action"] == "blocked" for item in report):
         panels = [{"id": _id(), "kind": panel["kind"], "axes": [compatible[field] for field in panel["axes"]]}
                   for panel in template["panel_templates"]]
         try:
-            plot = save_plot_specification(database_path, name, analysis_ids, panels, {}, [], [])
+            with closing(open_project(database_path)) as connection, connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if panels:
+                    plot = save_plot_specification(database_path, name, analysis_ids, panels, {}, [], [], transaction=connection)
+                elif version == 2:
+                    _layout_input(connection, analysis_ids)
+                if template["table_columns"]:
+                    columns = [{**column, "width_px": None} for column in template["table_columns"]]
+                    table = save_table_view(database_path, name, columns, template["table_sort"], [], transaction=connection)
         except ImportCommandError as error:
             if error.code not in {"PLOT_TERNARY_INCOMPATIBLE_AXES", "PLOT_LAYOUT_AXES_UNAVAILABLE", "PLOT_LAYOUT_INPUT_UNAVAILABLE"}:
                 raise
-            report.append({"field": "panel_templates", "action": "blocked", "reason": error.message})
-    return {"plot": plot, "migration_report": report}
+            field = "analysis_ids" if error.code == "PLOT_LAYOUT_INPUT_UNAVAILABLE" else "panel_templates"
+            report.append({"field": field, "action": "blocked", "reason": error.message})
+    result = {"plot": plot, "migration_report": report}
+    if version == 2:
+        result.update(table_view=table, method_plans=methods if not any(item["action"] == "blocked" for item in report) else [])
+    return result
+
+
+def _review_template_method(database_path, method, analysis_ids, compatible):
+    if (method["method_id"], method["method_version"]) != (_METHOD["method_id"], _METHOD["version"]):
+        return None, "Версия статистического метода несовместима."
+    settings = method["parameters"]
+    features = [compatible[field] for field in settings["features"]]
+    requested = {"kind": "analysis_snapshot", "analysis_ids": analysis_ids}
+    try:
+        review = review_statistics(database_path, requested, features)
+    except ImportCommandError as error:
+        return None, error.message
+    domain = review["domain"]
+    if settings["transform"] == "euclidean":
+        if not domain["euclidean_available"] or (domain["mixed_units"] and settings["scaling"] == "none"):
+            return None, "Единицы несовместимы с выбранным масштабированием."
+        count = review["complete_count"]
+    else:
+        if not domain["logratio_available"]:
+            return None, "Выбранные поля не образуют совместимый состав для CLR или ILR."
+        count = review["positive_complete_count"]
+    if count < settings["clusters"]:
+        return None, "После исключений недостаточно анализов для выбранного числа кластеров."
+    return {"method_id": method["method_id"], "method_version": method["method_version"], "input": requested,
+            "features": features, "parameters": {key: settings[key] for key in _METHOD_PARAMETERS},
+            "review_fingerprint": review["input_fingerprint"]}, None

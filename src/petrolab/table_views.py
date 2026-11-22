@@ -1,6 +1,6 @@
 """Project-bound table view settings, independent of analysis selection."""
 
-from contextlib import closing
+from contextlib import closing, nullcontext
 from hashlib import sha256
 import json
 from uuid import UUID
@@ -61,23 +61,29 @@ def _validate_layout(columns, sort, filters):
         seen.add(field)
 
 
-def save_table_view(database_path, name, columns, sort, filters):
+def save_table_view(database_path, name, columns, sort, filters, *, transaction=None):
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
         raise ImportCommandError("TABLE_VIEW_NAME_INVALID", "Введите название представления до 120 символов.")
     _validate_layout(columns, sort, filters)
-    with closing(open_project(database_path)) as connection, connection:
-        connection.execute("BEGIN IMMEDIATE")
-        if connection.execute("SELECT 1 FROM table_view WHERE name = ?", (name.strip(),)).fetchone():
-            raise ImportCommandError("TABLE_VIEW_NAME_EXISTS", "Представление с таким названием уже есть.")
-        view = {
-            "id": _id(), "name": name.strip(), "data_universe_fingerprint": _fingerprint(connection),
-            "project_id": connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0],
-            "columns": columns, "sort": sort, "filters": filters, "group_by": None,
-            "created_at": _now(), "updated_at": _now(),
-        }
-        connection.execute("INSERT INTO table_view (id, name, definition_json) VALUES (?, ?, ?)",
-                           (view["id"], view["name"], json.dumps(view, ensure_ascii=False)))
-        return view
+    with (closing(open_project(database_path)) if transaction is None else nullcontext(transaction)) as connection:
+        with (connection if transaction is None else nullcontext()):
+            if transaction is None:
+                connection.execute("BEGIN IMMEDIATE")
+            return _insert_table_view(connection, name, columns, sort, filters)
+
+
+def _insert_table_view(connection, name, columns, sort, filters):
+    if connection.execute("SELECT 1 FROM table_view WHERE name = ?", (name.strip(),)).fetchone():
+        raise ImportCommandError("TABLE_VIEW_NAME_EXISTS", "Представление с таким названием уже есть.")
+    view = {
+        "id": _id(), "name": name.strip(), "data_universe_fingerprint": _fingerprint(connection),
+        "project_id": connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0],
+        "columns": columns, "sort": sort, "filters": filters, "group_by": None,
+        "created_at": _now(), "updated_at": _now(),
+    }
+    connection.execute("INSERT INTO table_view (id, name, definition_json) VALUES (?, ?, ?)",
+                       (view["id"], view["name"], json.dumps(view, ensure_ascii=False)))
+    return view
 
 
 def list_table_views(database_path):

@@ -13,7 +13,6 @@
     "semantic_fingerprint": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
     "requirements": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -22,7 +21,9 @@
           "field": {"type": "string", "minLength": 1},
           "semantic_domain": {"type": "string", "enum": ["identity", "oxide_wt_percent", "trace_concentration", "apfu", "ratio_or_index", "metadata"]},
           "allowed_units": {"type": "array", "items": {"type": ["string", "null"]}, "uniqueItems": true},
-          "required": {"type": "boolean"}
+          "required": {"type": "boolean"},
+          "measurement_set": {"type": ["string", "null"]},
+          "method": {"type": ["string", "null"]}
         }
       }
     },
@@ -52,6 +53,20 @@
         }
       }
     },
+    "table_sort": {
+      "type": "array",
+      "maxItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "direction"],
+        "properties": {
+          "field": {"type": "string", "minLength": 1},
+          "direction": {"type": "string", "enum": ["ascending", "descending"]}
+        }
+      }
+    },
+    "table_filters_omitted": {"type": "boolean"},
     "method_templates": {
       "type": "array",
       "items": {

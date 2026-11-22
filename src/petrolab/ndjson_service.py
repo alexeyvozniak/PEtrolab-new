@@ -319,6 +319,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     )},
     "workspace.template.save": lambda params: {"result": save_analysis_template(
         _project_database_path(params), params.get("name"), params.get("plot_id"),
+        params.get("table_view_id"), params.get("calculation_run_id"),
     )},
     "workspace.template.apply": lambda params: {"result": apply_analysis_template(
         _project_database_path(params), params.get("id"), params.get("analysis_ids"), params.get("name"),

@@ -1,7 +1,7 @@
 """Pure numeric projections of stored Measurements for scientific plots."""
 
 from collections import defaultdict
-from contextlib import closing
+from contextlib import closing, nullcontext
 from hashlib import sha256
 import json
 from math import isfinite
@@ -256,7 +256,7 @@ def _validated_layers(layers):
     return layers
 
 
-def save_plot_specification(database_path, name, analysis_ids, panels, colors, hidden_analyses, hidden_sources, layers=None):
+def save_plot_specification(database_path, name, analysis_ids, panels, colors, hidden_analyses, hidden_sources, layers=None, *, transaction=None):
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
         raise ImportCommandError("PLOT_LAYOUT_NAME_INVALID", "Введите название раскладки до 120 символов.")
     if not isinstance(panels, list) or not 1 <= len(panels) <= 32:
@@ -283,37 +283,44 @@ def save_plot_specification(database_path, name, analysis_ids, panels, colors, h
             "normalization": "sum_of_three_components" if panel["kind"] == "ternary" else None,
         })
     _selection(panel_ids)
-    with closing(open_project(database_path)) as connection, connection:
-        connection.execute("BEGIN IMMEDIATE")
-        rows, available = _layout_input(connection, analysis_ids)
-        if not panel_keys <= available:
-            raise ImportCommandError("PLOT_LAYOUT_AXES_UNAVAILABLE", "Часть полей раскладки недоступна для выбранного набора.")
-        name = name.strip()
-        if connection.execute("SELECT 1 FROM plot_specification WHERE name = ?", (name,)).fetchone():
-            raise ImportCommandError("PLOT_LAYOUT_NAME_EXISTS", "Раскладка с таким названием уже есть.")
-        scope = {row["analysis_id"] for row in rows}
-        if any(not set(layer["analysis_ids"]) <= scope for layer in layers):
-            raise ImportCommandError("PLOT_LAYER_INPUT_UNAVAILABLE", "Часть анализов слоя находится вне входного набора раскладки.")
-        sources = {row["source_id"] for row in rows}
-        source_rows = connection.execute("""
-            SELECT source_id, display_name FROM source_file WHERE source_id IN (SELECT value FROM json_each(?))
-            ORDER BY display_name, source_id
-        """, (json.dumps(sorted(sources)),))
-        legend = [{"value": row["source_id"], "label": row["display_name"],
-                   "color": colors.get(row["source_id"], "#527eac"), "symbol": "circle"} for row in source_rows]
-        now = _now()
-        spec = {
-            "id": _id(), "project_id": connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0],
-            "name": name, "schema_version": 1,
-            "input": {"kind": "analysis_snapshot", "analysis_ids": list(analysis_ids or sorted(scope))},
-            "panels": saved_panels, "legend": {"group_by": "source", "entries": legend}, "filters": [],
-            "layers": layers,
-            "hidden_analysis_ids": [item for item in hidden_analyses if item in scope],
-            "hidden_source_ids": [item for item in hidden_sources if item in sources], "created_at": now, "updated_at": now,
-        }
-        connection.execute("INSERT INTO plot_specification (id, name, definition_json) VALUES (?, ?, ?)",
-                           (spec["id"], name, json.dumps(spec, ensure_ascii=False)))
-        return spec
+    with (closing(open_project(database_path)) if transaction is None else nullcontext(transaction)) as connection:
+        with (connection if transaction is None else nullcontext()):
+            if transaction is None:
+                connection.execute("BEGIN IMMEDIATE")
+            return _insert_plot_specification(connection, name, analysis_ids, saved_panels, panel_keys, colors,
+                                              hidden_analyses, hidden_sources, layers)
+
+
+def _insert_plot_specification(connection, name, analysis_ids, saved_panels, panel_keys, colors, hidden_analyses, hidden_sources, layers):
+    rows, available = _layout_input(connection, analysis_ids)
+    if not panel_keys <= available:
+        raise ImportCommandError("PLOT_LAYOUT_AXES_UNAVAILABLE", "Часть полей раскладки недоступна для выбранного набора.")
+    name = name.strip()
+    if connection.execute("SELECT 1 FROM plot_specification WHERE name = ?", (name,)).fetchone():
+        raise ImportCommandError("PLOT_LAYOUT_NAME_EXISTS", "Раскладка с таким названием уже есть.")
+    scope = {row["analysis_id"] for row in rows}
+    if any(not set(layer["analysis_ids"]) <= scope for layer in layers):
+        raise ImportCommandError("PLOT_LAYER_INPUT_UNAVAILABLE", "Часть анализов слоя находится вне входного набора раскладки.")
+    sources = {row["source_id"] for row in rows}
+    source_rows = connection.execute("""
+        SELECT source_id, display_name FROM source_file WHERE source_id IN (SELECT value FROM json_each(?))
+        ORDER BY display_name, source_id
+    """, (json.dumps(sorted(sources)),))
+    legend = [{"value": row["source_id"], "label": row["display_name"],
+               "color": colors.get(row["source_id"], "#527eac"), "symbol": "circle"} for row in source_rows]
+    now = _now()
+    spec = {
+        "id": _id(), "project_id": connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0],
+        "name": name, "schema_version": 1,
+        "input": {"kind": "analysis_snapshot", "analysis_ids": list(analysis_ids or sorted(scope))},
+        "panels": saved_panels, "legend": {"group_by": "source", "entries": legend}, "filters": [],
+        "layers": layers,
+        "hidden_analysis_ids": [item for item in hidden_analyses if item in scope],
+        "hidden_source_ids": [item for item in hidden_sources if item in sources], "created_at": now, "updated_at": now,
+    }
+    connection.execute("INSERT INTO plot_specification (id, name, definition_json) VALUES (?, ?, ?)",
+                       (spec["id"], name, json.dumps(spec, ensure_ascii=False)))
+    return spec
 
 
 def list_plot_specifications(database_path):

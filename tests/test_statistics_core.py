@@ -104,6 +104,48 @@ class StatisticsCoreTests(unittest.TestCase):
             view = call("table_view.save", name="Рабочая таблица",
                         columns=[{"field": "source", "order": 0, "visible": True, "width_px": None}],
                         sort=[{"field": "source", "direction": "ascending"}], filters=[])["result"]
+            filtered = call("table_view.save", name="Исходный фильтр",
+                            columns=[{"field": field, "order": index, "visible": True, "width_px": None}
+                                     for index, field in enumerate(["source", "identity:Analysis", "measurement:SiO2"])],
+                            sort=[{"field": "measurement:SiO2", "direction": "descending"}],
+                            filters=[{"id": str(uuid4()), "field": "source", "operator": "equals",
+                                      "value": listed[0]["source_id"], "enabled": True}])["result"]
+            portable = call("workspace.template.save", name="Рабочий способ", plot_id=plot["id"],
+                            table_view_id=filtered["id"], calculation_run_id=first["id"])["result"]
+            self.assertEqual(portable["schema_version"], 2)
+            self.assertTrue(portable["table_filters_omitted"])
+            self.assertTrue(all(identifier not in repr(portable) for identifier in ids + [
+                listed[0]["source_id"], first["id"], filtered["id"], group["id"]]))
+            target_ids = [item["analysis_id"] for item in first["result_manifest"]["members"]][:2]
+            preview = call("workspace.template.apply", id=portable["id"], analysis_ids=target_ids)["result"]
+            self.assertIsNone(preview["plot"])
+            self.assertIsNone(preview["table_view"])
+            self.assertEqual(preview["method_plans"][0]["input"]["analysis_ids"], target_ids)
+            self.assertTrue(any(entry["action"] == "omitted" for entry in preview["migration_report"]))
+            applied_all = call("workspace.template.apply", id=portable["id"], analysis_ids=target_ids,
+                               name="Другой набор")["result"]
+            self.assertEqual(applied_all["plot"]["input"]["analysis_ids"], target_ids)
+            self.assertEqual(applied_all["table_view"]["sort"], filtered["sort"])
+            self.assertEqual(applied_all["table_view"]["filters"], [])
+            self.assertEqual(applied_all["method_plans"][0]["parameters"], parameters)
+            self.assertEqual(len(call("statistics.runs.list")["result"]), 2)
+            rerun = call("statistics.cluster.run", **applied_all["method_plans"][0])["result"]
+            self.assertEqual(rerun["input"]["analysis_ids"], target_ids)
+            self.assertNotEqual(rerun["id"], first["id"])
+            conflict = call("workspace.template.apply", id=portable["id"], analysis_ids=target_ids, name="Рабочая таблица")
+            self.assertEqual(conflict["error"]["code"], "TABLE_VIEW_NAME_EXISTS")
+            self.assertNotIn("Рабочая таблица", [item["name"] for item in call("plot_spec.list")["result"]])
+            too_few = call("workspace.template.apply", id=portable["id"], analysis_ids=target_ids[:1], name="Один")["result"]
+            self.assertIsNone(too_few["plot"])
+            self.assertIsNone(too_few["table_view"])
+            self.assertTrue(any(entry["field"] == "method_templates" and entry["action"] == "blocked"
+                                for entry in too_few["migration_report"]))
+            table_only = call("workspace.template.save", name="Только таблица", table_view_id=view["id"])["result"]
+            self.assertEqual(table_only["requirements"], [])
+            table_applied = call("workspace.template.apply", id=table_only["id"], analysis_ids=target_ids,
+                                 name="Колонки без диаграмм")["result"]
+            self.assertIsNone(table_applied["plot"])
+            self.assertEqual(table_applied["table_view"]["columns"], view["columns"])
             state = {"data_universe": {"dataset_ids": [], "work_group_ids": [group["id"]], "analysis_ids": ids},
                      "table_view_id": view["id"], "plot_specification_ids": [plot["id"]],
                      "source_visibility": [{"source_id": listed[0]["source_id"], "visible": False}],
