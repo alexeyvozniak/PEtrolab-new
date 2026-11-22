@@ -115,7 +115,7 @@ jobs:
   upgrade:
     name: Verify upgrade with the clean-tested MSI
     needs: build
-    runs-on: windows-latest
+    runs-on: windows-2022
     env:
       PYTHONUTF8: "1"
       PYTHONPATH: ${{ github.workspace }}\\src

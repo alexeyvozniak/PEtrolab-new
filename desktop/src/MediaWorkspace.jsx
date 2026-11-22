@@ -15,6 +15,7 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
   const regionLoader = useRef(loadRegion);
   regionLoader.current = loadRegion;
   const precision = zoom > 400 && Boolean(loadRegion);
+  const maximumFocusZoom = loadRegion ? 2000 : 400;
   const changeZoom = (value) => {
     const viewport = viewer.current;
     const bounds = scene.current.getBoundingClientRect();
@@ -26,10 +27,19 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
   };
   useLayoutEffect(() => {
     if (!focus) return;
-    anchor.current = { zoom: 2000, x: (focus.x_px + (focus.width_px ?? 0) / 2) / image.width_px,
-      y: (focus.y_px + (focus.height_px ?? 0) / 2) / image.height_px };
-    setZoom(2000);
-  }, [focus, image]);
+    const width = focus.width_px ?? 0;
+    const height = focus.height_px ?? 0;
+    const viewport = viewer.current;
+    let targetZoom = maximumFocusZoom;
+    if (width > 0 && height > 0 && viewport.clientWidth && viewport.clientHeight) {
+      const fitWidth = 80 * image.width_px / width;
+      const fitHeight = 80 * image.width_px * viewport.clientHeight / (height * viewport.clientWidth);
+      targetZoom = Math.max(50, 25 * Math.floor(Math.min(maximumFocusZoom, fitWidth, fitHeight) / 25));
+    }
+    anchor.current = { zoom: targetZoom, x: (focus.x_px + width / 2) / image.width_px,
+      y: (focus.y_px + height / 2) / image.height_px };
+    setZoom(targetZoom);
+  }, [focus, image, maximumFocusZoom]);
   useLayoutEffect(() => {
     if (anchor.current?.zoom !== zoom) return;
     const viewport = viewer.current;
@@ -98,7 +108,7 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
   const reset = () => { setStart(null); setPreview(null); };
   const length = Math.max(image.width_px, image.height_px) * 100 / zoom;
   return <>
-    <label className="media-zoom">Масштаб {zoom}% <input aria-label="Масштаб изображения" type="range" min="50" max={loadRegion ? 2000 : 400} step="25" value={zoom}
+    <label className="media-zoom">Масштаб {zoom}% <input aria-label="Масштаб изображения" type="range" min="50" max={maximumFocusZoom} step="25" value={zoom}
       onChange={(event) => changeZoom(Number(event.target.value))} /></label>
     {precision && tileError && <p role="alert">{tileError}</p>}
     <div className="media-viewer" ref={viewer}>

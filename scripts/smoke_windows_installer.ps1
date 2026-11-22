@@ -172,6 +172,10 @@ try {
         throw "PetroLab process stayed alive but no main window appeared."
     }
     if (-not $serviceReady) {
+        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($appProcess.Id)" |
+            Select-Object Name, ProcessId, SessionId)
+        Write-Host "Installed window: $($appProcess.MainWindowTitle); session: $($appProcess.SessionId)"
+        Write-Host "Observed child processes: $(ConvertTo-Json -InputObject $children -Compress)"
         throw "PetroLab window opened but the packaged scientific service did not start."
     }
     if (-not $databaseReady) {

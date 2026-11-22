@@ -35,8 +35,10 @@ test("reopening a thin section and choosing a saved point centres on its origina
       { thin_section_id: null, media_asset_id: "other", display_name: "field.png", media_type: "Другое" },
     ] };
   const annotation = { spatial_annotation_id: "saved-point", geometry_kind: "point", point_name: "P-07", x_px: 750, y_px: 125 };
+  const area = { spatial_annotation_id: "saved-area", geometry_kind: "rectangle", label: "Z-01",
+    x_px: 200, y_px: 100, width_px: 400, height_px: 200 };
   const previewMedia = vi.fn(async (_id, region) => region ? { region, preview_url: "/region.png" }
-    : { width_px: 1000, height_px: 500, preview_url: "/overview.jpg", annotations: [annotation] });
+    : { width_px: 1000, height_px: 500, preview_url: "/overview.jpg", annotations: [annotation, area] });
   const props = { initialTab: "Шлифы", loadSamples: async () => [sample], loadSample: async () => sample, previewMedia };
   const user = userEvent.setup();
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -54,6 +56,10 @@ test("reopening a thin section and choosing a saved point centres on its origina
     expect(screen.getByRole("slider", { name: "Масштаб изображения" }).value).toBe("2000");
     expect(screen.getByLabelText("Аннотации изображения").querySelector("circle").getAttribute("cx")).toBe("750");
     await waitFor(() => expect(previewMedia).toHaveBeenLastCalledWith("view", { left: 724, top: 111, width: 52, height: 27 }));
+    await user.click(screen.getByRole("button", { name: "Z-01" }));
+    expect(screen.getByRole("slider", { name: "Масштаб изображения" }).value).toBe("200");
+    expect({ left: viewport.scrollLeft, top: viewport.scrollTop }).toEqual({ left: 120, top: 60 });
+    expect(screen.getByLabelText("Аннотации изображения").querySelector("rect").getAttribute("width")).toBe("400");
     unmount();
     previewMedia.mockClear();
   }

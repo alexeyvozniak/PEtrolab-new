@@ -1,0 +1,23 @@
+{
+  "scenario": "AT-21",
+  "build": "local-area-focus",
+  "pointId": "fa792358-b87c-4498-99bf-c08e9cb9162e",
+  "regionId": "958ebec6-f04a-4cd4-b07c-8d27348298bf",
+  "pointLinkId": "4b7975bc-7427-4171-acdd-8eba2e7380de",
+  "areaLinkId": "d7a5f534-27ae-45f8-b025-25603e0b3498",
+  "detailId": "fc121ebc-c0f6-4530-99e9-713bc29c1b53",
+  "activeAfterDetach": [
+    "d7a5f534-27ae-45f8-b025-25603e0b3498"
+  ],
+  "sourceSha256": [
+    "951b7590b7553a9aa1719c86608d415301183bc95c0a313674c390ea91481edb",
+    "9d7faad556860f5fc8fe20e21121d53f1d6a48119a8a746499e1030164d9df1b",
+    "82152a89d0b671471489da43382ae5142645f17f07e6ca45cedc5c6f7f603624"
+  ],
+  "areaFullyVisible": true,
+  "pointZoomPercent": 2000,
+  "preservedProjectAssets": true,
+  "preservedSourceBytes": true,
+  "preservedAnalyses": true,
+  "msiSha256": "9fb70d3170953821b4db6b29360bff776f5cb04605b756bc75e9b63c0823d973"
+}
