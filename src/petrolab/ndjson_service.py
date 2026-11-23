@@ -16,7 +16,7 @@ from .selection_export import export_selection_csv, export_selection_xlsx
 from .table_views import list_table_views, save_table_view
 from .edit_drafts import check_edit_draft, commit_edit_draft, list_edit_drafts, save_edit_draft
 from .project_navigation import project_overview, search_analyses
-from .sample_workspace import add_sample_note, change_point_link, get_point_analyses, get_project_sample, list_project_samples, save_sample_context
+from .sample_workspace import add_sample_note, change_point_link, get_point_analyses, get_project_sample, list_project_samples, save_sample_context, undo_point_link
 from .manual_analysis import create_manual_analysis
 from .media_links import change_media_link, create_media_region, import_linked_photo, list_media_links
 from .plot_data import list_plot_specifications, open_plot_specification, plot_catalog, query_plot_data, record_plot_visibility, save_plot_specification
@@ -416,6 +416,9 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "analytical_point.link.set": lambda params: {"result": change_point_link(
         _project_database_path(params), params.get("point_id"), params.get("analysis_id"), params.get("actor"), params.get("link_type"),
         analysis_ids=params.get("analysis_ids"),
+    )},
+    "analytical_point.link.undo": lambda params: {"result": undo_point_link(
+        _project_database_path(params), _string(params, "operation_id"), _string(params, "actor"),
     )},
     "media.preview_input": lambda params: {"result": preview_input_media(
         _source_path(params), params.get("region"), params.get("expected_fingerprint"),

@@ -183,7 +183,7 @@ def change_point_link(database_path, point_id, analysis_id, actor, link_type=Non
         if not point:
             raise ImportCommandError("POINT_UNAVAILABLE", "Аналитическая точка недоступна.")
         current = connection.execute("""
-            SELECT link_type FROM analytical_point_analysis
+            SELECT link_type, created_at FROM analytical_point_analysis
             WHERE analytical_point_id = ? AND analysis_id IN (SELECT value FROM json_each(?)) LIMIT 1
         """, (point_id, json.dumps(analysis_ids))).fetchone()
         if link_type is None:
@@ -191,7 +191,8 @@ def change_point_link(database_path, point_id, analysis_id, actor, link_type=Non
                 raise ImportCommandError("POINT_LINK_UNAVAILABLE", "Эту связь уже сняли.")
             connection.execute("DELETE FROM analytical_point_analysis WHERE analytical_point_id = ? AND analysis_id = ?",
                                (point_id, analysis_id))
-            return write_point_journal(connection, point_id, [analysis_id], actor.strip(), "unlink_analytical_point", current[0])
+            return write_point_journal(connection, point_id, [analysis_id], actor.strip(), "unlink_analytical_point",
+                                       current["link_type"], link_created_at=current["created_at"])
         if current is not None:
             raise ImportCommandError("POINT_LINK_EXISTS", "Этот анализ уже связан с точкой.")
         validate_point_input(connection, point[0], analysis_ids)
@@ -199,3 +200,68 @@ def change_point_link(database_path, point_id, analysis_id, actor, link_type=Non
         connection.executemany("INSERT INTO analytical_point_analysis VALUES (?, ?, ?, ?)",
                                [(point_id, item, link_type, timestamp) for item in analysis_ids])
         return write_point_journal(connection, point_id, analysis_ids, actor.strip(), "link_analytical_point", link_type)
+
+
+def undo_point_link(database_path, operation_id, actor):
+    _sample_id(operation_id)
+    if not isinstance(actor, str) or not 1 <= len(actor.strip()) <= 120:
+        raise ValueError("actor")
+    with closing(open_project(database_path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        stored = connection.execute("SELECT rowid, entry_json FROM operation_journal WHERE id = ?", (operation_id,)).fetchone()
+        entry = json.loads(stored["entry_json"]) if stored else {}
+        if (entry.get("action") not in {"link_analytical_point", "unlink_analytical_point"}
+                or entry.get("state") != "applied" or not entry.get("reversible")):
+            raise ImportCommandError("POINT_LINK_UNDO_UNAVAILABLE", "Операция со связью недоступна для отмены.")
+
+        action = entry["inverse_action"]["action"]
+        parameters = entry["inverse_action"]["parameters"]
+        point_id = parameters["analytical_point_id"]
+        ids = parameters["analysis_ids"]
+        link_type = parameters["link_type"]
+        encoded_ids = json.dumps(ids)
+        newer = connection.execute("""
+            SELECT DISTINCT affected.value
+            FROM operation_journal j, json_each(j.entry_json, '$.parameters.analysis_ids') affected
+            WHERE j.rowid > ? AND json_extract(j.entry_json, '$.state') = 'applied'
+              AND json_extract(j.entry_json, '$.action') IN ('link_analytical_point', 'unlink_analytical_point')
+              AND json_extract(j.entry_json, '$.reversible') = 1
+              AND json_extract(j.entry_json, '$.parameters.analytical_point_id') = ?
+              AND affected.value IN (SELECT value FROM json_each(?))
+        """, (stored["rowid"], point_id, encoded_ids)).fetchall()
+        point = connection.execute("SELECT 1 FROM analytical_point WHERE analytical_point_id = ?", (point_id,)).fetchone()
+        if point is None:
+            raise ImportCommandError("POINT_UNAVAILABLE", "Аналитическая точка недоступна.")
+        current = dict(connection.execute("""
+            SELECT analysis_id, link_type FROM analytical_point_analysis
+            WHERE analytical_point_id = ? AND analysis_id IN (SELECT value FROM json_each(?))
+        """, (point_id, encoded_ids)).fetchall())
+        expected = link_type if action == "unlink_analytical_point" else None
+        changed = {row[0] for row in newer} | {item for item in ids if current.get(item) != expected}
+        if changed:
+            raise ImportCommandError("POINT_LINK_UNDO_CONFLICT", "После этой операции часть связей изменилась.",
+                                     {"analysis_ids": [item for item in ids if item in changed]})
+
+        if action == "link_analytical_point":
+            active = {row[0] for row in connection.execute("""
+                SELECT a.analysis_id FROM analysis a JOIN import_batch b USING (import_batch_id)
+                LEFT JOIN import_batch_retraction r USING (import_batch_id)
+                WHERE b.status = 'applied' AND r.import_batch_id IS NULL
+                  AND a.analysis_id IN (SELECT value FROM json_each(?))
+            """, (encoded_ids,))}
+            if len(active) != len(ids):
+                raise ImportCommandError("POINT_LINK_UNDO_CONFLICT", "Часть анализов этой связи недоступна.",
+                                         {"analysis_ids": [item for item in ids if item not in active]})
+            timestamp = parameters.get("link_created_at") or _now()
+            connection.executemany("INSERT INTO analytical_point_analysis VALUES (?, ?, ?, ?)",
+                                   [(point_id, item, link_type, timestamp) for item in ids])
+        else:
+            connection.execute("""
+                DELETE FROM analytical_point_analysis
+                WHERE analytical_point_id = ? AND analysis_id IN (SELECT value FROM json_each(?))
+            """, (point_id, encoded_ids))
+        entry["state"] = "undone"
+        connection.execute("UPDATE operation_journal SET entry_json = ? WHERE id = ?",
+                           (json.dumps(entry, ensure_ascii=False), operation_id))
+        return write_point_journal(connection, point_id, ids, actor.strip(), action, link_type,
+                                   reverses_operation_id=operation_id)

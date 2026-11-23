@@ -272,8 +272,20 @@ class ImportWorkspaceTests(unittest.TestCase):
         change = {'point_id': point_id, 'analysis_id': ids[0], 'actor': 'Иванов'}
         removed = call('analytical_point.link.set', **change)['result']
         self.assertEqual(removed['inverse_action']['parameters']['link_type'], 'same_point')
+        undo_fields = {'operation_id': removed['id'], 'actor': 'Иванов'}
+        self.assertEqual(call('analytical_point.link.undo', operation_id=point['journal']['id'],
+                              actor='Иванов')['error']['code'], 'POINT_LINK_UNDO_CONFLICT')
+        self.assertEqual(len(call('analytical_point.analyses', point_id=point_id)['result']), 1)
+        inverse = call('analytical_point.link.undo', **undo_fields)['result']
+        self.assertEqual(inverse['parameters']['reverses_operation_id'], removed['id'])
+        self.assertFalse(inverse['reversible'])
+        self.assertEqual(call('analytical_point.link.undo', **undo_fields)['error']['code'], 'POINT_LINK_UNDO_UNAVAILABLE')
+        self.assertEqual(len(call('analytical_point.analyses', point_id=point_id)['result']), 2)
+        removed = call('analytical_point.link.set', **change)['result']
         restored = call('analytical_point.link.set', **change, link_type='same_point')['result']
         self.assertEqual(restored['parameters']['analysis_ids'], [ids[0]])
+        self.assertEqual(call('analytical_point.link.undo', operation_id=removed['id'],
+                              actor='Иванов')['error']['code'], 'POINT_LINK_UNDO_CONFLICT')
         self.assertEqual(len(call('analytical_point.analyses', point_id=point_id)['result']), 2)
         for analysis_id in ids[:2]:
             call('analytical_point.link.set', **{**change, 'analysis_id': analysis_id})
@@ -285,6 +297,10 @@ class ImportWorkspaceTests(unittest.TestCase):
         self.assertEqual(journal['parameters']['analysis_ids'], ids[:2])
         self.assertEqual(journal['inverse_action']['parameters']['analysis_ids'], ids[:2])
         self.assertEqual({row['analysis_id'] for row in call('analytical_point.analyses', point_id=point_id)['result']}, set(ids[:2]))
+        cancelled = call('analytical_point.link.undo', operation_id=journal['id'], actor='Иванов')['result']
+        self.assertEqual(cancelled['action'], 'unlink_analytical_point')
+        self.assertEqual(cancelled['parameters']['analysis_ids'], ids[:2])
+        self.assertEqual(call('analytical_point.analyses', point_id=point_id)['result'], [])
         self.assertEqual(list_project_analyses(database)['analyses'], analyses)
         self.assertEqual(self.source.read_text(encoding='utf-8'), text)
 

@@ -279,15 +279,21 @@ def validate_point_input(connection, sample_id, ids):
         _fail("POINT_SAMPLE_MISMATCH", "Часть анализов недоступна или не связана с выбранным физическим образцом.", analysis_ids=missing)
 
 
-def write_point_journal(connection, point_id, ids, actor, action, link_type):
+def write_point_journal(connection, point_id, ids, actor, action, link_type, *, link_created_at=None, reverses_operation_id=None):
     inverse = "unlink_analytical_point" if action == "link_analytical_point" else "link_analytical_point"
     parameters = {"analytical_point_id": point_id, "analysis_ids": ids, "link_type": link_type}
+    if link_created_at is not None:
+        parameters["link_created_at"] = link_created_at
+    inverse_action = {"action": inverse, "parameters": parameters.copy()}
+    if reverses_operation_id is not None:
+        parameters["reverses_operation_id"] = reverses_operation_id
+        inverse_action = None
     scope = [("analytical_point", point_id), *(("analysis", analysis_id) for analysis_id in ids)]
     entry = {
         "id": _id(), "project_id": connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0],
         "action": action, "category": "domain",
         "scope": [{"entity_type": kind, "entity_id": entity, "expected_revision": None, "result_revision": None} for kind, entity in scope],
-        "parameters": parameters, "reversible": True, "inverse_action": {"action": inverse, "parameters": parameters},
+        "parameters": parameters, "reversible": inverse_action is not None, "inverse_action": inverse_action,
         "state": "applied", "actor": actor, "created_at": _now(),
     }
     connection.execute("INSERT INTO operation_journal (id, entry_json) VALUES (?, ?)",

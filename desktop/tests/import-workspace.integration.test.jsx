@@ -799,6 +799,35 @@ test("opens field context and exports a byte-for-byte photo original and a decor
   expect((await readFile(join(folder, "petrolab-package.zip"))).includes(Buffer.from("images/01-media_capture.png"))).toBe(true);
 }, 20000);
 
+test("point links restore the original removal through its journal entry", async () => {
+  const content = "Analysis,Sample,SiO2 [wt.%]\nP1,KIV-2,52\nP2,KIV-2,48\n";
+  await writeFile(first, content);
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  const { result: { recipe } } = await invokePetrolab("import.recipe.suggest", { source_path: first });
+  expect((await invokePetrolab("import.plan.apply", { ...database, source_path: first, recipe })).error).toBeUndefined();
+  const before = (await invokePetrolab("project.analyses.list", database)).result.analyses;
+  const point = (await invokePetrolab("analytical_point.create", { ...database, sample_name: "KIV-2", point_name: "P-07",
+    analysis_ids: before.map(({ analysis_id }) => analysis_id), link_type: "same_point" })).result;
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Связи"));
+  await user.click(await enabledButton("P-07"));
+  const linked = await screen.findByText(/^P1(?: ·|$)/);
+  await user.click(within(linked.closest("li")).getByRole("button", { name: "Снять связь" }));
+  await screen.findByText("Связь снята.");
+  expect(screen.queryByText(/^P1(?: ·|$)/)).toBeNull();
+  expect(screen.getByText(/^P2(?: ·|$)/)).toBeTruthy();
+  await user.click(await enabledButton("Восстановить снятую связь"));
+  await screen.findByText("Связь восстановлена.");
+  expect(await screen.findByText(/^P1(?: ·|$)/)).toBeTruthy();
+  expect(requests.filter(({ command }) => command === "analytical_point.link.set")).toHaveLength(1);
+  expect(requests.find(({ command }) => command === "analytical_point.link.undo").payload.operation_id).toBeTruthy();
+  const after = await invokePetrolab("analytical_point.analyses", { ...database, point_id: point.analytical_point_id });
+  expect(after.result).toHaveLength(2);
+  expect((await invokePetrolab("project.analyses.list", database)).result.analyses).toEqual(before);
+  expect(await readFile(first, "utf8")).toBe(content);
+}, 20000);
+
 test("AT-10 carries an explicitly selected thin-section analysis into the table and both plots", async () => {
   const image = join(folder, "at10-bse.png");
   const pixels = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAIAAADbtmxLAAAAGklEQVR4nO3BAQEAAACCIP+vbkhAAQAAAPBsEiAAAZJII8cAAAAASUVORK5CYII=", "base64");
