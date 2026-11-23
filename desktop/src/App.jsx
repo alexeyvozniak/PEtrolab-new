@@ -28,7 +28,7 @@ import {
   pickMediaFiles, pickMediaExportPath, inspectMediaFiles, previewMediaFile, draftMediaImport, commitMediaImport,
   pickMediaFolder, inspectMediaFolder, loadMediaImportDraft, saveMediaImportDraft,
   createMediaRegion, listMediaLinks, setMediaLink, importLinkedPhoto,
-  previewProjectMedia, exportMediaOriginal, exportMediaRendered,
+  previewProjectMedia, exportMediaOriginal, exportMediaRendered, exportMediaBatch,
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
   getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication, capturePublicationPlot,
   capturePublicationTable, capturePublicationMedia,
@@ -604,6 +604,10 @@ export function App() {
             const base = image.display_name.replace(/\.[^.]+$/, "");
             const destination = await pickMediaExportPath(`${base}-annotated.png`);
             return destination ? unwrap(await exportMediaRendered(databasePath, image.media_asset_id, destination, options)) : null;
+          }}
+          exportBatch={async (ids, options) => {
+            const destination = await pickMediaExportPath("PetroLab-images.zip");
+            return destination ? unwrap(await exportMediaBatch(databasePath, ids, destination, options)) : null;
           }}
           addPublication={(image, options) => addPublicationItem(
             () => capturePublicationMedia(databasePath, image.media_asset_id, options),

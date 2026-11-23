@@ -149,7 +149,10 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
   </>;
 }
 
-export function MediaGallery({ images, previewMedia, exportOriginal, exportRendered, addPublication, showPoints = false, pointLinks, mediaLinks, reloadSample }) {
+const MEDIA_EXPORT_LAYERS = { points: "Точки", regions: "Области", labels: "Подписи", scale_bar: "Масштабная линейка", legend: "Легенда" };
+const DEFAULT_MEDIA_EXPORT_LAYERS = { points: true, regions: true, labels: true, scale_bar: false, legend: false };
+
+export function MediaGallery({ images, previewMedia, exportOriginal, exportRendered, exportBatch, addPublication, showPoints = false, pointLinks, mediaLinks, reloadSample }) {
   const [openId, setOpenId] = useState("");
   const [image, setImage] = useState(null);
   const [status, setStatus] = useState(null);
@@ -159,7 +162,11 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
   const [drawing, setDrawing] = useState(false);
   const [shape, setShape] = useState("rectangle");
   const inspectPoint = Boolean(pointLinks && focus?.analytical_point_id);
-  const [renderOptions, setRenderOptions] = useState({ points: true, regions: true, labels: true, scale_bar: false, legend: false });
+  const [renderOptions, setRenderOptions] = useState(DEFAULT_MEDIA_EXPORT_LAYERS);
+  const [batchIds, setBatchIds] = useState([]);
+  const [batchMode, setBatchMode] = useState("original");
+  const [batchOptions, setBatchOptions] = useState(DEFAULT_MEDIA_EXPORT_LAYERS);
+  const selectedBatch = images.filter(({ media_asset_id }) => batchIds.includes(media_asset_id));
   const [scaleUnit, setScaleUnit] = useState("px");
   const [referencePixels, setReferencePixels] = useState("");
   const [referenceLength, setReferenceLength] = useState("");
@@ -202,7 +209,9 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
     setPending(true);
     try {
       const result = await exporter(item, options);
-      if (result) setStatus({ notice: `Сохранено: ${result.output_path}` });
+      if (result) setStatus({ notice: result.image_count
+        ? `Снимков в архиве: ${result.image_count}. Сохранено: ${result.output_path}`
+        : `Сохранено: ${result.output_path}` });
     } catch (error) { setStatus({ error: error.message }); }
     finally { setPending(false); }
   };
@@ -216,7 +225,15 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
   return <>
     <ul className="sample-items media-items">
       {images.map((item) => <li key={item.media_asset_id}>
-        <div><b>{item.display_name}</b><p>{item.media_type} · {item.width_px} × {item.height_px}</p></div>
+        <div className="media-item-name">
+          {exportBatch && images.length > 1 && <input type="checkbox" aria-label={`Выбрать снимок ${item.display_name}`}
+            checked={batchIds.includes(item.media_asset_id)} disabled={pending}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setBatchIds((current) => checked ? [...current, item.media_asset_id] : current.filter((id) => id !== item.media_asset_id));
+            }} />}
+          <div><b>{item.display_name}</b><p>{item.media_type} · {item.width_px} × {item.height_px}</p></div>
+        </div>
         <div className="point-row-actions">
           {previewMedia && <button className="outline-button" type="button" disabled={pending}
             onClick={() => open(item.media_asset_id)}>Открыть</button>}
@@ -227,6 +244,22 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
         </div>
       </li>)}
     </ul>
+    {exportBatch && selectedBatch.length > 0 && <fieldset className="media-batch-export sample-form" disabled={pending}>
+      <legend>Пакетный экспорт · {selectedBatch.length}</legend>
+      <label>Режим пакета<select value={batchMode} onChange={(event) => setBatchMode(event.target.value)}>
+        <option value="original">Без меток (оригиналы)</option>
+        <option value="annotated">С метками и подписями</option>
+      </select></label>
+      {batchMode === "annotated" && <div className="media-batch-layers">
+        {Object.entries({ ...MEDIA_EXPORT_LAYERS, scale_bar: "Линейка в пикселях" }).map(([key, label]) =>
+          <label key={key}><input type="checkbox" checked={batchOptions[key]}
+            onChange={(event) => setBatchOptions({ ...batchOptions, [key]: event.target.checked })} /> {label}</label>)}
+      </div>}
+      <button className="primary-button" type="button" onClick={() => save(exportBatch,
+        selectedBatch.map(({ media_asset_id }) => media_asset_id), batchMode === "annotated" ? batchOptions : null)}>
+        Выгрузить выбранные
+      </button>
+    </fieldset>}
     {status && <p role={status.error ? "alert" : "status"}>{status.error || status.notice}</p>}
     {image && <>
       {mediaLinks && <div className="point-row-actions media-attachment-tools">
@@ -261,7 +294,7 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
       </div>
       {(exportRendered || addPublication) && <fieldset className="media-export-options">
         <legend>PNG с метками и подписями</legend>
-        {Object.entries({ points: "Точки", regions: "Области", labels: "Подписи", scale_bar: "Масштабная линейка", legend: "Легенда" }).map(([key, label]) =>
+        {Object.entries(MEDIA_EXPORT_LAYERS).map(([key, label]) =>
           <label key={key}><input type="checkbox" checked={renderOptions[key]} disabled={pending}
             onChange={(event) => setRenderOptions({ ...renderOptions, [key]: event.target.checked })} /> {label}</label>)}
         {image.annotations.length > 0 && <details className="media-export-annotations">

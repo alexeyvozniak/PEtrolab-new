@@ -13,7 +13,7 @@ const FIELDS = {
 };
 
 export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote, onOpenAnalyses, busy, pointLinks,
-  initialTab = "Обзор", onImportMedia, previewMedia, exportOriginal, exportRendered, addPublication, mediaLinks }) {
+  initialTab = "Обзор", onImportMedia, previewMedia, exportOriginal, exportRendered, exportBatch, addPublication, mediaLinks }) {
   const [samples, setSamples] = useState(null);
   const [sampleId, setSampleId] = useState("");
   const [sample, setSample] = useState(null);
@@ -113,7 +113,7 @@ export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote,
     <button className="outline-button" type="button" disabled={busy} onClick={() => onOpenAnalyses(current, source)}>Открыть анализы источника</button>
   </li>)}</ul>;
   const gallery = current && <MediaGallery key={sampleId} images={current.images} previewMedia={previewMedia}
-    exportOriginal={exportOriginal} exportRendered={exportRendered} addPublication={addPublication} />;
+    exportOriginal={exportOriginal} exportRendered={exportRendered} exportBatch={exportBatch} addPublication={addPublication} />;
   return <section className="sample-workspace">
     <div className="sample-header">
       <div>
@@ -160,7 +160,7 @@ export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote,
           <summary>{item.thin_section_name}</summary>
           <MediaGallery images={current.images.filter((image) => image.thin_section_id === item.thin_section_id)}
             previewMedia={previewMedia} pointLinks={pointLinks} mediaLinks={mediaLinks} reloadSample={reloadSample}
-            exportOriginal={exportOriginal} exportRendered={exportRendered} addPublication={addPublication} showPoints />
+            exportOriginal={exportOriginal} exportRendered={exportRendered} exportBatch={exportBatch} addPublication={addPublication} showPoints />
         </details>) : <p>У образца нет связанных шлифов.</p>}</section>}
       {tab === "Изображения" && <section className="sample-card"><h3>Изображения</h3>{gallery}</section>}
     </>}

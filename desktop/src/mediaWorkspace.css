@@ -1,4 +1,10 @@
 .media-items li { flex-wrap: wrap; }
+.media-item-name { display: flex; align-items: center; gap: 8px; }
+.media-item-name input { flex: none; accent-color: #267048; }
+fieldset.media-batch-export { min-width: 0; margin: 8px 0; border: 1px solid #e0e8e3; }
+.media-batch-layers { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+fieldset.media-batch-export .media-batch-layers label { display: flex; align-items: center; gap: 4px; }
+fieldset.media-batch-export .media-batch-layers input { margin: 0; width: auto; accent-color: #267048; }
 .media-items + .primary-button { margin-top: 10px; }
 .media-with-points { display: grid; grid-template-columns: minmax(6rem, 11rem) minmax(0, 1fr); gap: 12px; }
 .media-with-points > section { max-height: 65vh; overflow: auto; overflow-wrap: anywhere; }

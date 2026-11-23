@@ -7,8 +7,10 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
+from zipfile import ZipFile
 
 from PIL import Image, ImageDraw, ImageFont, PngImagePlugin, UnidentifiedImageError
 
@@ -288,3 +290,50 @@ def export_media_rendered(database_path, media_id, output_path, options):
         if temporary is not None:
             temporary.unlink(missing_ok=True)
     return {"output_path": str(destination), "sha256": fingerprint, **manifest}
+
+
+def export_media_batch(database_path, media_ids, output_path, options):
+    """Write the exact selection as a new ZIP after all files have been verified."""
+    if not isinstance(media_ids, list) or not media_ids:
+        _fail("INVALID_MEDIA_SELECTION", "Выберите изображения для экспорта.")
+    media_ids = [_uuid(media_id, "media_asset_id") for media_id in media_ids]
+    if len(set(media_ids)) != len(media_ids):
+        _fail("INVALID_MEDIA_SELECTION", "В отборе повторяется изображение.")
+    if not isinstance(output_path, str) or Path(output_path).suffix.lower() != ".zip":
+        _fail("INVALID_MEDIA_EXPORT_PATH", "Пакет изображений сохраняется в ZIP.")
+    if options is not None and (not isinstance(options, dict) or options.keys() & {"calibration", "annotation_ids"}):
+        _fail("INVALID_MEDIA_EXPORT_OPTIONS", "Для пакета используйте общие слои и шкалу в пикселях каждого снимка.")
+    destination = Path(output_path)
+    mode = "original" if options is None else "annotated"
+    files = []
+    try:
+        with TemporaryDirectory(prefix=".petrolab-images-", dir=destination.parent) as staging:
+            root = Path(staging)
+            bundle = root / "bundle.zip"
+            with ZipFile(bundle, "w") as archive:
+                for index, media_id in enumerate(media_ids, start=1):
+                    asset, source = _asset_source(database_path, media_id)
+                    suffix = source.suffix.lower() if options is None else ".png"
+                    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", Path(asset["display_name"]).stem)
+                    name = name.encode("utf-8")[:200].decode("utf-8", errors="ignore").strip(" .")
+                    filename = f"{index:03d}-{name or 'image'}{suffix}"
+                    temporary = root / f"{index}{suffix}"
+                    if options is None:
+                        result = export_media_original(database_path, media_id, str(temporary))
+                    else:
+                        result = export_media_rendered(database_path, media_id, str(temporary), options)
+                    relative = f"images/{filename}"
+                    archive.write(temporary, relative)
+                    temporary.unlink()
+                    entry = {key: value for key, value in result.items() if key != "output_path"}
+                    files.append({**entry, "media_asset_id": media_id, "source_name": asset["display_name"],
+                                  "source_sha256": asset["source_fingerprint_sha256"], "path": relative})
+                archive.writestr("manifest.json", json.dumps({"schema_version": 1, "mode": mode, "files": files},
+                                                            ensure_ascii=False, indent=2))
+            fingerprint = _sha256(bundle)
+            _publish_new_file(bundle, destination)
+    except FileExistsError:
+        _fail("EXPORT_FILE_EXISTS", "Этот файл уже существует. Выберите другое имя для архива.")
+    except OSError:
+        _fail("EXPORT_FAILED", "Не удалось выгрузить пакет изображений.")
+    return {"output_path": str(destination), "sha256": fingerprint, "image_count": len(files)}

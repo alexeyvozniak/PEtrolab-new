@@ -1081,6 +1081,18 @@ test("reviews a BSE/PPL/XPL batch and saves only manually placed and confirmed p
   expect((await invokePetrolab("media.import.draft.load", database)).result).toBeNull();
   for (const [path, bytes] of Object.entries(photos)) expect(await readFile(path)).toEqual(bytes);
   expect(app.container.querySelector(".media-provisional")).toBeNull();
+  await user.click(await screen.findByRole("checkbox", { name: "Выбрать снимок BSE.png" }));
+  await user.click(screen.getByRole("checkbox", { name: "Выбрать снимок XPL.png" }));
+  await user.selectOptions(screen.getByLabelText("Режим пакета"), "annotated");
+  await user.click(screen.getByRole("checkbox", { name: "Линейка в пикселях" }));
+  await user.click(await enabledButton("Выгрузить выбранные"));
+  await screen.findByText(/Снимков в архиве: 2/);
+  const batch = requests.find(({ command }) => command === "media.export_batch").payload;
+  expect(batch.media_asset_ids).toEqual(apply.items.filter((item) => item.media_type !== "PPL").map((item) => item.media_asset_id));
+  expect(batch.options).toMatchObject({ scale_bar: true, points: true, labels: true });
+  const zip = await readFile(join(folder, "copy-PetroLab-images.zip"));
+  expect(zip.includes(Buffer.from("manifest.json"))).toBe(true);
+  expect(zip.includes(Buffer.from("PPL.png"))).toBe(false);
 }, 30000);
 
 test("real Python mineral review separates conflicts and persists only explicit acceptance", async () => {

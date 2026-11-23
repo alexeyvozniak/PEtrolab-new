@@ -39,7 +39,7 @@ from .import_preview import (
 from .manual_mapping import review_duplicate_candidates, revise_import_mapping, revise_import_mappings, revise_import_sections
 from .media_import import (apply_media_import_plan, create_analytical_point, create_media_import_plan, inspect_media_folder,
                            inspect_media_sources, load_media_import_draft, save_media_import_draft)
-from .media_display import export_media_original, export_media_rendered, preview_input_media, preview_project_media
+from .media_display import export_media_batch, export_media_original, export_media_rendered, preview_input_media, preview_project_media
 from .statistics_service import list_calculation_runs, open_calculation_run, review_statistics, run_clustering, save_calculated_cluster
 from .formula_service import list_formula_runs, open_formula_run, review_formula, run_formula
 from .olivine_formula import OLIVINE
@@ -430,6 +430,9 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     )},
     "media.export_rendered": lambda params: {"result": export_media_rendered(
         _project_database_path(params), params.get("media_asset_id"), params.get("output_path"), params.get("options"),
+    )},
+    "media.export_batch": lambda params: {"result": export_media_batch(
+        _project_database_path(params), params.get("media_asset_ids"), params.get("output_path"), params.get("options"),
     )},
     "analysis.query": lambda params: {"result": search_analyses(
         _project_database_path(params), **{key: params[key] for key in ("query", "mineral", "source", "method", "source_id", "sample_id", "limit", "offset") if key in params},

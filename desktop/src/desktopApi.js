@@ -154,6 +154,9 @@ export const exportMediaOriginal = (projectDatabasePath, mediaAssetId, outputPat
 export const exportMediaRendered = (projectDatabasePath, mediaAssetId, outputPath, options) => invokePetrolab("media.export_rendered", {
   project_database_path: projectDatabasePath, media_asset_id: mediaAssetId, output_path: outputPath, options,
 });
+export const exportMediaBatch = (projectDatabasePath, mediaAssetIds, outputPath, options) => invokePetrolab("media.export_batch", {
+  project_database_path: projectDatabasePath, media_asset_ids: mediaAssetIds, output_path: outputPath, options,
+});
 export const createSamplePoint = (projectDatabasePath, fields) =>
   invokePetrolab("analytical_point.create", { project_database_path: projectDatabasePath, ...fields });
 export const listPointAnalyses = (projectDatabasePath, pointId) =>

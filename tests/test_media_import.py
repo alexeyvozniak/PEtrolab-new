@@ -23,7 +23,7 @@ from petrolab.import_apply import MIGRATIONS, apply_import_plan, latest_active_i
 from petrolab.import_preview import ImportCommandError  # noqa: E402
 from petrolab.manual_analysis import create_manual_analysis  # noqa: E402
 from petrolab.media_links import attach_media, change_media_link, create_media_region, import_linked_photo, list_media_links  # noqa: E402
-from petrolab.media_display import export_media_original, export_media_rendered, preview_input_media, preview_project_media  # noqa: E402
+from petrolab.media_display import export_media_batch, export_media_original, export_media_rendered, preview_input_media, preview_project_media  # noqa: E402
 from PIL import Image  # noqa: E402
 from openpyxl import load_workbook  # noqa: E402
 from petrolab.publication import capture_publication_media, capture_publication_table, export_publication, prepare_publication  # noqa: E402
@@ -408,6 +408,53 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(result["rendered_scale"], {"pixels": 180, "length": 180, "unit": "px"})
             self.assertIn(area["spatial_annotation_id"], result["annotation_ids"])
             self.assertEqual(source.read_bytes(), source_bytes)
+
+    def test_batch_export_contains_exact_sources_and_never_publishes_a_partial_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            database, point, _ = self._project_with_points(folder)
+            second_folder = folder / "other"
+            second_folder.mkdir()
+            first, second = folder / "scan.png", second_folder / "scan.png"
+            write_png(first)
+            write_png(second, width=18)
+            annotated = self._assignment(first, point["analytical_point_id"])
+            plan = create_media_import_plan(database, [annotated, {**annotated, "source_path": str(second), "placements": []}])
+            apply_media_import_plan(database, plan)
+            first_id, second_id = [item["media_asset_id"] for item in plan["items"]]
+            originals = [second.read_bytes(), first.read_bytes()]
+            archive = folder / "originals.zip"
+            result = export_media_batch(database, [second_id, first_id], str(archive), None)
+            self.assertEqual((result["image_count"], result["sha256"]), (2, hashlib.sha256(archive.read_bytes()).hexdigest()))
+            with ZipFile(archive) as package:
+                files = json.loads(package.read("manifest.json"))["files"]
+                self.assertEqual([entry["media_asset_id"] for entry in files], [second_id, first_id])
+                self.assertEqual([package.read(entry["path"]) for entry in files], originals)
+                self.assertEqual(len(set(package.namelist())), 3)
+            settings = {"points": True, "regions": True, "labels": True, "legend": True, "scale_bar": True}
+            rendered_path = folder / "rendered.zip"
+            export_media_batch(database, [first_id, second_id], str(rendered_path), settings)
+            with ZipFile(rendered_path) as package:
+                files = json.loads(package.read("manifest.json"))["files"]
+                self.assertEqual([entry["rendered_legend"] for entry in files], [{"points": 1, "regions": 0}, {"points": 0, "regions": 0}])
+                for entry in files:
+                    data = package.read(entry["path"])
+                    self.assertEqual(hashlib.sha256(data).hexdigest(), entry["sha256"])
+                    with Image.open(BytesIO(data)) as output:
+                        self.assertEqual(json.loads(output.info["PetroLab"])["source_sha256"], entry["source_sha256"])
+            with self.assertRaises(ImportCommandError) as collision:
+                export_media_batch(database, [first_id], str(archive), None)
+            self.assertEqual(collision.exception.code, "EXPORT_FILE_EXISTS")
+            self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), result["sha256"])
+            managed_second = folder / "media" / f"{second_id}.png"
+            managed_second.write_bytes(b"changed")
+            failed = folder / "failed.zip"
+            with self.assertRaises(ImportCommandError) as changed:
+                export_media_batch(database, [first_id, second_id], str(failed), None)
+            self.assertEqual(changed.exception.code, "SOURCE_FINGERPRINT_MISMATCH")
+            self.assertFalse(failed.exists())
+            self.assertFalse(list(folder.glob(".petrolab-images-*")))
+            self.assertEqual([second.read_bytes(), first.read_bytes()], originals)
 
     def test_preview_and_original_export_preserve_bytes_and_require_current_fingerprint(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

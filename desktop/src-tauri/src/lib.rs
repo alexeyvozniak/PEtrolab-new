@@ -202,7 +202,8 @@ fn pick_publication_export_path() -> Option<String> {
 
 #[tauri::command]
 fn pick_media_export_path(name: String) -> Option<String> {
-    pick_named_export_path(&name, "Image")
+    let label = if name.ends_with(".zip") { "ZIP" } else { "Image" };
+    pick_named_export_path(&name, label)
 }
 
 fn pick_named_export_path(name: &str, label: &str) -> Option<String> {
