@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Database, FileArrowUp, MagnifyingGlass, SquaresFour, X } from "@phosphor-icons/react";
 import "./projectNavigation.css";
+import { selectionRange } from "./selectionRange";
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" }) : "";
@@ -62,30 +63,63 @@ export function ProjectOverview({ load, project, workspace, selectionCount, busy
 
 const SEARCH_FIELDS = { query: "Анализ или образец", mineral: "Минерал", source: "Источник", method: "Метод" };
 const EMPTY_SEARCH = { query: "", mineral: "", source: "", method: "", source_id: "", sample_id: "" };
-const PAGE = 50;
-
-export function ProjectSearch({ seed, queryProject, onOpenAnalysis, onAddSelection, onPlot, selectionCount, busy }) {
+export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnalysis, onAddSelection, onPlot,
+  selectionCount, hiddenAnalysisIds = [], onSetVisibility, onUndoVisibility, busy }) {
   const initial = { ...EMPTY_SEARCH, ...seed };
   const [fields, setFields] = useState(initial);
   const [applied, setApplied] = useState(initial);
   const [offset, setOffset] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
   const [result, setResult] = useState(null);
   const [pending, setPending] = useState(true);
   const [error, setError] = useState("");
   const [marked, setMarked] = useState([]);
+  const [markingAll, setMarkingAll] = useState(false);
+  const [dragIds, setDragIds] = useState([]);
   const [focused, setFocused] = useState(null);
+  const anchor = useRef(null);
+  const drag = useRef(null);
   useEffect(() => {
     let active = true;
     setPending(true);
     setError("");
-    queryProject({ ...applied, offset, limit: PAGE })
+    queryProject({ ...applied, offset, limit: pageSize })
       .then((page) => { if (active) { setResult(page); setFocused(page.analyses[0] || null); } })
       .catch((caught) => { if (active) { setResult(null); setFocused(null); setError(caught.message); } })
       .finally(() => { if (active) setPending(false); });
     return () => { active = false; };
-  }, [applied, offset, queryProject]);
+  }, [applied, offset, pageSize, queryProject]);
+
+  useEffect(() => {
+    function finish(event) {
+      const gesture = drag.current;
+      if (!gesture || (event.type !== "blur" && gesture.pointerId !== event.pointerId)) return;
+      drag.current = null;
+      setDragIds([]);
+      if (event.type === "pointerup" && gesture.range.length > 1) {
+        anchor.current = gesture;
+        setMarked([...new Set([...gesture.base, ...gesture.range])]);
+      }
+    }
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    window.addEventListener("blur", finish);
+    return () => {
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("blur", finish);
+    };
+  }, []);
+
+  function clearRange() {
+    anchor.current = null;
+    drag.current = null;
+    setDragIds([]);
+  }
 
   const apply = (next) => {
+    clearRange();
+    setPending(true);
     setOffset(0);
     setMarked([]);
     setApplied({ ...next });
@@ -95,56 +129,142 @@ export function ProjectSearch({ seed, queryProject, onOpenAnalysis, onAddSelecti
     setFields(next);
     apply(next);
   };
-  const toggle = (id) => setMarked((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
-  const rows = [...(result?.analyses || [])].sort((a, b) => Number(marked.includes(b.analysis_id)) - Number(marked.includes(a.analysis_id)));
+  const markedSet = new Set(marked);
+  const hiddenSet = new Set(hiddenAnalysisIds);
+  const dragSet = new Set(dragIds);
+  const rows = [...(result?.analyses || [])].sort((a, b) => Number(markedSet.has(b.analysis_id)) - Number(markedSet.has(a.analysis_id)));
+  const visibleIds = rows.map(({ analysis_id }) => analysis_id);
+  const locked = pending || busy || markingAll;
+  const markedHidden = marked.filter((id) => hiddenSet.has(id)).length;
+
+  function changePage(nextOffset, nextSize = pageSize) {
+    if (nextOffset === offset && nextSize === pageSize) return;
+    clearRange();
+    setPending(true);
+    setOffset(nextOffset);
+    setPageSize(nextSize);
+  }
+
+  function toggle(id, extend) {
+    const previous = anchor.current;
+    if (extend && previous?.page === result) {
+      const range = selectionRange(previous.order, previous.id, id);
+      if (range.length) {
+        setMarked([...new Set([...previous.base, ...range])]);
+        return;
+      }
+    }
+    anchor.current = markedSet.has(id) ? null : { id, order: visibleIds, base: marked, page: result };
+    setMarked(markedSet.has(id) ? marked.filter((item) => item !== id) : [...marked, id]);
+  }
+
+  function startDrag(event, id) {
+    if (locked || event.button !== 0 || event.pointerType === "touch" || event.shiftKey || event.ctrlKey || event.metaKey) return;
+    drag.current = { id, order: visibleIds, base: marked, page: result, range: [], pointerId: event.pointerId };
+  }
+
+  function extendDrag(event, id) {
+    const gesture = drag.current;
+    if (!gesture || gesture.page !== result || gesture.pointerId !== event.pointerId || !(event.buttons & 1)) return;
+    gesture.range = selectionRange(gesture.order, gesture.id, id);
+    setDragIds(gesture.range);
+  }
+
+  async function markAll() {
+    setMarkingAll(true);
+    setError("");
+    try {
+      const scope = await queryAnalysisIds(applied);
+      clearRange();
+      setMarked(scope.analysis_ids);
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setMarkingAll(false);
+    }
+  }
 
   return <section className="project-navigation search-navigation">
     <main>
       <h2>Поиск по проекту</h2>
-      <form className="project-search-form" onSubmit={(event) => { event.preventDefault(); apply(fields); }}>
+      <form className="project-search-form" onSubmit={(event) => { event.preventDefault(); if (!locked) apply(fields); }}>
         {Object.entries(SEARCH_FIELDS).map(([key, label]) => <label key={key}>{label}
           <input value={fields[key]} maxLength={300} onChange={(event) => setFields({
             ...fields, [key]: event.target.value, ...(key === "source" ? { source_id: "" } : {}),
           })} />
         </label>)}
-        <button className="primary-button" disabled={pending || busy}><MagnifyingGlass size={17} /> Найти</button>
+        <button className="primary-button" disabled={locked}><MagnifyingGlass size={17} /> Найти</button>
       </form>
       <div className="project-search-chips" aria-label="Условия поиска">
-        {applied.sample_id && <button type="button" className="outline-button" onClick={() => remove("sample_id")} disabled={pending}>
+        {applied.sample_id && <button type="button" className="outline-button" onClick={() => remove("sample_id")} disabled={locked}>
           Образец: {seed?.sample_label || applied.sample_id} <X size={12} />
         </button>}
         {Object.entries(SEARCH_FIELDS).filter(([key]) => applied[key]).map(([key, label]) =>
-          <button type="button" className="outline-button" key={key} onClick={() => remove(key)} disabled={pending}>
+          <button type="button" className="outline-button" key={key} onClick={() => remove(key)} disabled={locked}>
             {label}: {applied[key]} <X size={12} />
           </button>)}
       </div>
       {error && <p role="alert">{error}</p>}
-      <p role="status">{pending ? "Ищу анализы…" : `Найдено анализов: ${result?.total || 0}. Отмечено: ${marked.length}. В отборе: ${selectionCount}.`}</p>
-      {marked.length > 0 && <div className="project-search-chips">
-        <button type="button" className="outline-button" disabled={pending || busy}
+      <p role="status">{pending ? "Ищу анализы…" : `Найдено анализов: ${result?.total || 0}. Отмечено: ${marked.length}. В отборе: ${selectionCount}.${markedHidden ? ` Скрыто на графиках из отмеченных: ${markedHidden}.` : ""}`}</p>
+      {marked.length > 0 && <div className="project-search-chips search-marked-actions" aria-label="Действия с отмеченными анализами">
+        <button type="button" className="outline-button" disabled={locked}
           onClick={() => onAddSelection(marked)}>Добавить отмеченные в отбор</button>
-        {onPlot && <button type="button" className="primary-button" disabled={pending || busy}
+        {onPlot && <button type="button" className="primary-button" disabled={locked}
           onClick={() => onPlot(marked)}>Построить диаграммы</button>}
+        {onSetVisibility && markedHidden < marked.length && <button type="button" className="outline-button" disabled={locked}
+          onClick={() => onSetVisibility(marked, true)}>Скрыть отмеченные на графиках</button>}
+        {onSetVisibility && markedHidden > 0 && <button type="button" className="outline-button" disabled={locked}
+          onClick={() => onSetVisibility(marked, false)}>Вернуть отмеченные на графики</button>}
       </div>}
+      {onUndoVisibility && <button type="button" className="outline-button" disabled={locked} onClick={onUndoVisibility}>
+        Отменить изменение видимости
+      </button>}
       {!pending && !rows.length && !error && <p>Совпадений нет. Измените условия поиска.</p>}
-      {rows.length > 0 && <div className="project-search-table">
-        <table>
+      {rows.length > 0 && <>
+        <details className="search-marking">
+          <summary>Отметки</summary>
+          <div>
+            <button type="button" className="outline-button" disabled={locked}
+              onClick={() => { clearRange(); setMarked((current) => [...new Set([...current, ...visibleIds])]); }}>
+              Выбрать видимые · {rows.length}
+            </button>
+            {queryAnalysisIds && <button type="button" className="outline-button" disabled={locked} onClick={markAll}>
+              Выбрать весь результат · {result.total}
+            </button>}
+            {marked.length > 0 && <button type="button" className="outline-button" disabled={locked}
+              onClick={() => { clearRange(); setMarked([]); }}>Снять отметки</button>}
+          </div>
+        </details>
+        <div className="project-search-table"><table>
           <thead><tr><th>Отметка</th><th>Анализ</th><th>Образец</th><th>Минерал</th><th>Метод</th><th>Источник</th><th /></tr></thead>
-          <tbody>{rows.map((row) => <tr key={row.analysis_id} className={marked.includes(row.analysis_id) ? "marked" : ""}
-            onFocus={() => setFocused(row)} onClick={() => setFocused(row)}>
-            <td><input type="checkbox" aria-label={`Отметить ${row.identity}`} checked={marked.includes(row.analysis_id)}
-              disabled={pending || busy} onChange={() => toggle(row.analysis_id)} /></td>
+          <tbody>{rows.map((row) => <tr key={row.analysis_id} className={markedSet.has(row.analysis_id) || dragSet.has(row.analysis_id) ? "marked" : ""}
+            onPointerEnter={(event) => extendDrag(event, row.analysis_id)}
+            onFocus={() => setFocused(row)} onClick={(event) => {
+              setFocused(row);
+              if (!locked && (event.ctrlKey || event.metaKey || event.shiftKey) && !event.target.closest("input,button")) {
+                toggle(row.analysis_id, event.shiftKey);
+              }
+            }}>
+            <td><input type="checkbox" aria-label={`Отметить ${row.identity}`} checked={markedSet.has(row.analysis_id)}
+              disabled={locked} onPointerDown={(event) => startDrag(event, row.analysis_id)}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => toggle(row.analysis_id, event.nativeEvent.shiftKey)} /></td>
             <td>{row.identity || "Анализ"}</td><td>{row.sample_name || "—"}</td><td>{row.mineral || "—"}</td>
             <td>{row.method || "—"}</td><td>{row.source_name}</td>
-            <td><button className="outline-button" type="button" disabled={pending || busy}
+            <td><button className="outline-button" type="button" disabled={locked}
               onClick={() => onOpenAnalysis(row.analysis_id)} aria-label={`Открыть анализ ${row.identity}`}>Открыть</button></td>
           </tr>)}</tbody>
-        </table>
-      </div>}
-      {result && (offset > 0 || result.has_more) && <div className="project-search-page">
-        <button type="button" className="outline-button" disabled={pending || offset === 0} onClick={() => setOffset(offset - PAGE)}>Назад</button>
-        <span>Страница {offset / PAGE + 1}</span>
-        <button type="button" className="outline-button" disabled={pending || !result.has_more} onClick={() => setOffset(offset + PAGE)}>Далее</button>
+        </table></div>
+      </>}
+      {result?.total > 0 && <div className="project-search-page">
+        {(offset > 0 || result.has_more) && <>
+          <button type="button" className="outline-button" disabled={locked || offset === 0} onClick={() => changePage(offset - pageSize)}>Назад</button>
+          <span>Страница {offset / pageSize + 1}</span>
+          <button type="button" className="outline-button" disabled={locked || !result.has_more} onClick={() => changePage(offset + pageSize)}>Далее</button>
+        </>}
+        <label>Показывать по <select value={pageSize} disabled={locked} onChange={(event) => changePage(0, Number(event.target.value))}>
+          {[10, 25, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
+        </select></label>
       </div>}
     </main>
     <aside>

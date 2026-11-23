@@ -15,11 +15,18 @@
 .project-search-form input { width: 100%; min-width: 0; height: 38px; padding: 6px 9px; border: 1px solid #aabdaf; border-radius: 7px; color: inherit; }
 .project-search-chips, .project-search-page { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-block: 10px; }
 .project-search-chips .outline-button, .project-search-table .outline-button { min-height: 28px; font-size: 11px; padding: 4px 8px; }
+.search-marked-actions { padding: 9px; border: 1px solid #cadbd0; border-radius: 8px; }
+.search-marking { position: relative; width: fit-content; margin-top: 8px; }
+.search-marking > summary { width: fit-content; padding: 5px 8px; border: 1px solid #cadbd0; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.search-marking > div { position: absolute; z-index: 2; top: calc(100% + 4px); left: 0; display: grid; gap: 4px; min-width: 208px; padding: 6px; border: 1px solid #cadbd0; border-radius: 7px; background: white; box-shadow: 0 5px 16px #23382c20; }
+.search-marking .outline-button { justify-content: flex-start; min-height: 28px; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
 .project-search-table { margin-top: 8px; overflow: auto; }
 .project-search-table table { border-collapse: collapse; width: 100%; font-size: 12px; }
 .project-search-table td, .project-search-table th { padding: 8px; text-align: left; border-bottom: 1px solid #dde5df; white-space: nowrap; }
 .project-search-table th { background: #eef4f0; }
 .project-search-table tr.marked { background: #e5f0e9; }
+.project-search-table tr.marked td:first-child { box-shadow: inset 3px 0 #497d5f; }
+.project-search-table tbody td:first-child { user-select: none; }
 .project-search-table input { accent-color: #365b49; }
 @media (max-width: 1250px) {
   .project-navigation { grid-template-columns: minmax(0, 1fr) 215px; }

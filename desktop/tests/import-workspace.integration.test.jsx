@@ -154,6 +154,73 @@ test("real Python clean single-source still commits and displays persisted analy
   expect(requests.filter(r => r.command === "import.workspace.commit")).toHaveLength(1);
 }, 20000);
 
+test("AT-26 marks search ranges, distinguishes a page from all results and journals exact visibility", async () => {
+  const content = "Analysis,SiO2 [wt.%],Al2O3 [wt.%]\n"
+    + Array.from({ length: 34 }, (_, index) => `P${String(index + 1).padStart(2, "0")},${index + 2},${index + 3}\n`).join("");
+  await writeFile(first, content);
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  const { result: { recipe } } = await invokePetrolab("import.recipe.suggest", { source_path: first });
+  const imported = await invokePetrolab("import.plan.apply", { ...database, source_path: first, recipe });
+  expect(imported.result.analysis_count).toBe(34);
+  const outside = await invokePetrolab("import.recipe.suggest", { source_path: second });
+  expect((await invokePetrolab("import.plan.apply", { ...database, source_path: second,
+    recipe: outside.result.recipe })).result.analysis_count).toBe(2);
+  const view = userEvent.setup();
+  render(<App />);
+  await view.click(await enabledButton("Поиск"));
+  await screen.findByText(/Найдено анализов: 36/);
+  await view.type(screen.getByLabelText("Источник", { exact: true }), "first.csv");
+  await view.click(await enabledButton("Найти"));
+  await screen.findByText(/Найдено анализов: 34/);
+  const check = (number) => screen.getByRole("checkbox", { name: `Отметить P${String(number).padStart(2, "0")}` });
+  const pointer = (node, type, buttons) => {
+    const event = new MouseEvent(type, { bubbles: true, button: 0, buttons });
+    Object.defineProperty(event, "pointerId", { value: 7 });
+    fireEvent(node, event);
+  };
+  pointer(check(2), "pointerdown", 1);
+  pointer(check(11).closest("tr"), "pointerover", 1);
+  pointer(window, "pointerup", 0);
+  await screen.findByText(/Отмечено: 10\. В отборе: 0/);
+  fireEvent.click(check(13), { shiftKey: true });
+  await screen.findByText(/Отмечено: 12\. В отборе: 0/);
+  fireEvent.click(check(16), { ctrlKey: true });
+  await screen.findByText(/Отмечено: 13\. В отборе: 0/);
+  const markedRows = within(screen.getByRole("table")).getAllByRole("row").slice(1, 14);
+  expect(markedRows.every((row) => row.classList.contains("marked"))).toBe(true);
+  await view.click(await enabledButton("Скрыть отмеченные на графиках"));
+  await screen.findByText(/Отмечено: 13\. В отборе: 0\. Скрыто на графиках из отмеченных: 13/);
+  const hide = requests.find(({ command }) => command === "plot_visibility.hide");
+  const snapshot = (await invokePetrolab("analysis.query.ids", { ...database, source: "first.csv" })).result.analysis_ids;
+  const scope = [...snapshot.slice(1, 13), snapshot[15]];
+  expect(hide.payload.analysis_ids).toEqual(scope);
+  await view.click(await enabledButton("Вернуть отмеченные на графики"));
+  expect(requests.find(({ command }) => command === "plot_visibility.restore").payload.analysis_ids).toEqual(scope);
+  const journal = (await invokePetrolab("operation_journal.list", { ...database, category: "view_only" })).result.entries;
+  expect(journal.map(({ action, scope_count }) => [action, scope_count]))
+    .toEqual([["restore_plot_points", 13], ["hide_plot_points", 13]]);
+  for (const { id } of journal) {
+    const record = (await invokePetrolab("operation_journal.open", { ...database, operation_id: id })).result;
+    expect(record.scope.map(({ entity_id }) => entity_id)).toEqual(scope);
+  }
+  await view.click(await enabledButton("Добавить отмеченные в отбор"));
+  await screen.findByText(/Отмечено: 13\. В отборе: 13/);
+  await view.click(screen.getByText("Отметки", { exact: true }));
+  await view.click(await enabledButton("Снять отметки"));
+  await view.selectOptions(screen.getByRole("combobox", { name: "Показывать по" }), "10");
+  await view.click(await enabledButton("Выбрать видимые · 10"));
+  await screen.findByText(/Отмечено: 10\. В отборе: 13/);
+  await view.click(await enabledButton("Выбрать весь результат · 34"));
+  await screen.findByText(/Отмечено: 34\. В отборе: 13/);
+  await view.click(await enabledButton("Далее"));
+  await waitFor(() => expect(check(11).checked).toBe(true));
+  await view.click(await enabledButton("Построить диаграммы"));
+  await screen.findAllByRole("button", { name: "Выбрать точку P34" });
+  expect(requests.findLast(({ command }) => command === "plot_data.query").payload.analysis_ids).toEqual(snapshot);
+  expect(screen.getByText("Выбранные анализы · 13")).toBeTruthy();
+  expect(await readFile(first, "utf8")).toBe(content);
+}, 30000);
+
 test("overview opens a project source and global search opens an exact analysis without clearing selection", async () => {
   await writeFile(second, "Analysis,Sample,Mineral,SiO2 [wt.%]\nB1,Sample A,apatite,40\nB2,Sample B,olivine,41\n");
   queue = [second];

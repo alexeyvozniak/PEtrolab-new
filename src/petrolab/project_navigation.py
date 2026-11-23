@@ -13,7 +13,7 @@ def _search_text(value):
     return value.strip().casefold()
 
 
-def search_analyses(database_path, query="", mineral="", source="", method="", source_id="", limit=50, offset=0, sample_id=""):
+def search_analyses(database_path, query="", mineral="", source="", method="", source_id="", limit=50, offset=0, sample_id="", *, ids_only=False):
     if type(limit) is not int or not 1 <= limit <= 200 or type(offset) is not int or offset < 0:
         raise ValueError("pagination")
     exact_source = _search_text(source_id)
@@ -48,11 +48,14 @@ def search_analyses(database_path, query="", mineral="", source="", method="", s
                   AND (? = '' OR sample_id = ?)
             )
         """
+        order = " ORDER BY created_at DESC, sheet_name, source_row_number, source_column_number, analysis_id"
+        if ids_only:
+            ids = connection.execute(projection + "SELECT analysis_id FROM matches" + order, parameters)
+            return {"analysis_ids": [row[0] for row in ids]}
         total = connection.execute(projection + "SELECT count(*) FROM matches", parameters).fetchone()[0]
         rows = connection.execute(projection + """
-            SELECT * FROM matches ORDER BY created_at DESC, sheet_name, source_row_number, source_column_number, analysis_id
-            LIMIT ? OFFSET ?
-        """, (*parameters, limit, offset)).fetchall()
+            SELECT * FROM matches
+        """ + order + " LIMIT ? OFFSET ?", (*parameters, limit, offset)).fetchall()
         analyses = []
         for row in rows:
             record = dict(row)

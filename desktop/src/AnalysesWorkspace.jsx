@@ -13,6 +13,7 @@ import {
 import "./analysesWorkspace.css";
 import { EditDraftPanel } from "./EditDraftPanel";
 import { GenerationAssignment } from "./GenerationAssignment";
+import { selectionRange } from "./selectionRange";
 
 function originLabel(analysis) {
   return analysis.source_orientation === "columns_are_analyses"
@@ -90,12 +91,6 @@ function mainIdentity(analysis) {
 
 function measurementContext(measurement) {
   return measurement.method || measurement.measurement_set || "";
-}
-
-function selectionRange(order, start, end) {
-  const first = order.indexOf(start);
-  const last = order.indexOf(end);
-  return first < 0 || last < 0 ? [] : order.slice(Math.min(first, last), Math.max(first, last) + 1);
 }
 
 const FILTER_NUMBER = "[+-]?(?:\\d+(?:[.,]\\d+)?|[.,]\\d+)(?:e[+-]?\\d+)?";

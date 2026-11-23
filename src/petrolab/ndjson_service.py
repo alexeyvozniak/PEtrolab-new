@@ -457,6 +457,10 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "analysis.query": lambda params: {"result": search_analyses(
         _project_database_path(params), **{key: params[key] for key in ("query", "mineral", "source", "method", "source_id", "sample_id", "limit", "offset") if key in params},
     )},
+    "analysis.query.ids": lambda params: {"result": search_analyses(
+        _project_database_path(params), ids_only=True,
+        **{key: params[key] for key in ("query", "mineral", "source", "method", "source_id", "sample_id") if key in params},
+    )},
     "project.analysis.get": _dispatch_analysis_get,
     "edit_draft.commit": lambda params: {"result": commit_edit_draft(
         _project_database_path(params), params.get("draft_id"), params.get("actor"), params.get("reason"),

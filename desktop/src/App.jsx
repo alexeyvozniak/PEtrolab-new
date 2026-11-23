@@ -22,7 +22,7 @@ import {
   pickAnalysisExportPath, exportAnalysisSelection,
   clearImportStaging,
   getProjectDatabasePath,
-  getProjectOverview, getProjectAnalysis, queryProjectAnalyses,
+  getProjectOverview, getProjectAnalysis, queryProjectAnalyses, queryProjectAnalysisIds,
   listProjectSamples, getProjectSample, saveSampleContext, addSampleNote,
   createSamplePoint, listPointAnalyses, setPointAnalysisLink, undoPointAnalysisLink, createManualPointAnalysis,
   pickMediaFiles, pickMediaExportPath, inspectMediaFiles, previewMediaFile, draftMediaImport, commitMediaImport,
@@ -602,7 +602,10 @@ export function App() {
           selectionCount={selectedAnalysisIds.length} busy={busy} canImport={desktopRuntimeAvailable} onImport={startNewImport}
           onResume={() => setScreen("Импорт")} onSource={openSearchSource} onGroup={openOverviewGroup} />}
         {screen === "Поиск" && <ProjectSearch seed={searchSeed} queryProject={queryProject} onOpenAnalysis={openSearchAnalysis}
+          queryAnalysisIds={async (query) => unwrap(await queryProjectAnalysisIds(databasePath, query))}
           selectionCount={selectedAnalysisIds.length} busy={busy}
+          hiddenAnalysisIds={hiddenAnalysisIds} onSetVisibility={setPlotVisibility}
+          onUndoVisibility={visibilityOperation ? undoVisibility : null}
           onPlot={openPlots}
           onAddSelection={(ids) => setSelectedAnalysisIds((current) => [...new Set([...current, ...ids])])} />}
         {["Образцы", "Связи", "Изображения"].includes(screen) && <SampleWorkspace key={screen} loadSamples={loadSamples} loadSample={loadSample}
