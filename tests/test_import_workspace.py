@@ -276,7 +276,7 @@ class ImportWorkspaceTests(unittest.TestCase):
         self.assertEqual(call('analytical_point.link.undo', operation_id=point['journal']['id'],
                               actor='Иванов')['error']['code'], 'POINT_LINK_UNDO_CONFLICT')
         self.assertEqual(len(call('analytical_point.analyses', point_id=point_id)['result']), 1)
-        inverse = call('analytical_point.link.undo', **undo_fields)['result']
+        inverse = call('operation_journal.undo', **undo_fields)['result']
         self.assertEqual(inverse['parameters']['reverses_operation_id'], removed['id'])
         self.assertFalse(inverse['reversible'])
         self.assertEqual(call('analytical_point.link.undo', **undo_fields)['error']['code'], 'POINT_LINK_UNDO_UNAVAILABLE')

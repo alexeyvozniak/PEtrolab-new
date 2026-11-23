@@ -256,7 +256,8 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
     return result
 
 
-def _write_visibility_entry(connection, analysis_ids, hidden, session_id, *, reverses_operation_id=None):
+def _write_visibility_entry(connection, analysis_ids, hidden, session_id, *, reverses_operation_id=None,
+                            actor="Локальный пользователь"):
     action = "hide_plot_points" if hidden else "restore_plot_points"
     inverse = "restore_plot_points" if hidden else "hide_plot_points"
     parameters = {"analysis_ids": analysis_ids, "hidden": hidden}
@@ -272,7 +273,7 @@ def _write_visibility_entry(connection, analysis_ids, hidden, session_id, *, rev
                   for analysis_id in analysis_ids],
         "parameters": parameters, "reversible": reversible,
         "inverse_action": {"action": inverse, "parameters": {"analysis_ids": analysis_ids}} if reversible else None,
-        "state": "applied", "actor": "Локальный пользователь", "created_at": _now(),
+        "state": "applied", "actor": actor, "created_at": _now(),
     }
     connection.execute("INSERT INTO operation_journal (id, entry_json) VALUES (?, ?)",
                        (entry["id"], json.dumps(entry, ensure_ascii=False)))
@@ -295,11 +296,13 @@ def record_plot_visibility(database_path, analysis_ids, hidden, *, session_id=No
         return _write_visibility_entry(connection, analysis_ids, hidden, session_id)
 
 
-def undo_plot_visibility(database_path, operation_id, session_id, hidden_analysis_ids):
+def undo_plot_visibility(database_path, operation_id, session_id, hidden_analysis_ids, *, actor="Локальный пользователь"):
     if not isinstance(session_id, str) or str(UUID(session_id)) != session_id:
         raise ValueError("session_id")
     if not isinstance(hidden_analysis_ids, list):
         raise ValueError("hidden_analysis_ids")
+    if not isinstance(actor, str) or not 1 <= len(actor.strip()) <= 120:
+        raise ValueError("actor")
     _selection(hidden_analysis_ids or None)
     with closing(open_project(database_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -329,7 +332,8 @@ def undo_plot_visibility(database_path, operation_id, session_id, hidden_analysi
         entry["state"] = "undone"
         connection.execute("UPDATE operation_journal SET entry_json = ? WHERE id = ?",
                            (json.dumps(entry, ensure_ascii=False), operation_id))
-        return _write_visibility_entry(connection, ids, not hidden, session_id, reverses_operation_id=operation_id)
+        return _write_visibility_entry(connection, ids, not hidden, session_id, reverses_operation_id=operation_id,
+                                       actor=actor.strip())
 
 
 def _layout_input(connection, analysis_ids):

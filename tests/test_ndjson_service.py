@@ -59,15 +59,26 @@ class NdjsonServiceTests(unittest.TestCase):
             self.assertEqual(visibility["category"], "view_only")
             self.assertEqual(call("generation.undo", operation_id=visibility["id"],
                                   actor="Reviewer")["error"]["code"], "GENERATION_UNDO_UNAVAILABLE")
+            page = call("operation_journal.list", limit=2)["result"]
+            self.assertEqual([item["id"] for item in page["entries"]], [visibility["id"], replacement["id"]])
+            self.assertEqual(page["entries"][0]["scope_count"], 2)
+            self.assertNotIn("scope", page["entries"][0])
+            older = call("operation_journal.list", category="domain", before_id=page["next_before_id"])["result"]
+            self.assertEqual([item["id"] for item in older["entries"]], [assigned["id"]])
+            self.assertIsNone(older["next_before_id"])
+            self.assertEqual(call("operation_journal.open", operation_id=assigned["id"])["result"], assigned)
+            self.assertEqual(call("operation_journal.open", operation_id=str(uuid.uuid4()))["error"]["code"],
+                             "OPERATION_NOT_FOUND")
             projected = {row["analysis_id"]: row["generation"] for row in call("project.analyses.list")["result"]["analyses"]}
             self.assertEqual([projected[item]["name"] for item in (first, second)], ["Rim", "Core"])
             self.assertIsNone(projected[neighbor])
             self.assertIn("result", call("generation.undo", operation_id=replacement["id"], actor="Reviewer"))
-            reversed_entry = call("generation.undo", operation_id=assigned["id"], actor="Reviewer")["result"]
+            reversed_entry = call("operation_journal.undo", operation_id=assigned["id"], actor="Reviewer")["result"]
             self.assertEqual(reversed_entry["action"], "restore_generation")
             self.assertEqual([row["entity_id"] for row in reversed_entry["scope"]], [first, second])
             self.assertEqual(call("generation.undo", operation_id=assigned["id"],
                                   actor="Reviewer")["error"]["code"], "GENERATION_UNDO_UNAVAILABLE")
+            self.assertEqual(call("operation_journal.open", operation_id=assigned["id"])["result"]["state"], "undone")
             self.assertTrue(all(row["generation"] is None for row in call("project.analyses.list")["result"]["analyses"]))
             self.assertEqual(evidence(), originals)
             self.assertEqual(FIXTURE.read_bytes(), source_bytes)
@@ -222,7 +233,8 @@ class NdjsonServiceTests(unittest.TestCase):
                            hidden_analysis_ids=scope[:1])["result"]
             self.assertEqual(inverse["parameters"]["analysis_ids"], scope[1:])
             self.assertTrue(inverse["parameters"]["hidden"])
-            restored = call("plot_visibility.undo", **undo, hidden_analysis_ids=scope)["result"]
+            restored = call("operation_journal.undo", **undo, actor="QA", hidden_analysis_ids=scope)["result"]
+            self.assertEqual(restored["actor"], "QA")
             self.assertEqual(restored["parameters"]["reverses_operation_id"], operation["id"])
             self.assertEqual(restored["parameters"]["analysis_ids"], scope)
             self.assertFalse(restored["parameters"]["hidden"])

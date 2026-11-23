@@ -200,6 +200,74 @@ def check_lithos_package(executable: Path, directory: Path, database: str, analy
                 raise AssertionError(f"Packaged publication checksum mismatch: {entry['path']}")
 
 
+def check_operation_journal(executable: Path, directory: Path) -> None:
+    source = directory / "journal.csv"
+    original = b"Analysis,SiO2 [wt.%]\nJ1,39\nJ2,41\nJ3,43\n"
+    source.write_bytes(original)
+    project = {"project_database_path": str(directory / "journal.sqlite")}
+
+    def exchange(*commands):
+        return [item["result"] for item in run(executable, [
+            request(command, {**project, **payload}) for command, payload in commands
+        ])]
+
+    prepared, = exchange(("import.workspace.create", {"sources": [{"staged_path": str(source)}]}))
+    workspace = prepared["session"]
+    review = {"workspace_id": workspace["workspace_id"], "expected_revision": workspace["draft_revision"]}
+    _, _, _, before = exchange(
+        ("import.workspace.restore", {}),
+        ("import.workspace.apply_decision", {
+            **review, "source_id": workspace["active_source_id"],
+            "decision": {"kind": "sample_assignment", "mode": "new", "sample_name": "QA Journal",
+                         "preview_ids": [row["preview_id"] for row in prepared["active"]["plan"]["planned_records"]]},
+        }),
+        ("import.workspace.commit", {**review, "expected_revision": workspace["draft_revision"] + 1}),
+        ("project.analyses.list", {}),
+    )
+    ids = [row["analysis_id"] for row in before["analyses"]]
+    sample_id = before["analyses"][0]["sample_association"]["sample_id"]
+    session_id = str(uuid.uuid4())
+    assigned, point, hidden, page = exchange(
+        ("generation.assign", {"analysis_ids": ids[:2], "new_name": "Rim", "actor": "QA"}),
+        ("analytical_point.create", {"analysis_ids": ids[:2], "sample_id": sample_id,
+                                     "point_name": "P-01", "link_type": "same_point", "actor": "QA"}),
+        ("plot_visibility.hide", {"analysis_ids": ids[:1], "session_id": session_id}),
+        ("operation_journal.list", {"limit": 2}),
+    )
+    if [entry["category"] for entry in page["entries"]] != ["view_only", "domain"]:
+        raise AssertionError("Packaged journal lost its operation categories")
+    point_entry = point["journal"]["id"]
+    point_args = {"point_id": point["analytical_point_id"]}
+    opened, restored_view, removed, links_after_remove, undo_generation, after, undone_entry = exchange(
+        ("operation_journal.open", {"operation_id": point_entry}),
+        ("operation_journal.undo", {"operation_id": hidden["id"], "actor": "QA",
+                                    "session_id": session_id, "hidden_analysis_ids": ids[:1]}),
+        ("analytical_point.link.set", {**point_args, "analysis_id": ids[0], "actor": "QA"}),
+        ("analytical_point.analyses", point_args),
+        ("operation_journal.undo", {"operation_id": assigned["id"], "actor": "QA"}),
+        ("project.analyses.list", {}),
+        ("operation_journal.open", {"operation_id": assigned["id"]}),
+    )
+    inverse, links_after_restore, cancelled_point, links_after_cancel = exchange(
+        ("operation_journal.undo", {"operation_id": removed["id"], "actor": "QA"}),
+        ("analytical_point.analyses", point_args),
+        ("operation_journal.undo", {"operation_id": point_entry, "actor": "QA"}),
+        ("analytical_point.analyses", point_args),
+    )
+    if opened != point["journal"] or restored_view["parameters"]["analysis_ids"] != ids[:1]:
+        raise AssertionError("Packaged journal lost the original scope")
+    if ([row["analysis_id"] for row in links_after_remove] != ids[1:2]
+            or inverse["parameters"]["reverses_operation_id"] != removed["id"]):
+        raise AssertionError("Packaged journal reversed the wrong removal")
+    if ({row["analysis_id"] for row in links_after_restore} != set(ids[:2])
+            or cancelled_point["parameters"]["analysis_ids"] != ids[:2] or links_after_cancel):
+        raise AssertionError("Packaged journal restored or cancelled the wrong point links")
+    if (undo_generation["parameters"]["assignment_operation_id"] != assigned["id"] or undone_entry["state"] != "undone"
+            or after != before or source.read_bytes() != original):
+        raise AssertionError("Packaged journal lost its inverse or changed the source evidence")
+    print("Packaged AT-37 service: generation, point links, visibility and journal round-trip verified.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path, default=ROOT / "desktop/src-tauri/binaries/petrolab-service.exe")
@@ -251,6 +319,7 @@ def main() -> None:
         check_lithos_package(executable, Path(directory), database,
                              [row["analysis_id"] for row in reopened["result"]["analyses"]])
         check_workspace_archive(executable, Path(directory))
+        check_operation_journal(executable, Path(directory))
         image = Path(directory) / "thin-section.png"
         Image.new("RGB", (48, 32), "#627758").save(image)
         archive = Path(directory) / "portable.petrolab"

@@ -1,0 +1,338 @@
+{
+  "scenarios": [
+    "AT-01",
+    "AT-06",
+    "AT-07",
+    "AT-09",
+    "AT-37 (domain and visibility actions)"
+  ],
+  "selected": [
+    {
+      "label": "P2",
+      "analysisId": "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b"
+    },
+    {
+      "label": "P6",
+      "analysisId": "bc2e1bea-3956-44c1-9477-2b20706f3134"
+    },
+    {
+      "label": "P4",
+      "analysisId": "fecd8ab2-fed2-45d9-80bd-71aedb787abd"
+    },
+    {
+      "label": "P1",
+      "analysisId": "689ffb0b-ad2e-43ea-ac43-a54a980f2b20"
+    },
+    {
+      "label": "P7",
+      "analysisId": "8010ba0a-98b2-46a4-a483-fe9e7fee9878"
+    }
+  ],
+  "workGroup": {
+    "id": "30e6813a-c3fd-46d1-979b-68b484dca201",
+    "project_id": "ab527df5-272c-49c4-8fc8-65ae00d4c23b",
+    "name": "AT-14 рабочая группа",
+    "description": "",
+    "created_by": "QA",
+    "created_at": "2026-11-23T10:47:31Z",
+    "analysis_ids": [
+      "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b",
+      "bc2e1bea-3956-44c1-9477-2b20706f3134",
+      "fecd8ab2-fed2-45d9-80bd-71aedb787abd",
+      "689ffb0b-ad2e-43ea-ac43-a54a980f2b20",
+      "8010ba0a-98b2-46a4-a483-fe9e7fee9878"
+    ],
+    "revision": 1
+  },
+  "plotSpecification": {
+    "id": "1ba8242e-b74f-4fbc-8b6d-38627a2e7103",
+    "project_id": "ab527df5-272c-49c4-8fc8-65ae00d4c23b",
+    "name": "AT-14 две диаграммы",
+    "schema_version": 1,
+    "input": {
+      "kind": "analysis_snapshot",
+      "analysis_ids": [
+        "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b",
+        "bc2e1bea-3956-44c1-9477-2b20706f3134",
+        "fecd8ab2-fed2-45d9-80bd-71aedb787abd",
+        "689ffb0b-ad2e-43ea-ac43-a54a980f2b20",
+        "8010ba0a-98b2-46a4-a483-fe9e7fee9878"
+      ]
+    },
+    "panels": [
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "MgO",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "73ce0555-9297-4958-9ca7-bb7c84ef6d35",
+        "kind": "binary",
+        "title": "Al2O3 / MgO",
+        "normalization": null
+      },
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "MgO",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "SiO2",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "03f6581c-77af-430e-b0f8-dfae533c223c",
+        "kind": "ternary",
+        "title": "Al2O3 / MgO / SiO2",
+        "normalization": "sum_of_three_components"
+      }
+    ],
+    "legend": {
+      "group_by": "source",
+      "entries": [
+        {
+          "value": "575a3a80-896e-4afa-86fb-cce9ca801bcd",
+          "label": "at14-analyses.csv",
+          "color": "#4a6584",
+          "symbol": "circle"
+        }
+      ]
+    },
+    "filters": [],
+    "layers": [],
+    "hidden_analysis_ids": [],
+    "hidden_source_ids": [],
+    "created_at": "2026-11-23T10:47:30Z",
+    "updated_at": "2026-11-23T10:47:30Z"
+  },
+  "journal": {
+    "assign_generation": {
+      "id": "587f4f5c-4711-4aa2-acf5-d2eb1d73ab20",
+      "project_id": "ab527df5-272c-49c4-8fc8-65ae00d4c23b",
+      "action": "assign_generation",
+      "category": "domain",
+      "scope": [
+        {
+          "entity_type": "analysis",
+          "entity_id": "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b",
+          "expected_revision": 0,
+          "result_revision": 1
+        },
+        {
+          "entity_type": "analysis",
+          "entity_id": "bc2e1bea-3956-44c1-9477-2b20706f3134",
+          "expected_revision": 0,
+          "result_revision": 1
+        },
+        {
+          "entity_type": "analysis",
+          "entity_id": "fecd8ab2-fed2-45d9-80bd-71aedb787abd",
+          "expected_revision": 0,
+          "result_revision": 1
+        },
+        {
+          "entity_type": "analysis",
+          "entity_id": "689ffb0b-ad2e-43ea-ac43-a54a980f2b20",
+          "expected_revision": 0,
+          "result_revision": 1
+        },
+        {
+          "entity_type": "analysis",
+          "entity_id": "8010ba0a-98b2-46a4-a483-fe9e7fee9878",
+          "expected_revision": 0,
+          "result_revision": 1
+        }
+      ],
+      "parameters": {
+        "generation_id": "025c18b4-dead-431e-8163-51bdb3c0130c",
+        "analysis_ids": [
+          "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b",
+          "bc2e1bea-3956-44c1-9477-2b20706f3134",
+          "fecd8ab2-fed2-45d9-80bd-71aedb787abd",
+          "689ffb0b-ad2e-43ea-ac43-a54a980f2b20",
+          "8010ba0a-98b2-46a4-a483-fe9e7fee9878"
+        ]
+      },
+      "reversible": true,
+      "inverse_action": {
+        "action": "restore_generation",
+        "parameters": {
+          "assignments": [
+            {
+              "analysis_id": "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b",
+              "generation_id": null,
+              "assignment_id": null,
+              "revision": null
+            },
+            {
+              "analysis_id": "bc2e1bea-3956-44c1-9477-2b20706f3134",
+              "generation_id": null,
+              "assignment_id": null,
+              "revision": null
+            },
+            {
+              "analysis_id": "fecd8ab2-fed2-45d9-80bd-71aedb787abd",
+              "generation_id": null,
+              "assignment_id": null,
+              "revision": null
+            },
+            {
+              "analysis_id": "689ffb0b-ad2e-43ea-ac43-a54a980f2b20",
+              "generation_id": null,
+              "assignment_id": null,
+              "revision": null
+            },
+            {
+              "analysis_id": "8010ba0a-98b2-46a4-a483-fe9e7fee9878",
+              "generation_id": null,
+              "assignment_id": null,
+              "revision": null
+            }
+          ]
+        }
+      },
+      "state": "undone",
+      "actor": "Локальный пользователь",
+      "created_at": "2026-11-23T10:47:30Z"
+    },
+    "hide_plot_points": {
+      "id": "8cda1485-bc6f-40a0-8759-148ffafd0fae",
+      "project_id": "ab527df5-272c-49c4-8fc8-65ae00d4c23b",
+      "action": "hide_plot_points",
+      "category": "view_only",
+      "scope": [
+        {
+          "entity_type": "analysis",
+          "entity_id": "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b",
+          "expected_revision": null,
+          "result_revision": null
+        },
+        {
+          "entity_type": "analysis",
+          "entity_id": "bc2e1bea-3956-44c1-9477-2b20706f3134",
+          "expected_revision": null,
+          "result_revision": null
+        },
+        {
+          "entity_type": "analysis",
+          "entity_id": "fecd8ab2-fed2-45d9-80bd-71aedb787abd",
+          "expected_revision": null,
+          "result_revision": null
+        },
+        {
+          "entity_type": "analysis",
+          "entity_id": "689ffb0b-ad2e-43ea-ac43-a54a980f2b20",
+          "expected_revision": null,
+          "result_revision": null
+        },
+        {
+          "entity_type": "analysis",
+          "entity_id": "8010ba0a-98b2-46a4-a483-fe9e7fee9878",
+          "expected_revision": null,
+          "result_revision": null
+        }
+      ],
+      "parameters": {
+        "analysis_ids": [
+          "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b",
+          "bc2e1bea-3956-44c1-9477-2b20706f3134",
+          "fecd8ab2-fed2-45d9-80bd-71aedb787abd",
+          "689ffb0b-ad2e-43ea-ac43-a54a980f2b20",
+          "8010ba0a-98b2-46a4-a483-fe9e7fee9878"
+        ],
+        "hidden": true,
+        "session_id": "a3cba03e-dea5-4351-999a-fbeb280d0f8d"
+      },
+      "reversible": true,
+      "inverse_action": {
+        "action": "restore_plot_points",
+        "parameters": {
+          "analysis_ids": [
+            "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b",
+            "bc2e1bea-3956-44c1-9477-2b20706f3134",
+            "fecd8ab2-fed2-45d9-80bd-71aedb787abd",
+            "689ffb0b-ad2e-43ea-ac43-a54a980f2b20",
+            "8010ba0a-98b2-46a4-a483-fe9e7fee9878"
+          ]
+        }
+      },
+      "state": "undone",
+      "actor": "Локальный пользователь",
+      "created_at": "2026-11-23T10:47:30Z"
+    },
+    "unlink_analytical_point": {
+      "id": "f345b4c2-750c-4329-b70c-734cb6b2e160",
+      "project_id": "ab527df5-272c-49c4-8fc8-65ae00d4c23b",
+      "action": "unlink_analytical_point",
+      "category": "domain",
+      "scope": [
+        {
+          "entity_type": "analytical_point",
+          "entity_id": "9b5e4773-aa37-4ba0-98c4-f855be67079b",
+          "expected_revision": null,
+          "result_revision": null
+        },
+        {
+          "entity_type": "analysis",
+          "entity_id": "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b",
+          "expected_revision": null,
+          "result_revision": null
+        }
+      ],
+      "parameters": {
+        "analytical_point_id": "9b5e4773-aa37-4ba0-98c4-f855be67079b",
+        "analysis_ids": [
+          "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b"
+        ],
+        "link_type": "same_point",
+        "link_created_at": "2026-11-23T10:47:27Z"
+      },
+      "reversible": true,
+      "inverse_action": {
+        "action": "link_analytical_point",
+        "parameters": {
+          "analytical_point_id": "9b5e4773-aa37-4ba0-98c4-f855be67079b",
+          "analysis_ids": [
+            "a0a48e75-07ab-4bf1-8c92-2ce032e1da4b"
+          ],
+          "link_type": "same_point",
+          "link_created_at": "2026-11-23T10:47:27Z"
+        }
+      },
+      "state": "undone",
+      "actor": "Локальный пользователь",
+      "created_at": "2026-11-23T10:47:36Z"
+    }
+  },
+  "sourceSha256": "2c55fd1324c5b927772e7c6074b2a8c10a1a7224fdd0ee46f6af5c32fb3d1e0c"
+}

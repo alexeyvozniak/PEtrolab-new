@@ -207,6 +207,9 @@ const analyses = serviceRequest("project.analyses.list").analyses;
 assert.equal(analyses.length, 7);
 const expectedIds = chosenLabels.map((label) => analyses.find(({ identity }) => identity.Analysis === label).analysis_id);
 const expectedLabels = [...chosenLabels].sort();
+const point = serviceRequest("analytical_point.create", {
+  sample_name: "AT-37 Sample", point_name: "AT-37 Point", analysis_ids: expectedIds.slice(0, 2), link_type: "same_point",
+});
 
 await withWindow(async (evaluate, screenshot) => {
   await until("project name, status and recent import", () => evaluate(() =>
@@ -241,6 +244,16 @@ await withWindow(async (evaluate, screenshot) => {
   await screenshot("AT-07-binary", ".plot-panel:nth-child(1)");
   await screenshot("AT-07-ternary", ".plot-panel:nth-child(2)");
 
+  await click(evaluate, "Скрыть отбор на графиках");
+  await until("the selected analyses are hidden on both panels", () => evaluate(() =>
+    document.body.innerText.includes("Вернуть скрытые точки · 5") && !document.querySelector(".plot-point")));
+  await screenshot("AT-37-hidden");
+  await click(evaluate, "Отменить изменение видимости");
+  await until("visibility inverse restores both selected series", () => evaluate(() =>
+    document.querySelectorAll('.plot-point[aria-pressed="true"]').length === 10
+    && !document.body.innerText.includes("Вернуть скрытые точки")));
+  await screenshot("AT-37-visibility-restored");
+
   await evaluate((name) => {
     const details = document.querySelector(".plot-saved-layouts");
     details.open = true;
@@ -251,6 +264,24 @@ await withWindow(async (evaluate, screenshot) => {
   await click(evaluate, "Сохранить раскладку");
   await until("saved plot layout", () => evaluate((name) => document.body.innerText.includes(`Сохранена раскладка «${name}»`), layoutName));
   await click(evaluate, "Открыть в анализах");
+  await click(evaluate, "Назначить Generation");
+  await until("new Generation field", () => evaluate(() => Boolean(document.querySelector(".generation-assignment input"))));
+  await evaluate(() => {
+    const input = document.querySelector(".generation-assignment input");
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "AT-37 Rim");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await click(evaluate, "Назначить");
+  await until("exact Generation assignment in table", () => evaluate(() =>
+    [...document.querySelectorAll("tbody tr")].filter((row) => row.textContent.includes("AT-37 Rim")).length === 5));
+  await evaluate(() => [...document.querySelectorAll("th")].find((cell) => cell.textContent.includes("Generation"))
+    .scrollIntoView({ block: "nearest", inline: "center" }));
+  await screenshot("AT-37-generation");
+  await click(evaluate, "Отменить назначение Generation");
+  await until("the Generation assignment was undone", () => evaluate(() =>
+    !document.querySelector("tbody")?.textContent.includes("AT-37 Rim")
+    && !document.body.innerText.includes("Отменить назначение Generation")));
+  assert.deepEqual(await evaluate(selection), expectedLabels);
   await click(evaluate, "Сохранить как рабочую группу");
   await evaluate((name) => {
     const form = document.querySelector('form[aria-label="Новая рабочая группа"]');
@@ -283,16 +314,39 @@ await withWindow(async (evaluate, screenshot) => {
   await until("work group reinstated", () => evaluate((name) => document.body.innerText.includes(`Открыта группа «${name}»`), groupName));
   assert.deepEqual(await evaluate(selection), expectedLabels);
   await screenshot("AT-09-restored-work-group");
+  await click(evaluate, "Связи");
+  await click(evaluate, point.point_name);
+  await until("two original point links", () => evaluate(() => document.querySelectorAll(".point-analysis-items li").length === 2));
+  await evaluate((label) => [...document.querySelectorAll(".point-analysis-items li")]
+    .find((row) => row.querySelector("b")?.textContent === label).querySelector("button:last-child").click(), chosenLabels[0]);
+  await until("one link was removed", () => evaluate(() => document.querySelectorAll(".point-analysis-items li").length === 1
+    && document.body.innerText.includes("Связь снята.")));
+  await click(evaluate, "Восстановить снятую связь");
+  await until("the original point link was restored", () => evaluate(() => document.querySelectorAll(".point-analysis-items li").length === 2
+    && document.body.innerText.includes("Связь восстановлена.")));
+  await screenshot("AT-37-link-restored");
 });
 
+const operations = serviceRequest("operation_journal.list").entries;
+const journal = Object.fromEntries(["assign_generation", "hide_plot_points", "unlink_analytical_point"].map((action) => {
+  const summary = operations.find((item) => item.action === action);
+  const entry = serviceRequest("operation_journal.open", { operation_id: summary.id });
+  assert.equal(entry.state, "undone");
+  return [action, entry];
+}));
+assert.deepEqual([...journal.assign_generation.parameters.analysis_ids].sort(), [...expectedIds].sort());
+assert.deepEqual([...journal.hide_plot_points.parameters.analysis_ids].sort(), [...expectedIds].sort());
+assert.equal(journal.hide_plot_points.category, "view_only");
+assert.deepEqual(journal.unlink_analytical_point.parameters.analysis_ids, expectedIds.slice(0, 1));
+assert.equal(journal.unlink_analytical_point.parameters.analytical_point_id, point.analytical_point_id);
 assert.deepEqual(savedGroup(), before);
 assert.deepEqual(serviceRequest("plot_spec.open", { id: saved.id }), layout);
 assert.deepEqual(serviceRequest("project.analyses.list").analyses, analyses);
 const finalSource = await readFile(source);
 assert.equal(finalSource.toString("utf8"), original);
 await writeFile(join(evidence, "acceptance.json"), JSON.stringify({
-  scenarios: ["AT-01", "AT-06", "AT-07", "AT-09"],
+  scenarios: ["AT-01", "AT-06", "AT-07", "AT-09", "AT-37 (domain and visibility actions)"],
   selected: chosenLabels.map((label, index) => ({ label, analysisId: expectedIds[index] })),
-  workGroup: before, plotSpecification: layout, sourceSha256: createHash("sha256").update(finalSource).digest("hex"),
+  workGroup: before, plotSpecification: layout, journal, sourceSha256: createHash("sha256").update(finalSource).digest("hex"),
 }, null, 2));
-console.log("AT-14 native project, selection, plots and restart checks passed.");
+console.log("Native project, selection, plots, restart and AT-37 journal action checks passed.");

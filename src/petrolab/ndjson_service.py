@@ -12,6 +12,7 @@ from .clean_table import classify_clean_table
 from .import_workspace import ImportWorkspaceStore
 from .work_groups import create_work_group, list_work_groups
 from .generations import assign_generation, list_generations, undo_generation
+from .operation_journal import list_operations, open_operation, undo_operation
 from .selection_export import export_selection_csv, export_selection_xlsx
 from .table_views import list_table_views, save_table_view
 from .edit_drafts import check_edit_draft, commit_edit_draft, list_edit_drafts, save_edit_draft
@@ -484,6 +485,17 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     )},
     "generation.undo": lambda params: {"result": undo_generation(
         _project_database_path(params), _string(params, "operation_id"), _string(params, "actor"),
+    )},
+    "operation_journal.list": lambda params: {"result": list_operations(
+        _project_database_path(params), category=params.get("category"), before_id=params.get("before_id"),
+        limit=params.get("limit", 50),
+    )},
+    "operation_journal.open": lambda params: {"result": open_operation(
+        _project_database_path(params), _string(params, "operation_id"),
+    )},
+    "operation_journal.undo": lambda params: {"result": undo_operation(
+        _project_database_path(params), _string(params, "operation_id"), _string(params, "actor"),
+        session_id=params.get("session_id"), hidden_analysis_ids=params.get("hidden_analysis_ids"),
     )},
     "import.inspect_source": _dispatch_import_inspect,
     "import.clean_table.classify": _dispatch_import_clean_table_classify,
