@@ -204,19 +204,24 @@ def check_lithos_package(executable: Path, directory: Path, database: str, analy
                 raise AssertionError(f"Packaged publication checksum mismatch: {entry['path']}")
 
 
-def check_portable_archive(executable: Path, directory: Path, database: str, analyses: list[dict]) -> None:
+def check_portable_archive(executable: Path, directory: Path) -> None:
+    directory.mkdir()
+    database = str(directory / "project.sqlite")
     project = {"project_database_path": database}
     image, photo = directory / "thin-section.png", directory / "plane-light.png"
     Image.new("RGB", (48, 32), "#627758").save(image)
     Image.new("RGB", (48, 32), "#7d9c71").save(photo)
     original_files = {path: path.read_bytes() for path in (FIXTURE, image, photo)}
-    preview, point = [item["result"] for item in run(executable, [
+    _, listed, preview = [item["result"] for item in run(executable, [
+        request("import.plan.apply", {**project, "source_path": str(FIXTURE), "recipe": fixture_recipe()}),
+        request("project.analyses.list", {**project, "limit": 100}),
         request("media.preview_input", {"source_path": str(image)}),
-        request("analytical_point.create", {**project, "sample_name": "Archive QA", "point_name": "P-01",
-            "analysis_ids": [row["analysis_id"] for row in analyses[:2]], "link_type": "same_point"}),
     ])]
     if not preview["preview_url"].startswith("data:image/jpeg;base64,"):
         raise AssertionError("Packaged service failed to decode and preview an image")
+    analyses = listed["analyses"]
+    point = run(executable, [request("analytical_point.create", {**project, "sample_name": "Archive QA", "point_name": "P-01",
+        "analysis_ids": [row["analysis_id"] for row in analyses[:2]], "link_type": "same_point"})])[0]["result"]
     point_id = point["analytical_point_id"]
     assignment = {"ownership_mode": "linked_external", "sample_name": point["sample_name"], "thin_section_name": "TS-01"}
     plan = run(executable, [request("media.import.plan", {**project, "assignments": [
@@ -431,7 +436,7 @@ def main() -> None:
                              [row["analysis_id"] for row in reopened["result"]["analyses"]])
         check_workspace_archive(executable, Path(directory))
         check_operation_journal(executable, Path(directory))
-        check_portable_archive(executable, Path(directory), database, reopened["result"]["analyses"])
+        check_portable_archive(executable, Path(directory) / "archive-qa")
         selection_book = Path(directory) / "selection.xlsx"
         run(executable, [request("analysis.selection.export_xlsx", {
             "project_database_path": database, "analysis_ids": members, "output_path": str(selection_book),
