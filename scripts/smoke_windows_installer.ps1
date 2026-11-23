@@ -127,7 +127,7 @@ try {
 
     if ($UiEvidence) {
         & node (Join-Path $PSScriptRoot "qa_installer_ui.mjs") $appExecutable.FullName $UiEvidence
-        if ($LASTEXITCODE -ne 0) { throw "Installed PetroLab failed the AT-14 native workflow." }
+        if ($LASTEXITCODE -ne 0) { throw "Installed PetroLab failed the native acceptance workflow." }
     }
 
     Write-Host "Launching $($appExecutable.FullName)"

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { get } from "node:http";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
@@ -96,12 +96,12 @@ function connect(socket) {
   });
 }
 
-async function withWindow(check) {
+async function withWindow(check, { projectPath = database, editConfirmations = null } = {}) {
   const port = await debuggingPort();
   const profile = await mkdtemp(join(workspace, "webview-"));
   const child = spawn(executable, [], {
     cwd: dirname(executable), stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, PETROLAB_PROJECT_DATABASE: database, WEBVIEW2_USER_DATA_FOLDER: profile,
+    env: { ...process.env, PETROLAB_PROJECT_DATABASE: projectPath, WEBVIEW2_USER_DATA_FOLDER: profile,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1` },
   });
   let appOutput = "";
@@ -131,6 +131,15 @@ async function withWindow(check) {
     socket = new WebSocket(address);
     await until("debugger connection", () => socket.readyState === WebSocket.OPEN, 5000);
     const command = connect(socket);
+    if (editConfirmations) {
+      socket.addEventListener("message", (event) => {
+        const { method, params } = JSON.parse(event.data);
+        if (method !== "Page.javascriptDialogOpening") return;
+        const matches = params.type === "confirm" && params.message.startsWith("Записать правку в ячейку B2");
+        editConfirmations.push(matches);
+        command("Page.handleJavaScriptDialog", { accept: matches }).catch(() => {});
+      });
+    }
     const evaluate = async (fn, ...args) => {
       const { result, exceptionDetails } = await command("Runtime.evaluate", {
         expression: `(${fn.toString()})(...${JSON.stringify(args)})`, returnByValue: true, awaitPromise: true,
@@ -344,9 +353,150 @@ assert.deepEqual(serviceRequest("plot_spec.open", { id: saved.id }), layout);
 assert.deepEqual(serviceRequest("project.analyses.list").analyses, analyses);
 const finalSource = await readFile(source);
 assert.equal(finalSource.toString("utf8"), original);
+
+const editDatabase = join(workspace, "AT-32-Project.sqlite");
+const editProject = { project_database_path: editDatabase };
+const conflictBook = join(workspace, "external-change.xlsx");
+const editableBook = join(workspace, "confirmed-write.xlsx");
+const python = (script, ...args) => execFileSync("python", ["-X", "utf8", "-c", script, ...args],
+  { encoding: "utf8", windowsHide: true, timeout: 30000 });
+python(`
+import sys
+from openpyxl import Workbook
+for path, label, value in ((sys.argv[1], "Conflict", 4.5), (sys.argv[2], "Writable", 7.5)):
+    book = Workbook()
+    book.active.append(["Analysis", "F (wt.%)"])
+    book.active.append([label, value])
+    book.save(path)
+    book.close()
+`, conflictBook, editableBook);
+const [originalConflict, originalEditable] = await Promise.all([readFile(conflictBook), readFile(editableBook)]);
+for (const source_path of [conflictBook, editableBook]) {
+  const { recipe: editRecipe } = serviceRequest("import.recipe.suggest", { source_path });
+  const linkedRecipe = JSON.parse(python(`
+import json, sys
+from petrolab.import_preview import semantic_fingerprint
+recipe = json.loads(sys.argv[1])
+recipe["ownership_mode"] = "linked_external"
+recipe["semantic_fingerprint"] = semantic_fingerprint(recipe)
+print(json.dumps(recipe))
+`, JSON.stringify(editRecipe)));
+  serviceRequest("import.plan.apply", { ...editProject, source_path, recipe: linkedRecipe });
+}
+const editBefore = serviceRequest("project.analyses.list", editProject).analyses;
+const byLabel = Object.fromEntries(editBefore.map((row) => [row.identity.Analysis, row]));
+
+async function openEditDrafts(evaluate, label) {
+  await until(`analysis ${label}`, () => evaluate((name) => {
+    const cell = [...document.querySelectorAll("tbody td")].find((item) => item.textContent === name);
+    if (!cell) return false;
+    cell.click();
+    return true;
+  }, label));
+  await until(`draft panel ${label}`, () => evaluate((name) => {
+    const detail = document.querySelector(".analysis-detail");
+    const summary = detail?.querySelector(".analysis-edit-drafts summary");
+    if (!summary || detail.querySelector("h2")?.textContent !== name) return false;
+    if (!summary.parentElement.open) summary.click();
+    return true;
+  }, label));
+}
+
+async function saveDraft(evaluate, nextValue, expectedLine) {
+  await until("draft input ready", () => evaluate(() => {
+    const input = document.querySelector(".analysis-edit-drafts input[name=new_value]");
+    return input && !input.disabled;
+  }));
+  await evaluate((value) => { document.querySelector(".analysis-edit-drafts input[name=new_value]").value = value; }, nextValue);
+  await click(evaluate, "Сохранить черновик");
+  await until(expectedLine, () => evaluate((line) => document.body.innerText.includes(line), expectedLine));
+}
+
+await withWindow(async (evaluate, screenshot) => {
+  await click(evaluate, "Анализы");
+  await openEditDrafts(evaluate, "Conflict");
+  await saveDraft(evaluate, "6.5", "Было 4.5 → предлагается 6.5 wt.%");
+  await screenshot("AT-32-saved-draft");
+}, { projectPath: editDatabase });
+
+python(`
+import sys
+from openpyxl import load_workbook
+book = load_workbook(sys.argv[1])
+book.active["B2"] = 99
+book.save(sys.argv[1])
+book.close()
+`, conflictBook);
+const modifiedConflict = await readFile(conflictBook);
+assert.notDeepEqual(modifiedConflict, originalConflict);
+
+async function confirmEdit(evaluate) {
+  await until("edit confirmation form ready", () => evaluate(() => {
+    const form = document.querySelector('.analysis-edit-draft form[aria-label^="Запись ячейки"]');
+    const submit = form?.querySelector("button");
+    if (!submit || submit.disabled) return false;
+    form.elements.actor.value = "QA";
+    form.elements.reason.value = "AT-32 verification";
+    setTimeout(() => submit.click(), 0);
+    return true;
+  }));
+}
+
+const editConfirmations = [];
+await withWindow(async (evaluate, screenshot) => {
+  await click(evaluate, "Анализы");
+  await openEditDrafts(evaluate, "Conflict");
+  await until("draft restored after restart", () => evaluate(() =>
+    document.body.innerText.includes("Было 4.5 → предлагается 6.5 wt.%")));
+  await confirmEdit(evaluate);
+  await until("external edit conflict", () => evaluate(() =>
+    document.body.innerText.includes("Исходный файл изменился") && document.body.innerText.includes("Сейчас в файле: 99")));
+  await evaluate(() => {
+    const hashes = document.querySelector(".analysis-edit-draft details");
+    hashes.open = true;
+    hashes.scrollIntoView({ block: "end" });
+  });
+  await screenshot("AT-32-conflict");
+  await openEditDrafts(evaluate, "Writable");
+  await saveDraft(evaluate, "8.5", "Было 7.5 → предлагается 8.5 wt.%");
+  await confirmEdit(evaluate);
+  await until("confirmed write and backup visible", () => evaluate(() =>
+    document.body.innerText.includes("Записано в XLSX") && document.body.innerText.includes("Резервная копия")));
+  await screenshot("AT-32-backup");
+}, { projectPath: editDatabase, editConfirmations });
+
+assert.deepEqual(editConfirmations, [true, true]);
+const sha256 = (content) => createHash("sha256").update(content).digest("hex");
+const draftFor = (label) => serviceRequest("edit_draft.list", { ...editProject, analysis_id: byLabel[label].analysis_id }).drafts[0];
+const blocked = draftFor("Conflict");
+const storedEdit = draftFor("Writable");
+assert.equal(blocked.draft.conflict.kind, "source_changed");
+assert.equal(blocked.draft.source_fingerprint_at_start, sha256(originalConflict));
+assert.equal(blocked.draft.conflict.current_source_fingerprint, sha256(modifiedConflict));
+assert.equal(blocked.draft.changes[0].old_value, "4.5");
+assert.deepEqual(await readFile(conflictBook), modifiedConflict);
+assert.ok(!(await readdir(workspace)).some((name) => name.startsWith("external-change.xlsx.before-edit-")));
+assert.equal(storedEdit.draft.status, "committed");
+assert.deepEqual(await readFile(storedEdit.operation.parameters.backup_path), originalEditable);
+assert.equal(storedEdit.operation.parameters.before_sha256, sha256(originalEditable));
+assert.equal(storedEdit.operation.parameters.after_sha256, sha256(await readFile(editableBook)));
+assert.equal(python(`
+import sys
+from openpyxl import load_workbook
+with open(sys.argv[1], "rb") as stream:
+    book = load_workbook(stream, read_only=True)
+    print(book.active["B2"].value)
+    book.close()
+`, editableBook).trim(), "8.5");
+assert.deepEqual(serviceRequest("project.analyses.list", editProject).analyses, editBefore);
+const editDraft = {
+  conflict: { draft: blocked.draft, external_file_unchanged: true },
+  confirmed_write: { draft: storedEdit.draft, backup_sha256: sha256(originalEditable), value: 8.5 },
+  imported_measurements_unchanged: true,
+};
 await writeFile(join(evidence, "acceptance.json"), JSON.stringify({
-  scenarios: ["AT-01", "AT-06", "AT-07", "AT-09", "AT-37 (domain and visibility actions)"],
+  scenarios: ["AT-01", "AT-06", "AT-07", "AT-09", "AT-32", "AT-37 (domain and visibility actions)"],
   selected: chosenLabels.map((label, index) => ({ label, analysisId: expectedIds[index] })),
-  workGroup: before, plotSpecification: layout, journal, sourceSha256: createHash("sha256").update(finalSource).digest("hex"),
+  workGroup: before, plotSpecification: layout, journal, editDraft, sourceSha256: sha256(finalSource),
 }, null, 2));
-console.log("Native project, selection, plots, restart and AT-37 journal action checks passed.");
+console.log("Native project, selection, plots, restart, AT-32 edit and AT-37 journal checks passed.");

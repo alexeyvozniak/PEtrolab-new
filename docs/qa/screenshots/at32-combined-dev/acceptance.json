@@ -1,0 +1,64 @@
+{
+  "conflict": {
+    "draft": {
+      "id": "1faafd36-c533-4f3e-94d1-d9cbb37540fe",
+      "project_id": "d02e8842-6d9c-4962-839c-287978c30787",
+      "source_id": "8f5ffb8c-fe68-4bbb-a35c-0174ad84e3d0",
+      "source_fingerprint_at_start": "ac9afe991c20ab9f8dee5f9443100417958e4c43c3eb711143e4672d419f536b",
+      "changes": [
+        {
+          "analysis_id": "ef2cd56b-9a33-443c-8502-38bca1a8acea",
+          "field": "F",
+          "old_value": "4.5",
+          "new_value": "6.5",
+          "unit": "wt.%"
+        }
+      ],
+      "status": "conflict",
+      "created_at": "2026-11-23T11:00:47Z",
+      "updated_at": "2026-11-23T11:00:50Z",
+      "conflict": {
+        "kind": "source_changed",
+        "current_source_fingerprint": "068b740dbef511881790464984840067b9d30cadc651da4ec46fb210dc97a8e5",
+        "current_values": [
+          {
+            "analysis_id": "ef2cd56b-9a33-443c-8502-38bca1a8acea",
+            "field": "F",
+            "current_value": "99"
+          }
+        ],
+        "detected_at": "2026-11-23T11:00:50Z"
+      }
+    },
+    "external_file_unchanged": true
+  },
+  "confirmed_write": {
+    "draft": {
+      "id": "a168ff44-7362-4acf-a2c8-531b76b9a613",
+      "project_id": "d02e8842-6d9c-4962-839c-287978c30787",
+      "source_id": "153c3b64-bb24-4fc3-bf82-35e2d6cd6a03",
+      "source_fingerprint_at_start": "a4c6af6ff4bccf6a5faaca5a3db672d753ad2ebc46842a77566fe2f9ca62ff69",
+      "changes": [
+        {
+          "analysis_id": "ed3a09fa-d21d-4a17-8fa6-68f3578b3b9b",
+          "field": "F",
+          "old_value": "7.5",
+          "new_value": "8.5",
+          "unit": "wt.%"
+        }
+      ],
+      "status": "committed",
+      "created_at": "2026-11-23T11:00:50Z",
+      "updated_at": "2026-11-23T11:00:51Z",
+      "conflict": {
+        "kind": "none",
+        "detected_at": null,
+        "current_source_fingerprint": null,
+        "current_values": []
+      }
+    },
+    "backup_sha256": "a4c6af6ff4bccf6a5faaca5a3db672d753ad2ebc46842a77566fe2f9ca62ff69",
+    "value": 8.5
+  },
+  "imported_measurements_unchanged": true
+}
