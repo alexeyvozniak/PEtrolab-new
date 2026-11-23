@@ -206,6 +206,28 @@ class NdjsonServiceTests(unittest.TestCase):
             self.assertEqual(hide["inverse_action"]["action"], "restore_plot_points")
             self.assertEqual(call("plot_visibility.restore", analysis_ids=[p2["analysis_id"]])["result"]["action"],
                              "restore_plot_points")
+            session = str(uuid.uuid4())
+            scope = mask["analysis_ids"]
+            operation = call("plot_visibility.hide", analysis_ids=scope, session_id=session)["result"]
+            self.assertEqual([item["entity_id"] for item in operation["scope"]], scope)
+            undo = {"operation_id": operation["id"], "session_id": session}
+            conflict = call("plot_visibility.undo", **undo, hidden_analysis_ids=scope[:1])
+            self.assertEqual(conflict["error"]["details"]["analysis_ids"], scope[1:])
+            self.assertEqual(call("plot_visibility.undo", **{**undo, "session_id": str(uuid.uuid4())},
+                                  hidden_analysis_ids=scope)["error"]["code"], "PLOT_VISIBILITY_UNDO_UNAVAILABLE")
+            later = call("plot_visibility.restore", analysis_ids=scope[1:], session_id=session)["result"]
+            self.assertEqual(call("plot_visibility.undo", **undo, hidden_analysis_ids=scope)["error"]["code"],
+                             "PLOT_VISIBILITY_UNDO_CONFLICT")
+            inverse = call("plot_visibility.undo", **{**undo, "operation_id": later["id"]},
+                           hidden_analysis_ids=scope[:1])["result"]
+            self.assertEqual(inverse["parameters"]["analysis_ids"], scope[1:])
+            self.assertTrue(inverse["parameters"]["hidden"])
+            restored = call("plot_visibility.undo", **undo, hidden_analysis_ids=scope)["result"]
+            self.assertEqual(restored["parameters"]["reverses_operation_id"], operation["id"])
+            self.assertEqual(restored["parameters"]["analysis_ids"], scope)
+            self.assertFalse(restored["parameters"]["hidden"])
+            self.assertEqual(call("plot_visibility.undo", **undo, hidden_analysis_ids=[])["error"]["code"],
+                             "PLOT_VISIBILITY_UNDO_UNAVAILABLE")
             self.assertEqual(call("plot_data.query", **mask)["result"], binary)
             panels = [{"id": str(uuid.uuid4()), "kind": "binary", "axes": mask["axes"]},
                       {"id": str(uuid.uuid4()), "kind": "ternary", "axes": keys}]

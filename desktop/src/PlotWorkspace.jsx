@@ -315,7 +315,7 @@ function PlotExport({ options, onChange, panels, pending, close, submit, canAddP
 }
 
 export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedIds, inputIds, onBack,
-  hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onSetVisibility, busy, loadLayouts, saveLayout, openLayout,
+  hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
   onExport, onAddPublication }) {
   const [axes, setAxes] = useState([]);
   const [patterns, setPatterns] = useState({});
@@ -490,6 +490,9 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
         <p>Зелёный контур — текущий отбор</p>
         {hiddenAnalysisIds.length > 0 && <button className="outline-button" type="button" disabled={busy || !onSetVisibility}
           onClick={() => onSetVisibility(hiddenAnalysisIds, false)}>Вернуть скрытые точки · {hiddenAnalysisIds.length}</button>}
+        {onUndoVisibility && <button className="outline-button" type="button" disabled={busy} onClick={onUndoVisibility}>
+          Отменить изменение видимости
+        </button>}
       </section>
       <details className="plot-layers">
         <summary>Слои и поля</summary>

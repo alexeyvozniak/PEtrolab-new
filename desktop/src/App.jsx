@@ -32,7 +32,7 @@ import {
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
   getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication, capturePublicationPlot,
   capturePublicationTable, capturePublicationMedia,
-  getPlotCatalog, getPlotData, recordPlotVisibility,
+  getPlotCatalog, getPlotData, recordPlotVisibility, undoPlotVisibility,
   listPlotSpecifications, openPlotSpecification, savePlotSpecification, pickPlotExportPath, exportPlot,
   isPetrolabDesktop,
   listProjectAnalyses,
@@ -120,6 +120,8 @@ export function App() {
   const [plotInputIds, setPlotInputIds] = useState(null);
   const [hiddenSourceIds, setHiddenSourceIds] = useState([]);
   const [hiddenAnalysisIds, setHiddenAnalysisIds] = useState([]);
+  const [visibilitySessionId, setVisibilitySessionId] = useState(() => crypto.randomUUID());
+  const [visibilityOperation, setVisibilityOperation] = useState(null);
   const [workspace, setWorkspace] = useState(null);
   const [sourceIssues, setSourceIssues] = useState([]);
   const [focusedIssueKey, setFocusedIssueKey] = useState("");
@@ -416,12 +418,18 @@ export function App() {
     const scope = new Set(layout.input.analysis_ids);
     const sources = new Set(layout.legend.entries.map(({ value }) => value));
     setHiddenAnalysisIds((current) => [...current.filter((analysisId) => !scope.has(analysisId)), ...layout.hidden_analysis_ids]);
+    setVisibilityOperation(null);
+    setVisibilitySessionId(crypto.randomUUID());
     setHiddenSourceIds((current) => [...current.filter((sourceId) => !sources.has(sourceId)), ...layout.hidden_source_ids]);
     return layout;
   };
   const loadPlotData = useCallback(async (kind, axes, layers, normalization) =>
     unwrap(await getPlotData(databasePath, plotInputIds, kind, axes, hiddenAnalysisIds, hiddenSourceIds, layers, normalization)),
   [databasePath, plotInputIds, hiddenAnalysisIds, hiddenSourceIds]);
+  const applyVisibilityEntry = ({ parameters: { analysis_ids: ids, hidden } }) => {
+    const scope = new Set(ids);
+    setHiddenAnalysisIds((current) => hidden ? [...new Set([...current, ...ids])] : current.filter((id) => !scope.has(id)));
+  };
   const setPlotVisibility = async (ids, hidden) => {
     if (busy || !databasePath) return;
     const changed = ids.filter((id) => hidden !== hiddenAnalysisIds.includes(id));
@@ -429,8 +437,23 @@ export function App() {
     setBusy(true);
     setError("");
     try {
-      unwrap(await recordPlotVisibility(databasePath, changed, hidden));
-      setHiddenAnalysisIds((current) => hidden ? [...new Set([...current, ...changed])] : current.filter((id) => !changed.includes(id)));
+      const entry = unwrap(await recordPlotVisibility(databasePath, changed, hidden, visibilitySessionId));
+      applyVisibilityEntry(entry);
+      setVisibilityOperation(entry);
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const undoVisibility = async () => {
+    if (busy || !databasePath || !visibilityOperation) return;
+    setBusy(true);
+    setError("");
+    try {
+      const entry = unwrap(await undoPlotVisibility(databasePath, visibilityOperation.id, visibilitySessionId, hiddenAnalysisIds));
+      applyVisibilityEntry(entry);
+      setVisibilityOperation(null);
     } catch (caught) {
       setError(caught.message);
     } finally {
@@ -673,6 +696,7 @@ export function App() {
           selectedIds={selectedAnalysisIds} setSelectedIds={setSelectedAnalysisIds} onBack={() => setScreen("Анализы")}
           hiddenAnalysisIds={hiddenAnalysisIds} hiddenSourceIds={hiddenSourceIds} busy={busy}
           onSetVisibility={setPlotVisibility}
+          onUndoVisibility={visibilityOperation ? undoVisibility : null}
           onToggleSource={(id) => setHiddenSourceIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])} />}
         {screen === "Импорт" && (
           <section className={`live-page${sourcePath ? " import-live-page" : ""}`}>
@@ -763,6 +787,7 @@ export function App() {
             onOpenPlots={() => openPlots()}
             hiddenPlotAnalysisIds={hiddenAnalysisIds}
             onSetPlotVisibility={setPlotVisibility}
+            onUndoPlotVisibility={visibilityOperation ? undoVisibility : null}
             onListTableViews={async () => unwrap(await listTableViews(databasePath))}
             onSaveTableView={async (view) => unwrap(await saveTableView(databasePath, view))}
             editDraftActions={{

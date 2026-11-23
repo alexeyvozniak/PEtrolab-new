@@ -227,7 +227,12 @@ test("one common selection highlights the same analysis on binary and ternary pl
   await user.click(screen.getByRole("checkbox", { name: "second.csv" }));
   await screen.findAllByRole("button", { name: "Выбрать точку P2" });
   expect(screen.queryByRole("button", { name: "Выбрать точку P1" })).toBeNull();
-  await user.click(await enabledButton("Вернуть скрытые точки · 1"));
+  await user.click(await enabledButton("Отменить изменение видимости"));
+  const hidden = requests.find(({ command }) => command === "plot_visibility.hide");
+  const restoredView = requests.find(({ command }) => command === "plot_visibility.undo");
+  expect(restoredView.payload.hidden_analysis_ids).toEqual(hidden.payload.analysis_ids);
+  expect(restoredView.payload.session_id).toBe(hidden.payload.session_id);
+  expect(restoredView.payload.operation_id).toBeTruthy();
   await waitFor(() => {
     const restored = screen.getAllByRole("button", { name: "Выбрать точку P1" });
     expect(restored).toHaveLength(8);
@@ -249,6 +254,7 @@ test("one common selection highlights the same analysis on binary and ternary pl
   await user.click(await enabledButton("Вернуть скрытые точки · 1"));
   await user.click(await enabledButton("Открыть «Три панели»"));
   await screen.findByText("Открыта раскладка «Три панели».");
+  expect(screen.queryByRole("button", { name: "Отменить изменение видимости" })).toBeNull();
   await waitFor(() => {
     expect(screen.getAllByRole("combobox", { name: "Тип диаграммы" })).toHaveLength(3);
     expect(screen.queryByRole("button", { name: "Выбрать точку P1" })).toBeNull();

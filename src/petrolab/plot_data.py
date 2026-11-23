@@ -256,12 +256,35 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
     return result
 
 
-def record_plot_visibility(database_path, analysis_ids, hidden):
-    if analysis_ids is None:
-        raise ValueError("analysis_ids")
-    _, encoded = _selection(analysis_ids)
+def _write_visibility_entry(connection, analysis_ids, hidden, session_id, *, reverses_operation_id=None):
     action = "hide_plot_points" if hidden else "restore_plot_points"
     inverse = "restore_plot_points" if hidden else "hide_plot_points"
+    parameters = {"analysis_ids": analysis_ids, "hidden": hidden}
+    if session_id is not None:
+        parameters["session_id"] = session_id
+    if reverses_operation_id is not None:
+        parameters["reverses_operation_id"] = reverses_operation_id
+    reversible = reverses_operation_id is None
+    entry = {
+        "id": _id(), "project_id": connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0],
+        "action": action, "category": "view_only",
+        "scope": [{"entity_type": "analysis", "entity_id": analysis_id, "expected_revision": None, "result_revision": None}
+                  for analysis_id in analysis_ids],
+        "parameters": parameters, "reversible": reversible,
+        "inverse_action": {"action": inverse, "parameters": {"analysis_ids": analysis_ids}} if reversible else None,
+        "state": "applied", "actor": "Локальный пользователь", "created_at": _now(),
+    }
+    connection.execute("INSERT INTO operation_journal (id, entry_json) VALUES (?, ?)",
+                       (entry["id"], json.dumps(entry, ensure_ascii=False)))
+    return entry
+
+
+def record_plot_visibility(database_path, analysis_ids, hidden, *, session_id=None):
+    if analysis_ids is None:
+        raise ValueError("analysis_ids")
+    if session_id is not None and (not isinstance(session_id, str) or str(UUID(session_id)) != session_id):
+        raise ValueError("session_id")
+    _, encoded = _selection(analysis_ids)
     with closing(open_project(database_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         known = connection.execute("""
@@ -269,18 +292,44 @@ def record_plot_visibility(database_path, analysis_ids, hidden):
         """, (encoded,)).fetchone()[0]
         if known != len(analysis_ids):
             raise ImportCommandError("PLOT_ANALYSIS_UNAVAILABLE", "Часть анализов недоступна. Видимость не изменена.")
-        entry = {
-            "id": _id(), "project_id": connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0],
-            "action": action, "category": "view_only",
-            "scope": [{"entity_type": "analysis", "entity_id": analysis_id, "expected_revision": None, "result_revision": None}
-                      for analysis_id in analysis_ids],
-            "parameters": {"analysis_ids": analysis_ids, "hidden": hidden}, "reversible": True,
-            "inverse_action": {"action": inverse, "parameters": {"analysis_ids": analysis_ids}},
-            "state": "applied", "actor": "Локальный пользователь", "created_at": _now(),
-        }
-        connection.execute("INSERT INTO operation_journal (id, entry_json) VALUES (?, ?)",
-                           (entry["id"], json.dumps(entry, ensure_ascii=False)))
-        return entry
+        return _write_visibility_entry(connection, analysis_ids, hidden, session_id)
+
+
+def undo_plot_visibility(database_path, operation_id, session_id, hidden_analysis_ids):
+    if not isinstance(session_id, str) or str(UUID(session_id)) != session_id:
+        raise ValueError("session_id")
+    if not isinstance(hidden_analysis_ids, list):
+        raise ValueError("hidden_analysis_ids")
+    _selection(hidden_analysis_ids or None)
+    with closing(open_project(database_path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        stored = connection.execute("SELECT rowid, entry_json FROM operation_journal WHERE id = ?", (operation_id,)).fetchone()
+        entry = json.loads(stored["entry_json"]) if stored else {}
+        parameters = entry.get("parameters", {})
+        if (entry.get("action") not in {"hide_plot_points", "restore_plot_points"}
+                or entry.get("state") != "applied" or not entry.get("reversible")
+                or parameters.get("session_id") != session_id):
+            raise ImportCommandError("PLOT_VISIBILITY_UNDO_UNAVAILABLE", "Эта операция недоступна для отмены в текущем виде.")
+        ids = parameters["analysis_ids"]
+        hidden = parameters["hidden"]
+        later = connection.execute("""
+            SELECT DISTINCT affected.value
+            FROM operation_journal j, json_each(j.entry_json, '$.parameters.analysis_ids') affected
+            WHERE j.rowid > ? AND json_extract(j.entry_json, '$.state') = 'applied'
+              AND json_extract(j.entry_json, '$.category') = 'view_only'
+              AND json_extract(j.entry_json, '$.reversible') = 1
+              AND json_extract(j.entry_json, '$.parameters.session_id') = ?
+              AND affected.value IN (SELECT value FROM json_each(?))
+        """, (stored["rowid"], session_id, json.dumps(ids))).fetchall()
+        current = set(hidden_analysis_ids)
+        conflicts = {row[0] for row in later} | {item for item in ids if (item in current) != hidden}
+        if conflicts:
+            raise ImportCommandError("PLOT_VISIBILITY_UNDO_CONFLICT", "Видимость части точек изменилась после этой операции.",
+                                     {"analysis_ids": [item for item in ids if item in conflicts]})
+        entry["state"] = "undone"
+        connection.execute("UPDATE operation_journal SET entry_json = ? WHERE id = ?",
+                           (json.dumps(entry, ensure_ascii=False), operation_id))
+        return _write_visibility_entry(connection, ids, not hidden, session_id, reverses_operation_id=operation_id)
 
 
 def _layout_input(connection, analysis_ids):
