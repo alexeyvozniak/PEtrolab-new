@@ -617,9 +617,13 @@ test("an edit draft survives reopening and reports external source changes witho
   await user.click(within(await screen.findByRole("table")).getByText("B1"));
   await user.click(screen.getByText("Черновики правок", { exact: true }));
   const form = within(screen.getByRole("form", { name: "Новый черновик правки" }));
-  await user.type(form.getByLabelText("Новое значение"), "42");
+  const newValue = form.getByLabelText("Новое значение");
+  await waitFor(() => expect(newValue.disabled).toBe(false));
+  await user.type(newValue, "42");
+  expect(newValue.value).toBe("42");
   await user.click(await enabledButton("Сохранить черновик"));
   await screen.findByText("Черновик сохранён.");
+  await screen.findByText("Было 40 → предлагается 42 wt.%");
   app.unmount();
   await stopService();
   await writeFile(second, "Analysis,SiO2 [wt.%]\nB1,99\nB2,41\n");
