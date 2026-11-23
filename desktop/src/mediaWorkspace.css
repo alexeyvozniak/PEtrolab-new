@@ -1,4 +1,6 @@
 .media-items li { flex-wrap: wrap; }
+.media-without-section { display: inline-flex; align-items: center; gap: 5px; }
+.media-without-section input { accent-color: #267048; }
 .media-item-name { display: flex; align-items: center; gap: 8px; }
 .media-item-name input { flex: none; accent-color: #267048; }
 fieldset.media-batch-export { min-width: 0; margin: 8px 0; border: 1px solid #e0e8e3; }

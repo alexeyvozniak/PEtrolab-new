@@ -9,6 +9,8 @@ from .media_import import _fail, _sha256, _uuid, _validate_geometry, apply_media
 
 def create_media_region(database_path, media_id, geometry):
     asset, source = _asset_source(database_path, media_id)
+    if asset["thin_section_id"] is None:
+        _fail("MEDIA_SECTION_REQUIRED", "Пространственную область можно сохранить на снимке шлифа.")
     if _sha256(source) != asset["source_fingerprint_sha256"]:
         _fail("SOURCE_FINGERPRINT_MISMATCH", "Снимок изменился. Откройте актуальный файл.")
     with closing(open_project(database_path)) as connection, connection:

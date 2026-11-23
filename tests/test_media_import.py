@@ -24,6 +24,7 @@ from petrolab.import_preview import ImportCommandError  # noqa: E402
 from petrolab.manual_analysis import create_manual_analysis  # noqa: E402
 from petrolab.media_links import attach_media, change_media_link, create_media_region, import_linked_photo, list_media_links  # noqa: E402
 from petrolab.media_display import export_media_batch, export_media_original, export_media_rendered, preview_input_media, preview_project_media  # noqa: E402
+from petrolab.project_archive import export_project_archive, restore_project_archive  # noqa: E402
 from PIL import Image  # noqa: E402
 from openpyxl import load_workbook  # noqa: E402
 from petrolab.publication import capture_publication_media, capture_publication_table, export_publication, prepare_publication  # noqa: E402
@@ -409,6 +410,71 @@ class MediaImportTests(unittest.TestCase):
             self.assertIn(area["spatial_annotation_id"], result["annotation_ids"])
             self.assertEqual(source.read_bytes(), source_bytes)
 
+    def test_sample_photo_migration_preserves_v20_links_and_allows_no_thin_section(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            legacy = folder / "v20"
+            legacy.mkdir()
+            for migration in MIGRATIONS.glob("*.sql"):
+                if int(migration.name.split("_", 1)[0]) <= 20:
+                    (legacy / migration.name).write_bytes(migration.read_bytes())
+            overview, detail, field = (folder / f"{name}.png" for name in ("overview", "detail", "outcrop"))
+            for width, image in enumerate((overview, detail, field), start=12):
+                write_png(image, width=width)
+            tables = ("sample", "thin_section", "media_asset", "spatial_annotation", "analytical_point_annotation", "media_link")
+            with patch("petrolab.import_apply.MIGRATIONS", legacy):
+                database, point, _ = self._project_with_points(folder)
+                assignment = self._assignment(overview, point["analytical_point_id"])
+                plan = create_media_import_plan(database, [assignment])
+                apply_media_import_plan(database, plan)
+                annotation_id = plan["items"][0]["placements"][0]["spatial_annotation_id"]
+                import_linked_photo(database, annotation_id, detail, "PPL", inspect_media_source(detail)["source_fingerprint"])
+                legacy_draft = create_media_import_plan(database, [{**assignment, "source_path": str(field), "placements": []}])
+                draft = save_media_import_draft(database, legacy_draft)
+                with closing(open_project(database)) as connection:
+                    before = {table: connection.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall() for table in tables}
+
+            with closing(open_project(database)) as connection:
+                self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+                self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+                self.assertEqual({table: connection.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall() for table in tables}, before)
+            backup, = folder.glob("project.sqlite.before-v21-*.bak")
+            with closing(sqlite3.connect(backup)) as connection:
+                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 20)
+                self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+            self.assertEqual(load_media_import_draft(database)["plan"], legacy_draft)
+            standalone = {**assignment, "source_path": str(field), "media_type": "Полевое фото", "thin_section_name": None,
+                          "placements": []}
+            for invalid in ({**standalone, "media_type": "BSE"}, {**standalone, "placements": assignment["placements"]}):
+                with self.assertRaises(ImportCommandError) as error:
+                    create_media_import_plan(database, [invalid])
+                self.assertEqual(error.exception.code, "MEDIA_SECTION_REQUIRED")
+
+            plan = create_media_import_plan(database, [standalone])
+            self.assertEqual((plan["schema_version"], plan["warnings"], plan["unplaced_points"]), (3, [], []))
+            resaved = save_media_import_draft(database, plan, draft["fingerprint"])
+            self.assertEqual(load_media_import_draft(database)["plan"], plan)
+            apply_media_import_plan(database, plan, draft_fingerprint=resaved["fingerprint"])
+            media_id = plan["items"][0]["media_asset_id"]
+            with closing(open_project(database)) as connection:
+                asset = connection.execute("SELECT sample_id, thin_section_id FROM media_asset WHERE media_asset_id = ?", (media_id,)).fetchone()
+                self.assertEqual(tuple(asset), (point["sample_id"], None))
+                self.assertEqual(connection.execute("SELECT * FROM thin_section").fetchall(), before["thin_section"])
+                self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+            output = folder / "outcrop-copy.png"
+            export_media_original(database, media_id, str(output))
+            self.assertEqual(output.read_bytes(), field.read_bytes())
+            with self.assertRaises(ImportCommandError) as error:
+                create_media_region(database, media_id, {"kind": "square", "x_px": 1, "y_px": 1, "width_px": 4, "height_px": 4})
+            self.assertEqual(error.exception.code, "MEDIA_SECTION_REQUIRED")
+            archive, restored = folder / "project.petrolab", folder / "restored"
+            export_project_archive(database, str(archive), "full")
+            restore_project_archive(str(archive), str(restored))
+            restored_copy = folder / "restored-outcrop.png"
+            export_media_original(restored / "project.sqlite", media_id, str(restored_copy))
+            self.assertEqual(restored_copy.read_bytes(), field.read_bytes())
+            self.assertEqual(list_media_links(restored / "project.sqlite", annotation_id), list_media_links(database, annotation_id))
+
     def test_batch_export_contains_exact_sources_and_never_publishes_a_partial_archive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -531,7 +597,7 @@ class MediaImportTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM spatial_annotation").fetchone()[0], 1)
                 row = connection.execute("SELECT geometry_kind, x_px, y_px, image_width_px, image_height_px FROM spatial_annotation").fetchone()
                 self.assertEqual(row, ("point", 5.25, 3.5, 12, 8))
-                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 20)
+                self.assertEqual(connection.execute("SELECT project_schema_version FROM project_meta").fetchone()[0], 21)
             self.assertEqual(result["spatial_annotation_count"], 1)
             media_id = plan["items"][0]["media_asset_id"]
             preview = preview_project_media(database, media_id)

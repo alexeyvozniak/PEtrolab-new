@@ -31,6 +31,7 @@ MEDIA_FORMATS = {
     ".bmp": ("image/bmp", "bmp"),
 }
 STANDARD_MEDIA_TYPES = {"BSE", "PPL", "XPL"}
+SAMPLE_PHOTO_TYPES = {"Полевое фото", "Ручной образец"}
 OWNERSHIP_MODES = {"managed_copy", "linked_external"}
 LINK_TYPES = {"same_point", "same_grain", "same_zone", "repeat_measurement"}
 
@@ -400,14 +401,19 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
             if media_type.upper() in STANDARD_MEDIA_TYPES:
                 media_type = media_type.upper()
             sample_name = _text(assignment["sample_name"], "sample_name")
-            section_name = _text(assignment["thin_section_name"], "thin_section_name")
+            section_name = assignment["thin_section_name"]
+            if section_name is None:
+                if media_type not in SAMPLE_PHOTO_TYPES or assignment["placements"]:
+                    _fail("MEDIA_SECTION_REQUIRED", "Для снимка такого типа или с размещениями укажите шлиф.")
+            else:
+                section_name = _text(section_name, "thin_section_name")
             target = assignment.get("sample_target")
             if target is not None:
                 _check_media_sample_target(connection, sample_name, target)
             existing = connection.execute(
                 """SELECT ma.media_asset_id, s.sample_name, ts.thin_section_name, ma.media_type, ma.width_px, ma.height_px
                 FROM media_asset ma JOIN sample s ON s.sample_id = ma.sample_id
-                JOIN thin_section ts ON ts.thin_section_id = ma.thin_section_id
+                LEFT JOIN thin_section ts ON ts.thin_section_id = ma.thin_section_id
                 WHERE ma.source_fingerprint_sha256 = ?""",
                 (inspection["source_fingerprint"],),
             ).fetchone()
@@ -416,7 +422,7 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
             placements = assignment["placements"]
             if not isinstance(placements, list):
                 _fail("INVALID_ASSIGNMENT", "placements must be an array.")
-            if not placements:
+            if not placements and section_name is not None:
                 warnings.append({"code": "UNPLACED_MEDIA", "message": f"{inspection['display_name']} has no placed Analytical Points."})
             planned_placements = []
             seen_points: set[str] = set()
@@ -472,6 +478,8 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
                 "unplaced_points": _unplaced_points(connection, plan_items)}
         if links := _plan_media_links(plan_items, assignments):
             plan.update(schema_version=2, media_links=links)
+        if any(item["thin_section_name"] is None for item in plan_items):
+            plan["schema_version"] = 3
         plan["semantic_fingerprint"] = _plan_fingerprint(plan)
         return plan
     finally:
@@ -481,6 +489,8 @@ def create_media_import_plan(database_path: str | Path, assignments: Any) -> dic
 def _unplaced_points(connection, items):
     placements = {}
     for item in items:
+        if item["thin_section_name"] is None:
+            continue
         scope = (item["sample_name"], item["thin_section_name"])
         placements.setdefault(scope, set()).update(placement["analytical_point_id"] for placement in item["placements"])
     remaining = []
@@ -528,11 +538,13 @@ def _check_media_sample_target(connection, sample_name, target):
         _fail("SAMPLE_UNAVAILABLE", "Выбранный образец недоступен. Повторите назначение.")
 
 
-def _ensure_sample_and_section(connection: sqlite3.Connection, sample_name: str, section_name: str, timestamp: str) -> tuple[str, str]:
+def _ensure_sample_and_section(connection: sqlite3.Connection, sample_name: str, section_name: str | None, timestamp: str) -> tuple[str, str | None]:
     sample = connection.execute("SELECT sample_id FROM sample WHERE sample_name = ?", (sample_name,)).fetchone()
     sample_id = sample["sample_id"] if sample else _id()
     if sample is None:
         connection.execute("INSERT INTO sample (sample_id, sample_name, created_at) VALUES (?, ?, ?)", (sample_id, sample_name, timestamp))
+    if section_name is None:
+        return sample_id, None
     section = connection.execute("SELECT thin_section_id FROM thin_section WHERE sample_id = ? AND thin_section_name = ?", (sample_id, section_name)).fetchone()
     section_id = section["thin_section_id"] if section else _id()
     if section is None:
@@ -541,13 +553,14 @@ def _ensure_sample_and_section(connection: sqlite3.Connection, sample_name: str,
 
 
 def _verify_media_plan_sources(plan, *, check_pixels=False):
-    if not isinstance(plan, dict) or plan.get("schema_version") not in (1, 2) or not isinstance(plan.get("items"), list) or not plan["items"]:
+    if not isinstance(plan, dict) or plan.get("schema_version") not in (1, 2, 3) or not isinstance(plan.get("items"), list) or not plan["items"]:
         _fail("PLAN_SCHEMA_INCOMPATIBLE", "Media import plan is invalid.")
     if plan.get("semantic_fingerprint") != _plan_fingerprint(plan):
         _fail("PLAN_FINGERPRINT_MISMATCH", "Media import plan changed after review.")
     links = plan.get("media_links")
     if ((plan["schema_version"] == 1 and "media_links" in plan)
-            or (plan["schema_version"] == 2 and (not isinstance(links, list) or not links))):
+            or (plan["schema_version"] == 2 and "media_links" not in plan)
+            or ("media_links" in plan and (not isinstance(links, list) or not links))):
         _fail("PLAN_SCHEMA_INCOMPATIBLE", "Media Link list is invalid.")
     if links:
         assets = {item["media_asset_id"] for item in plan["items"]}
@@ -562,6 +575,8 @@ def _verify_media_plan_sources(plan, *, check_pixels=False):
                 _fail("PLAN_SCHEMA_INCOMPATIBLE", "Media Link target is duplicated or outside the import plan.")
             seen.add((asset, annotation))
     for item in plan["items"]:
+        if item["thin_section_name"] is None and (plan["schema_version"] != 3 or item["media_type"] not in SAMPLE_PHOTO_TYPES or item["placements"]):
+            _fail("MEDIA_SECTION_REQUIRED", "Для снимка такого типа или с размещениями укажите шлиф.")
         current = inspect_media_source(item["source_path"])
         if current["source_fingerprint"] != item["source_fingerprint"] or current["width_px"] != item["width_px"] or current["height_px"] != item["height_px"]:
             _fail("SOURCE_FINGERPRINT_MISMATCH", "Image changed after planning.", path=item["source_path"])

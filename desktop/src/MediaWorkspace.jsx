@@ -3,7 +3,7 @@ import { ThinSectionLinks } from "./ThinSectionLinks";
 import { MediaAttachment } from "./MediaAttachment";
 import "./mediaWorkspace.css";
 
-export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, shape = "point" }) {
+export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, shape = "point", alt = "Изображение шлифа" }) {
   const [zoom, setZoom] = useState(100);
   const [start, setStart] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -113,7 +113,7 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
     {precision && tileError && <p role="alert">{tileError}</p>}
     <div className="media-viewer" ref={viewer}>
       <div className="media-scene" ref={scene} style={{ width: `${zoom}%`, aspectRatio: `${image.width_px} / ${image.height_px}` }}>
-        <img src={image.preview_url} alt="Изображение шлифа" draggable={false} />
+        <img src={image.preview_url} alt={alt} draggable={false} />
         {precision && tile && <img className="media-precision-region" src={tile.preview_url} alt="" draggable={false} style={{
           left: `${tile.region.left * 100 / image.width_px}%`, top: `${tile.region.top * 100 / image.height_px}%`,
           width: `${tile.region.width * 100 / image.width_px}%`, height: `${tile.region.height * 100 / image.height_px}%`,
@@ -151,6 +151,7 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
 
 const MEDIA_EXPORT_LAYERS = { points: "Точки", regions: "Области", labels: "Подписи", scale_bar: "Масштабная линейка", legend: "Легенда" };
 const DEFAULT_MEDIA_EXPORT_LAYERS = { points: true, regions: true, labels: true, scale_bar: false, legend: false };
+const SAMPLE_PHOTO_TYPES = ["Полевое фото", "Ручной образец"];
 
 export function MediaGallery({ images, previewMedia, exportOriginal, exportRendered, exportBatch, addPublication, showPoints = false, pointLinks, mediaLinks, reloadSample }) {
   const [openId, setOpenId] = useState("");
@@ -281,7 +282,8 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
           </li>)}</ul> : <p>На снимке нет сохранённых точек или областей.</p>}
         </section>}
         <div>
-          <MediaViewer key={openId} image={image} loadRegion={(region) => previewMedia(openId, region)} focus={focus}
+          <MediaViewer key={openId} image={image} alt={images.find(({ media_asset_id }) => media_asset_id === openId)?.thin_section_id === null
+            ? "Снимок образца" : undefined} loadRegion={(region) => previewMedia(openId, region)} focus={focus}
             onPlace={drawing && !pending ? saveRegion : undefined} shape={shape} annotations={image.annotations.filter((item) => !exportRendered ||
               (renderOptions[item.geometry_kind === "point" ? "points" : "regions"] && !excludedAnnotations.includes(item.spatial_annotation_id))).map((item) => ({
             ...item, id: item.spatial_annotation_id, kind: item.geometry_kind, label: !exportRendered || renderOptions.labels ? item.point_name || item.label : null,
@@ -370,7 +372,7 @@ function MediaImportReview({ plan, initialPath, preview, onBack, onSaveDraft, on
       <aside className="sample-card media-review-files" aria-label="Файлы пакета">
         <h4>Файлы пакета</h4>
         {[...groups].map(([key, items]) => <section key={key}>
-          <h5>{items[0].sample_name} · {items[0].thin_section_name}</h5>
+          <h5>{[items[0].sample_name, items[0].thin_section_name].filter(Boolean).join(" · ")}</h5>
           <ul className="media-review-list">{items.map((item) => <li key={item.media_asset_id}>
             <button className="outline-button" type="button" aria-label={`Показать снимок ${item.display_name}`}
               aria-pressed={selected === item} onClick={() => setSelectedId(item.media_asset_id)}>
@@ -384,12 +386,12 @@ function MediaImportReview({ plan, initialPath, preview, onBack, onSaveDraft, on
         <tbody>{plan.items.map((item) => <tr key={item.media_asset_id} className={selected === item ? "marked" : undefined}>
           <td><button className="outline-button" type="button" aria-pressed={selected === item}
             onClick={() => setSelectedId(item.media_asset_id)}>{item.display_name}</button></td>
-          <td>{item.sample_name}</td><td>{item.thin_section_name}</td><td>{item.media_type}</td>
+          <td>{item.sample_name}</td><td>{item.thin_section_name ?? "Без шлифа"}</td><td>{item.media_type}</td>
           <td>{item.placements.length}</td><td>{mediaLinks.filter((link) => link.media_asset_id === item.media_asset_id).length}</td>
           <td>{item.placements.filter((point) => point.cross_sample_exception_reason).length}</td>
         </tr>)}</tbody>
       </table>
-        {plan.items.some((item) => !item.placements.length) && <p>В пакете есть изображения без размещённых точек.</p>}
+        {plan.items.some((item) => item.thin_section_name && !item.placements.length) && <p>В пакете есть изображения без размещённых точек.</p>}
       </div>
       <aside className="media-review-inspector" aria-label="Выбранный снимок">
         <section className="sample-card">
@@ -397,12 +399,13 @@ function MediaImportReview({ plan, initialPath, preview, onBack, onSaveDraft, on
           {previewState?.error && <p role="alert">{previewState.error}</p>}
           {!previewState && <p role="status">Загружается предпросмотр…</p>}
           {previewState?.image && <MediaViewer key={selectedId} image={previewState.image}
+            alt={selected.thin_section_name === null ? "Снимок образца" : undefined}
             annotations={selected.placements.map((point) => ({ ...point.geometry, id: point.spatial_annotation_id, label: point.point_name }))} />}
-          <h5>Размещённые точки ({selected.placements.length})</h5>
-          {selected.placements.length === 0 ? <p>На снимке нет размещённых точек.</p> :
+          {selected.thin_section_name && <h5>Размещённые точки ({selected.placements.length})</h5>}
+          {selected.thin_section_name && (selected.placements.length === 0 ? <p>На снимке нет размещённых точек.</p> :
             <ul className="media-review-list">{selected.placements.map((point) => <li key={point.spatial_annotation_id}>
               {point.point_name} · {point.point_sample_name}
-            </li>)}</ul>}
+            </li>)}</ul>)}
           {selected.placements.filter((point) => point.cross_sample_exception_reason).map((point) =>
             <p className="media-review-exception" key={point.spatial_annotation_id}>
               {selected.display_name} · {point.point_sample_name} / {point.point_name} · {point.cross_sample_exception_reason}
@@ -472,6 +475,7 @@ export function MediaImport({ actions, onCancel, onDone }) {
   const pickedSample = samples.find(({ sample_id }) => sample_id === sampleId);
   const sampleName = pickedSample?.sample_name || newSample.trim();
   const active = files.find(({ source_path }) => source_path === activePath);
+  const needsSection = files.some((item) => !item.withoutSection);
   const linkTargets = files.filter((item) => item !== active).flatMap((item) =>
     item.placements.map((placement) => ({
       source_fingerprint: item.source_fingerprint,
@@ -547,8 +551,9 @@ export function MediaImport({ actions, onCancel, onDone }) {
     const target = first.sample_target;
     setSampleId(target?.mode === "new" ? "new" : target?.sample_id || samples.find((sample) => sample.sample_name === first.sample_name)?.sample_id || "new");
     setNewSample(first.sample_name);
-    setSection(first.thin_section_name);
-    setFiles(saved.items.map((item) => ({ ...item, placements: item.placements.map((placement) => ({ ...placement, pointLabel: placement.point_name })) })));
+    setSection(saved.items.find((item) => item.thin_section_name)?.thin_section_name ?? "");
+    setFiles(saved.items.map((item) => ({ ...item, withoutSection: item.thin_section_name === null,
+      placements: item.placements.map((placement) => ({ ...placement, pointLabel: placement.point_name })) })));
     const placements = new Map(saved.items.flatMap((item) => item.placements.map((point) => [point.spatial_annotation_id, { item, point }])));
     const assets = new Map(saved.items.map((item) => [item.media_asset_id, item]));
     setPhotoLinks((saved.media_links || []).map((link) => {
@@ -583,7 +588,7 @@ export function MediaImport({ actions, onCancel, onDone }) {
   const review = () => perform(async () => {
     setPlan(await actions.plan(files.map((item) => ({
       source_path: item.source_path, expected_source_fingerprint: item.source_fingerprint, ownership_mode: "managed_copy",
-      media_type: item.media_type, sample_name: sampleName, thin_section_name: section.trim(),
+      media_type: item.media_type, sample_name: sampleName, thin_section_name: item.withoutSection ? null : section.trim(),
       placements: item.placements.map(({ analytical_point_id, geometry, cross_sample_exception_reason }) =>
         ({ analytical_point_id, geometry, cross_sample_exception_reason })),
       attach_to_placements: photoLinks.filter((link) => link.photo_fingerprint === item.source_fingerprint)
@@ -592,7 +597,7 @@ export function MediaImport({ actions, onCancel, onDone }) {
     }))));
   });
   return <section className="sample-workspace media-import">
-    <div className="sample-header"><h2>Импорт изображений шлифов</h2>
+    <div className="sample-header"><h2>Импорт снимков образцов и шлифов</h2>
       <button className="outline-button" type="button" disabled={pending} onClick={onCancel}>К изображениям</button></div>
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
@@ -622,17 +627,25 @@ export function MediaImport({ actions, onCancel, onDone }) {
           </select></label>
           {assignedPoints.size > 0 && <p>Для смены образца сначала снимите предварительные привязки.</p>}
           {sampleId === "new" && <label>Имя нового образца<input value={newSample} disabled={pending || assignedPoints.size > 0 || Boolean(exceptionPreview)} maxLength={200} onChange={(event) => setNewSample(event.target.value)} /></label>}
-          <label>Имя шлифа<input list="sample-thin-sections" value={section} maxLength={200} disabled={pending}
-            onChange={(event) => setSection(event.target.value)} /></label>
+          {needsSection && <label>Имя шлифа<input list="sample-thin-sections" value={section} maxLength={200} disabled={pending}
+            onChange={(event) => setSection(event.target.value)} /></label>}
           <datalist id="sample-thin-sections">{(context?.sample_id === sampleId ? context.thin_sections : []).map((item) =>
             <option key={item.thin_section_id} value={item.thin_section_name} />)}</datalist>
         </div>
         <ul className="sample-items media-items">{files.map((item) => <li key={item.source_path}>
           <button className="outline-button" type="button" aria-pressed={activePath === item.source_path} disabled={pending || Boolean(exceptionPreview)}
             onClick={() => pickPreview(item)}>{item.display_name}</button>
-          <label>Тип <select value={item.media_type} disabled={pending} onChange={(event) => changeFile(item.source_path, { media_type: event.target.value })}>
+          <label>Тип <select value={item.media_type} disabled={pending} onChange={(event) => {
+            const media_type = event.target.value;
+            changeFile(item.source_path, { media_type, withoutSection: SAMPLE_PHOTO_TYPES.includes(media_type) && item.withoutSection });
+          }}>
             {["BSE", "PPL", "XPL", "Полевое фото", "Ручной образец", "Аналитические точки", "Другое"].map((type) => <option key={type}>{type}</option>)}
           </select></label>
+          {SAMPLE_PHOTO_TYPES.includes(item.media_type) && <label className="media-without-section">
+            <input type="checkbox" checked={Boolean(item.withoutSection)}
+              disabled={pending || Boolean(exceptionPreview) || item.placements.length > 0 || photoLinks.some((link) => link.photo_fingerprint === item.source_fingerprint)}
+              onChange={(event) => changeFile(item.source_path, { withoutSection: event.target.checked })} /> Без шлифа
+          </label>}
           <button className="outline-button" type="button" disabled={pending || Boolean(exceptionPreview)} onClick={() => {
             if (item.source_path === activePath) { setActivePath(""); setImage(null); }
             setFiles((current) => current.filter(({ source_path }) => source_path !== item.source_path));
@@ -640,13 +653,14 @@ export function MediaImport({ actions, onCancel, onDone }) {
               link.photo_fingerprint !== item.source_fingerprint && link.source_fingerprint !== item.source_fingerprint));
           }}>Убрать</button>
         </li>)}</ul>
-        <button className="primary-button" type="button" disabled={pending || !sampleId || !sampleName || !section.trim() || !files.length || Boolean(exceptionPreview)}
+        <button className="primary-button" type="button" disabled={pending || !sampleId || !sampleName || (needsSection && !section.trim()) || !files.length || Boolean(exceptionPreview)}
           onClick={review}>Проверить импорт изображений</button>
       </section>
       <section className="sample-card">
-        <h3>Точки на изображении</h3>
+        <h3>{active?.withoutSection ? "Предпросмотр снимка" : "Точки на изображении"}</h3>
         {!image && <p>Выберите файл для предпросмотра.</p>}
-        {image && active && <>
+        {image && active?.withoutSection && <MediaViewer key={activePath} image={image} annotations={[]} alt="Снимок образца" />}
+        {image && active && !active.withoutSection && <>
           <div className="sample-form">
             <label>Образец аналитической точки<select value={pointSampleId} disabled={pending}
               onChange={(event) => { setPointSampleId(event.target.value); setPointId(""); clearException(); }}>

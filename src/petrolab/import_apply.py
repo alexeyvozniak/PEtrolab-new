@@ -268,6 +268,11 @@ def open_project(database_path: str | Path) -> sqlite3.Connection:
         connection.close()
         raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции черновиков изображений.",
                                  {"incompatible_migration": 20})
+    if 21 in applied and not any(row["name"] == "thin_section_id" and not row["notnull"]
+                                 for row in connection.execute("PRAGMA table_info(media_asset)")):
+        connection.close()
+        raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции полевых снимков.",
+                                 {"incompatible_migration": 21})
     meta_exists = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_meta'").fetchone()
     if meta_exists:
         meta = connection.execute("SELECT project_schema_version FROM project_meta WHERE singleton = 1").fetchone()
