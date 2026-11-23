@@ -21,17 +21,31 @@ from petrolab.work_groups import create_work_group
 
 
 class PublicationPackageTests(unittest.TestCase):
-    def test_trace_pattern_package_keeps_reference_ratios_and_censored_gap(self):
+    def test_trace_pattern_package_keeps_reference_ratios_and_measurement_gaps(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)
             source = root / "trace.csv"
-            source.write_text("Analysis,La (ppm),Ce (ppb),Pr (ppm)\nM1,6.87,<100,0.276\n", encoding="utf-8")
+            source.write_text(
+                "Analysis,La (ppm),Ce (ppb),Pr (ppm),Nd (ppm),Nd (ppb)\n"
+                "M1,6.87,<100,0.276,1.354,2708\n",
+                encoding="utf-8",
+            )
+            source_bytes = source.read_bytes()
             database = root / "petrolab.sqlite"
             apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
             by_element = {axis["field"]: axis for axis in plot_catalog(database)["axes"]}
-            axes = [by_element[element] for element in ("La", "Ce", "Pr")]
+            axes = [by_element[element] for element in ("La", "Ce", "Pr", "Nd")]
             normalization = "sun_mcdonough_1989_mantle_diagram_v1"
             projected = query_plot_data(database, "ree_pattern", axes, normalization=normalization)
+            spider = query_plot_data(database, "spider", axes, normalization=normalization)
+            duplicate = projected["points"][0]["vertices"][3]
+            self.assertEqual(spider["points"][0]["vertices"][3], duplicate)
+            self.assertEqual(duplicate["status"], "duplicate_measurements")
+            self.assertIsNone(duplicate["ratio"])
+            self.assertIsNone(duplicate["v"])
+            self.assertCountEqual([(row["unit"], row["raw_token"]) for row in duplicate["measurements"]],
+                                  [("ppm", "1.354"), ("ppb", "2708")])
+            self.assertEqual(len({row["measurement_id"] for row in duplicate["measurements"]}), 2)
             capture = {
                 "name": "РЗЭ", "format": "svg", "width_mm": 90, "dpi": 600, "include_csv": True,
                 "svg": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><g id="panel-a"><text x="1" y="2">a</text></g></svg>',
@@ -48,11 +62,13 @@ class PublicationPackageTests(unittest.TestCase):
                 self.assertEqual(panel["normalization"], projected["normalization"])
                 self.assertEqual(panel["points"], projected["points"])
                 rows = list(csv.DictReader(StringIO(archive.read("data/01-plot_capture.csv").decode())))
-                self.assertEqual([row["field"] for row in rows], ["La", "Ce", "Pr"])
+                self.assertEqual([row["field"] for row in rows], ["La", "Ce", "Pr", "Nd"])
                 self.assertTrue(all(row["normalization_id"] == normalization for row in rows))
                 self.assertAlmostEqual(float(rows[0]["value"]), 10)
                 self.assertEqual((rows[1]["value"], rows[1]["status"]), ("", "below_detection_limit"))
                 self.assertAlmostEqual(float(rows[2]["value"]), 1)
+                self.assertEqual((rows[3]["value"], rows[3]["status"]), ("", "duplicate_measurements"))
+            self.assertEqual(source.read_bytes(), source_bytes)
 
     def test_direct_plot_capture_keeps_exact_panels_and_source_scope(self):
         with TemporaryDirectory() as folder:

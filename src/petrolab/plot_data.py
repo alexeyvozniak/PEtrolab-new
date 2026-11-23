@@ -115,7 +115,7 @@ def _pattern_vertices(record, keys, concentrations):
     vertices = []
     for index, key in enumerate(keys):
         element, unit, _, _ = key
-        rows = record[key] or record[_alternate_concentration_key(key)]
+        rows = record[key] + record[_alternate_concentration_key(key)]
         value = _measurement_numeric_value(rows[0]) if len(rows) == 1 else None
         ratio = normalized_pattern_value(value, rows[0]["unit"] if rows else unit, concentrations[element])
         status = "missing"
