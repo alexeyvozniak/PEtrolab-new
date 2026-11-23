@@ -1,0 +1,80 @@
+{
+  "scenario": "AT-25",
+  "build": "bacccde",
+  "sampleId": "b6f4425b-8012-4c71-8173-621db8927d89",
+  "originalUnchanged": true,
+  "sampleAndMeasurementsUnchanged": true,
+  "originalSha256": "951b7590b7553a9aa1719c86608d415301183bc95c0a313674c390ea91481edb",
+  "withoutMarkup": {
+    "meta": {
+      "version": 2,
+      "media_asset_id": "1d16586d-65a5-416c-97d8-4ac03000ab6e",
+      "source_sha256": "9d7faad556860f5fc8fe20e21121d53f1d6a48119a8a746499e1030164d9df1b",
+      "annotation_ids": [],
+      "options": {
+        "annotation_ids": [],
+        "labels": true,
+        "legend": true,
+        "points": true,
+        "regions": true,
+        "scale_bar": true
+      },
+      "rendered_scale": {
+        "pixels": 180,
+        "length": 180,
+        "unit": "px"
+      },
+      "rendered_legend": {
+        "points": 0,
+        "regions": 0
+      }
+    },
+    "overlay": true,
+    "size": [
+      720,
+      480
+    ]
+  },
+  "withMarkup": {
+    "meta": {
+      "version": 2,
+      "media_asset_id": "6b0c1ebb-cf9f-4c97-873e-b525fbf05e95",
+      "source_sha256": "951b7590b7553a9aa1719c86608d415301183bc95c0a313674c390ea91481edb",
+      "annotation_ids": [
+        "1141894b-2d2d-4059-b695-cb4effd036b8",
+        "94e8dbc4-6aff-446f-af6e-a5bddb7d6163"
+      ],
+      "options": {
+        "annotation_ids": [
+          "1141894b-2d2d-4059-b695-cb4effd036b8",
+          "94e8dbc4-6aff-446f-af6e-a5bddb7d6163"
+        ],
+        "calibration": {
+          "reference_length": 100,
+          "reference_pixels": 240,
+          "unit": "µm"
+        },
+        "labels": true,
+        "legend": true,
+        "points": true,
+        "regions": true,
+        "scale_bar": true
+      },
+      "rendered_scale": {
+        "pixels": 180,
+        "length": 75,
+        "unit": "µm"
+      },
+      "rendered_legend": {
+        "points": 1,
+        "regions": 1
+      }
+    },
+    "overlay": true,
+    "size": [
+      720,
+      548
+    ]
+  },
+  "msiSha256": "de9dea98ba872360bc021ae5a009c52c11da24debe79857c38947005ca9fd251"
+}
