@@ -1,0 +1,90 @@
+{
+  "selected": [
+    "642c15f3-b52f-4952-b4cd-57ce926ab37e",
+    "c21a9368-1107-4dc8-838f-e05d35bf0cc8"
+  ],
+  "sampleId": "4f6d646f-3389-4681-a53f-430e2ecc348e",
+  "originalsManifest": {
+    "schema_version": 1,
+    "mode": "original",
+    "files": [
+      {
+        "sha256": "951b7590b7553a9aa1719c86608d415301183bc95c0a313674c390ea91481edb",
+        "media_asset_id": "642c15f3-b52f-4952-b4cd-57ce926ab37e",
+        "source_name": "SM-01B-A_BSE.png",
+        "source_sha256": "951b7590b7553a9aa1719c86608d415301183bc95c0a313674c390ea91481edb",
+        "path": "images/001-SM-01B-A_BSE.png"
+      },
+      {
+        "sha256": "82152a89d0b671471489da43382ae5142645f17f07e6ca45cedc5c6f7f603624",
+        "media_asset_id": "c21a9368-1107-4dc8-838f-e05d35bf0cc8",
+        "source_name": "SM-01B-A_XPL.png",
+        "source_sha256": "82152a89d0b671471489da43382ae5142645f17f07e6ca45cedc5c6f7f603624",
+        "path": "images/002-SM-01B-A_XPL.png"
+      }
+    ]
+  },
+  "renderedManifest": {
+    "schema_version": 1,
+    "mode": "annotated",
+    "files": [
+      {
+        "sha256": "085f0f52f620bf416c653ef2a25d1432628bebb1e36e87440331a9742b86f4b1",
+        "version": 2,
+        "media_asset_id": "642c15f3-b52f-4952-b4cd-57ce926ab37e",
+        "source_sha256": "951b7590b7553a9aa1719c86608d415301183bc95c0a313674c390ea91481edb",
+        "annotation_ids": [
+          "35cf81f3-8a0b-4785-99cd-e191c150efed",
+          "77f67b75-90e3-4a5b-8e8a-37d0a8e63356"
+        ],
+        "options": {
+          "labels": true,
+          "legend": true,
+          "points": true,
+          "regions": true,
+          "scale_bar": true
+        },
+        "rendered_scale": {
+          "pixels": 180,
+          "length": 180,
+          "unit": "px"
+        },
+        "rendered_legend": {
+          "points": 1,
+          "regions": 1
+        },
+        "source_name": "SM-01B-A_BSE.png",
+        "path": "images/001-SM-01B-A_BSE.png"
+      },
+      {
+        "sha256": "1a294a631b6a9bd2d89076dbcebd2d4c8c786b0e78b22ffffc2b9908a14ef3e3",
+        "version": 2,
+        "media_asset_id": "c21a9368-1107-4dc8-838f-e05d35bf0cc8",
+        "source_sha256": "82152a89d0b671471489da43382ae5142645f17f07e6ca45cedc5c6f7f603624",
+        "annotation_ids": [],
+        "options": {
+          "labels": true,
+          "legend": true,
+          "points": true,
+          "regions": true,
+          "scale_bar": true
+        },
+        "rendered_scale": {
+          "pixels": 180,
+          "length": 180,
+          "unit": "px"
+        },
+        "rendered_legend": {
+          "points": 0,
+          "regions": 0
+        },
+        "source_name": "SM-01B-A_XPL.png",
+        "path": "images/002-SM-01B-A_XPL.png"
+      }
+    ]
+  },
+  "sourceBytesUnchanged": true,
+  "sampleUnchanged": true,
+  "build": "90a176d",
+  "msiSha256": "9816aeceb4453d75fd6c53687bed182b4e34fd52f61a73eea4e5a0694efa08a6"
+}
