@@ -481,12 +481,15 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
         rows = connection.execute(
             f"""SELECT a.analysis_id, a.source_id, a.sheet_name, a.source_row_number,
                        a.source_column_number, a.source_orientation, a.block_id,
-                       a.identity_json, a.created_at, s.display_name AS source_name, r.recipe_json
+                       a.identity_json, a.created_at, s.display_name AS source_name, r.recipe_json,
+                       g.id AS generation_id, g.name AS generation_name, ag.revision AS generation_revision
                 FROM analysis a
                 JOIN source_file s ON s.source_id = a.source_id
                 JOIN import_batch b ON b.import_batch_id = a.import_batch_id
                 JOIN import_recipe_revision r ON r.recipe_revision_id = b.recipe_revision_id
                 LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
+                LEFT JOIN analysis_generation ag ON ag.analysis_id = a.analysis_id
+                LEFT JOIN generation g ON g.id = ag.generation_id
                 WHERE {active_filter}{requested_filter}
                 ORDER BY a.created_at DESC, a.sheet_name, a.source_row_number, a.source_column_number, a.analysis_id
                 LIMIT ? OFFSET ?""",
@@ -576,6 +579,8 @@ def list_project_analyses(database_path: str | Path, limit: int = 500, offset: i
                     "reported_weight_percent_total": weight_total if math.isfinite(weight_total) else None,
                 },
                 "analysis_id": row["analysis_id"],
+                "generation": {"id": row["generation_id"], "name": row["generation_name"],
+                               "revision": row["generation_revision"]} if row["generation_id"] else None,
                 "source_id": row["source_id"],
                 "source_name": row["source_name"],
                 "sheet_name": row["sheet_name"],

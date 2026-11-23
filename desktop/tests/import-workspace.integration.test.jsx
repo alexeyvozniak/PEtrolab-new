@@ -444,6 +444,31 @@ test("opening PetroLab again restores the queue and the saved skip decision", as
   expect(table.queryByText("B1")).toBeNull();
 }, 20000);
 
+test("Generation assignment includes the selected row hidden by a filter and can be undone", async () => {
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton("Импортировать таблицу"));
+  await screen.findByRole("heading", { name: "Анализы" });
+  const table = within(await screen.findByRole("table"));
+  await user.click(table.getByRole("checkbox", { name: "Выбрать B2" }));
+  fireEvent.change(table.getByRole("textbox", { name: "Фильтр Analysis" }), { target: { value: "B1" } });
+  await user.click(await enabledButton("Назначить Generation"));
+  const form = within(await screen.findByRole("form", { name: "Назначение Generation" }));
+  await user.type(form.getByRole("textbox", { name: "Название" }), "Rim");
+  await user.click(form.getByRole("button", { name: "Назначить", exact: true }));
+  expect((await screen.findByRole("button", { name: "Отменить назначение Generation" }))).toBeTruthy();
+  expect(screen.getByText("Скрыто фильтром: 1")).toBeTruthy();
+  fireEvent.change(table.getByRole("textbox", { name: "Фильтр Analysis" }), { target: { value: "" } });
+  expect(await table.findByText("Rim")).toBeTruthy();
+  const assignment = requests.find((item) => item.command === "generation.assign");
+  expect(assignment.payload.analysis_ids).toHaveLength(1);
+  await user.click(await enabledButton("Отменить назначение Generation"));
+  await waitFor(() => expect(table.queryByText("Rim")).toBeNull());
+  expect(table.getByRole("checkbox", { name: "Выбрать B2" }).checked).toBe(true);
+}, 20000);
+
 test("a saved work group restores the exact selection after reopening the application", async () => {
   queue = [second];
   const user = userEvent.setup();

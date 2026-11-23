@@ -23,6 +23,55 @@ from test_media_import import write_png  # noqa: E402
 
 
 class NdjsonServiceTests(unittest.TestCase):
+    def test_generation_assignment_undo_keeps_exact_scope_and_import_evidence(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = str(Path(directory) / "project.sqlite")
+            source_bytes = FIXTURE.read_bytes()
+
+            def call(command, **payload):
+                return handle_request({"protocol_version": PROTOCOL_VERSION, "request_id": str(uuid.uuid4()),
+                    "command": command, "payload": {"project_database_path": database, **payload}})
+
+            def evidence():
+                with closing(sqlite3.connect(database)) as connection:
+                    return [connection.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+                            for table in ("analysis", "measurement", "source_file", "source_cell_provenance")]
+
+            self.assertIn("result", call("import.plan.apply", source_path=str(FIXTURE), recipe=fixture_recipe()))
+            originals = evidence()
+            rows = call("project.analyses.list")["result"]["analyses"]
+            first, second, neighbor = [row["analysis_id"] for row in rows[:3]]
+            assigned = call("generation.assign", analysis_ids=[first, second], new_name="Rim", actor="Reviewer")["result"]
+            self.assertEqual(assigned["category"], "domain")
+            self.assertEqual([row["entity_id"] for row in assigned["scope"]], [first, second])
+            self.assertEqual([row["result_revision"] for row in assigned["scope"]], [1, 1])
+            catalog = call("generation.list")["result"]["generations"]
+            self.assertEqual([(item["name"], item["created_by"]) for item in catalog], [("Rim", "Reviewer")])
+            self.assertEqual(call("generation.assign", analysis_ids=[neighbor], new_name="rim",
+                                  actor="Reviewer")["error"]["code"], "GENERATION_NAME_EXISTS")
+            replacement = call("generation.assign", analysis_ids=[second], new_name="Core", actor="Reviewer")["result"]
+            conflict = call("generation.undo", operation_id=assigned["id"], actor="Reviewer")
+            self.assertEqual(conflict["error"]["code"], "GENERATION_UNDO_CONFLICT")
+            self.assertEqual(conflict["error"]["details"]["analysis_ids"], [second])
+            visibility = call("plot_visibility.hide", analysis_ids=[first, second])["result"]
+            self.assertEqual(visibility["category"], "view_only")
+            self.assertEqual(call("generation.undo", operation_id=visibility["id"],
+                                  actor="Reviewer")["error"]["code"], "GENERATION_UNDO_UNAVAILABLE")
+            projected = {row["analysis_id"]: row["generation"] for row in call("project.analyses.list")["result"]["analyses"]}
+            self.assertEqual([projected[item]["name"] for item in (first, second)], ["Rim", "Core"])
+            self.assertIsNone(projected[neighbor])
+            self.assertIn("result", call("generation.undo", operation_id=replacement["id"], actor="Reviewer"))
+            reversed_entry = call("generation.undo", operation_id=assigned["id"], actor="Reviewer")["result"]
+            self.assertEqual(reversed_entry["action"], "restore_generation")
+            self.assertEqual([row["entity_id"] for row in reversed_entry["scope"]], [first, second])
+            self.assertEqual(call("generation.undo", operation_id=assigned["id"],
+                                  actor="Reviewer")["error"]["code"], "GENERATION_UNDO_UNAVAILABLE")
+            self.assertTrue(all(row["generation"] is None for row in call("project.analyses.list")["result"]["analyses"]))
+            self.assertEqual(evidence(), originals)
+            self.assertEqual(FIXTURE.read_bytes(), source_bytes)
+
     def test_mineral_trace_patterns_normalize_units_and_keep_gaps(self) -> None:
         from petrolab.desktop_workflow import suggest_import_recipe
 

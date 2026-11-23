@@ -9,7 +9,7 @@
   "properties": {
     "id": {"type": "string", "format": "uuid"},
     "project_id": {"type": "string", "format": "uuid"},
-    "action": {"type": "string", "enum": ["assign_generation", "link_analytical_point", "unlink_analytical_point", "hide_plot_points", "restore_plot_points", "commit_edit_draft", "accept_mineral_suggestion", "create_work_group"]},
+    "action": {"type": "string", "enum": ["assign_generation", "restore_generation", "link_analytical_point", "unlink_analytical_point", "hide_plot_points", "restore_plot_points", "commit_edit_draft", "accept_mineral_suggestion", "create_work_group"]},
     "category": {"type": "string", "enum": ["domain", "view_only", "persistence"]},
     "scope": {
       "type": "array",

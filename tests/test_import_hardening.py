@@ -155,7 +155,7 @@ class ImportHardeningTests(unittest.TestCase):
                     connection.execute('INSERT INTO sample (sample_id, sample_name, created_at) VALUES (?, ?, ?)', ('old-sample', 'Keep original label', '2026-09-01T00:00:00Z'))
                     connection.commit()
             with closing(open_project(database)) as connection:
-                self.assertEqual(connection.execute('SELECT project_schema_version FROM project_meta').fetchone()[0], 21)
+                self.assertEqual(connection.execute('SELECT project_schema_version FROM project_meta').fetchone()[0], 22)
                 self.assertEqual(connection.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
                 self.assertEqual(connection.execute('SELECT sample_name FROM sample WHERE sample_id = ?', ('old-sample',)).fetchone()[0], 'Keep original label')
             backups = list(folder.glob('old.sqlite.before-v9-*.bak'))
@@ -183,6 +183,8 @@ class ImportHardeningTests(unittest.TestCase):
                     DROP TABLE sample_note;
                     DROP TABLE sample_context;
                     DROP TABLE plot_specification;
+                    DROP TABLE analysis_generation;
+                    DROP TABLE generation;
                     DROP TABLE operation_journal;
                     DROP TABLE edit_draft;
                     DROP TABLE table_view;
@@ -213,7 +215,7 @@ class ImportHardeningTests(unittest.TestCase):
             backup, = folder.glob('project.sqlite.before-v10-*.bak')
             restored = folder / 'restored.sqlite'
             shutil.copyfile(backup, restored)
-            for candidate, version in ((database, 21), (restored, 9)):
+            for candidate, version in ((database, 22), (restored, 9)):
                 with closing(sqlite3.connect(candidate)) as connection:
                     self.assertEqual(connection.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
                     self.assertEqual(connection.execute('PRAGMA foreign_key_check').fetchall(), [])

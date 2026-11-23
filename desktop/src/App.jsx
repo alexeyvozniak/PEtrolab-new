@@ -16,7 +16,7 @@ import {
 import {
   createImportWorkspace, restoreImportWorkspace, addWorkspaceSources, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
   commitImportWorkspace,
-  createWorkGroup, listWorkGroups,
+  createWorkGroup, listWorkGroups, listGenerations, assignGeneration, undoGeneration,
   listTableViews, saveTableView,
   listEditDrafts, saveEditDraft, checkEditDraft, commitEditDraft,
   pickAnalysisExportPath, exportAnalysisSelection,
@@ -745,6 +745,18 @@ export function App() {
             setSelectedIds={setSelectedAnalysisIds}
             onListWorkGroups={async () => unwrap(await listWorkGroups(databasePath))}
             onCreateWorkGroup={async (metadata) => unwrap(await createWorkGroup(databasePath, metadata))}
+            generationActions={{
+              list: async () => unwrap(await listGenerations(databasePath)),
+              assign: async (value) => {
+                const entry = unwrap(await assignGeneration(databasePath, value));
+                await refreshAnalyses().catch((caught) => setError(caught.message));
+                return entry;
+              },
+              undo: async (id, actor) => {
+                unwrap(await undoGeneration(databasePath, id, actor));
+                await refreshAnalyses().catch((caught) => setError(caught.message));
+              },
+            }}
             onExportSelection={exportSelection}
             onPublishSelection={publishSelection}
             onOpenPlots={() => openPlots()}

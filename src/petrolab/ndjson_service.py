@@ -11,6 +11,7 @@ from typing import Any, TextIO
 from .clean_table import classify_clean_table
 from .import_workspace import ImportWorkspaceStore
 from .work_groups import create_work_group, list_work_groups
+from .generations import assign_generation, list_generations, undo_generation
 from .selection_export import export_selection_csv, export_selection_xlsx
 from .table_views import list_table_views, save_table_view
 from .edit_drafts import check_edit_draft, commit_edit_draft, list_edit_drafts, save_edit_draft
@@ -469,6 +470,14 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
         params.get("created_by"), params.get("description", ""),
     )},
     "work_group.list": lambda params: {"result": list_work_groups(_project_database_path(params))},
+    "generation.list": lambda params: {"result": list_generations(_project_database_path(params))},
+    "generation.assign": lambda params: {"result": assign_generation(
+        _project_database_path(params), _string_list(params, "analysis_ids"), _string(params, "actor"),
+        generation_id=params.get("generation_id"), new_name=params.get("new_name"),
+    )},
+    "generation.undo": lambda params: {"result": undo_generation(
+        _project_database_path(params), _string(params, "operation_id"), _string(params, "actor"),
+    )},
     "import.inspect_source": _dispatch_import_inspect,
     "import.clean_table.classify": _dispatch_import_clean_table_classify,
     "import.preview.window": _dispatch_import_preview_window,

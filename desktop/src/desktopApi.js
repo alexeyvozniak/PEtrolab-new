@@ -7,6 +7,12 @@ export const restoreImportWorkspace = (projectDatabasePath) =>
   invokePetrolab("import.workspace.restore", { project_database_path: projectDatabasePath });
 export const listWorkGroups = (projectDatabasePath) =>
   invokePetrolab("work_group.list", { project_database_path: projectDatabasePath });
+export const listGenerations = (projectDatabasePath) =>
+  invokePetrolab("generation.list", { project_database_path: projectDatabasePath });
+export const assignGeneration = (projectDatabasePath, assignment) =>
+  invokePetrolab("generation.assign", { project_database_path: projectDatabasePath, ...assignment });
+export const undoGeneration = (projectDatabasePath, operationId, actor) =>
+  invokePetrolab("generation.undo", { project_database_path: projectDatabasePath, operation_id: operationId, actor });
 export const listTableViews = (projectDatabasePath) =>
   invokePetrolab("table_view.list", { project_database_path: projectDatabasePath });
 export const saveTableView = (projectDatabasePath, view) =>

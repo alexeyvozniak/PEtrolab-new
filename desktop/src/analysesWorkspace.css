@@ -119,6 +119,9 @@
 .analysis-selection-chips > span { align-self: center; color: #657168; font-size: 9px; }
 .analysis-selection-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
 .analysis-selection-actions button { min-height: 32px; padding: 5px 9px; font-size: 11px; }
+.generation-assignment { position: absolute; right: 0; bottom: calc(100% + 8px); width: min(280px, 100%); display: grid; gap: 8px; padding: 12px; background: white; border: 1px solid #b9cbbd; border-radius: 8px; box-shadow: 0 8px 24px rgba(35, 53, 42, .14); }
+.generation-assignment label { display: grid; gap: 4px; }
+.generation-assignment select, .generation-assignment input { width: 100%; min-height: 32px; padding: 4px 6px; border: 1px solid #b9cbbd; border-radius: 4px; font: inherit; }
 .analysis-retract-link { position: absolute; left: 14px; bottom: 12px; border: 0; background: transparent; color: #8a4842; font-size: 9px; text-decoration: underline; }
 
 .analyses-empty { min-height: calc(100vh - 76px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px; background: #fff; color: #405047; text-align: center; }

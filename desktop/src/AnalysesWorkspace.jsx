@@ -12,6 +12,7 @@ import {
 } from "@phosphor-icons/react";
 import "./analysesWorkspace.css";
 import { EditDraftPanel } from "./EditDraftPanel";
+import { GenerationAssignment } from "./GenerationAssignment";
 
 function originLabel(analysis) {
   return analysis.source_orientation === "columns_are_analyses"
@@ -74,6 +75,7 @@ function valueFor(analysis, column) {
   if (column.kind === "sheet") return analysis.sheet_name || "";
   if (column.kind === "origin") return originLabel(analysis);
   if (column.kind === "mineral") return mineralLabel(analysis);
+  if (column.kind === "generation") return analysis.generation?.name || "";
   if (column.kind === "mineral-status") return MINERAL_STATUS_LABELS[mineralStatus(analysis)] || mineralStatus(analysis);
   if (column.kind === "identity") return analysis.identity?.[column.field] || "";
   if (column.kind === "metadata") return analysis.source_metadata?.[column.field] || "";
@@ -248,7 +250,7 @@ function AnalysisDetail({ analysis, editDraftActions, hiddenPlotAnalysisIds, onS
   );
 }
 
-export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, onExportSelection, onPublishSelection, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
+export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, generationActions, onExportSelection, onPublishSelection, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
   const analyses = project.analyses || [];
   const mineralStatusCounts = project.mineral_status_counts || {};
   const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
@@ -263,6 +265,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setS
     { id: "sheet", kind: "sheet", label: "Лист" },
     { id: "origin", kind: "origin", label: "В файле" },
     { id: "mineral", kind: "mineral", label: "Минерал" },
+    { id: "generation", kind: "generation", label: "Generation" },
     { id: "mineral-status", kind: "mineral-status", label: "Проверка минерала" },
     ...identityFields.map((field) => ({ id: columnId("identity", field), kind: "identity", field, label: field })),
     ...metadataFields.map((field) => ({ id: columnId("metadata", field), kind: "metadata", field, label: `${field} · исходное` })),
@@ -273,6 +276,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setS
     "sheet",
     "origin",
     "mineral",
+    "generation",
     "mineral-status",
     ...identityFields.map((field) => columnId("identity", field)),
     ...metadataFields.slice(0, 2).map((field) => columnId("metadata", field)),
@@ -765,6 +769,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setS
           </div>
           <div className="analysis-selection-actions">
             {onCreateWorkGroup && <button className="primary-button" type="button" disabled={busy || groupBusy} onClick={() => setGroupForm(true)}>Сохранить как рабочую группу</button>}
+            {generationActions && <GenerationAssignment actions={generationActions} selectedIds={selectedIds} busy={busy} />}
             {onOpenPlots && <button className="outline-button" type="button" disabled={busy} onClick={onOpenPlots}>Построить диаграммы</button>}
             {onExportSelection && <>
               <button className="outline-button" type="button" disabled={busy} onClick={() => onExportSelection("xlsx")}>Экспорт отбора XLSX</button>
