@@ -514,7 +514,39 @@ def _observed_header(sheet: SheetInspection, section: dict[str, Any], mapping: d
     return sheet.rows[index][header_column] if index < len(sheet.rows) and header_column < len(sheet.rows[index]) else None
 
 
+def recipe_sheet_layout(sheet: SheetInspection, sections: list[dict[str, Any]]) -> dict[str, Any]:
+    """Physical structure that must match before rebinding a saved recipe."""
+    header_rows = set(sheet.header_rows)
+    transposed_headers = []
+    for section in sections:
+        if section["sheet_name"] != sheet.name:
+            continue
+        if section.get("orientation") == "columns_are_analyses":
+            column = section.get("header_column", 1) - 1
+            transposed_headers.append([
+                row[column] if column < len(row) else None
+                for row in sheet.rows[section["data_start_row"] - 1:section["data_end_row"]]
+            ])
+        else:
+            header_rows.add(section["header_row"])
+    return {
+        "extent": (len(sheet.rows), max((len(row) for row in sheet.rows), default=0)),
+        "blocks": candidate_blocks(sheet),
+        "headers": [
+            (number, sheet.rows[number - 1] if number <= len(sheet.rows) else None,
+             _unit_context(sheet.rows, number) if number <= len(sheet.rows) else None)
+            for number in sorted(header_rows)
+        ],
+        "transposed_headers": transposed_headers,
+        "warnings": sheet.warnings,
+    }
+
+
 def validate_recipe(inspection: SourceInspection, recipe: dict[str, Any]) -> dict[str, Any]:
+    version = recipe.get("schema_version", 1)
+    if type(version) is not int or version not in (1, 2):
+        raise ImportCommandError("RECIPE_VERSION_UNSUPPORTED", "Import recipe schema version is unsupported.",
+                                 {"schema_version": version, "supported_versions": [1, 2]})
     if recipe.get("source_file_sha256") not in (None, inspection.fingerprint):
         raise ImportCommandError("SOURCE_FINGERPRINT_MISMATCH", "Recipe belongs to another source revision.")
     if recipe.get("source_format") != inspection.source_format:

@@ -12,7 +12,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .import_preview import ImportCommandError, create_import_plan, inspect_source, semantic_fingerprint, validate_recipe
+from .import_preview import (
+    ImportCommandError, create_import_plan, inspect_source, recipe_sheet_layout, semantic_fingerprint, validate_recipe,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -405,6 +407,74 @@ def save_import_recipe_revision(database_path: str | Path, source_id: str, recip
         }
     finally:
         connection.close()
+
+
+def open_import_recipe_revision(database_path: str | Path, recipe_revision_id: str, source_path: str | Path) -> dict[str, Any]:
+    with closing(open_project(database_path)) as connection:
+        saved = connection.execute(
+            """SELECT r.*, s.source_kind, s.linked_path, s.managed_relative_path, s.source_fingerprint_sha256
+               FROM import_recipe_revision r JOIN source_file s USING (source_id)
+               WHERE r.recipe_revision_id = ?""",
+            (recipe_revision_id,),
+        ).fetchone()
+    if saved is None:
+        raise ImportCommandError("RECIPE_REVISION_NOT_FOUND", "Saved import recipe revision does not exist.")
+
+    recipe = json.loads(saved["recipe_json"])
+    report = {"report_version": 1, "from_schema_version": saved["schema_version"], "to_schema_version": 2,
+              "changes": [], "dropped_fields": []}
+    result = {"recipe_revision_id": recipe_revision_id, "source_id": saved["source_id"],
+              "semantic_fingerprint": saved["semantic_fingerprint_sha256"], "migration_report": report}
+    try:
+        if (recipe.get("schema_version", 1) != saved["schema_version"]
+                or semantic_fingerprint(recipe) != result["semantic_fingerprint"]):
+            raise ImportCommandError("RECIPE_REVISION_INTEGRITY", "Saved recipe version or semantic fingerprint differs from its revision.")
+        target = inspect_source(source_path)
+        different_source = target.fingerprint != saved["source_fingerprint_sha256"]
+        original = inspect_source(_source_path_for_revision(database_path, saved)) if different_source else target
+        if original.fingerprint != saved["source_fingerprint_sha256"]:
+            raise ImportCommandError("SOURCE_FINGERPRINT_MISMATCH", "Original source changed and cannot be used to verify compatibility.")
+        validate_recipe(original, recipe)
+
+        if different_source:
+            decisions = recipe["global_decisions"]
+            portable = {"fe_semantics", "censored_value_policy", "duplicate_policy", "unit_policy",
+                        "mineral_verification_enabled"}
+            empty_safe = {"duplicate_review", "semantic_annotations", "semantic_history", "project_aliases",
+                          "mineral_acceptances", "sample_assignments"}
+            bound = sorted(field for field in decisions.keys() - portable
+                           if field not in empty_safe or decisions[field] not in (None, [], {}))
+            if bound:
+                raise ImportCommandError("RECIPE_SOURCE_BOUND_DECISIONS", "Saved decisions refer to the original source or project.",
+                                         {"blocked_fields": [f"global_decisions.{field}" for field in bound]})
+            if target.source_format != original.source_format:
+                raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Source format differs from the saved recipe.")
+            left = {sheet.name: recipe_sheet_layout(sheet, recipe["sections"]) for sheet in original.sheets}
+            right = {sheet.name: recipe_sheet_layout(sheet, recipe["sections"]) for sheet in target.sheets}
+            mismatches = sorted(name for name in left.keys() | right.keys() if left.get(name) != right.get(name))
+            if mismatches:
+                raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "The candidate workbook has a different physical layout.",
+                                         {"sheets": mismatches})
+        if recipe.get("schema_version") != 2:
+            report["changes"].append({"field": "schema_version", "action": "converted", "reason": "Legacy runtime recipe opened as v2."})
+        if recipe.get("source_file_sha256") != target.fingerprint:
+            report["changes"].append({"field": "source_file_sha256", "action": "converted", "reason": "Recipe bound to the verified candidate source."})
+        recipe.update(schema_version=2, source_file_sha256=target.fingerprint)
+        plan = create_import_plan(target, recipe)
+    except ImportCommandError as error:
+        return {**result, "status": "incompatible", "recipe": None, "issue": error.projection()["error"]}
+    try:
+        blockers = [issue for issue in plan["issues"] if issue.get("blocking")]
+        if blockers:
+            raise ImportCommandError(blockers[0]["code"], blockers[0]["message"], {"issues": blockers})
+        _require_non_empty_plan(plan)
+        _require_mapping_review(recipe)
+        _require_duplicate_review(plan, recipe)
+    except ImportCommandError as error:
+        field = "global_decisions.duplicate_review" if error.code == "DUPLICATE_REVIEW_REQUIRED" else "import_plan"
+        report["changes"].append({"field": field, "action": "blocked", "reason": error.message})
+        return {**result, "status": "review_required", "recipe": recipe, "issue": error.projection()["error"]}
+    return {**result, "status": "compatible", "recipe": recipe}
 
 
 def _validated_import(source_path, recipe, expected_fingerprint=None):

@@ -10,6 +10,7 @@ import unittest
 import uuid
 import shutil
 from unittest.mock import patch
+from zipfile import ZipFile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -564,6 +565,76 @@ class NdjsonServiceTests(unittest.TestCase):
                 },
             })
             self.assertEqual(response["result"]["supersedes_recipe_revision_id"], imported["recipe_revision_id"])
+
+    def test_saved_legacy_recipe_reopens_with_exact_semantics_or_rejects_changed_workbook(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "project.sqlite"
+            legacy = fixture_recipe()
+
+            def call(command, **payload):
+                return handle_request({"protocol_version": PROTOCOL_VERSION, "request_id": str(uuid.uuid4()),
+                    "command": command, "payload": {"project_database_path": str(database), **payload}})
+
+            def candidate(name, old, new):
+                target = root / name
+                with ZipFile(FIXTURE) as source, ZipFile(target, "w") as output:
+                    for member in source.infolist():
+                        content = source.read(member)
+                        if member.filename == "xl/worksheets/sheet2.xml":
+                            self.assertIn(old, content)
+                            content = content.replace(old, new, 1)
+                        output.writestr(member, content)
+                return target
+
+            imported = call("import.plan.apply", source_path=str(FIXTURE), recipe=legacy)["result"]
+            revision = imported["recipe_revision_id"]
+            stored_bytes = database.read_bytes()
+            original_bytes = FIXTURE.read_bytes()
+            reopened = call("import.recipe.open_revision", source_path=str(FIXTURE), recipe_revision_id=revision)["result"]
+            self.assertEqual(reopened["status"], "review_required")
+            self.assertEqual(reopened["issue"]["code"], "DUPLICATE_REVIEW_REQUIRED")
+            self.assertEqual(reopened["recipe"], {**legacy, "schema_version": 2})
+            self.assertEqual(reopened["migration_report"]["report_version"], 1)
+            self.assertEqual(reopened["migration_report"]["from_schema_version"], 1)
+            self.assertEqual(reopened["migration_report"]["to_schema_version"], 2)
+            self.assertEqual(reopened["migration_report"]["dropped_fields"], [])
+            self.assertEqual(reopened["semantic_fingerprint"], legacy["semantic_fingerprint"])
+            self.assertEqual(call("import.plan.apply", source_path=str(FIXTURE),
+                                  recipe=reopened["recipe"])["error"]["code"], "DUPLICATE_REVIEW_REQUIRED")
+
+            compatible = candidate("compatible.xlsx", b'>18.2</x:v>', b'>19.2</x:v>')
+            rebinding = call("import.recipe.open_revision", source_path=str(compatible), recipe_revision_id=revision)["result"]
+            self.assertEqual(rebinding["status"], "review_required")
+            self.assertEqual(rebinding["recipe"], {**legacy, "schema_version": 2,
+                "source_file_sha256": inspect_source(compatible).fingerprint})
+            self.assertEqual(rebinding["semantic_fingerprint"], legacy["semantic_fingerprint"])
+            changed = candidate("changed.xlsx", b'Li (ppm)', b'Li (ppb)')
+            rejected = call("import.recipe.open_revision", source_path=str(changed), recipe_revision_id=revision)["result"]
+            self.assertEqual(rejected["status"], "incompatible")
+            self.assertIsNone(rejected["recipe"])
+            self.assertEqual(rejected["issue"]["details"]["sheets"], ["Trace_elements"])
+            self.assertEqual(rejected["migration_report"]["dropped_fields"], [])
+            self.assertEqual(database.read_bytes(), stored_bytes)
+            self.assertEqual(FIXTURE.read_bytes(), original_bytes)
+
+            unsupported = call("import.plan.apply", source_path=str(FIXTURE), recipe={**legacy, "schema_version": 3})
+            self.assertEqual(unsupported["error"]["code"], "RECIPE_VERSION_UNSUPPORTED")
+
+            reviewed = call("import.recipe.review_duplicates", source_path=str(compatible),
+                            recipe=rebinding["recipe"], decision="keep_all")["result"]["recipe"]
+            applied = call("import.plan.apply", source_path=str(compatible), recipe=reviewed)["result"]
+            self.assertEqual(applied["analysis_count"], 8)
+            current = call("import.recipe.open_revision", source_path=str(compatible),
+                           recipe_revision_id=applied["recipe_revision_id"])["result"]
+            self.assertEqual(current["status"], "compatible")
+            self.assertEqual(current["recipe"], reviewed)
+            self.assertEqual(current["migration_report"]["changes"], [])
+            bound = call("import.recipe.open_revision", source_path=str(FIXTURE),
+                         recipe_revision_id=applied["recipe_revision_id"])["result"]
+            self.assertEqual(bound["status"], "incompatible")
+            self.assertIsNone(bound["recipe"])
+            self.assertEqual(bound["issue"]["details"]["blocked_fields"], ["global_decisions.duplicate_review"])
 
     def test_media_inspection_and_point_placement_are_available_through_transport(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

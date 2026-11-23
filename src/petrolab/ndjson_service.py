@@ -24,6 +24,7 @@ from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bu
 from .import_apply import (
     apply_import_plan,
     check_linked_source,
+    open_import_recipe_revision,
     retract_latest_import,
     rollback_incomplete_batch,
     save_import_recipe_revision,
@@ -284,6 +285,12 @@ def _dispatch_recipe_save_revision(params: Mapping[str, Any]) -> dict[str, Any]:
     )}
 
 
+def _dispatch_recipe_open_revision(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {"result": open_import_recipe_revision(
+        _project_database_path(params), _string(params, "recipe_revision_id"), _source_path(params)
+    )}
+
+
 def _dispatch_analytical_point_create(params: Mapping[str, Any]) -> dict[str, Any]:
     sample_id = params.get("sample_id")
     return {"result": create_analytical_point(
@@ -483,6 +490,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "source.check_linked": _dispatch_linked_source_check,
     "import.batch.rollback": _dispatch_batch_rollback,
     "import.recipe.save_revision": _dispatch_recipe_save_revision,
+    "import.recipe.open_revision": _dispatch_recipe_open_revision,
     "analytical_point.create": _dispatch_analytical_point_create,
     "media.inspect_sources": _dispatch_media_inspect,
     "media.inspect_folder": lambda params: {"result": inspect_media_folder(_string(params, "folder"))},
