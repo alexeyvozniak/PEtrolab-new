@@ -51,7 +51,10 @@ from .publication import (
     prepare_publication, publication_catalog,
 )
 from .project_archive import export_project_archive, restore_project_archive
-from .workspace_snapshots import apply_analysis_template, list_workspace_snapshots, open_workspace_snapshot, save_analysis_template, save_workspace_snapshot
+from .workspace_snapshots import (
+    apply_analysis_template, list_analysis_templates, list_workspace_snapshots, open_workspace_snapshot,
+    save_analysis_template, save_workspace_snapshot,
+)
 
 
 PROTOCOL_VERSION = "1.0"
@@ -330,6 +333,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
         _project_database_path(params), params.get("name"), params.get("plot_id"),
         params.get("table_view_id"), params.get("calculation_run_id"),
     )},
+    "workspace.template.list": lambda params: {"result": list_analysis_templates(_project_database_path(params))},
     "workspace.template.apply": lambda params: {"result": apply_analysis_template(
         _project_database_path(params), params.get("id"), params.get("analysis_ids"), params.get("name"),
     )},

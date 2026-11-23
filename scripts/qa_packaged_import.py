@@ -56,24 +56,36 @@ def archive_command(executable: Path, *args, expected_error: str | None = None) 
 
 def check_workspace_archive(executable: Path, directory: Path) -> None:
     source = directory / "workspace.csv"
-    original = b"Analysis,SiO2 [wt.%],Al2O3 [wt.%]\nA,10,20\nB,12,21\nC,39,22\nD,45,24\n"
-    source.write_bytes(original)
+    incoming = directory / "workspace-new.csv"
+    incompatible = directory / "workspace-ppm.csv"
+    originals = {
+        source: b"Analysis,SiO2 [wt.%],Al2O3 [wt.%]\nA,10,20\nB,12,21\nC,39,22\nD,45,24\n",
+        incoming: b"Analysis,SiO2 [wt.%],Al2O3 [wt.%]\nN1,14,29\nN2,48,26\n",
+        incompatible: b"Analysis,SiO2 [ppm],Al2O3 [ppm]\nT1,140,29\nT2,480,26\n",
+    }
+    for path, data in originals.items():
+        path.write_bytes(data)
     database = directory / "workspace.sqlite"
     project = {"project_database_path": str(database)}
-    _, listed, catalog = run(executable, [
-        request("import.plan.apply", {**project, "source_path": str(source), "recipe": suggest_import_recipe(source)["recipe"]}),
+    imported = run(executable, [
+        *(request("import.plan.apply", {**project, "source_path": str(path), "recipe": suggest_import_recipe(path)["recipe"]})
+          for path in originals),
         request("project.analyses.list", project),
-        request("plot_data.catalog", project),
     ])
-    rows = listed["result"]["analyses"]
-    ids = [row["analysis_id"] for row in rows]
-    features = catalog["result"]["axes"]
+    source_ids = [entry["result"]["source_id"] for entry in imported[:-1]]
+    rows = imported[-1]["result"]["analyses"]
+    ids, target_ids, incompatible_ids = [[row["analysis_id"] for row in rows if row["source_id"] == source_id]
+                                        for source_id in source_ids]
+    features = run(executable, [request("plot_data.catalog", {**project, "analysis_ids": ids})])[0]["result"]["axes"]
     calculation_input = {"kind": "analysis_snapshot", "analysis_ids": ids}
     review, table, plot = [entry["result"] for entry in run(executable, [
         request("statistics.review", {**project, "input": calculation_input, "features": features}),
         request("table_view.save", {**project, "name": "QA workspace table",
-            "columns": [{"field": "source", "order": 0, "visible": True, "width_px": None}],
-            "sort": [{"field": "source", "direction": "descending"}], "filters": []}),
+            "columns": [{"field": field, "order": index, "visible": True, "width_px": None}
+                        for index, field in enumerate(("source", "generation", "measurement:SiO2"))],
+            "sort": [{"field": "source", "direction": "descending"}],
+            "filters": [{"id": str(uuid.uuid4()), "field": "source", "operator": "equals",
+                         "value": source_ids[0], "enabled": True}]}),
         request("plot_spec.save", {**project, "name": "QA workspace plot", "analysis_ids": ids, "colors": {},
             "panels": [{"id": str(uuid.uuid4()), "kind": "binary", "axes": features} for _ in range(3)]}),
     ])]
@@ -84,7 +96,8 @@ def check_workspace_archive(executable: Path, directory: Path) -> None:
     state = {
         "data_universe": {"dataset_ids": [], "work_group_ids": [], "analysis_ids": ids},
         "table_view_id": table["id"], "plot_specification_ids": [plot["id"]],
-        "source_visibility": [{"source_id": rows[0]["source_id"], "visible": False}],
+        "source_visibility": [{"source_id": source_ids[0], "visible": False},
+                              {"source_id": source_ids[1], "visible": True}],
         "selection_restore_policy": "restore_exact_if_available", "selection_analysis_ids": ids[:2],
         "active_calculation_run_id": calculation["id"], "active_surface": "statistics",
     }
@@ -93,28 +106,45 @@ def check_workspace_archive(executable: Path, directory: Path) -> None:
         request("workspace.template.save", {**project, "name": "QA template",
             "plot_id": plot["id"], "table_view_id": table["id"], "calculation_run_id": calculation["id"]}),
     ])]
-    if any(identifier in json.dumps(template) for identifier in [*ids, rows[0]["source_id"], calculation["id"]]):
+    if any(identifier in json.dumps(template) for identifier in [*ids, *source_ids, calculation["id"]]):
         raise AssertionError("Analysis template retained concrete IDs")
     original_database = database.read_bytes()
     archive = directory / "workspace.petrolab"
     archive_command(executable, "export", database, archive, "--level", "full")
     restored = archive_command(executable, "restore", archive, directory / "workspace-restored")
     destination = {"project_database_path": restored["project_database_path"]}
-    opened, applied = [entry["result"] for entry in run(executable, [
+    opened, reopened_plot, reopened_run, listed_templates = [entry["result"] for entry in run(executable, [
         request("workspace.snapshot.open", {**destination, "id": snapshot["id"]}),
-        request("workspace.template.apply", {**destination, "id": template["id"],
-            "name": "QA applied", "analysis_ids": ids[2:]}),
+        request("plot_spec.open", {**destination, "id": plot["id"]}),
+        request("statistics.run.open", {**destination, "run_id": calculation["id"]}),
+        request("workspace.template.list", destination),
     ])]
-    if opened != {"snapshot": snapshot, "migration_report": []}:
+    if opened != {"snapshot": snapshot, "migration_report": []} or reopened_plot != plot or reopened_run != calculation:
         raise AssertionError("Restored workspace differs from the saved state")
+    if listed_templates != [{"id": template["id"], "name": template["name"]}]:
+        raise AssertionError("Template disappeared from the restored project")
+    database_before_rejection = Path(destination["project_database_path"]).read_bytes()
+    rejected = run(executable, [request("workspace.template.apply", {**destination, "id": template["id"],
+        "name": "QA incompatible", "analysis_ids": incompatible_ids})])[0]["result"]
+    if any(rejected[key] for key in ("plot", "table_view", "method_plans")):
+        raise AssertionError("Template partially applied to incompatible units")
+    rejected_fields = {item["field"] for item in rejected["migration_report"]
+                       if item["action"] == "blocked" and "ppm" in item["reason"] and "wt.%" in item["reason"]}
+    if rejected_fields != {"SiO2", "Al2O3"} or Path(destination["project_database_path"]).read_bytes() != database_before_rejection:
+        raise AssertionError("Incompatible template changed the project or lost the expected and observed units")
+    applied = run(executable, [request("workspace.template.apply", {**destination, "id": template["id"],
+        "name": "QA applied", "analysis_ids": target_ids})])[0]["result"]
     if (len(applied["plot"]["panels"]) != 3 or applied["table_view"]["sort"] != table["sort"]
-            or applied["plot"]["input"]["analysis_ids"] != ids[2:]):
+            or applied["plot"]["input"]["analysis_ids"] != target_ids
+            or applied["table_view"]["columns"] != table["columns"] or applied["table_view"]["filters"]
+            or not any(item["field"] == "table_filters" and item["action"] == "omitted" for item in applied["migration_report"])):
         raise AssertionError("Restored template did not preserve the transferable layout")
     rerun = run(executable, [request("statistics.cluster.run", {**destination, **applied["method_plans"][0]})])[0]["result"]
-    if rerun["input"]["analysis_ids"] != ids[2:] or rerun["id"] == calculation["id"]:
+    if rerun["input"]["analysis_ids"] != target_ids or rerun["id"] == calculation["id"]:
         raise AssertionError("Template did not start a separate calculation on the new selection")
-    if source.read_bytes() != original or database.read_bytes() != original_database:
+    if any(path.read_bytes() != data for path, data in originals.items()) or database.read_bytes() != original_database:
         raise AssertionError("Workspace archive operations changed the original files")
+    print("Packaged AT-33 service: exact workspace restored, template applied to a different source, incompatible units rejected.")
 
 
 def check_lithos_package(executable: Path, directory: Path, database: str, analysis_ids: list[str]) -> None:

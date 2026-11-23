@@ -153,7 +153,12 @@ def open_workspace_snapshot(database_path, snapshot_id):
 
 _TEMPLATE_CONTENT = ("requirements", "table_columns", "panel_templates", "method_templates")
 _METHOD_PARAMETERS = ("transform", "scaling", "clusters", "seed")
-_TABLE_COLUMNS = {"source", "sheet", "origin", "mineral", "mineral-status"}
+_TABLE_COLUMNS = {"source", "sheet", "origin", "mineral", "mineral-status", "generation"}
+
+
+def list_analysis_templates(database_path):
+    with closing(open_project(database_path)) as connection:
+        return [dict(row) for row in connection.execute("SELECT id, name FROM analysis_template ORDER BY name, id")]
 
 
 def save_analysis_template(database_path, name, plot_id=None, table_view_id=None, calculation_run_id=None):
@@ -185,6 +190,13 @@ def save_analysis_template(database_path, name, plot_id=None, table_view_id=None
             definition["normalization"] = panel["normalization"]
         panels.append(definition)
     columns, sort, methods, filters_omitted = [], [], [], False
+    if calculation_run_id is not None:
+        run = open_calculation_run(database_path, calculation_run_id)
+        if run.get("status") != "current":
+            raise ImportCommandError("TEMPLATE_METHOD_UNAVAILABLE", "Исходный расчёт устарел.")
+        params = run["parameters"]
+        methods.append({"method_id": run["method_id"], "method_version": run["method_version"],
+                        "parameters": {**{key: params[key] for key in _METHOD_PARAMETERS}, "features": fields(params["features"])}})
     if table_view_id is not None:
         _uuid(table_view_id)
         with closing(open_project(database_path)) as connection:
@@ -198,18 +210,12 @@ def save_analysis_template(database_path, name, plot_id=None, table_view_id=None
         catalog = plot_catalog(database_path)["axes"]
         for column in columns:
             kind, _, key = column["field"].partition(":")
-            if kind == "measurement":
+            # A panel or calculation can establish the context for a shared table field.
+            if kind == "measurement" and key not in requirements:
                 matches = [axis for axis in catalog if axis["field"] == key]
                 if not matches:
                     raise ImportCommandError("TEMPLATE_FIELD_AMBIGUOUS", f"Измерение {key} недоступно.")
                 fields(matches)
-    if calculation_run_id is not None:
-        run = open_calculation_run(database_path, calculation_run_id)
-        if run.get("status") != "current":
-            raise ImportCommandError("TEMPLATE_METHOD_UNAVAILABLE", "Исходный расчёт устарел.")
-        params = run["parameters"]
-        methods.append({"method_id": run["method_id"], "method_version": run["method_version"],
-                        "parameters": {**{key: params[key] for key in _METHOD_PARAMETERS}, "features": fields(params["features"])}})
     content = {"requirements": list(requirements.values()), "table_columns": columns,
                "panel_templates": panels, "method_templates": methods}
     if version == 2:
@@ -273,15 +279,25 @@ def apply_analysis_template(database_path, template_id, analysis_ids, name=None)
     report = []
     for requirement in template["requirements"]:
         field = requirement["field"]
-        matches = [axis for axis in axes if axis["field"] == field and axis["unit"] in requirement["allowed_units"]
+        candidates = [axis for axis in axes if axis["field"] == field]
+        matches = [axis for axis in candidates if axis["unit"] in requirement["allowed_units"]
                    and feature_domain(axis) == requirement["semantic_domain"]
                    and all(axis[key] == requirement[key] for key in ("measurement_set", "method") if key in requirement)]
         if len(matches) == 1:
             compatible[field] = matches[0]
-            report.append({"field": field, "action": "unchanged", "reason": "Домен, единица и аналитический контекст однозначны."})
+            report.append({"field": field, "action": "unchanged",
+                           "reason": f"Единица {matches[0]['unit']}, домен и аналитический контекст совместимы."})
         else:
-            report.append({"field": field, "action": "blocked",
-                           "reason": "Нет совместимой единицы или домена." if not matches else "Есть несколько аналитических контекстов."})
+            expected_units = ", ".join(requirement["allowed_units"])
+            observed_units = ", ".join(sorted({axis["unit"] for axis in candidates}))
+            if not candidates:
+                reason = f"Поле отсутствует в выбранном наборе. Требуемые единицы — {expected_units}."
+            elif not matches:
+                reason = (f"Требуемые единицы — {expected_units}. Найденные единицы — {observed_units}. "
+                          "Совместимое сочетание единицы, домена и аналитического контекста отсутствует.")
+            else:
+                reason = "Есть несколько совместимых аналитических контекстов."
+            report.append({"field": field, "action": "blocked", "reason": reason})
     table = None
     methods = []
     plot = None

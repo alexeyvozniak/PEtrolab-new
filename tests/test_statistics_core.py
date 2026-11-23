@@ -106,7 +106,7 @@ class StatisticsCoreTests(unittest.TestCase):
                         sort=[{"field": "source", "direction": "ascending"}], filters=[])["result"]
             filtered = call("table_view.save", name="Исходный фильтр",
                             columns=[{"field": field, "order": index, "visible": True, "width_px": None}
-                                     for index, field in enumerate(["source", "identity:Analysis", "measurement:SiO2"])],
+                                     for index, field in enumerate(["source", "identity:Analysis", "measurement:SiO2", "generation"])],
                             sort=[{"field": "measurement:SiO2", "direction": "descending"}],
                             filters=[{"id": str(uuid4()), "field": "source", "operator": "equals",
                                       "value": listed[0]["source_id"], "enabled": True}])["result"]
@@ -126,6 +126,7 @@ class StatisticsCoreTests(unittest.TestCase):
                                name="Другой набор")["result"]
             self.assertEqual(applied_all["plot"]["input"]["analysis_ids"], target_ids)
             self.assertEqual(applied_all["table_view"]["sort"], filtered["sort"])
+            self.assertEqual(applied_all["table_view"]["columns"], filtered["columns"])
             self.assertEqual(applied_all["table_view"]["filters"], [])
             self.assertEqual(applied_all["method_plans"][0]["parameters"], parameters)
             self.assertEqual(len(call("statistics.runs.list")["result"]), 2)
@@ -166,3 +167,44 @@ class StatisticsCoreTests(unittest.TestCase):
             self.assertEqual(stale["status"], "stale")
             self.assertEqual(stale["result_manifest"], first["result_manifest"])
             self.assertEqual(source.read_text(encoding="utf-8"), csv)
+
+    def test_workspace_template_uses_explicit_plot_context_for_shared_table_field(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "project.sqlite"
+
+            def call(command, **payload):
+                return handle_request({"protocol_version": "1.0", "request_id": str(uuid4()), "command": command,
+                    "payload": {"project_database_path": str(database), **payload}})
+
+            source_ids = []
+            for name, unit in (("original", "wt.%"), ("target", "wt.%"), ("different", "ppm")):
+                source = root / f"{name}.csv"
+                source.write_text(f"Analysis,SiO2 [{unit}],Al2O3 [{unit}]\n{name},10,20\n", encoding="utf-8")
+                imported = call("import.plan.apply", source_path=str(source), recipe=suggest_import_recipe(source)["recipe"])["result"]
+                source_ids.append(imported["source_id"])
+            analyses = {row["source_id"]: row["analysis_id"] for row in call("project.analyses.list")["result"]["analyses"]}
+            original, target, different = ([analyses[item]] for item in source_ids)
+            axes = call("plot_data.catalog", analysis_ids=original)["result"]["axes"]
+            panels = [{"id": str(uuid4()), "kind": "binary", "axes": axes}]
+            plot = call("plot_spec.save", name="Исходный график", analysis_ids=original, panels=panels, colors={})["result"]
+            columns = [{"field": field, "order": index, "visible": True, "width_px": None}
+                       for index, field in enumerate(["generation", "measurement:SiO2"])]
+            table = call("table_view.save", name="Таблица", columns=columns,
+                         sort=[{"field": "generation", "direction": "ascending"}], filters=[])["result"]
+            ambiguous = call("workspace.template.save", name="Табличный шаблон", table_view_id=table["id"])
+            self.assertEqual(ambiguous["error"]["code"], "TEMPLATE_FIELD_AMBIGUOUS")
+            template = call("workspace.template.save", name="Контекст графика", plot_id=plot["id"],
+                            table_view_id=table["id"])["result"]
+            self.assertEqual(call("workspace.template.list")["result"], [{"id": template["id"], "name": template["name"]}])
+            before = database.read_bytes()
+            rejected = call("workspace.template.apply", id=template["id"], analysis_ids=different, name="Отказ")["result"]
+            self.assertIsNone(rejected["plot"])
+            self.assertIsNone(rejected["table_view"])
+            self.assertEqual({item["field"] for item in rejected["migration_report"]
+                              if item["action"] == "blocked" and "wt.%" in item["reason"] and "ppm" in item["reason"]},
+                             {"SiO2", "Al2O3"})
+            self.assertEqual(database.read_bytes(), before)
+            applied = call("workspace.template.apply", id=template["id"], analysis_ids=target, name="Новая раскладка")["result"]
+            self.assertEqual(applied["plot"]["input"]["analysis_ids"], target)
+            self.assertEqual(applied["table_view"]["columns"], columns)
