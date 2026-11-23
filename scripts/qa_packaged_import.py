@@ -42,9 +42,13 @@ def run(executable: Path, requests: list[dict]) -> list[dict]:
     return responses
 
 
-def archive_command(executable: Path, *args) -> dict:
+def archive_command(executable: Path, *args, expected_error: str | None = None) -> dict | None:
     completed = subprocess.run([str(executable), "archive", *map(str, args)], text=True, encoding="utf-8",
                                capture_output=True, timeout=120, check=False)
+    if expected_error is not None:
+        if completed.returncode != 1 or not completed.stderr.startswith(expected_error + ":"):
+            raise AssertionError(f"Expected {expected_error}, got {completed.returncode}: {completed.stderr.strip()}")
+        return None
     if completed.returncode:
         raise RuntimeError(f"Packaged archive command failed: {completed.stderr.strip()}")
     return json.loads(completed.stdout)
@@ -200,6 +204,113 @@ def check_lithos_package(executable: Path, directory: Path, database: str, analy
                 raise AssertionError(f"Packaged publication checksum mismatch: {entry['path']}")
 
 
+def check_portable_archive(executable: Path, directory: Path, database: str, analyses: list[dict]) -> None:
+    project = {"project_database_path": database}
+    image, photo = directory / "thin-section.png", directory / "plane-light.png"
+    Image.new("RGB", (48, 32), "#627758").save(image)
+    Image.new("RGB", (48, 32), "#7d9c71").save(photo)
+    original_files = {path: path.read_bytes() for path in (FIXTURE, image, photo)}
+    preview, point = [item["result"] for item in run(executable, [
+        request("media.preview_input", {"source_path": str(image)}),
+        request("analytical_point.create", {**project, "sample_name": "Archive QA", "point_name": "P-01",
+            "analysis_ids": [row["analysis_id"] for row in analyses[:2]], "link_type": "same_point"}),
+    ])]
+    if not preview["preview_url"].startswith("data:image/jpeg;base64,"):
+        raise AssertionError("Packaged service failed to decode and preview an image")
+    point_id = point["analytical_point_id"]
+    assignment = {"ownership_mode": "linked_external", "sample_name": point["sample_name"], "thin_section_name": "TS-01"}
+    plan = run(executable, [request("media.import.plan", {**project, "assignments": [
+        {**assignment, "source_path": str(image), "media_type": "BSE", "placements": [
+            {"analytical_point_id": point_id, "geometry": {"kind": "point", "x_px": 16, "y_px": 8},
+             "cross_sample_exception_reason": None}]},
+        {**assignment, "source_path": str(photo), "media_type": "PPL", "placements": [],
+         "attach_to_placements": [{"analytical_point_id": point_id,
+                                   "source_fingerprint": hashlib.sha256(original_files[image]).hexdigest()}]},
+    ]})])[0]["result"]
+    run(executable, [request("media.import.apply", {**project, "plan": plan})])
+
+    def content(path):
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+            if connection.execute("PRAGMA integrity_check").fetchall() != [("ok",)] or connection.execute("PRAGMA foreign_key_check").fetchone():
+                raise AssertionError(f"Integrity check failed for {path.name}")
+            tables = ("analysis", "measurement", "source_cell_provenance", "import_recipe_revision",
+                      "analytical_point_analysis", "spatial_annotation", "analytical_point_annotation", "media_link")
+            return {table: connection.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall() for table in tables}
+
+    expected = content(Path(database))
+    if not all(expected.values()):
+        raise AssertionError("Portable archive fixture has missing scientific records or links")
+    database_bytes = Path(database).read_bytes()
+    levels = {"project": 1, "project_sources": 2, "full": 4}
+    source_hash, image_hash, photo_hash = (hashlib.sha256(original_files[path]).hexdigest() for path in (FIXTURE, image, photo))
+    expected_hashes = {"project": set(), "project_sources": {source_hash}, "full": {source_hash, image_hash, photo_hash}}
+    archives = {level: directory / f"portable-{level}.petrolab" for level in levels}
+    destinations = {level: directory / f"relocated-{level}" for level in levels}
+    exported = run(executable, [request("project.archive.export", {**project, "output_path": str(path), "level": level})
+                                for level, path in archives.items()])
+    restored = run(executable, [request("project.archive.restore", {"archive_path": str(archives[level]),
+                              "destination_path": str(destination)}) for level, destination in destinations.items()])
+    for (level, count), output, opened in zip(levels.items(), exported, restored, strict=True):
+        manifest = opened["result"]["manifest"]
+        destination = destinations[level]
+        if output["result"]["manifest"] != manifest or len(manifest["files"]) != count or manifest["level"] != level:
+            raise AssertionError(f"Wrong manifest for archive level {level}")
+        if content(destination / "project.sqlite") != expected:
+            raise AssertionError(f"Scientific records or links changed in archive level {level}")
+        for entry in manifest["files"]:
+            payload = (destination / entry["path"]).read_bytes()
+            if len(payload) != entry["size"] or hashlib.sha256(payload).hexdigest() != entry["sha256"]:
+                raise AssertionError(f"Manifest differs from the restored file: {entry['path']}")
+        included = {hashlib.sha256(path.read_bytes()).hexdigest() for path in destination.rglob("*")
+                    if path.is_file() and path.name != "project.sqlite"}
+        if included != expected_hashes[level]:
+            raise AssertionError(f"Unexpected files in archive level {level}")
+
+    full = archives["full"]
+    destination = destinations["full"]
+    relocated_project = {"project_database_path": str(destination / "project.sqlite")}
+    reopened, restored_preview = [item["result"] for item in run(executable, [
+        request("project.analyses.list", {**relocated_project, "limit": 100}),
+        request("media.preview", {**relocated_project, "media_asset_id": plan["items"][0]["media_asset_id"]}),
+    ])]
+    if reopened["analyses"] != analyses or restored_preview["annotations"][0]["analytical_point_id"] != point_id:
+        raise AssertionError("Restored project lost an analysis or the image point")
+    previous_file = destination / "original-notes.txt"
+    previous_file.write_bytes(b"Original workspace")
+    previous_database = (destination / "project.sqlite").read_bytes()
+    archive_command(executable, "restore", full, destination, expected_error="PROJECT_ARCHIVE_DESTINATION_EXISTS")
+    corrupted = directory / "damaged.petrolab"
+    with ZipFile(full) as original, ZipFile(corrupted, "w") as altered:
+        for name in original.namelist():
+            payload = original.read(name)
+            altered.writestr(name, b"!" + payload[1:] if name == "project.sqlite" else payload)
+    archive_command(executable, "restore", corrupted, destination, "--replace", expected_error="PROJECT_ARCHIVE_INVALID")
+    invalid_path = directory / "invalid-path.petrolab"
+    with ZipFile(full) as original, ZipFile(invalid_path, "w") as altered:
+        manifest = json.loads(original.read("manifest.json"))
+        for entry in manifest["files"]:
+            name = entry["path"]
+            if name.startswith("media/"):
+                entry["path"] = "../" + Path(name).name
+            altered.writestr(entry["path"], original.read(name))
+        altered.writestr("manifest.json", json.dumps(manifest))
+    invalid_destination = directory / "invalid-restore"
+    archive_command(executable, "restore", invalid_path, invalid_destination, expected_error="PROJECT_ARCHIVE_INVALID")
+    if invalid_destination.exists():
+        raise AssertionError("Invalid archive path created a destination")
+    if (previous_file.read_bytes() != b"Original workspace" or (destination / "project.sqlite").read_bytes() != previous_database
+            or list(directory.glob(f"{destination.name}.backup-*"))):
+        raise AssertionError("Rejected restore changed or backed up the destination")
+    replacement = archive_command(executable, "restore", full, destination, "--replace")
+    backup = Path(replacement["backup_path"])
+    if (previous_file.exists() or (backup / previous_file.name).read_bytes() != b"Original workspace"
+            or (backup / "project.sqlite").read_bytes() != previous_database or content(destination / "project.sqlite") != expected):
+        raise AssertionError("Replacing the workspace did not preserve the complete previous directory or restore the archive")
+    if Path(database).read_bytes() != database_bytes or any(path.read_bytes() != data for path, data in original_files.items()):
+        raise AssertionError("Archive verification changed an original")
+    print("Packaged AT-34 service: all archive levels, original bytes, exact links, rejected replacement and backup verified.")
+
+
 def check_operation_journal(executable: Path, directory: Path) -> None:
     source = directory / "journal.csv"
     original = b"Analysis,SiO2 [wt.%]\nJ1,39\nJ2,41\nJ3,43\n"
@@ -320,30 +431,7 @@ def main() -> None:
                              [row["analysis_id"] for row in reopened["result"]["analyses"]])
         check_workspace_archive(executable, Path(directory))
         check_operation_journal(executable, Path(directory))
-        image = Path(directory) / "thin-section.png"
-        Image.new("RGB", (48, 32), "#627758").save(image)
-        archive = Path(directory) / "portable.petrolab"
-        restored = Path(directory) / "relocated"
-        preview = run(executable, [request("media.preview_input", {"source_path": str(image)})])[0]
-        exported = archive_command(executable, "export", database, archive, "--level", "project_sources")
-        unpacked = archive_command(executable, "restore", archive, restored)
-        reopened_copy = run(executable, [
-            request("project.analyses.list", {"project_database_path": unpacked["project_database_path"], "limit": 100}),
-        ])[0]
-        if not preview["result"]["preview_url"].startswith("data:image/jpeg;base64,"):
-            raise AssertionError("Packaged service failed to decode and preview an image")
-        if (exported["manifest"] != unpacked["manifest"]
-                or reopened_copy["result"]["analyses"] != reopened["result"]["analyses"]):
-            raise AssertionError("Packaged service changed project data during archive round-trip")
-        previous_file = restored / "original-notes.txt"
-        previous_file.write_bytes(b"Original workspace")
-        previous_database = Path(unpacked["project_database_path"]).read_bytes()
-        replacement = archive_command(executable, "restore", archive, restored, "--replace")
-        backup = Path(replacement["backup_path"])
-        if (replacement["manifest"] != unpacked["manifest"] or previous_file.exists()
-                or (backup / previous_file.name).read_bytes() != b"Original workspace"
-                or (backup / "project.sqlite").read_bytes() != previous_database):
-            raise AssertionError("Replacing the workspace did not preserve the complete previous directory")
+        check_portable_archive(executable, Path(directory), database, reopened["result"]["analyses"])
         selection_book = Path(directory) / "selection.xlsx"
         run(executable, [request("analysis.selection.export_xlsx", {
             "project_database_path": database, "analysis_ids": members, "output_path": str(selection_book),
