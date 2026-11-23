@@ -1,0 +1,20 @@
+{
+  "versions": [
+    20,
+    21
+  ],
+  "rows": {
+    "sample": 2,
+    "thin_section": 1,
+    "media_asset": 3,
+    "spatial_annotation": 2,
+    "analytical_point_annotation": 2,
+    "media_link": 2,
+    "measurement": 6,
+    "analysis": 6
+  },
+  "originalSha256": "84dafae78be2b58ed08fa09ffc9486d2eca44c857c19ec280ef55c7755be9219",
+  "identicalRows": true,
+  "backupValidated": true,
+  "mediaHashesPreserved": true
+}
