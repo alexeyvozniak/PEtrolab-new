@@ -113,6 +113,7 @@ export function App() {
   const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
   const [selectedAnalysisIds, setSelectedAnalysisIds] = useState([]);
   const [navigationAnalysis, setNavigationAnalysis] = useState(null);
+  const [navigationDraftId, setNavigationDraftId] = useState("");
   const [navigationSampleId, setNavigationSampleId] = useState("");
   const [searchSeed, setSearchSeed] = useState(null);
   const [pointLinkScope, setPointLinkScope] = useState(null);
@@ -508,13 +509,14 @@ export function App() {
     setNavigationSampleId(sampleId);
     setScreen("Образцы");
   };
-  const openSearchAnalysis = async (id) => {
+  const openSearchAnalysis = async (id, editDraft = false) => {
     if (busy) return;
     setBusy(true);
     setError("");
     try {
       const analysis = unwrap(await getProjectAnalysis(databasePath, id));
       setNavigationAnalysis(analysis);
+      setNavigationDraftId(editDraft ? id : "");
       setScreen("Анализы");
     } catch (caught) {
       setError(caught.message);
@@ -524,6 +526,7 @@ export function App() {
   };
   useEffect(() => {
     if (screen !== "Связи") setPointLinkScope(null);
+    if (screen !== "Анализы") setNavigationDraftId("");
   }, [screen]);
 
   const beginSearchPointLink = async (analysisIds) => {
@@ -652,6 +655,7 @@ export function App() {
           selectionCount={selectedAnalysisIds.length} busy={busy} canImport={desktopRuntimeAvailable} onImport={startNewImport}
           onResume={() => setScreen("Импорт")} onSource={openSearchSource} onGroup={openOverviewGroup} />}
         {screen === "Поиск" && <ProjectSearch seed={searchSeed} queryProject={queryProject} onOpenAnalysis={openSearchAnalysis}
+          onEditAnalysis={(id) => openSearchAnalysis(id, true)}
           onOpenSample={openSearchSample}
           queryAnalysisIds={async (query) => unwrap(await queryProjectAnalysisIds(databasePath, query))}
           selectionCount={selectedAnalysisIds.length} busy={busy}
@@ -825,6 +829,7 @@ export function App() {
             project={navigationAnalysis && !project.analyses.some((item) => item.analysis_id === navigationAnalysis.analysis_id)
               ? { ...project, analyses: [...project.analyses, navigationAnalysis] } : project}
             initialFocusedId={navigationAnalysis?.analysis_id}
+            initialDraftId={navigationDraftId}
             selectedIds={selectedAnalysisIds}
             setSelectedIds={setSelectedAnalysisIds}
             onListWorkGroups={async () => unwrap(await listWorkGroups(databasePath))}

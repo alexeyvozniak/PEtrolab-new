@@ -69,7 +69,7 @@ const PUBLICATION_LABELS = {
   "Publication title": "Название", "Publication journal": "Издание", "Publication URL": "Ссылка",
 };
 const EMPTY_SEARCH = { query: "", mineral: "", source: "", method: "", source_id: "", sample_id: "" };
-export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnalysis, onOpenSample, onAddSelection, onPlot,
+export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnalysis, onEditAnalysis, onOpenSample, onAddSelection, onPlot,
   selectionCount, hiddenAnalysisIds = [], onSetVisibility, onUndoVisibility, hiddenSourceIds = [], onToggleSource,
   onCreateWorkGroup, generationActions, onBeginPointLink, busy }) {
   const initial = { ...EMPTY_SEARCH, ...seed };
@@ -321,13 +321,17 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
             <td><div className="search-row-actions">
               <button className="outline-button" type="button" disabled={locked}
                 onClick={() => onOpenAnalysis(row.analysis_id)} aria-label={`Открыть анализ ${row.identity}`}>Открыть</button>
-              {row.sample_id && <details className="search-marking">
+              <details className="search-marking">
                 <summary aria-label={`Действия для анализа ${row.identity}`}>…</summary>
                 <button className="outline-button" type="button" disabled={locked}
-                  onClick={() => onOpenSample(row.sample_id)}>Открыть образец</button>
-                <button className="outline-button" type="button" disabled={locked}
-                  onClick={() => onBeginPointLink([row.analysis_id])}>Привязать к аналитической точке</button>
-              </details>}
+                  onClick={() => onEditAnalysis(row.analysis_id)}>Исправить</button>
+                {row.sample_id && <>
+                  <button className="outline-button" type="button" disabled={locked}
+                    onClick={() => onOpenSample(row.sample_id)}>Открыть образец</button>
+                  <button className="outline-button" type="button" disabled={locked}
+                    onClick={() => onBeginPointLink([row.analysis_id])}>Привязать к аналитической точке</button>
+                </>}
+              </details>
             </div></td>
           </tr>)}</tbody>
         </table></div>

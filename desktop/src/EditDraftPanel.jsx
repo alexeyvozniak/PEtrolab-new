@@ -7,9 +7,9 @@ const conflictLabels = {
   mixed_ownership: "Несовместимые режимы источников",
 };
 
-export function EditDraftPanel({ analysisId, measurements, actions }) {
+export function EditDraftPanel({ analysisId, measurements, actions, initiallyExpanded = false }) {
   const [rows, setRows] = useState([]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -62,12 +62,13 @@ export function EditDraftPanel({ analysisId, measurements, actions }) {
     });
   };
 
-  return <details className="analysis-edit-drafts" open={expanded}>
-    <summary onClick={(event) => {
-      event.preventDefault();
-      setExpanded(!expanded);
-      if (!expanded && !pending) run(refresh);
-    }}>Черновики правок</summary>
+  return <details className="analysis-edit-drafts" open={expanded} onToggle={(event) => {
+    const details = event.currentTarget;
+    setExpanded(details.open);
+    if (details.open && !pending) run(refresh);
+    if (details.open && initiallyExpanded) details.scrollIntoView?.({ block: "nearest" });
+  }}>
+    <summary>Черновики правок</summary>
     <form onSubmit={save} aria-label="Новый черновик правки">
       <label>Измерение<select name="measurement_id" disabled={pending}>
         {available.map((measurement) => <option key={measurement.measurement_id} value={measurement.measurement_id}>

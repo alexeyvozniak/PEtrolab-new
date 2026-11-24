@@ -183,7 +183,7 @@ function AnalysisMineralReview({ analysis }) {
   </section>;
 }
 
-function AnalysisDetail({ analysis, editDraftActions, hiddenPlotAnalysisIds, onSetPlotVisibility, onUndoPlotVisibility, busy }) {
+function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlotAnalysisIds, onSetPlotVisibility, onUndoPlotVisibility, busy }) {
   if (!analysis) {
     return <aside className="analysis-detail empty"><SquaresFour size={24} /><span>Выбери строку, чтобы увидеть все поля и происхождение значений.</span></aside>;
   }
@@ -231,7 +231,7 @@ function AnalysisDetail({ analysis, editDraftActions, hiddenPlotAnalysisIds, onS
 
       <AnalysisCompositionSummary summary={analysis.composition_summary} />
       {editDraftActions && <EditDraftPanel key={analysis.analysis_id} analysisId={analysis.analysis_id}
-        measurements={measurements} actions={editDraftActions} />}
+        measurements={measurements} actions={editDraftActions} initiallyExpanded={analysis.analysis_id === initialDraftId} />}
 
       <section className="analysis-measurements-section">
         <div className="analysis-detail-section-head"><h3>Все измерения</h3><span>{measurements.length}</span></div>
@@ -248,7 +248,7 @@ function AnalysisDetail({ analysis, editDraftActions, hiddenPlotAnalysisIds, onS
   );
 }
 
-export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, generationActions, onExportSelection, onPublishSelection, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, onUndoPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
+export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, generationActions, onExportSelection, onPublishSelection, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, onUndoPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
   const analyses = project.analyses || [];
   const mineralStatusCounts = project.mineral_status_counts || {};
   const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
@@ -752,7 +752,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, selectedIds, setS
         {project.has_more && <button className="analyses-load-more" type="button" onClick={onLoadMore} disabled={busy}>Загрузить ещё анализы</button>}
       </main>
 
-      <AnalysisDetail analysis={focused} editDraftActions={editDraftActions} hiddenPlotAnalysisIds={hiddenPlotAnalysisIds}
+      <AnalysisDetail analysis={focused} editDraftActions={editDraftActions} initialDraftId={initialDraftId} hiddenPlotAnalysisIds={hiddenPlotAnalysisIds}
         onSetPlotVisibility={onSetPlotVisibility} onUndoPlotVisibility={onUndoPlotVisibility} busy={busy} />
 
       {selectedIds.length > 0 && (
