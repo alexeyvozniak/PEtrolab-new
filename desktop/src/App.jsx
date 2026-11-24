@@ -114,6 +114,7 @@ export function App() {
   const [selectedAnalysisIds, setSelectedAnalysisIds] = useState([]);
   const [navigationAnalysis, setNavigationAnalysis] = useState(null);
   const [searchSeed, setSearchSeed] = useState(null);
+  const [pointLinkScope, setPointLinkScope] = useState(null);
   const [publicationItems, setPublicationItems] = useState([]);
   const [publicationName, setPublicationName] = useState("");
   const [publicationSettings, setPublicationSettings] = useState({ profile: "neutral", width: 90 });
@@ -509,6 +510,30 @@ export function App() {
       setBusy(false);
     }
   };
+  useEffect(() => {
+    if (screen !== "Связи") setPointLinkScope(null);
+  }, [screen]);
+
+  const beginSearchPointLink = async (analysisIds) => {
+    setBusy(true);
+    setError("");
+    try {
+      const first = unwrap(await getProjectAnalysis(databasePath, analysisIds[0]));
+      const sampleId = first.sample_association?.sample_id;
+      if (!sampleId) throw new Error("Для массовой привязки отметьте анализы одного физического образца.");
+      const sampleScope = unwrap(await queryProjectAnalysisIds(databasePath, { sample_id: sampleId }));
+      const activeIds = new Set(sampleScope.analysis_ids);
+      if (!analysisIds.every((id) => activeIds.has(id))) {
+        throw new Error("Отмеченные анализы должны быть доступны и относиться к одному физическому образцу.");
+      }
+      setPointLinkScope({ sampleId, analysisIds: [...analysisIds] });
+      setScreen("Связи");
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const openOverviewGroup = async (id) => {
     if (busy) return;
     setBusy(true);
@@ -620,10 +645,12 @@ export function App() {
           hiddenAnalysisIds={hiddenAnalysisIds} onSetVisibility={setPlotVisibility}
           onUndoVisibility={visibilityOperation ? undoVisibility : null}
           onCreateWorkGroup={saveWorkGroup} generationActions={generationActions}
+          onBeginPointLink={beginSearchPointLink}
           onPlot={openPlots}
           onAddSelection={(ids) => setSelectedAnalysisIds((current) => [...new Set([...current, ...ids])])} />}
         {["Образцы", "Связи", "Изображения"].includes(screen) && <SampleWorkspace key={screen} loadSamples={loadSamples} loadSample={loadSample}
           initialTab={screen === "Связи" ? "Точки" : screen === "Изображения" ? "Изображения" : "Обзор"}
+          pointLinkScope={pointLinkScope} onClearPointLinkScope={() => setPointLinkScope(null)}
           saveContext={async (id, context, revision) => unwrap(await saveSampleContext(databasePath, id, context, revision))}
           addNote={async (id, author, body) => unwrap(await addSampleNote(databasePath, id, author, body))}
           onImportMedia={databasePath && desktopRuntimeAvailable ? () => setScreen("Импорт изображений") : undefined}

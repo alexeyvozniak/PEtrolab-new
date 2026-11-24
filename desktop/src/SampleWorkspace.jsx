@@ -13,9 +13,10 @@ const FIELDS = {
 };
 
 export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote, onOpenAnalyses, busy, pointLinks,
-  initialTab = "Обзор", onImportMedia, previewMedia, exportOriginal, exportRendered, exportBatch, addPublication, mediaLinks }) {
+  initialTab = "Обзор", onImportMedia, previewMedia, exportOriginal, exportRendered, exportBatch, addPublication, mediaLinks,
+  pointLinkScope, onClearPointLinkScope }) {
   const [samples, setSamples] = useState(null);
-  const [sampleId, setSampleId] = useState("");
+  const [sampleId, setSampleId] = useState(pointLinkScope?.sampleId || "");
   const [sample, setSample] = useState(null);
   const [tab, setTab] = useState(initialTab);
   const [error, setError] = useState("");
@@ -28,7 +29,7 @@ export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote,
     loadSamples().then((items) => {
       if (!active) return;
       setSamples(items);
-      setSampleId(items[0]?.sample_id || "");
+      setSampleId((currentId) => currentId || items[0]?.sample_id || "");
     }).catch((caught) => { if (active) setError(caught.message); });
     return () => { active = false; };
   }, [loadSamples]);
@@ -45,6 +46,7 @@ export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote,
     setSample((item) => item?.sample_id === refreshed.sample_id ? refreshed : item);
   };
   const choose = (event) => {
+    onClearPointLinkScope?.();
     setDraft(null);
     setName("");
     setBody("");
@@ -154,7 +156,8 @@ export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote,
       {tab === "Заметки" && notes}
       {tab === "Источники" && <section className="sample-card"><h3>Источники</h3>{current.sources.length ? sources : <p>У образца нет связанных источников анализов.</p>}</section>}
       {tab === "Точки" && pointLinks && <PointLinks key={sampleId} sample={current} busy={busy} {...pointLinks}
-        reloadSample={reloadSample} />}
+        reloadSample={reloadSample} markedIds={pointLinkScope?.sampleId === sampleId ? pointLinkScope.analysisIds : null}
+        onClearMarked={onClearPointLinkScope} />}
       {tab === "Шлифы" && <section className="sample-card"><h3>Шлифы</h3>{current.thin_sections.length ?
         current.thin_sections.map((item) => <details key={item.thin_section_id}>
           <summary>{item.thin_section_name}</summary>

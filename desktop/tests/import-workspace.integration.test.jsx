@@ -895,6 +895,68 @@ test("opens field context and exports a byte-for-byte photo original and a decor
   expect((await readFile(join(folder, "petrolab-package.zip"))).includes(Buffer.from("images/01-media_capture.png"))).toBe(true);
 }, 20000);
 
+test("AT-26 hands only marked analyses to an existing point and can undo the whole link", async () => {
+  const content = "Analysis,Sample,Method,SiO2 [wt.%]\n"
+    + "Epma,Z-2,EPMA,52\nTrace,Z-2,LA-ICP-MS,48\nPrior,Z-2,EPMA,50\nOther,Z-2,EPMA,54\nForeign,A-1,EPMA,51\n";
+  await writeFile(first, content);
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  let { result: workspace } = await invokePetrolab("import.workspace.create", { ...database, sources: [{ staged_path: first }] });
+  for (const sampleName of ["Z-2", "A-1"]) {
+    const previewIds = workspace.active.plan.planned_records
+      .filter((row) => row.sample_association.reported.value === sampleName).map(({ preview_id }) => preview_id);
+    const { workspace_id, draft_revision, active_source_id } = workspace.session;
+    ({ result: workspace } = await invokePetrolab("import.workspace.apply_decision", {
+      workspace_id, expected_revision: draft_revision, source_id: active_source_id,
+      decision: { kind: "sample_assignment", mode: "new", sample_name: sampleName, preview_ids: previewIds },
+    }));
+  }
+  expect((await invokePetrolab("import.workspace.commit", {
+    workspace_id: workspace.session.workspace_id, expected_revision: workspace.session.draft_revision,
+  })).error).toBeUndefined();
+  const before = (await invokePetrolab("project.analyses.list", database)).result.analyses;
+  const ids = Object.fromEntries(before.map(({ identity, analysis_id }) => [identity.Analysis, analysis_id]));
+  const sampleId = before.find(({ analysis_id }) => analysis_id === ids.Epma).sample_association.sample_id;
+  const original = [ids.Prior, ids.Other];
+  const marked = [ids.Epma, ids.Trace];
+  const { result: point } = await invokePetrolab("analytical_point.create", { ...database, sample_id: sampleId,
+    point_name: "P-07", analysis_ids: original, link_type: "same_point", actor: "QA" });
+  expect(point.analytical_point_id).toBeTruthy();
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Поиск"));
+  const checkbox = (name) => screen.getByRole("checkbox", { name: `Отметить ${name}` });
+  await user.click(await screen.findByRole("checkbox", { name: "Отметить Prior" }));
+  await user.click(await enabledButton("Добавить отмеченные в отбор"));
+  await user.click(checkbox("Prior"));
+  for (const name of ["Epma", "Trace", "Foreign"]) await user.click(checkbox(name));
+  await user.click(screen.getByLabelText("Другие действия с отмеченными"));
+  await user.click(await enabledButton("Начать массовую привязку"));
+  await screen.findByText("Отмеченные анализы должны быть доступны и относиться к одному физическому образцу.");
+  expect(requests.filter(({ command }) => command === "analytical_point.link.set")).toHaveLength(0);
+  await user.click(checkbox("Foreign"));
+  await user.click(await enabledButton("Начать массовую привязку"));
+  await screen.findByRole("heading", { name: "Образец Z-2" });
+  await screen.findByText(/Отмечено в поиске: 2/);
+  expect(requests.filter(({ command }) => command === "analytical_point.link.set")).toHaveLength(0);
+  await user.selectOptions(screen.getByLabelText("Куда привязать"), point.analytical_point_id);
+  await user.click(await enabledButton("Связать анализы"));
+  await screen.findByText("К точке «P-07» привязано анализов: 2.");
+  expect(requests.find(({ command }) => command === "analytical_point.link.set").payload.analysis_ids).toEqual(marked);
+  const journal = (await invokePetrolab("operation_journal.list", database)).result.entries;
+  const entry = (await invokePetrolab("operation_journal.open", { ...database, operation_id: journal[0].id })).result;
+  expect(entry.scope.map(({ entity_type, entity_id }) => [entity_type, entity_id]))
+    .toEqual([["analytical_point", point.analytical_point_id], ...marked.map((id) => ["analysis", id])]);
+  expect((await invokePetrolab("analytical_point.analyses", { ...database, point_id: point.analytical_point_id })).result
+    .map(({ analysis_id }) => analysis_id).sort()).toEqual([...original, ...marked].sort());
+  await user.click(await enabledButton("Отменить пакетную привязку"));
+  await screen.findByText("Пакетная привязка отменена.");
+  expect((await invokePetrolab("analytical_point.analyses", { ...database, point_id: point.analytical_point_id })).result
+    .map(({ analysis_id }) => analysis_id).sort()).toEqual([...original].sort());
+  expect(screen.getByText(/В отборе: 1/)).toBeTruthy();
+  expect((await invokePetrolab("project.analyses.list", database)).result.analyses).toEqual(before);
+  expect(await readFile(first, "utf8")).toBe(content);
+}, 30000);
+
 test("point links restore the original removal through its journal entry", async () => {
   const content = "Analysis,Sample,SiO2 [wt.%]\nP1,KIV-2,52\nP2,KIV-2,48\n";
   await writeFile(first, content);

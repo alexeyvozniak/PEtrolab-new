@@ -7,10 +7,12 @@ const LINK_TYPES = {
   repeat_measurement: "Повторное измерение",
 };
 
-export function PointLinks({ sample, loadPoint, createPoint, changeLink, undoLink, reloadSample, selectedIds, addToSelection, openAnalysis, busy }) {
+export function PointLinks({ sample, loadPoint, createPoint, changeLink, undoLink, reloadSample, selectedIds, addToSelection,
+  openAnalysis, markedIds, onClearMarked, busy }) {
   const [pointId, setPointId] = useState("");
   const [rows, setRows] = useState(null);
   const [name, setName] = useState("");
+  const [targetPointId, setTargetPointId] = useState("");
   const [linkType, setLinkType] = useState("same_point");
   const [actor, setActor] = useState("Локальный пользователь");
   const [status, setStatus] = useState(null);
@@ -18,6 +20,11 @@ export function PointLinks({ sample, loadPoint, createPoint, changeLink, undoLin
   const [undo, setUndo] = useState(null);
   const point = sample.points.find(({ analytical_point_id }) => analytical_point_id === pointId);
   const locked = pending || busy;
+  const inputs = markedIds ?? selectedIds;
+  const attachToExisting = Boolean(markedIds && targetPointId);
+  const target = attachToExisting && sample.points.find(({ analytical_point_id }) => analytical_point_id === targetPointId);
+  const canLink = !locked && Boolean(actor.trim())
+    && (attachToExisting ? Boolean(target) : inputs.length >= 2 && Boolean(name.trim()));
   useEffect(() => {
     if (!pointId) return;
     let active = true;
@@ -25,17 +32,33 @@ export function PointLinks({ sample, loadPoint, createPoint, changeLink, undoLin
       .catch((error) => { if (active) setStatus({ error: error.message }); });
     return () => { active = false; };
   }, [loadPoint, pointId]);
-  const create = async (event) => {
+  const link = async (event) => {
     event.preventDefault();
+    if (!canLink) return;
     setPending(true);
     setStatus(null);
     try {
-      const item = await createPoint({ sample_id: sample.sample_id, point_name: name, analysis_ids: selectedIds, link_type: linkType, actor });
-      setRows(null);
-      setPointId(item.analytical_point_id);
+      let notice;
+      if (target) {
+        const entry = await changeLink(targetPointId, inputs, linkType, actor);
+        setUndo({ pointId: targetPointId, operationId: entry.id, added: true });
+        if (pointId !== targetPointId) {
+          setRows(null);
+          setPointId(targetPointId);
+        }
+        notice = `К точке «${target.point_name}» привязано анализов: ${inputs.length}.`;
+      } else {
+        const item = await createPoint({ sample_id: sample.sample_id, point_name: name, analysis_ids: inputs, link_type: linkType, actor });
+        setRows(null);
+        setPointId(item.analytical_point_id);
+        notice = `Создана точка «${item.point_name}».`;
+      }
       setName("");
+      setTargetPointId("");
+      if (markedIds) onClearMarked();
+      setStatus({ notice });
+      if (target && pointId === targetPointId) setRows(await loadPoint(targetPointId));
       await reloadSample();
-      setStatus({ notice: `Создана точка «${item.point_name}».` });
     } catch (error) {
       setStatus({ error: error.message });
     } finally {
@@ -65,7 +88,7 @@ export function PointLinks({ sample, loadPoint, createPoint, changeLink, undoLin
       setUndo(null);
       setRows(await loadPoint(pointId));
       await reloadSample();
-      setStatus({ notice: "Связь восстановлена." });
+      setStatus({ notice: undo.added ? "Пакетная привязка отменена." : "Связь восстановлена." });
     } catch (error) {
       setStatus({ error: error.message });
     } finally {
@@ -88,15 +111,26 @@ export function PointLinks({ sample, loadPoint, createPoint, changeLink, undoLin
             </li>)}</ul> : <p>У образца ещё нет аналитических точек.</p>}
         </section>
         <section className="sample-card">
-          <h3>Связать выбранные анализы</h3>
-          <p>В отборе: {selectedIds.length}. Для новой точки выберите в таблице минимум два анализа этого образца.</p>
-          <form className="sample-form" onSubmit={create}>
-            <label>Название точки<input value={name} maxLength={200} disabled={locked} onChange={(event) => setName(event.target.value)} /></label>
+          <h3>{markedIds ? "Привязать отмеченные анализы" : "Связать выбранные анализы"}</h3>
+          {markedIds ? <p>Отмечено в поиске: {markedIds.length}. Для новой точки нужны минимум два анализа.</p>
+            : <p>В отборе: {selectedIds.length}. Для новой точки выберите в таблице минимум два анализа этого образца.</p>}
+          <form className="sample-form" onSubmit={link}>
+            {markedIds && <label>Куда привязать
+              <select value={targetPointId} disabled={locked} onChange={(event) => setTargetPointId(event.target.value)}>
+                <option value="">Новая аналитическая точка</option>
+                {sample.points.map((item) => <option key={item.analytical_point_id} value={item.analytical_point_id}>{item.point_name}</option>)}
+              </select>
+            </label>}
+            {!attachToExisting && <label>Название точки<input value={name} maxLength={200} disabled={locked} onChange={(event) => setName(event.target.value)} /></label>}
             <label>Тип связи<select value={linkType} disabled={locked} onChange={(event) => setLinkType(event.target.value)}>
               {Object.entries(LINK_TYPES).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
             </select></label>
             <label>Автор изменения<input value={actor} maxLength={120} disabled={locked} onChange={(event) => setActor(event.target.value)} /></label>
-            <div><button className="primary-button" disabled={locked || selectedIds.length < 2 || !name.trim() || !actor.trim()}>Связать анализы</button></div>
+            <div>
+              <button className="primary-button" disabled={!canLink}>Связать анализы</button>
+              {markedIds && <button type="button" className="outline-button" disabled={locked}
+                onClick={() => { setTargetPointId(""); setName(""); setStatus(null); onClearMarked(); }}>Отмена</button>}
+            </div>
           </form>
         </section>
       </div>
@@ -106,7 +140,7 @@ export function PointLinks({ sample, loadPoint, createPoint, changeLink, undoLin
         {point && !rows && !status?.error && <p role="status">Загружаю анализы точки…</p>}
         {point && rows?.length === 0 && <p>У этой точки нет связанных анализов.</p>}
         {undo?.pointId === pointId && <button className="outline-button" type="button" disabled={locked || !actor.trim()}
-          onClick={restoreLink}>Восстановить снятую связь</button>}
+          onClick={restoreLink}>{undo.added ? "Отменить пакетную привязку" : "Восстановить снятую связь"}</button>}
         {point && rows && <ul className="sample-items point-analysis-items">{rows.map((row) => <li key={row.analysis_id}>
           <div>
             <b>{row.identity || row.analysis_id}</b>

@@ -65,7 +65,7 @@ export function ProjectOverview({ load, project, workspace, selectionCount, busy
 const SEARCH_FIELDS = { query: "Анализ или образец", mineral: "Минерал", source: "Источник", method: "Метод" };
 const EMPTY_SEARCH = { query: "", mineral: "", source: "", method: "", source_id: "", sample_id: "" };
 export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnalysis, onAddSelection, onPlot,
-  selectionCount, hiddenAnalysisIds = [], onSetVisibility, onUndoVisibility, onCreateWorkGroup, generationActions, busy }) {
+  selectionCount, hiddenAnalysisIds = [], onSetVisibility, onUndoVisibility, onCreateWorkGroup, generationActions, onBeginPointLink, busy }) {
   const initial = { ...EMPTY_SEARCH, ...seed };
   const [fields, setFields] = useState(initial);
   const [applied, setApplied] = useState(initial);
@@ -257,6 +257,8 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
               </div>
             </form>}
             {generationActions && <GenerationAssignment actions={generationActions} selectedIds={marked} busy={locked} />}
+            {onBeginPointLink && <button type="button" className="outline-button" disabled={locked}
+              onClick={() => onBeginPointLink(marked)}>Начать массовую привязку</button>}
           </div>
         </details>
       </div>}
