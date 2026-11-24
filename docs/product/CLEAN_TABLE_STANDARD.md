@@ -38,11 +38,13 @@ The following headers are preserved as source metadata when present:
 - `Rock`
 - `Source`
 - `DOI`
+- `Publication authors`, `Publication year`, `Publication title`, `Publication journal`, `Publication URL`
 - `Method`
 - `Measurement set`
 - `Comment`
 
 Free-text source metadata is not automatically promoted to controlled PetroLab domain entities.
+Search uses these bibliography fields from the matching analysis. A workbook can cite different articles in different rows.
 
 ### Measurements
 

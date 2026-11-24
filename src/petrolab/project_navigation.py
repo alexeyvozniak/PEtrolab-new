@@ -1,10 +1,34 @@
 """Read models for project overview and global analysis search."""
 
 from contextlib import closing
+import json
 from pathlib import Path
+import re
+from urllib.parse import quote, urlsplit
 
 from .desktop_workflow import analysis_identity
 from .import_apply import open_project
+
+_PUBLICATION_FIELDS = json.dumps([
+    "Source", "Publication authors", "Publication year", "Publication title", "Publication journal", "DOI", "Publication URL",
+])
+_DOI_PREFIX = r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)"
+
+
+def _publication_link(field, value):
+    value = value.strip()
+    if field == "DOI":
+        identifier = re.sub(_DOI_PREFIX, "", value, flags=re.IGNORECASE)
+        if re.fullmatch(r"10\.\d{4,9}/[^\s]+", identifier):
+            return "https://doi.org/" + quote(identifier, safe="/")
+    if field == "Publication URL" and not any(character.isspace() or ord(character) < 32 for character in value):
+        try:
+            link = urlsplit(value)
+            if link.scheme in {"https", "http"} and link.hostname and link.username is None and link.password is None:
+                return value
+        except ValueError:
+            pass
+    return None
 
 
 def _search_text(value):
@@ -18,7 +42,10 @@ def search_analyses(database_path, query="", mineral="", source="", method="", s
         raise ValueError("pagination")
     exact_source = _search_text(source_id)
     exact_sample = _search_text(sample_id)
-    parameters = (*map(_search_text, (query, mineral, source, method)), exact_source, exact_source, exact_sample, exact_sample)
+    parameters = dict(zip(("query", "mineral", "source", "method"), map(_search_text, (query, mineral, source, method))))
+    parameters.update(exact_source=exact_source, exact_sample=exact_sample, publication_fields=_PUBLICATION_FIELDS,
+                      query_doi=re.sub(_DOI_PREFIX, "", parameters["query"]) or parameters["query"],
+                      source_doi=re.sub(_DOI_PREFIX, "", parameters["source"]) or parameters["source"])
     with closing(open_project(database_path)) as connection:
         connection.create_function("casefold", 1, lambda value: str(value or "").casefold(), deterministic=True)
         connection.execute("BEGIN")
@@ -41,11 +68,18 @@ def search_analyses(database_path, query="", mineral="", source="", method="", s
                 LEFT JOIN sample p ON p.sample_id = json_extract(e.sample_association_json, '$.sample_id')
                 WHERE b.status = 'applied' AND x.import_batch_id IS NULL
             ), matches AS (
-                SELECT * FROM candidates
-                WHERE instr(casefold(identity_json || ' ' || sample_name || ' ' || mineral || ' ' || method || ' ' || source_name || ' ' || sheet_name), ?)
-                  AND instr(casefold(mineral), ?) AND instr(casefold(source_name), ?) AND instr(casefold(method), ?)
-                  AND (? = '' OR source_id = ?)
-                  AND (? = '' OR sample_id = ?)
+                SELECT * FROM candidates c
+                WHERE (instr(casefold(identity_json || ' ' || sample_name || ' ' || mineral || ' ' || method || ' ' || source_name || ' ' || sheet_name), :query)
+                       OR EXISTS (SELECT 1 FROM analysis_source_metadata m WHERE m.analysis_id = c.analysis_id
+                                  AND m.canonical_field IN (SELECT value FROM json_each(:publication_fields))
+                                  AND instr(casefold(m.raw_token), CASE WHEN m.canonical_field = 'DOI' THEN :query_doi ELSE :query END)))
+                  AND instr(casefold(mineral), :mineral) AND instr(casefold(method), :method)
+                  AND (instr(casefold(source_name), :source)
+                       OR EXISTS (SELECT 1 FROM analysis_source_metadata m WHERE m.analysis_id = c.analysis_id
+                                  AND m.canonical_field IN (SELECT value FROM json_each(:publication_fields))
+                                  AND instr(casefold(m.raw_token), CASE WHEN m.canonical_field = 'DOI' THEN :source_doi ELSE :source END)))
+                  AND (:exact_source = '' OR source_id = :exact_source)
+                  AND (:exact_sample = '' OR sample_id = :exact_sample)
             )
         """
         order = " ORDER BY created_at DESC, sheet_name, source_row_number, source_column_number, analysis_id"
@@ -55,7 +89,19 @@ def search_analyses(database_path, query="", mineral="", source="", method="", s
         total = connection.execute(projection + "SELECT count(*) FROM matches", parameters).fetchone()[0]
         rows = connection.execute(projection + """
             SELECT * FROM matches
-        """ + order + " LIMIT ? OFFSET ?", (*parameters, limit, offset)).fetchall()
+        """ + order + " LIMIT :limit OFFSET :offset", {**parameters, "limit": limit, "offset": offset}).fetchall()
+        publications = {}
+        for entry in connection.execute("""
+            SELECT analysis_id, canonical_field, raw_token, source_cell FROM analysis_source_metadata
+            WHERE analysis_id IN (SELECT value FROM json_each(:ids))
+              AND canonical_field IN (SELECT value FROM json_each(:fields))
+              AND trim(raw_token) <> ''
+            ORDER BY source_row_number, source_column_index
+        """, {"ids": json.dumps([row["analysis_id"] for row in rows]), "fields": _PUBLICATION_FIELDS}):
+            field, value = entry["canonical_field"], entry["raw_token"]
+            publications.setdefault(entry["analysis_id"], []).append({
+                "field": field, "value": value, "source_cell": entry["source_cell"], "url": _publication_link(field, value),
+            })
         analyses = []
         for row in rows:
             record = dict(row)
@@ -63,6 +109,7 @@ def search_analyses(database_path, query="", mineral="", source="", method="", s
             record["identity"] = fields.get("Analysis") or fields.get("Point") or fields.get("Sample") or next((value for value in fields.values() if value), "")
             record.pop("recipe_json")
             record.pop("identity_json")
+            record["publication_metadata"] = publications.get(row["analysis_id"], [])
             analyses.append(record)
         return {"analyses": analyses, "total": total, "offset": offset, "has_more": offset + len(analyses) < total}
 

@@ -303,6 +303,48 @@ class NdjsonServiceTests(unittest.TestCase):
             self.assertEqual(exact["source_id"], source_id)
             self.assertEqual(exact["source_row_number"], hit["source_row_number"])
 
+    def test_publication_metadata_matches_only_analyses_with_the_same_citation(self) -> None:
+        from petrolab.clean_table import classify_clean_table
+        from petrolab.import_preview import inspect_source
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "measurements.csv"
+            original = (
+                "Analysis,Mineral,SiO2 [wt.%],Publication authors,Publication year,Publication title,Publication journal,DOI,Publication URL\n"
+                "P1,apatite,40,Иванов,2021,Северный массив,Journal,10.1234/apatite,https://example.org/reference\n"
+                "P2,apatite,41,Петров,2022,Южный массив,Other,10.1234/other,javascript:alert(1)\n"
+                "P3,olivine,42,Иванов,2021,Северный массив,Journal,10.1234/apatite,\n"
+            ).encode("utf-8")
+            source.write_bytes(original)
+
+            def call(command, **payload):
+                reply = handle_request({"protocol_version": PROTOCOL_VERSION, "request_id": str(uuid.uuid4()),
+                    "command": command, "payload": {"project_database_path": str(root / "project.sqlite"), **payload}})
+                self.assertIn("result", reply, reply)
+                return reply["result"]
+
+            classification = classify_clean_table(inspect_source(source))
+            self.assertEqual(classification["mode"], "clean_table_fast")
+            call("import.plan.apply", source_path=str(source), recipe=classification["recipe"])
+            for term in ("ИВАНОВ", "2021", "северный массив", "10.1234/apatite", "https://doi.org/10.1234/apatite"):
+                with self.subTest(term=term):
+                    result = call("analysis.query", source=term, mineral="apatite")
+                    self.assertEqual([row["identity"] for row in result["analyses"]], ["P1"])
+                    hit = result["analyses"][0]
+                    self.assertEqual(call("analysis.query.ids", source=term, mineral="apatite")["analysis_ids"], [hit["analysis_id"]])
+            metadata = {item["field"]: item for item in hit["publication_metadata"]}
+            self.assertEqual(metadata["DOI"], {"field": "DOI", "value": "10.1234/apatite", "source_cell": "H2",
+                                              "url": "https://doi.org/10.1234/apatite"})
+            self.assertEqual(metadata["Publication year"]["value"], "2021")
+            self.assertEqual(metadata["Publication URL"]["url"], "https://example.org/reference")
+            other = call("analysis.query", query="Южный массив")["analyses"]
+            self.assertEqual([row["identity"] for row in other], ["P2"])
+            rejected = next(item for item in other[0]["publication_metadata"] if item["field"] == "Publication URL")
+            self.assertEqual(rejected["value"], "javascript:alert(1)")
+            self.assertIsNone(rejected["url"])
+            self.assertEqual(source.read_bytes(), original)
+
     def test_edit_draft_detects_external_excel_change_using_original_path(self) -> None:
         from hashlib import sha256
         from io import BytesIO

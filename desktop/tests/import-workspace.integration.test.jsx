@@ -241,7 +241,8 @@ test("AT-26 marks search ranges, distinguishes a page from all results and journ
 }, 30000);
 
 test("overview opens a project source and global search opens an exact analysis without clearing selection", async () => {
-  await writeFile(second, "Analysis,Sample,Mineral,SiO2 [wt.%]\nB1,Sample A,apatite,40\nB2,Sample B,olivine,41\n");
+  await writeFile(second, "Analysis,Sample,Mineral,SiO2 [wt.%],Publication authors,Publication year,Publication title,DOI\n"
+    + "B1,Sample A,apatite,40,Иванов,2021,Северный массив,10.1234/apatite\nB2,Sample B,olivine,41,Петров,2022,Южный массив,10.1234/other\n");
   queue = [second];
   const user = userEvent.setup();
   render(<App />);
@@ -254,9 +255,14 @@ test("overview opens a project source and global search opens an exact analysis 
   await user.click(await enabledButton("Открыть источник second.csv"));
   await screen.findByRole("heading", { name: "Поиск по проекту" });
   expect(screen.getByLabelText("Источник").value).toBe("second.csv");
+  await user.clear(screen.getByLabelText("Источник"));
+  await user.type(screen.getByLabelText("Источник"), "ИВАНОВ");
   await user.type(screen.getByLabelText("Минерал"), "APATITE");
   await user.click(await enabledButton("Найти"));
   await screen.findByText(/Найдено анализов: 1\. Отмечено: 0\. В отборе: 1/);
+  const bibliography = within(await screen.findByRole("region", { name: "Библиография" }));
+  expect(bibliography.getByText("Северный массив")).toBeTruthy();
+  expect(bibliography.getByRole("link", { name: "10.1234/apatite" }).getAttribute("href")).toBe("https://doi.org/10.1234/apatite");
   await user.click(screen.getByRole("checkbox", { name: "Отметить B1" }));
   await screen.findByText(/Отмечено: 1\. В отборе: 1/);
   await user.click(await enabledButton("Открыть анализ B1"));

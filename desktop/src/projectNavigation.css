@@ -7,6 +7,9 @@
 .project-navigation aside section { margin-top: 24px; }
 .project-navigation aside .outline-button { width: 100%; margin-bottom: 6px; }
 .project-navigation .project-name { color: #586961; font-size: 13px; margin-bottom: 14px; }
+.project-navigation .search-publication > div { display: block; margin-top: 8px; }
+.search-publication dt { color: #586961; font-size: 12px; }
+.project-navigation .search-publication dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .overview-event { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #dfe8e1; }
 .overview-event small { display: block; color: #566a60; margin-bottom: 4px; }
 .overview-event b, .overview-event p, .project-fingerprint { overflow-wrap: anywhere; }

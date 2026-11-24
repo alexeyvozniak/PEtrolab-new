@@ -63,6 +63,10 @@ export function ProjectOverview({ load, project, workspace, selectionCount, busy
 }
 
 const SEARCH_FIELDS = { query: "Анализ или образец", mineral: "Минерал", source: "Источник", method: "Метод" };
+const PUBLICATION_LABELS = {
+  Source: "Источник по таблице", DOI: "DOI", "Publication authors": "Авторы", "Publication year": "Год",
+  "Publication title": "Название", "Publication journal": "Издание", "Publication URL": "Ссылка",
+};
 const EMPTY_SEARCH = { query: "", mineral: "", source: "", method: "", source_id: "", sample_id: "" };
 export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnalysis, onOpenSample, onAddSelection, onPlot,
   selectionCount, hiddenAnalysisIds = [], onSetVisibility, onUndoVisibility, onCreateWorkGroup, generationActions, onBeginPointLink, busy }) {
@@ -218,7 +222,7 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
       <h2>Поиск по проекту</h2>
       <form className="project-search-form" onSubmit={(event) => { event.preventDefault(); if (!locked) apply(fields); }}>
         {Object.entries(SEARCH_FIELDS).map(([key, label]) => <label key={key}>{label}
-          <input value={fields[key]} maxLength={300} onChange={(event) => setFields({
+          <input value={fields[key]} maxLength={300} placeholder={key === "source" ? "Файл, DOI, автор, год…" : undefined} onChange={(event) => setFields({
             ...fields, [key]: event.target.value, ...(key === "source" ? { source_id: "" } : {}),
           })} />
         </label>)}
@@ -333,6 +337,16 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
         <p><Database size={16} /> <b>{focused.source_name}</b></p>
         <p>{focused.sheet_name} · {focused.source_column_number ? `колонка ${focused.source_column_number}` : `строка ${focused.source_row_number}`}</p>
         {focused.sample_name && <p>Образец: {focused.sample_name}</p>}
+        {focused.publication_metadata?.length > 0 && <section aria-label="Библиография">
+          <h3>Библиография</h3>
+          <dl className="search-publication">
+            {focused.publication_metadata.map(({ field, value, source_cell, url }) =>
+              <div key={`${field}:${source_cell}`} title={`Ячейка ${source_cell}`}>
+                <dt>{PUBLICATION_LABELS[field]}</dt>
+                <dd>{url ? <a href={url} target="_blank" rel="noreferrer">{value}</a> : value}</dd>
+              </div>)}
+          </dl>
+        </section>}
         <details><summary>Контрольная сумма источника</summary><p className="project-fingerprint">{focused.source_sha256}</p></details>
         <section aria-label="Действия со связанными объектами">
           <button type="button" className="outline-button" disabled={locked}
