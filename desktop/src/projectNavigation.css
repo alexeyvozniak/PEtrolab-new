@@ -13,6 +13,23 @@
 .overview-event { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #dfe8e1; }
 .overview-event small { display: block; color: #566a60; margin-bottom: 4px; }
 .overview-event b, .overview-event p, .project-fingerprint { overflow-wrap: anywhere; }
+.overview-work-plan > header, .overview-work-plan li, .overview-work-plan form > div { display: flex; align-items: center; gap: 8px; }
+.overview-work-plan > header { justify-content: space-between; }
+.overview-work-plan > header h3 { margin: 0; }
+.project-navigation .overview-work-plan header button, .project-navigation .overview-work-plan li button {
+  width: auto; min-height: 30px; margin: 0; padding: 4px 7px;
+}
+.overview-work-plan ul { list-style: none; padding: 0; margin: 10px 0; }
+.overview-work-plan li { padding-block: 6px; justify-content: space-between; }
+.overview-work-plan li label { min-width: 0; display: flex; gap: 8px; align-items: flex-start; overflow-wrap: anywhere; }
+.overview-work-plan li input { flex: none; accent-color: #365b49; }
+.overview-work-plan input:checked + span { color: #586961; text-decoration: line-through; }
+.overview-work-plan form { display: grid; gap: 8px; margin-top: 8px; }
+.overview-work-plan form label { display: grid; gap: 4px; }
+.overview-work-plan form input { width: 100%; min-height: 32px; padding: 4px 6px; border: 1px solid #b9cbbd; border-radius: 4px; font: inherit; }
+.overview-work-plan form > div { flex-wrap: wrap; }
+.project-navigation .overview-work-plan form button { width: auto; margin: 0; }
+.overview-work-plan > button { margin-top: 8px; }
 .project-search-form { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: 8px; }
 .project-search-form label { min-width: 0; display: grid; gap: 5px; font-size: 12px; }
 .project-search-form input { width: 100%; min-width: 0; height: 38px; padding: 6px 9px; border: 1px solid #aabdaf; border-radius: 7px; color: inherit; }

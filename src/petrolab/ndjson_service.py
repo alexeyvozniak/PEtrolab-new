@@ -16,7 +16,7 @@ from .operation_journal import list_operations, open_operation, undo_operation
 from .selection_export import export_selection_csv, export_selection_xlsx
 from .table_views import list_table_views, save_table_view
 from .edit_drafts import check_edit_draft, commit_edit_draft, list_edit_drafts, save_edit_draft
-from .project_navigation import project_overview, search_analyses
+from .project_navigation import project_overview, save_work_plan_task, search_analyses
 from .sample_workspace import add_sample_note, change_point_link, get_point_analyses, get_project_sample, list_project_samples, save_sample_context, undo_point_link
 from .manual_analysis import create_manual_analysis
 from .media_links import change_media_link, create_media_region, import_linked_photo, list_media_links
@@ -408,6 +408,10 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
         normalization=params.get("normalization"),
     )},
     "project.overview": lambda params: {"result": project_overview(_project_database_path(params))},
+    "project.work_plan.save": lambda params: {"result": save_work_plan_task(
+        _project_database_path(params), params.get("task_id"), params.get("title"), params.get("completed"),
+        params.get("expected_revision"),
+    )},
     "project.samples.list": lambda params: {"result": list_project_samples(_project_database_path(params))},
     "project.sample.get": lambda params: {"result": get_project_sample(_project_database_path(params), params.get("sample_id"))},
     "project.sample.context.save": lambda params: {"result": save_sample_context(

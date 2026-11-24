@@ -242,6 +242,32 @@ test("AT-26 marks search ranges, distinguishes a page from all results and journ
   expect(await readFile(first, "utf8")).toBe(content);
 }, 30000);
 
+test("AT-01 overview keeps an edited and completed plan task after restarting", async () => {
+  const user = userEvent.setup();
+  const app = render(<App />);
+  await user.click(await enabledButton("Добавить задачу"));
+  await user.type(screen.getByLabelText("Задача", { exact: true }), "Проверить импорт");
+  await user.click(await enabledButton("Сохранить задачу"));
+  await screen.findByRole("checkbox", { name: "Проверить импорт" });
+  await user.click(await enabledButton("Редактировать план работы"));
+  await user.click(await enabledButton("Изменить задачу: Проверить импорт"));
+  const title = screen.getByLabelText("Задача", { exact: true });
+  await user.clear(title);
+  await user.type(title, "Проверить EPMA");
+  await user.click(await enabledButton("Сохранить задачу"));
+  await user.click(await screen.findByRole("checkbox", { name: "Проверить EPMA" }));
+  await waitFor(() => expect(screen.getByRole("checkbox", { name: "Проверить EPMA" }).checked).toBe(true));
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  const plan = (await invokePetrolab("project.overview", database)).result.work_plan;
+  expect(plan).toEqual([{ id: expect.any(String), title: "Проверить EPMA", completed: true, revision: 3 }]);
+  app.unmount();
+  await stopService();
+  await startService();
+  render(<App />);
+  expect((await screen.findByRole("checkbox", { name: "Проверить EPMA" })).checked).toBe(true);
+  expect((await invokePetrolab("project.overview", database)).result.work_plan).toEqual(plan);
+}, 20000);
+
 test("overview opens a project source and global search opens an exact analysis without clearing selection", async () => {
   await writeFile(second, "Analysis,Sample,Mineral,SiO2 [wt.%],Publication authors,Publication year,Publication title,DOI\n"
     + "B1,Sample A,apatite,40,Иванов,2021,Северный массив,10.1234/apatite\nB2,Sample B,olivine,41,Петров,2022,Южный массив,10.1234/other\n");

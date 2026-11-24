@@ -303,6 +303,25 @@ class NdjsonServiceTests(unittest.TestCase):
             self.assertEqual(exact["source_id"], source_id)
             self.assertEqual(exact["source_row_number"], hit["source_row_number"])
 
+    def test_work_plan_rejects_stale_revision_and_keeps_task_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = str(Path(directory) / "test-project.sqlite")
+
+            def call(command, **payload):
+                return handle_request({"protocol_version": PROTOCOL_VERSION, "request_id": str(uuid.uuid4()),
+                    "command": command, "payload": {"project_database_path": database, **payload}})
+
+            self.assertEqual(call("project.overview")["result"]["work_plan"], [])
+            task = call("project.work_plan.save", title="  Проверить импорт  ", completed=False, expected_revision=0)["result"]
+            self.assertEqual(task["title"], "Проверить импорт")
+            revised = call("project.work_plan.save", task_id=task["id"], title="Проверить EPMA", completed=True,
+                           expected_revision=task["revision"])["result"]
+            self.assertEqual(revised, {"id": task["id"], "title": "Проверить EPMA", "completed": True, "revision": 2})
+            stale = call("project.work_plan.save", task_id=task["id"], title="Устаревшая правка", completed=False,
+                         expected_revision=task["revision"])
+            self.assertEqual(stale["error"]["code"], "WORK_PLAN_TASK_CONFLICT")
+            self.assertEqual(call("project.overview")["result"]["work_plan"], [revised])
+
     def test_publication_metadata_matches_only_analyses_with_the_same_citation(self) -> None:
         from petrolab.clean_table import classify_clean_table
         from petrolab.import_preview import inspect_source

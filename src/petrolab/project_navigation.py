@@ -7,7 +7,8 @@ import re
 from urllib.parse import quote, urlsplit
 
 from .desktop_workflow import analysis_identity
-from .import_apply import open_project
+from .import_apply import _id, open_project
+from .import_preview import ImportCommandError
 
 _PUBLICATION_FIELDS = json.dumps([
     "Source", "Publication authors", "Publication year", "Publication title", "Publication journal", "DOI", "Publication URL",
@@ -132,5 +133,31 @@ def project_overview(database_path):
             FROM work_group g ORDER BY g.created_at DESC, g.rowid DESC LIMIT 5
         """).fetchall()
         name = Path(database_path).stem.replace("-", " ")
+        tasks = connection.execute("SELECT id, title, completed, revision FROM project_work_plan_task ORDER BY rowid")
         return {"project_id": identity, "project_name": "Локальный проект PetroLab" if name == "petrolab v2" else name,
-                "recent_imports": [dict(row) for row in imports], "recent_groups": [dict(row) for row in groups]}
+                "recent_imports": [dict(row) for row in imports], "recent_groups": [dict(row) for row in groups],
+                "work_plan": [{**dict(row), "completed": bool(row["completed"])} for row in tasks]}
+
+
+def save_work_plan_task(database_path, task_id, title, completed, expected_revision):
+    if (not isinstance(title, str) or not 1 <= len(title.strip()) <= 240 or type(completed) is not bool
+            or type(expected_revision) is not int or expected_revision < 0
+            or (task_id is None and expected_revision != 0)
+            or (task_id is not None and (not isinstance(task_id, str) or len(task_id) != 36 or expected_revision == 0))):
+        raise ValueError("work_plan_task")
+    title = title.strip()
+    revision = expected_revision + 1
+    with closing(open_project(database_path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        if task_id is None:
+            task_id = _id()
+            connection.execute("INSERT INTO project_work_plan_task VALUES (?, ?, ?, ?)",
+                               (task_id, title, completed, revision))
+        else:
+            result = connection.execute("""
+                UPDATE project_work_plan_task SET title = ?, completed = ?, revision = ?
+                WHERE id = ? AND revision = ?
+            """, (title, completed, revision, task_id, expected_revision))
+            if result.rowcount != 1:
+                raise ImportCommandError("WORK_PLAN_TASK_CONFLICT", "Задача изменилась. Откройте обзор заново перед сохранением.")
+    return {"id": task_id, "title": title, "completed": completed, "revision": revision}

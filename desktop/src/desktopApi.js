@@ -81,6 +81,9 @@ export const clearImportStaging = (stagedPath) => desktopInvoke("clear_import_st
 export const getProjectDatabasePath = () => desktopInvoke("project_database_path");
 export const getProjectOverview = (projectDatabasePath) =>
   invokePetrolab("project.overview", { project_database_path: projectDatabasePath });
+export const saveProjectWorkPlanTask = (projectDatabasePath, { id, title, completed, revision }) =>
+  invokePetrolab("project.work_plan.save", { project_database_path: projectDatabasePath,
+    task_id: id ?? null, title, completed, expected_revision: revision });
 export const listProjectSamples = (projectDatabasePath) =>
   invokePetrolab("project.samples.list", { project_database_path: projectDatabasePath });
 export const reviewStatistics = (projectDatabasePath, input, features) => invokePetrolab("statistics.review", {

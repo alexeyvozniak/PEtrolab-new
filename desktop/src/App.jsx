@@ -22,7 +22,7 @@ import {
   pickAnalysisExportPath, exportAnalysisSelection,
   clearImportStaging,
   getProjectDatabasePath,
-  getProjectOverview, getProjectAnalysis, queryProjectAnalyses, queryProjectAnalysisIds,
+  getProjectOverview, getProjectAnalysis, queryProjectAnalyses, queryProjectAnalysisIds, saveProjectWorkPlanTask,
   listProjectSamples, getProjectSample, saveSampleContext, addSampleNote,
   createSamplePoint, listPointAnalyses, setPointAnalysisLink, undoPointAnalysisLink, createManualPointAnalysis,
   pickMediaFiles, pickMediaExportPath, inspectMediaFiles, previewMediaFile, draftMediaImport, commitMediaImport,
@@ -652,6 +652,7 @@ export function App() {
         {success && <div className="global-message success"><CheckCircle size={20} weight="fill" /><span>{success}</span></div>}
 
         {screen === "Обзор" && <ProjectOverview load={loadOverview} project={project} workspace={workspace}
+          onSaveTask={async (task) => unwrap(await saveProjectWorkPlanTask(databasePath, task))}
           selectionCount={selectedAnalysisIds.length} busy={busy} canImport={desktopRuntimeAvailable} onImport={startNewImport}
           onResume={() => setScreen("Импорт")} onSource={openSearchSource} onGroup={openOverviewGroup} />}
         {screen === "Поиск" && <ProjectSearch seed={searchSeed} queryProject={queryProject} onOpenAnalysis={openSearchAnalysis}

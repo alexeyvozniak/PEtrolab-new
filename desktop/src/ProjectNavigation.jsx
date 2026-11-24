@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Database, FileArrowUp, MagnifyingGlass, SquaresFour, X } from "@phosphor-icons/react";
+import { Database, FileArrowUp, MagnifyingGlass, PencilSimple, Plus, SquaresFour, X } from "@phosphor-icons/react";
 import { GenerationAssignment } from "./GenerationAssignment";
 import { isPetrolabDesktop, openExternalUrl } from "./desktopApi";
 import "./projectNavigation.css";
@@ -9,9 +9,13 @@ function formatDate(value) {
   return value ? new Date(value).toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" }) : "";
 }
 
-export function ProjectOverview({ load, project, workspace, selectionCount, busy, canImport, onImport, onResume, onSource, onGroup }) {
+export function ProjectOverview({ load, project, workspace, selectionCount, busy, canImport, onImport, onResume, onSource, onGroup, onSaveTask }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [editingTasks, setEditingTasks] = useState(false);
+  const [taskDraft, setTaskDraft] = useState(null);
+  const [savingTask, setSavingTask] = useState(false);
+  const [taskError, setTaskError] = useState("");
   useEffect(() => {
     let active = true;
     load().then((result) => { if (active) setData(result); })
@@ -21,6 +25,23 @@ export function ProjectOverview({ load, project, workspace, selectionCount, busy
 
   const imports = data?.recent_imports || [];
   const groups = data?.recent_groups || [];
+  const tasks = data?.work_plan || [];
+  const taskLocked = busy || savingTask;
+  async function saveTask(task) {
+    setSavingTask(true);
+    setTaskError("");
+    try {
+      const saved = await onSaveTask(task);
+      setData((current) => ({ ...current, work_plan: task.id
+        ? current.work_plan.map((item) => item.id === saved.id ? saved : item)
+        : [...(current.work_plan || []), saved] }));
+      setTaskDraft(null);
+    } catch (caught) {
+      setTaskError(caught.message);
+    } finally {
+      setSavingTask(false);
+    }
+  }
   const events = [
     ...imports.map((item) => ({ ...item, key: item.import_batch_id, time: item.applied_at, kind: "import" })),
     ...groups.map((item) => ({ ...item, key: item.id, time: item.created_at, kind: "group" })),
@@ -55,6 +76,36 @@ export function ProjectOverview({ load, project, workspace, selectionCount, busy
       <dl><div><dt>Источники</dt><dd>{project.source_count}</dd></div>
         <div><dt>Анализы</dt><dd>{project.total}</dd></div>
         {selectionCount > 0 && <div><dt>Текущий отбор</dt><dd>{selectionCount}</dd></div>}</dl>
+      {data && onSaveTask && <section className="overview-work-plan" aria-labelledby="overview-plan-heading">
+        <header>
+          <h3 id="overview-plan-heading">План работы</h3>
+          {tasks.length > 0 && <button className="outline-button" type="button" aria-label="Редактировать план работы"
+            aria-pressed={editingTasks} disabled={taskLocked || Boolean(taskDraft)} onClick={() => setEditingTasks(!editingTasks)}>
+            <PencilSimple size={17} />
+          </button>}
+        </header>
+        {tasks.length > 0 && <ul>{tasks.map((task) => <li key={task.id}>
+          <label><input type="checkbox" checked={task.completed} disabled={taskLocked || Boolean(taskDraft)}
+            onChange={(event) => saveTask({ ...task, completed: event.target.checked })} /><span>{task.title}</span></label>
+          {editingTasks && <button className="outline-button" type="button" aria-label={`Изменить задачу: ${task.title}`}
+            disabled={taskLocked || Boolean(taskDraft)} onClick={() => { setTaskDraft(task); setTaskError(""); }}>
+            <PencilSimple size={15} />
+          </button>}
+        </li>)}</ul>}
+        {taskDraft ? <form aria-label="Задача плана работы" onSubmit={(event) => { event.preventDefault(); saveTask(taskDraft); }}>
+          <label>Задача<input autoFocus value={taskDraft.title} required maxLength={240} disabled={taskLocked}
+            onChange={(event) => setTaskDraft({ ...taskDraft, title: event.target.value })} /></label>
+          <div>
+            <button className="primary-button" type="submit" disabled={taskLocked || !taskDraft.title.trim()}>Сохранить задачу</button>
+            <button className="outline-button" type="button" disabled={taskLocked}
+              onClick={() => { setTaskDraft(null); setTaskError(""); }}>Отмена</button>
+          </div>
+        </form> : <button className="outline-button" type="button" disabled={taskLocked}
+          onClick={() => { setTaskDraft({ title: "", completed: false, revision: 0 }); setTaskError(""); }}>
+          <Plus size={17} /> Добавить задачу
+        </button>}
+        {taskError && <p role="alert">{taskError}</p>}
+      </section>}
       {groups.length > 0 && <section><h3>Рабочие группы</h3>
         {groups.map((group) => <button className="outline-button" type="button" key={group.id}
           disabled={busy} onClick={() => onGroup(group.id)}>{group.name} · {group.analysis_count}</button>)}
