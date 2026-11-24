@@ -353,7 +353,51 @@ function PlotExport({ options, onChange, panels, pending, close, submit, canAddP
   </form>;
 }
 
-export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedIds, inputIds, onBack,
+function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
+  const limit = 25;
+  const [page, setPage] = useState(null);
+  const [response, setResponse] = useState(null);
+  const offset = page?.ids === ids ? page.offset : 0;
+  useEffect(() => {
+    if (!ids.length) return;
+    let active = true;
+    load(ids, offset, limit)
+      .then((result) => { if (active) setResponse({ ids, offset, result }); })
+      .catch((error) => { if (active) setResponse({ ids, offset, error: error.message || String(error) }); });
+    return () => { active = false; };
+  }, [ids, offset, load]);
+  if (!ids.length) return <p>В отборе пока нет анализов.</p>;
+  const current = response?.ids === ids && response.offset === offset ? response : null;
+  if (!current) return <p role="status">Загружаю выбранные анализы…</p>;
+  if (current.error) return <p role="alert">{current.error}</p>;
+  const { analyses, total, has_more: hasMore } = current.result;
+  const hiddenAnalyses = new Set(hiddenAnalysisIds);
+  const hiddenSources = new Set(hiddenSourceIds);
+  return <>
+    {total < ids.length && <p role="status">Недоступно анализов: {ids.length - total}.</p>}
+    {analyses.length > 0 && <div className="plot-selection-scroll">
+      <table aria-label="Таблица выбранных анализов">
+        <thead><tr><th>Анализ</th><th>Образец</th><th>Минерал</th><th>Метод</th><th>Источник</th><th>На графиках</th></tr></thead>
+        <tbody>{analyses.map((row) => <tr key={row.analysis_id} data-analysis-id={row.analysis_id}>
+          <th scope="row" title={row.analysis_id}>{row.identity}</th>
+          <td>{row.sample_name || "—"}</td><td>{row.mineral || "—"}</td><td>{row.method || "—"}</td>
+          <td title={row.source_id}>{row.source_name} · {row.sheet_name} · {row.source_column_number
+            ? `колонка ${row.source_column_number}` : `строка ${row.source_row_number}`}</td>
+          <td>{hiddenAnalyses.has(row.analysis_id) || hiddenSources.has(row.source_id) ? "Скрыт" : "Не скрыт"}</td>
+        </tr>)}</tbody>
+      </table>
+    </div>}
+    {(offset > 0 || hasMore) && <div className="plot-selection-pages">
+      <button type="button" className="outline-button" disabled={offset === 0}
+        onClick={() => setPage({ ids, offset: Math.max(0, offset - limit) })}>Назад</button>
+      <span>{analyses.length ? `${offset + 1}–${offset + analyses.length} из ${total}` : "На этой странице нет доступных анализов"}</span>
+      <button type="button" className="outline-button" disabled={!hasMore}
+        onClick={() => setPage({ ids, offset: offset + limit })}>Далее</button>
+    </div>}
+  </>;
+}
+
+export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedIds, setSelectedIds, inputIds, onBack,
   hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
   onExport, onAddPublication }) {
   const [axes, setAxes] = useState([]);
@@ -363,6 +407,7 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState("union");
   const [shape, setShape] = useState("rectangle");
+  const [selectionExpanded, setSelectionExpanded] = useState(false);
   const [sources, setSources] = useState([]);
   const [layouts, setLayouts] = useState([]);
   const [layoutName, setLayoutName] = useState("");
@@ -609,10 +654,18 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
           close={() => setExportOptions(null)} onChange={(values) => setExportOptions((current) => ({ ...current, ...values }))} />}
       </div>
       <footer className="plot-selection-footer"><b>Выбранные анализы · {selectedIds.length}</b>
+        {loadSelection && <button type="button" className="outline-button" aria-expanded={selectionExpanded}
+          aria-controls="plot-selection-table" onClick={() => setSelectionExpanded(!selectionExpanded)}>
+          {selectionExpanded ? "Свернуть таблицу" : "Развернуть таблицу"}
+        </button>}
         {onSetVisibility && selectedIds.some((id) => !hiddenAnalysisIds.includes(id)) &&
           <button type="button" className="outline-button" disabled={busy}
             onClick={() => onSetVisibility(selectedIds, true)}>Скрыть отбор на графиках</button>}
         <button type="button" className="outline-button" onClick={onBack}>Открыть в анализах</button>
+        <section id="plot-selection-table" hidden={!selectionExpanded} className="plot-selection-table">
+          {selectionExpanded && <PlotSelectionTable ids={selectedIds} load={loadSelection}
+            hiddenAnalysisIds={hiddenAnalysisIds} hiddenSourceIds={hiddenSourceIds} />}
+        </section>
       </footer>
     </main>
   </section>;

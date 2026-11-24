@@ -323,6 +323,13 @@ class NdjsonServiceTests(unittest.TestCase):
             exact = call("project.analysis.get", analysis_id=hit["analysis_id"])["result"]
             self.assertEqual(exact["source_id"], source_id)
             self.assertEqual(exact["source_row_number"], hit["source_row_number"])
+            rows = call("analysis.query")["result"]["analyses"]
+            scope = [str(uuid.uuid4()), rows[1]["analysis_id"], rows[0]["analysis_id"]]
+            for offset, expected in enumerate(scope[1:]):
+                page = call("analysis.query", analysis_ids=scope, limit=1, offset=offset)["result"]
+                self.assertEqual(page["total"], 2)
+                self.assertEqual([item["analysis_id"] for item in page["analyses"]], [expected])
+            self.assertEqual(call("analysis.query", analysis_ids=[])["result"]["analyses"], [])
 
     def test_work_plan_rejects_stale_revision_and_keeps_task_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -377,6 +377,11 @@ test("AT-08 excludes only the focused source from both plots and restores it fro
   expect(requests.filter(({ command }) => command === "plot_data.query")
     .every(({ payload }) => payload.hidden_source_ids.length === 1 && payload.hidden_source_ids[0] === excluded.source_id)).toBe(true);
   expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  await user.click(await enabledButton("Развернуть таблицу"));
+  const dock = await screen.findByRole("table", { name: "Таблица выбранных анализов" });
+  expect(within(dock).getByRole("rowheader", { name: "P1" }).closest("tr").dataset.analysisId).toBe(excluded.analysis_id);
+  expect(within(dock).getByText("Скрыт")).toBeTruthy();
+  expect(within(dock).queryByRole("rowheader", { name: "P2" })).toBeNull();
   await user.click(await enabledButton("Поиск"));
   await focus("P1");
   await user.click(await enabledButton("Вернуть источник на графики"));
@@ -384,6 +389,8 @@ test("AT-08 excludes only the focused source from both plots and restores it fro
   await waitFor(() => expect(point("P1")).toHaveLength(2));
   expect(point("P2")).toHaveLength(2);
   expect(point("P1").every((node) => node.getAttribute("aria-pressed") === "true")).toBe(true);
+  await user.click(await enabledButton("Развернуть таблицу"));
+  expect(within(await screen.findByRole("table", { name: "Таблица выбранных анализов" })).getByText("Не скрыт")).toBeTruthy();
   expect((await invokePetrolab("project.analyses.list", database)).result.analyses).toEqual(before);
   for (const [path, content] of files) expect(await readFile(path, "utf8")).toBe(content);
 }, 20000);

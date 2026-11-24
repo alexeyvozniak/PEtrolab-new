@@ -420,6 +420,8 @@ export function App() {
       : [...current, id]);
   };
   const loadPlotCatalog = useCallback(async () => unwrap(await getPlotCatalog(databasePath, plotInputIds)), [databasePath, plotInputIds]);
+  const loadPlotSelection = useCallback(async (analysisIds, offset, limit) =>
+    unwrap(await queryProjectAnalyses(databasePath, { analysis_ids: analysisIds, offset, limit })), [databasePath]);
   const loadPlotLayouts = useCallback(async () => unwrap(await listPlotSpecifications(databasePath)), [databasePath]);
   const restorePlotLayout = async (id) => {
     const layout = unwrap(await openPlotSpecification(databasePath, id));
@@ -749,6 +751,7 @@ export function App() {
             return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination, settings)) : null;
           }} />}
         {screen === "Построение" && <PlotWorkspace loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
+          loadSelection={loadPlotSelection}
           loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}
           openLayout={restorePlotLayout} onExport={async (svg, options) => {
             const destination = await pickPlotExportPath(options.name);

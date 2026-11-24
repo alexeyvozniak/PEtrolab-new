@@ -459,7 +459,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
         _project_database_path(params), params.get("media_asset_ids"), params.get("output_path"), params.get("options"),
     )},
     "analysis.query": lambda params: {"result": search_analyses(
-        _project_database_path(params), **{key: params[key] for key in ("query", "mineral", "source", "method", "source_id", "sample_id", "limit", "offset") if key in params},
+        _project_database_path(params), **{key: params[key] for key in ("query", "mineral", "source", "method", "source_id", "sample_id", "analysis_ids", "limit", "offset") if key in params},
     )},
     "analysis.query.ids": lambda params: {"result": search_analyses(
         _project_database_path(params), ids_only=True,

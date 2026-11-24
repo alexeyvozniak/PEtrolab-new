@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 from urllib.parse import quote, urlsplit
+from uuid import UUID
 
 from .desktop_workflow import analysis_identity
 from .import_apply import _id, open_project
@@ -38,21 +39,35 @@ def _search_text(value):
     return value.strip().casefold()
 
 
-def search_analyses(database_path, query="", mineral="", source="", method="", source_id="", limit=50, offset=0, sample_id="", *, ids_only=False):
+def search_analyses(database_path, query="", mineral="", source="", method="", source_id="", limit=50, offset=0, sample_id="", *, ids_only=False,
+                    analysis_ids=None):
     if type(limit) is not int or not 1 <= limit <= 200 or type(offset) is not int or offset < 0:
         raise ValueError("pagination")
     exact_source = _search_text(source_id)
     exact_sample = _search_text(sample_id)
+    if analysis_ids is not None and (not isinstance(analysis_ids, list)
+            or not all(isinstance(value, str) and str(UUID(value)) == value for value in analysis_ids)
+            or len(analysis_ids) != len(set(analysis_ids))):
+        raise ValueError("analysis_ids")
     parameters = dict(zip(("query", "mineral", "source", "method"), map(_search_text, (query, mineral, source, method))))
     parameters.update(exact_source=exact_source, exact_sample=exact_sample, publication_fields=_PUBLICATION_FIELDS,
                       query_doi=re.sub(_DOI_PREFIX, "", parameters["query"]) or parameters["query"],
                       source_doi=re.sub(_DOI_PREFIX, "", parameters["source"]) or parameters["source"])
+    selection_join = ""
+    selection_position = "NULL"
+    order = " ORDER BY created_at DESC, sheet_name, source_row_number, source_column_number, analysis_id"
+    if analysis_ids is not None:
+        parameters["selection_ids"] = json.dumps(analysis_ids)
+        selection_join = "JOIN json_each(:selection_ids) AS selected ON selected.value = a.analysis_id"
+        selection_position = "selected.key"
+        order = " ORDER BY selection_position"
     with closing(open_project(database_path)) as connection:
         connection.create_function("casefold", 1, lambda value: str(value or "").casefold(), deterministic=True)
         connection.execute("BEGIN")
-        projection = """
+        projection = f"""
             WITH candidates AS (
                 SELECT a.analysis_id, a.identity_json, a.sheet_name, a.source_row_number, a.block_id, recipe.recipe_json,
+                       {selection_position} AS selection_position,
                        a.source_column_number, a.created_at, s.source_id, s.display_name AS source_name,
                        s.source_fingerprint_sha256 AS source_sha256,
                        json_extract(e.sample_association_json, '$.sample_id') AS sample_id,
@@ -62,6 +77,7 @@ def search_analyses(database_path, query="", mineral="", source="", method="", s
                                 json_extract(e.reported_mineral_json, '$.value'), '') AS mineral,
                        COALESCE(json_extract(e.analytical_method_json, '$.value'), '') AS method
                 FROM analysis a JOIN source_file s ON s.source_id = a.source_id
+                {selection_join}
                 JOIN import_batch b ON b.import_batch_id = a.import_batch_id
                 JOIN import_recipe_revision recipe ON recipe.recipe_revision_id = b.recipe_revision_id
                 LEFT JOIN import_batch_retraction x ON x.import_batch_id = b.import_batch_id
@@ -83,7 +99,6 @@ def search_analyses(database_path, query="", mineral="", source="", method="", s
                   AND (:exact_sample = '' OR sample_id = :exact_sample)
             )
         """
-        order = " ORDER BY created_at DESC, sheet_name, source_row_number, source_column_number, analysis_id"
         if ids_only:
             ids = connection.execute(projection + "SELECT analysis_id FROM matches" + order, parameters)
             return {"analysis_ids": [row[0] for row in ids]}
@@ -110,6 +125,7 @@ def search_analyses(database_path, query="", mineral="", source="", method="", s
             record["identity"] = fields.get("Analysis") or fields.get("Point") or fields.get("Sample") or next((value for value in fields.values() if value), "")
             record.pop("recipe_json")
             record.pop("identity_json")
+            record.pop("selection_position")
             record["publication_metadata"] = publications.get(row["analysis_id"], [])
             analyses.append(record)
         return {"analyses": analyses, "total": total, "offset": offset, "has_more": offset + len(analyses) < total}

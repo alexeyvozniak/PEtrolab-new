@@ -30,6 +30,13 @@
 .plot-halo { fill: none; stroke: #0c613e; stroke-width: 2; pointer-events: none; }
 .plot-rubber { fill: #396f5227; stroke: #396f52; pointer-events: none; }
 .plot-selection-footer { position: sticky; bottom: 0; z-index: 2; }
+.plot-selection-table { flex: 1 0 100%; min-width: 0; }
+.plot-selection-table p { margin: 6px 0; }
+.plot-selection-scroll { max-height: min(26vh, 230px); overflow: auto; }
+.plot-selection-table table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+.plot-selection-table :is(th, td) { padding: 6px 8px; border-bottom: 1px solid #d9e3da; white-space: nowrap; }
+.plot-selection-table thead { position: sticky; top: 0; background: #eef4ef; }
+.plot-selection-pages { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .plot-source-legend { display: grid; gap: 6px; min-width: 0; }
 .plot-source-legend label { display: flex; align-items: center; gap: 5px; overflow-wrap: anywhere; }
 .plot-source-legend input { flex: 0 0 auto; margin: 0; }
