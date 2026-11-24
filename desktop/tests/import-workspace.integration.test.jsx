@@ -311,6 +311,37 @@ test("overview opens a project source and global search opens an exact analysis 
   expect(requests.findLast(({ command }) => command === "analysis.query").payload.source_id).toBeTruthy();
 }, 20000);
 
+test("histogram with one measurement field restores its layout and exports the visible bars", async () => {
+  const content = "Analysis,SiO2 [wt.%]\nP1,10\nP2,20\nP3,<1\n";
+  await writeFile(second, content);
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton("Импортировать таблицу"));
+  await user.click(await enabledButton("Построение"));
+  const bars = await screen.findAllByRole("button", { name: /Выбрать интервал/ });
+  expect(bars).toHaveLength(2);
+  expect(screen.getByText("Анализов: 2 из 3 · пропущено: 1")).toBeTruthy();
+  bars[0].focus();
+  await user.keyboard("{Enter}");
+  expect(bars[0].getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  await user.click(screen.getByText("Сохранённые раскладки", { exact: true }));
+  await user.type(screen.getByLabelText("Название раскладки"), "Гистограмма SiO2");
+  await user.click(await enabledButton("Сохранить раскладку"));
+  await screen.findByText("Сохранена раскладка «Гистограмма SiO2».");
+  await user.click(await enabledButton("Добавить диаграмму"));
+  expect(screen.getAllByLabelText("Тип диаграммы")).toHaveLength(2);
+  await user.click(await enabledButton("Открыть «Гистограмма SiO2»"));
+  await screen.findByText("Открыта раскладка «Гистограмма SiO2».");
+  expect((await screen.findByLabelText("Тип диаграммы")).value).toBe("histogram");
+  await screen.findAllByRole("button", { name: /Выбрать интервал/ });
+  const svg = await readFile(await savePlot(user, 0), "utf8");
+  expect((svg.match(/<rect /g) || [])).toHaveLength(2);
+  expect(await readFile(second, "utf8")).toBe(content);
+}, 25000);
+
 test("AT-08 excludes only the focused source from both plots and restores it from search", async () => {
   const alternate = join(folder, "alternate");
   await mkdir(alternate);

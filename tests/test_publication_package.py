@@ -89,6 +89,18 @@ class PublicationPackageTests(unittest.TestCase):
             item = capture_publication_plot(database, capture, "Панель b")
             self.assertEqual(database.read_bytes(), before)
             self.assertEqual(item["capture"]["analysis_ids"], projected["input_analysis_ids"])
+            histogram_axis = [next(axis for axis in axes if axis["field"] == "SiO2")]
+            histogram = query_plot_data(database, "histogram", histogram_axis)
+            histogram_capture = {**capture, "panels": [{**capture["panels"][0], "kind": "histogram",
+                "axes": histogram_axis, "projection_sha256": histogram["projection_sha256"]}]}
+            histogram_item = capture_publication_plot(database, histogram_capture, "Гистограмма")
+            histogram_package = prepare_publication(database, "Гистограмма", [histogram_item])
+            histogram_path = root / "histogram.zip"
+            export_publication(database, "Гистограмма", [histogram_item], histogram_package["fingerprint"], str(histogram_path))
+            with ZipFile(histogram_path) as archive:
+                saved_histogram = json.loads(archive.read("materials/01-plot_capture.json"))["panels"][0]
+                self.assertEqual(saved_histogram["binning"], "sturges_v1")
+                self.assertEqual(saved_histogram["bins"], histogram["bins"])
             incoming = root / "other.csv"
             incoming.write_text("Analysis,SiO2 [wt.%],Al2O3 [wt.%]\nP4,40,22\n", encoding="utf-8")
             apply_import_plan(database, incoming, suggest_import_recipe(incoming)["recipe"])

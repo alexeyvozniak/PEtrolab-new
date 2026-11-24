@@ -1,5 +1,6 @@
 """Pure numeric projections of stored Measurements for scientific plots."""
 
+from bisect import bisect_right
 from collections import defaultdict
 from contextlib import closing, nullcontext
 from hashlib import sha256
@@ -24,6 +25,8 @@ _ACTIVE_MEASUREMENTS = """
       AND (? IS NULL OR a.analysis_id IN (SELECT value FROM json_each(?)))
 """
 _AXIS_FIELDS = ("field", "unit", "measurement_set", "method")
+_COORDINATE_AXIS_COUNTS = {"binary": 2, "ternary": 3, "histogram": 1}
+_HISTOGRAM_BINNING = "sturges_v1"
 _AXIS_PROJECTION = "m.canonical_field AS field, m.unit, m.measurement_set, m.method"
 _ACTIVE_ANALYSES = """
     FROM analysis a JOIN import_batch b USING (import_batch_id)
@@ -74,7 +77,7 @@ def _plot_keys(kind, axes):
     if kind in PATTERN_ORDERS:
         if not 2 <= len(axes) <= len(PATTERN_ORDERS[kind]):
             raise ValueError("plot")
-    elif kind not in ("binary", "ternary") or len(axes) != (2 if kind == "binary" else 3):
+    elif len(axes) != _COORDINATE_AXIS_COUNTS.get(kind):
         raise ValueError("plot")
     keys = [_axis_key(axis) for axis in axes]
     if len(set(keys)) != len(keys):
@@ -104,6 +107,42 @@ def _linear_coordinates(values):
         {"at": 0.5, "label": f"{low / 2 + high / 2:.6g}"},
         {"at": 1, "label": f"{high:.6g}"},
     ]
+
+
+def _histogram(points):
+    if not points:
+        return [], [[], []]
+    values = [point["values"][0] for point in points]
+    low, high = min(values), max(values)
+    intervals = (len(values) - 1).bit_length() + 1
+    edges = [low]
+    if low < high:
+        for index in range(1, intervals):
+            fraction = index / intervals
+            edge = low * (1 - fraction) + high * fraction
+            if edges[-1] < edge < high:
+                edges.append(edge)
+    edges.append(high)
+    positions, x_ticks = _linear_coordinates(edges)
+    if low == high:
+        positions = [0, 1]
+    bins = [defaultdict(list) for _ in range(len(edges) - 1)]
+    for point, value in zip(points, values):
+        index = min(bisect_right(edges, value) - 1, len(bins) - 1)
+        bins[index][point["source_id"]].append(point["analysis_id"])
+    counts = [sum(map(len, bin_sources.values())) for bin_sources in bins]
+    maximum = max(counts)
+    bars = []
+    for index, (bin_sources, count) in enumerate(zip(bins, counts)):
+        series, base = [], 0
+        for source_id, ids in sorted(bin_sources.items()):
+            series.append({"source_id": source_id, "analysis_ids": ids, "base": base / maximum,
+                           "height": len(ids) / maximum})
+            base += len(ids)
+        bars.append({"lower": edges[index], "upper": edges[index + 1], "left": positions[index],
+                     "right": positions[index + 1], "count": count, "series": series})
+    y_ticks = [{"at": count / maximum, "label": str(count)} for count in sorted({0, maximum // 2, maximum})]
+    return bars, [x_ticks, y_ticks]
 
 
 def _alternate_concentration_key(key):
@@ -216,6 +255,8 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
             ticks.append(axis_ticks)
         for point, u, v in zip(points, *coordinates):
             point.update(u=u, v=v)
+    if kind == "histogram":
+        histogram_bins, ticks = _histogram(points)
     if reference is not None:
         ticks = [[{"at": index / (len(keys) - 1), "label": key[0]} for index, key in enumerate(keys)],
                  pattern_coordinates(points)]
@@ -227,7 +268,7 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
         field = layer["field"]
         if field is None or not field["visible"]:
             continue
-        if reference is not None:
+        if kind not in ("binary", "ternary"):
             fields.append({"layer_id": layer["id"], "analysis_ids": [], "vertices": [],
                            "message": "Поля доступны для бинарных и тройных диаграмм."})
             continue
@@ -251,6 +292,8 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
               "excluded_count": len(visible) - len(points)}
     if reference is not None:
         result.update(normalization=reference, exclusions=pattern_exclusions)
+    if kind == "histogram":
+        result.update(binning=_HISTOGRAM_BINNING, bins=histogram_bins)
     result["projection_sha256"] = sha256(json.dumps(result, ensure_ascii=False, sort_keys=True,
                                                      allow_nan=False).encode()).hexdigest()
     return result
@@ -392,7 +435,7 @@ def save_plot_specification(database_path, name, analysis_ids, panels, colors, h
     panel_keys = set()
     saved_panels = []
     for panel in panels:
-        if not isinstance(panel, dict) or set(panel) - {"normalization"} != {"id", "kind", "axes"}:
+        if not isinstance(panel, dict) or set(panel) - {"normalization", "binning"} != {"id", "kind", "axes"}:
             raise ValueError("panels")
         panel_ids.append(panel["id"])
         kind = panel["kind"]
@@ -401,11 +444,15 @@ def save_plot_specification(database_path, name, analysis_ids, panels, colors, h
         normalization = "sum_of_three_components" if kind == "ternary" else None
         if kind in PATTERN_ORDERS:
             normalization = pattern_reference(kind, [key[0] for key in keys], panel.get("normalization"))["id"]
+        if "binning" in panel and (kind != "histogram" or panel["binning"] != _HISTOGRAM_BINNING):
+            raise ImportCommandError("PLOT_HISTOGRAM_BINNING_UNSUPPORTED", "Версия интервалов гистограммы не поддерживается.")
         saved_panels.append({
             **panel, "title": " / ".join(axis["field"] for axis in panel["axes"]),
             "axes": [{**axis, "scale": "linear", "manual_range": None} for axis in panel["axes"]],
             "normalization": normalization,
         })
+        if kind == "histogram":
+            saved_panels[-1]["binning"] = _HISTOGRAM_BINNING
     _selection(panel_ids)
     with (closing(open_project(database_path)) if transaction is None else nullcontext(transaction)) as connection:
         with (connection if transaction is None else nullcontext()):
@@ -462,6 +509,8 @@ def open_plot_specification(database_path, spec_id):
         spec = json.loads(row[0])
         if spec.get("schema_version") != 1:
             raise ImportCommandError("PLOT_LAYOUT_VERSION_UNSUPPORTED", "Версия раскладки несовместима с этой версией PetroLab.")
+        if any(panel["kind"] == "histogram" and panel.get("binning") != _HISTOGRAM_BINNING for panel in spec["panels"]):
+            raise ImportCommandError("PLOT_HISTOGRAM_BINNING_UNSUPPORTED", "Версия интервалов гистограммы не поддерживается.")
         _, available = _layout_input(connection, spec["input"]["analysis_ids"])
         keys = {tuple(axis[key] for key in _AXIS_FIELDS) for panel in spec["panels"] for axis in panel["axes"]}
         if not keys <= available:

@@ -194,6 +194,25 @@ class NdjsonServiceTests(unittest.TestCase):
             self.assertAlmostEqual(points["P1"]["u"], 0.55)
             self.assertAlmostEqual(points["P1"]["v"], 0.50)
             self.assertEqual(points["P1"]["values"], [20, 30, 50])
+            histogram = call("plot_data.query", kind="histogram", axes=[axes["SiO2"]])["result"]
+            self.assertEqual(histogram["binning"], "sturges_v1")
+            self.assertEqual(histogram["excluded_count"], 1)
+            self.assertEqual([item["count"] for item in histogram["bins"]], [2, 0, 1])
+            self.assertEqual(histogram["bins"][0]["lower"], 10)
+            self.assertEqual(histogram["bins"][-1]["upper"], 20)
+            self.assertEqual(histogram["bins"][-1]["series"][0]["analysis_ids"], [points["P1"]["analysis_id"]])
+            constant = call("plot_data.query", kind="histogram", axes=[axes["SiO2"]],
+                            hidden_analysis_ids=[points["P1"]["analysis_id"]])["result"]
+            self.assertEqual([(item["lower"], item["upper"], item["count"]) for item in constant["bins"]], [(10, 10, 2)])
+            saved_histogram = call("plot_spec.save", name="Гистограмма", colors={}, panels=[
+                {"id": str(uuid.uuid4()), "kind": "histogram", "axes": [axes["SiO2"]]},
+            ])["result"]
+            restored_histogram = call("plot_spec.open", id=saved_histogram["id"])["result"]
+            self.assertEqual(restored_histogram["panels"][0]["binning"], "sturges_v1")
+            histogram_template = call("workspace.template.save", name="Шаблон гистограммы", plot_id=saved_histogram["id"])["result"]
+            applied_histogram = call("workspace.template.apply", id=histogram_template["id"], name="Гистограмма из шаблона",
+                                     analysis_ids=restored_histogram["input"]["analysis_ids"])["result"]
+            self.assertEqual(applied_histogram["plot"]["panels"][0]["binning"], "sturges_v1")
             binary = call("plot_data.query", kind="binary", axes=[axes["SiO2"], axes["F"]],
                           analysis_ids=[points["P1"]["analysis_id"], points["P2"]["analysis_id"]])["result"]
             self.assertEqual(binary["input_count"], 2)
@@ -251,7 +270,9 @@ class NdjsonServiceTests(unittest.TestCase):
             self.assertEqual(saved["hidden_source_ids"], [p2["source_id"]])
             self.assertEqual(saved["legend"]["entries"][0]["color"], "#7654a3")
             self.assertEqual(saved["panels"][1]["normalization"], "sum_of_three_components")
-            self.assertEqual(call("plot_spec.list")["result"], [{"id": saved["id"], "name": saved["name"]}])
+            self.assertCountEqual(call("plot_spec.list")["result"], [
+                {"id": item["id"], "name": item["name"]} for item in (saved, saved_histogram, applied_histogram["plot"])
+            ])
             self.assertEqual(call("plot_spec.open", id=saved["id"])["result"], saved)
             field_axes = [axes["Al2O3"], axes["F"]]
             field_input = call("plot_data.query", kind="binary", axes=field_axes)["result"]

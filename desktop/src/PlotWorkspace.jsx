@@ -12,7 +12,8 @@ const PATTERN_LABELS = { ree_pattern: "Диаграмма РЗЭ", spider: "Сп
 const REFERENCE_LABELS = { "C1 chondrite": "Хондрит C1", "Primitive mantle (diagram values)": "Примитивная мантия" };
 const referenceLabel = (reference) => REFERENCE_LABELS[reference.label] || reference.label;
 const measurementGroup = (axis) => JSON.stringify([axis.method, axis.measurement_set]);
-const panelTitle = (panel) => PATTERN_LABELS[panel.kind] || panel.axes.map((axis) => axis.field).join(" / ");
+const panelTitle = (panel) => PATTERN_LABELS[panel.kind] || (panel.kind === "histogram"
+  ? `Гистограмма · ${panel.axes[0].field}` : panel.axes.map((axis) => axis.field).join(" / "));
 
 function patternGroups(axes, pattern) {
   const groups = new Map();
@@ -61,7 +62,8 @@ function insidePolygon(point, vertices) {
 }
 
 function initialPanels(axes) {
-  if (axes.length < 2) return [];
+  if (axes.length === 0) return [];
+  if (axes.length === 1) return [{ id: crypto.randomUUID(), kind: "histogram", axes: [axes[0]] }];
   const compatible = axes.find((axis) => ["wt.%", "ppm", "ppb"].includes(axis.unit) &&
     axes.filter((item) => item.unit === axis.unit && item.measurement_set === axis.measurement_set && item.method === axis.method).length >= 3);
   const make = (kind, selected) => ({ id: crypto.randomUUID(), kind, axes: selected });
@@ -74,8 +76,21 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
   const drag = useRef(null);
   const [rubber, setRubber] = useState(null);
   const isPattern = Boolean(data.normalization);
+  const isHistogram = data.kind === "histogram";
   const denseLabels = isPattern && data.axes.length > 20;
-  const markers = points.flatMap((point) => isPattern ? point.vertices.filter(({ v }) => v !== null).map((vertex, index) => ({
+  const bins = data.bins || [];
+  const bars = bins.flatMap((bin) => bin.series.map((series) => ({
+    ...series, ...bin, u: (bin.left + bin.right) / 2, v: series.base + series.height / 2,
+    label: `${bin.lower}–${bin.upper} · ${series.analysis_ids.length} анализов`,
+  })));
+  const maximumCount = Math.max(1, ...bins.map((bin) => bin.count));
+  const selectedCounts = bins.map((bin) => bin.series.flatMap((series) => series.analysis_ids)
+    .filter((id) => selected.has(id)).length);
+  const selectedOutline = selectedCounts.some(Boolean)
+    ? `M ${px(bins[0].left)} ${VIEW.bottom} ${bins.map((bin, index) =>
+      `V ${py(selectedCounts[index] / maximumCount)} H ${px(bin.right)}`).join(" ")} V ${VIEW.bottom}`
+    : "";
+  const markers = isHistogram ? bars : points.flatMap((point) => isPattern ? point.vertices.filter(({ v }) => v !== null).map((vertex, index) => ({
     ...vertex, analysis_id: point.analysis_id, source_id: point.source_id, opacity: point.opacity,
     tabIndex: index === 0 ? 0 : -1,
     label: `${point.label} · ${vertex.element}`, title: `${point.label} · ${point.source_name} · ${vertex.element}: ${vertex.ratio.toPrecision(5)}`,
@@ -88,7 +103,8 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
   const start = (event) => {
     if (event.button !== 0 || (event.pointerType === "touch" && !event.isPrimary)) return;
     const point = position(event);
-    drag.current = { origin: point, pointer: event.pointerId, trail: [point], analysisId: event.target.dataset?.analysisId };
+    drag.current = { origin: point, pointer: event.pointerId, trail: [point], analysisId: event.target.dataset?.analysisId,
+      barIndex: event.target.dataset?.plotBar };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const move = (event) => {
@@ -112,11 +128,16 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
     const first = drag.current.origin;
     const trail = drag.current.trail;
     const pressedAnalysisId = drag.current.analysisId;
+    const pressedBar = bars[drag.current.barIndex];
     const last = position(event);
     drag.current = null;
     setRubber(null);
     const freehand = shape === "lasso" && trail.length >= 3;
     if (!freehand && Math.hypot(first.x - last.x, first.y - last.y) < 4) {
+      if (isHistogram) {
+        if (pressedBar) onSelect(pressedBar.analysis_ids);
+        return;
+      }
       const hit = markers.findLast((point) => Math.hypot(px(point.u) - last.x, py(point.v) - last.y) <= 7);
       const id = hit?.analysis_id || pressedAnalysisId;
       if (id) onSelect([id]);
@@ -127,7 +148,7 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
     onSelect([...new Set(markers.filter((point) => freehand
       ? insidePolygon({ x: px(point.u), y: py(point.v) }, [...trail, last])
       : inside(px(point.u), first.x, last.x) && inside(py(point.v), first.y, last.y))
-      .map((point) => point.analysis_id))]);
+      .flatMap((point) => point.analysis_ids || [point.analysis_id]))]);
   };
   const clear = () => { drag.current = null; setRubber(null); };
   return <svg className="plot-canvas" viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} aria-label="Диаграмма"
@@ -151,14 +172,27 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
       <text x={px(0.5)} y={VIEW.bottom + (isPattern ? 39 : 34)} textAnchor="middle">{isPattern ? `${referenceLabel(data.normalization)} · Sun и McDonough, 1989`
         : `${data.axes[0].field} (${data.axes[0].unit})`}</text>
       <text transform={`translate(12 ${py(0.5)}) rotate(-90)`} textAnchor="middle">{isPattern ? "Отношение к эталону"
-        : `${data.axes[1].field} (${data.axes[1].unit})`}</text>
+        : isHistogram ? "Число анализов" : `${data.axes[1].field} (${data.axes[1].unit})`}</text>
     </>}
     {(data.fields || []).filter((field) => field.vertices.length >= 3).map((field) =>
       <polygon key={field.layer_id} className="plot-field" fill="#99b9a0" fillOpacity={0.26}
         stroke="#5c7d66" strokeWidth={1} points={field.vertices.map(([u, v]) => `${px(u)},${py(v)}`).join(" ")} />)}
     {isPattern && points.map((point) => <path key={point.analysis_id} className="plot-series" data-analysis-id={point.analysis_id}
       d={patternPath(point.vertices)} fill="none" stroke={colorFor(point.source_id)} strokeWidth={1.25} opacity={point.opacity} />)}
-    {markers.map((point) => <g key={`${point.analysis_id}:${point.element || ""}`}>
+    {bars.map((bar, index) => {
+      const highlighted = bar.analysis_ids.some((id) => selected.has(id));
+      const rect = { x: px(bar.left), y: py(bar.base + bar.height), width: px(bar.right) - px(bar.left),
+        height: py(bar.base) - py(bar.base + bar.height) };
+      return <g key={`${bar.lower}:${bar.source_id}`}>
+        <rect className="plot-point" data-plot-bar={index} {...rect} fill={colorFor(bar.source_id)} role="button"
+          tabIndex={0} aria-label={`Выбрать интервал ${bar.label}`} aria-pressed={highlighted}
+          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(bar.analysis_ids); } }}>
+          <title>{bar.label}</title>
+        </rect>
+      </g>;
+    })}
+    {selectedOutline && <path className="plot-halo" d={selectedOutline} />}
+    {!isHistogram && markers.map((point) => <g key={`${point.analysis_id}:${point.element || ""}`}>
       <circle className="plot-point" data-analysis-id={point.analysis_id} fill={colorFor(point.source_id)}
         cx={px(point.u)} cy={py(point.v)} r={isPattern ? 2.5 : 3.5} role="button" tabIndex={point.tabIndex ?? 0}
         opacity={point.opacity}
@@ -167,7 +201,7 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
         <title>{point.title}</title>
       </circle>
     </g>)}
-    {markers.filter((point) => selected.has(point.analysis_id)).map((point) =>
+    {!isHistogram && markers.filter((point) => selected.has(point.analysis_id)).map((point) =>
       <circle key={`${point.analysis_id}:${point.element || ""}`} className="plot-halo" cx={px(point.u)} cy={py(point.v)} r={isPattern ? 4.5 : 6} />)}
     {rubber && (rubber.path ? <polygon className="plot-rubber" points={rubber.path} /> : <rect className="plot-rubber" {...rubber} />)}
   </svg>;
@@ -181,7 +215,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
   layers.forEach(({ analysis_ids, opacity, show_points }, order) => {
     for (const id of analysis_ids) styles.set(id, { order, opacity: show_points ? opacity : 0 });
   });
-  const points = (data?.points || []).map((point) => ({ ...point, ...(styles.get(point.analysis_id) || { opacity: 1, order: -1 }) }))
+  const points = panel.kind === "histogram" ? data?.points || [] : (data?.points || []).map((point) => ({ ...point, ...(styles.get(point.analysis_id) || { opacity: 1, order: -1 }) }))
     .filter((point) => point.opacity > 0).sort((a, b) => a.order - b.order);
   const status = current ? current.error : "Загружаю диаграмму…";
   const pattern = patterns[panel.kind];
@@ -194,6 +228,10 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
     return () => { active = false; };
   }, [load, panel]);
   const updateKind = (kind) => {
+    if (kind === "histogram") {
+      update({ id: panel.id, kind, axes: [panel.axes[0]] });
+      return;
+    }
     if (patterns[kind]) {
       const { groups, default_normalization } = patterns[kind];
       update({ id: panel.id, kind, axes: groups[0].axes, normalization: default_normalization });
@@ -213,8 +251,9 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
     </header>
     <div className="plot-panel-controls">
       <select aria-label="Тип диаграммы" value={panel.kind} onChange={(event) => updateKind(event.target.value)}>
-        <option value="binary">Бинарная</option>
+        <option value="binary" disabled={axes.length < 2}>Бинарная</option>
         <option value="ternary" disabled={axes.length < 3}>Тройная</option>
+        <option value="histogram">Гистограмма</option>
         {Object.entries(PATTERN_LABELS).map(([kind, label]) =>
           <option key={kind} value={kind} disabled={!patterns[kind]?.groups.length}>{label}</option>)}
       </select>
@@ -238,7 +277,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
     {status && <p role="status">{status}</p>}
     {data && <>
       <PlotCanvas data={data} selected={selected} onSelect={onSelect} shape={shape} colorFor={colorFor} points={points} />
-      <small>{pattern ? "Спектров" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
+      <small>{pattern ? "Спектров" : panel.kind === "histogram" ? "Анализов" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
         {data.hidden_count ? ` · скрыто: ${data.hidden_count}` : ""}
         {data.points.length > points.length ? ` · скрыто стилем слоя: ${data.points.length - points.length}` : ""}
         {data.kind === "ternary" ? " · доли от суммы трёх компонентов" : ""}</small>
@@ -550,14 +589,14 @@ export function PlotWorkspace({ loadCatalog, loadData, selectedIds, setSelectedI
         <label>Действие <select value={mode} onChange={(event) => setMode(event.target.value)}>
           <option value="replace">Новый отбор</option><option value="union">Добавить к отбору</option><option value="subtract">Исключить из отбора</option>
         </select></label>
-        <button className="primary-button" type="button" onClick={add} disabled={axes.length < 2 || panels.length >= 32}>Добавить диаграмму</button>
+        <button className="primary-button" type="button" onClick={add} disabled={!axes.length || panels.length >= 32}>Добавить диаграмму</button>
         {onExport && <button className="outline-button" type="button" disabled={exportBusy || loading || !panels.length}
           onClick={() => openExport(null)}>Выгрузить раскладку</button>}
       </header>
       {exportStatus && <p role={exportStatus.error ? "alert" : "status"}>{exportStatus.error || exportStatus.notice}</p>}
       {loading && <p role="status">Загружаю поля проекта…</p>}
       {error && <p role="alert">{error}</p>}
-      {!loading && !error && !panels.length && <p>Для построения нужны как минимум два поля измерений.</p>}
+      {!loading && !error && !panels.length && <p>Для построения нужно хотя бы одно поле измерений.</p>}
       <div className={exportOptions ? "plot-content plot-content-export" : "plot-content"}>
         <div className="plot-grid" ref={grid}>
           {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} shape={shape} colorFor={colorFor} layers={layers}

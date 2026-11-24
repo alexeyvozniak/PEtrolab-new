@@ -188,6 +188,8 @@ def save_analysis_template(database_path, name, plot_id=None, table_view_id=None
         definition = {"kind": panel["kind"], "title": panel["title"], "axes": fields(panel["axes"])}
         if panel["kind"] in PATTERN_ORDERS:
             definition["normalization"] = panel["normalization"]
+        if panel["kind"] == "histogram":
+            definition["binning"] = panel["binning"]
         panels.append(definition)
     columns, sort, methods, filters_omitted = [], [], [], False
     if calculation_run_id is not None:
@@ -327,6 +329,8 @@ def apply_analysis_template(database_path, template_id, analysis_ids, name=None)
             definition = {"id": _id(), "kind": panel["kind"], "axes": [compatible[field] for field in panel["axes"]]}
             if "normalization" in panel:
                 definition["normalization"] = panel["normalization"]
+            if "binning" in panel:
+                definition["binning"] = panel["binning"]
             panels.append(definition)
         try:
             with closing(open_project(database_path)) as connection, connection:

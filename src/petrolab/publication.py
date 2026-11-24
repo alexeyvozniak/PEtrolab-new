@@ -142,6 +142,8 @@ def _plot_capture(database_path, capture):
                     "ticks": projection["ticks"], "fields": projection["fields"]}
         if "normalization" in projection:
             snapshot.update(normalization=projection["normalization"], exclusions=projection["exclusions"])
+        if "bins" in projection:
+            snapshot.update(binning=projection["binning"], bins=projection["bins"])
         snapshots.append(snapshot)
     if not contributors:
         raise ImportCommandError("PUBLICATION_EMPTY_PLOT", "В выбранных панелях нет анализов для публикации.")
