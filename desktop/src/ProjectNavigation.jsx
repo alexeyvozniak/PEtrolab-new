@@ -64,7 +64,7 @@ export function ProjectOverview({ load, project, workspace, selectionCount, busy
 
 const SEARCH_FIELDS = { query: "Анализ или образец", mineral: "Минерал", source: "Источник", method: "Метод" };
 const EMPTY_SEARCH = { query: "", mineral: "", source: "", method: "", source_id: "", sample_id: "" };
-export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnalysis, onAddSelection, onPlot,
+export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnalysis, onOpenSample, onAddSelection, onPlot,
   selectionCount, hiddenAnalysisIds = [], onSetVisibility, onUndoVisibility, onCreateWorkGroup, generationActions, onBeginPointLink, busy }) {
   const initial = { ...EMPTY_SEARCH, ...seed };
   const [fields, setFields] = useState(initial);
@@ -132,6 +132,11 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
   };
   const remove = (key) => {
     const next = { ...applied, [key]: "", ...(key === "source" ? { source_id: "" } : {}) };
+    setFields(next);
+    apply(next);
+  };
+  const showSource = (row) => {
+    const next = { ...EMPTY_SEARCH, source_id: row.source_id, source: row.source_name };
     setFields(next);
     apply(next);
   };
@@ -287,7 +292,7 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
             onPointerEnter={(event) => extendDrag(event, row.analysis_id)}
             onFocus={() => setFocused(row)} onClick={(event) => {
               setFocused(row);
-              if (!locked && (event.ctrlKey || event.metaKey || event.shiftKey) && !event.target.closest("input,button")) {
+              if (!locked && (event.ctrlKey || event.metaKey || event.shiftKey) && !event.target.closest("input,button,summary")) {
                 toggle(row.analysis_id, event.shiftKey);
               }
             }}>
@@ -297,8 +302,17 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
               onChange={(event) => toggle(row.analysis_id, event.nativeEvent.shiftKey)} /></td>
             <td>{row.identity || "Анализ"}</td><td>{row.sample_name || "—"}</td><td>{row.mineral || "—"}</td>
             <td>{row.method || "—"}</td><td>{row.source_name}</td>
-            <td><button className="outline-button" type="button" disabled={locked}
-              onClick={() => onOpenAnalysis(row.analysis_id)} aria-label={`Открыть анализ ${row.identity}`}>Открыть</button></td>
+            <td><div className="search-row-actions">
+              <button className="outline-button" type="button" disabled={locked}
+                onClick={() => onOpenAnalysis(row.analysis_id)} aria-label={`Открыть анализ ${row.identity}`}>Открыть</button>
+              {row.sample_id && <details className="search-marking">
+                <summary aria-label={`Действия для анализа ${row.identity}`}>…</summary>
+                <button className="outline-button" type="button" disabled={locked}
+                  onClick={() => onOpenSample(row.sample_id)}>Открыть образец</button>
+                <button className="outline-button" type="button" disabled={locked}
+                  onClick={() => onBeginPointLink([row.analysis_id])}>Привязать к аналитической точке</button>
+              </details>}
+            </div></td>
           </tr>)}</tbody>
         </table></div>
       </>}
@@ -320,6 +334,12 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
         <p>{focused.sheet_name} · {focused.source_column_number ? `колонка ${focused.source_column_number}` : `строка ${focused.source_row_number}`}</p>
         {focused.sample_name && <p>Образец: {focused.sample_name}</p>}
         <details><summary>Контрольная сумма источника</summary><p className="project-fingerprint">{focused.source_sha256}</p></details>
+        <section aria-label="Действия со связанными объектами">
+          <button type="button" className="outline-button" disabled={locked}
+            onClick={() => showSource(focused)}>Показать анализы источника</button>
+          {focused.sample_id && <button type="button" className="outline-button" disabled={locked}
+            onClick={() => onOpenSample(focused.sample_id)}>Открыть образец {focused.sample_name}</button>}
+        </section>
       </> : <p>Контекст появится после поиска.</p>}
     </aside>
   </section>;

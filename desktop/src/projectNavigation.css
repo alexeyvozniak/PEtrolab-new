@@ -35,6 +35,10 @@
 .project-search-table tr.marked td:first-child { box-shadow: inset 3px 0 #497d5f; }
 .project-search-table tbody td:first-child { user-select: none; }
 .project-search-table input { accent-color: #365b49; }
+.search-row-actions { display: flex; align-items: flex-start; gap: 4px; }
+.search-row-actions .search-marking { display: grid; margin: 0; }
+.search-row-actions .search-marking[open] { gap: 4px; }
+.search-row-actions .search-marking button { display: flex; width: 100%; }
 @media (max-width: 1250px) {
   .search-bulk-menu > div { left: 0; right: auto; }
   .project-navigation { grid-template-columns: minmax(0, 1fr) 215px; }

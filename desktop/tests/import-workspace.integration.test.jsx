@@ -264,6 +264,14 @@ test("overview opens a project source and global search opens an exact analysis 
   expect(analysis.getByRole("heading", { name: "B1" })).toBeTruthy();
   expect(screen.getByRole("checkbox", { name: "Выбрать B2" }).checked).toBe(true);
   expect(screen.getByRole("checkbox", { name: "Выбрать B1" }).checked).toBe(false);
+  await user.click(await enabledButton("Обзор"));
+  await user.click(await enabledButton("Открыть источник second.csv"));
+  await user.type(screen.getByLabelText("Минерал"), "apatite");
+  await user.click(await enabledButton("Найти"));
+  await screen.findByText(/Найдено анализов: 1\. Отмечено: 0\. В отборе: 1/);
+  await user.click(await enabledButton("Показать анализы источника"));
+  await screen.findByText(/Найдено анализов: 2\. Отмечено: 0\. В отборе: 1/);
+  expect(requests.findLast(({ command }) => command === "analysis.query").payload.source_id).toBeTruthy();
 }, 20000);
 
 test("one common selection highlights the same analysis on binary and ternary plots and in the table", async () => {
@@ -953,6 +961,23 @@ test("AT-26 hands only marked analyses to an existing point and can undo the who
   expect((await invokePetrolab("analytical_point.analyses", { ...database, point_id: point.analytical_point_id })).result
     .map(({ analysis_id }) => analysis_id).sort()).toEqual([...original].sort());
   expect(screen.getByText(/В отборе: 1/)).toBeTruthy();
+  await user.click(await enabledButton("Поиск"));
+  const epmaActions = await screen.findByLabelText("Действия для анализа Epma");
+  await user.click(epmaActions);
+  await user.click(within(epmaActions.closest("details")).getByRole("button", { name: "Открыть образец" }));
+  await screen.findByRole("heading", { name: "Образец Z-2" });
+  await user.click(await enabledButton("Анализы · 4"));
+  await screen.findByText(/Найдено анализов: 4\. Отмечено: 0\. В отборе: 1/);
+  expect(screen.queryByRole("button", { name: "Открыть анализ Foreign" })).toBeNull();
+  const epmaMenu = await screen.findByLabelText("Действия для анализа Epma");
+  await user.click(epmaMenu);
+  await user.click(within(epmaMenu.closest("details")).getByRole("button", { name: "Привязать к аналитической точке" }));
+  await screen.findByText(/Отмечено в поиске: 1/);
+  expect(screen.getByRole("button", { name: "Связать анализы" }).disabled).toBe(true);
+  await user.selectOptions(screen.getByLabelText("Куда привязать"), point.analytical_point_id);
+  expect(screen.getByRole("button", { name: "Связать анализы" }).disabled).toBe(false);
+  await user.click(await enabledButton("Отмена"));
+  expect(requests.filter(({ command }) => command === "analytical_point.link.set")).toHaveLength(1);
   expect((await invokePetrolab("project.analyses.list", database)).result.analyses).toEqual(before);
   expect(await readFile(first, "utf8")).toBe(content);
 }, 30000);

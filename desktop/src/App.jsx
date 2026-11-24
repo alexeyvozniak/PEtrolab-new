@@ -113,6 +113,7 @@ export function App() {
   const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
   const [selectedAnalysisIds, setSelectedAnalysisIds] = useState([]);
   const [navigationAnalysis, setNavigationAnalysis] = useState(null);
+  const [navigationSampleId, setNavigationSampleId] = useState("");
   const [searchSeed, setSearchSeed] = useState(null);
   const [pointLinkScope, setPointLinkScope] = useState(null);
   const [publicationItems, setPublicationItems] = useState([]);
@@ -404,6 +405,7 @@ export function App() {
       return;
     }
     if (label === "Поиск") setSearchSeed(null);
+    if (label === "Образцы") setNavigationSampleId("");
     setScreen(label);
   };
   const openPlots = (ids = selectedAnalysisIds) => {
@@ -495,6 +497,11 @@ export function App() {
     setSearchSeed({ sample_id: sample.sample_id, sample_label: sample.sample_name,
       ...(source ? { source: source.source_name, source_id: source.source_id } : {}) });
     setScreen("Поиск");
+  };
+  const openSearchSample = (sampleId) => {
+    setError("");
+    setNavigationSampleId(sampleId);
+    setScreen("Образцы");
   };
   const openSearchAnalysis = async (id) => {
     if (busy) return;
@@ -640,6 +647,7 @@ export function App() {
           selectionCount={selectedAnalysisIds.length} busy={busy} canImport={desktopRuntimeAvailable} onImport={startNewImport}
           onResume={() => setScreen("Импорт")} onSource={openSearchSource} onGroup={openOverviewGroup} />}
         {screen === "Поиск" && <ProjectSearch seed={searchSeed} queryProject={queryProject} onOpenAnalysis={openSearchAnalysis}
+          onOpenSample={openSearchSample}
           queryAnalysisIds={async (query) => unwrap(await queryProjectAnalysisIds(databasePath, query))}
           selectionCount={selectedAnalysisIds.length} busy={busy}
           hiddenAnalysisIds={hiddenAnalysisIds} onSetVisibility={setPlotVisibility}
@@ -650,6 +658,7 @@ export function App() {
           onAddSelection={(ids) => setSelectedAnalysisIds((current) => [...new Set([...current, ...ids])])} />}
         {["Образцы", "Связи", "Изображения"].includes(screen) && <SampleWorkspace key={screen} loadSamples={loadSamples} loadSample={loadSample}
           initialTab={screen === "Связи" ? "Точки" : screen === "Изображения" ? "Изображения" : "Обзор"}
+          initialSampleId={screen === "Образцы" ? navigationSampleId : pointLinkScope?.sampleId}
           pointLinkScope={pointLinkScope} onClearPointLinkScope={() => setPointLinkScope(null)}
           saveContext={async (id, context, revision) => unwrap(await saveSampleContext(databasePath, id, context, revision))}
           addNote={async (id, author, body) => unwrap(await addSampleNote(databasePath, id, author, body))}

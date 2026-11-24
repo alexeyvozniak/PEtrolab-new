@@ -14,9 +14,9 @@ const FIELDS = {
 
 export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote, onOpenAnalyses, busy, pointLinks,
   initialTab = "Обзор", onImportMedia, previewMedia, exportOriginal, exportRendered, exportBatch, addPublication, mediaLinks,
-  pointLinkScope, onClearPointLinkScope }) {
+  pointLinkScope, onClearPointLinkScope, initialSampleId = "" }) {
   const [samples, setSamples] = useState(null);
-  const [sampleId, setSampleId] = useState(pointLinkScope?.sampleId || "");
+  const [sampleId, setSampleId] = useState(initialSampleId);
   const [sample, setSample] = useState(null);
   const [tab, setTab] = useState(initialTab);
   const [error, setError] = useState("");
