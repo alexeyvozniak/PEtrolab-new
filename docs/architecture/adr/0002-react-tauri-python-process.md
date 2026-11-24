@@ -11,6 +11,8 @@
 
 React является UI, Tauri — desktop shell и supervisor, локальный Python child process — application/scientific service. Начальный транспорт — versioned NDJSON по stdio. Localhost API, embedded Python и несколько backend-процессов не вводятся до доказанной необходимости.
 
+Явное открытие внешней ссылки использует команду Tauri и системный браузер. Оболочка принимает HTTP и HTTPS с именем хоста без учётных данных. Команда не обращается к данным проекта.
+
 ## Consequences
 
 Граница процессов требует явных DTO и обработки сбоев, зато UI не зависит от Python GUI, scientific core тестируется отдельно, а приложение не открывает сетевой порт.

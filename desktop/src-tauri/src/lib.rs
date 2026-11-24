@@ -302,6 +302,43 @@ fn project_database_path(app: AppHandle) -> Result<String, String> {
     Ok(directory.join("petrolab-v2.sqlite").to_string_lossy().into_owned())
 }
 
+#[tauri::command]
+fn open_external_url(url: &str) -> Result<(), String> {
+    let url = tauri::Url::parse(url).map_err(|_| "Некорректная внешняя ссылка.".to_owned())?;
+    if !matches!(url.scheme(), "https" | "http")
+        || !url.has_host()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("Разрешены только ссылки HTTP и HTTPS без учётных данных.".to_owned());
+    }
+    open_in_system_browser(&url)
+}
+
+#[cfg(windows)]
+fn open_in_system_browser(url: &tauri::Url) -> Result<(), String> {
+    use std::{iter, ptr};
+    use windows_sys::{core::w, Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL}};
+
+    let address: Vec<u16> = url.as_str().encode_utf16().chain(iter::once(0)).collect();
+    // ShellExecuteW reads this null-terminated buffer during the call.
+    let result = unsafe {
+        ShellExecuteW(
+            ptr::null_mut(), w!("open"), address.as_ptr(), ptr::null(), ptr::null(), SW_SHOWNORMAL,
+        )
+    };
+    if result as isize > 32 {
+        Ok(())
+    } else {
+        Err("Не удалось открыть ссылку в системном браузере.".to_owned())
+    }
+}
+
+#[cfg(not(windows))]
+fn open_in_system_browser(_url: &tauri::Url) -> Result<(), String> {
+    Err("Открытие внешних ссылок доступно в Windows.".to_owned())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
@@ -321,6 +358,7 @@ pub fn run() {
             pick_plot_export_path,
             stage_import_file,
             clear_import_staging,
+            open_external_url,
             project_database_path
         ])
         .run(tauri::generate_context!())

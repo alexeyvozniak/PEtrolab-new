@@ -66,6 +66,7 @@ export async function invokePetrolab(command, payload) {
 }
 
 export const pickImportFile = () => desktopInvoke("pick_import_file");
+export const openExternalUrl = (url) => desktopInvoke("open_external_url", { url });
 export const pickAnalysisExportPath = (format = "xlsx") => desktopInvoke("pick_analysis_export_path", { format });
 export const pickPlotExportPath = (name) => desktopInvoke("pick_plot_export_path", { name });
 export const exportPlot = (svg, { format, width, dpi }, outputPath) => invokePetrolab("plot.export", {

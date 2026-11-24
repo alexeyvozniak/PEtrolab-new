@@ -14,7 +14,7 @@ import { App } from "../src/App";
 import { invokePetrolab } from "../src/desktopApi";
 configure({ asyncUtilTimeout: 5000 });
 
-let child, folder, first, second, queue, mediaQueue, mediaFolder, original, pending, requests, plotExports;
+let child, folder, first, second, queue, mediaQueue, mediaFolder, original, pending, requests, plotExports, externalUrls;
 async function startService() {
   child = spawn("python", ["-m", "petrolab.ndjson_service"], {
     cwd: resolve(process.cwd(), ".."), windowsHide: true,
@@ -58,7 +58,9 @@ beforeEach(async () => {
   await writeFile(first, original);
   await writeFile(second, "Analysis,SiO2 [wt.%]\nB1,40\nB2,41\n");
   queue = [first, second]; mediaQueue = []; mediaFolder = null; requests = []; plotExports = [];
+  externalUrls = [];
   bridge.invoke = async (command, args) => {
+    if (command === "open_external_url") { externalUrls.push(args.url); return; }
     if (command === "project_database_path") return join(folder, "project.sqlite");
     if (command === "pick_import_file") return queue.shift() || null;
     if (command === "pick_media_files") return mediaQueue.splice(0);
@@ -262,7 +264,10 @@ test("overview opens a project source and global search opens an exact analysis 
   await screen.findByText(/Найдено анализов: 1\. Отмечено: 0\. В отборе: 1/);
   const bibliography = within(await screen.findByRole("region", { name: "Библиография" }));
   expect(bibliography.getByText("Северный массив")).toBeTruthy();
-  expect(bibliography.getByRole("link", { name: "10.1234/apatite" }).getAttribute("href")).toBe("https://doi.org/10.1234/apatite");
+  const citation = bibliography.getByRole("link", { name: "10.1234/apatite" });
+  expect(citation.getAttribute("href")).toBe("https://doi.org/10.1234/apatite");
+  await user.click(citation);
+  expect(externalUrls).toEqual(["https://doi.org/10.1234/apatite"]);
   await user.click(screen.getByRole("checkbox", { name: "Отметить B1" }));
   await screen.findByText(/Отмечено: 1\. В отборе: 1/);
   await user.click(await enabledButton("Открыть анализ B1"));

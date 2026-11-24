@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Database, FileArrowUp, MagnifyingGlass, SquaresFour, X } from "@phosphor-icons/react";
 import { GenerationAssignment } from "./GenerationAssignment";
+import { isPetrolabDesktop, openExternalUrl } from "./desktopApi";
 import "./projectNavigation.css";
 import { selectionRange } from "./selectionRange";
 
@@ -143,6 +144,16 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
     const next = { ...EMPTY_SEARCH, source_id: row.source_id, source: row.source_name };
     setFields(next);
     apply(next);
+  };
+  const openPublicationLink = async (event, url) => {
+    if (!isPetrolabDesktop()) return;
+    event.preventDefault();
+    setError("");
+    try {
+      await openExternalUrl(url);
+    } catch (caught) {
+      setError(caught?.message || String(caught));
+    }
   };
   const markedSet = new Set(marked);
   const hiddenSet = new Set(hiddenAnalysisIds);
@@ -343,7 +354,8 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
             {focused.publication_metadata.map(({ field, value, source_cell, url }) =>
               <div key={`${field}:${source_cell}`} title={`Ячейка ${source_cell}`}>
                 <dt>{PUBLICATION_LABELS[field]}</dt>
-                <dd>{url ? <a href={url} target="_blank" rel="noreferrer">{value}</a> : value}</dd>
+                <dd>{url ? <a href={url} target="_blank" rel="noreferrer"
+                  onClick={(event) => openPublicationLink(event, url)}>{value}</a> : value}</dd>
               </div>)}
           </dl>
         </section>}
