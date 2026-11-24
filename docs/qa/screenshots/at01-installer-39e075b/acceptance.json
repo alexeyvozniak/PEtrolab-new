@@ -1,0 +1,19 @@
+{
+  "installer_commit": "39e075be52733e8a255014c5b5687ad54ce6115e",
+  "installer_sha256": "78D94979F0BEBB46FE26F283EDE056852DB7E5F98CC6F5A31A7208358A454904",
+  "work_plan_task": {
+    "id": "54648d7a-f986-4d76-9831-fb2c29a493c4",
+    "title": "Проверить импорт EPMA",
+    "completed": true,
+    "revision": 3
+  },
+  "source_sha256": "2c55fd1324c5b927772e7c6074b2a8c10a1a7224fdd0ee46f6af5c32fb3d1e0c",
+  "scenarios": [
+    "AT-01",
+    "AT-06",
+    "AT-07",
+    "AT-09",
+    "AT-32",
+    "AT-37 (domain and visibility actions)"
+  ]
+}

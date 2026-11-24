@@ -21,6 +21,8 @@ const database = join(workspace, "AT-14-Project.sqlite");
 const source = join(workspace, "at14-analyses.csv");
 const groupName = "AT-14 рабочая группа";
 const layoutName = "AT-14 две диаграммы";
+const initialTaskTitle = "Проверить импорт";
+const completedTaskTitle = "Проверить импорт EPMA";
 const chosenLabels = ["P2", "P6", "P4", "P1", "P7"];
 
 function serviceRequest(command, payload = {}) {
@@ -205,6 +207,24 @@ async function click(evaluate, label) {
   }, label));
 }
 
+async function fillWorkPlanTitle(evaluate, title) {
+  await until("work plan title field", () => evaluate((title) => {
+    const input = document.querySelector(".overview-work-plan form input");
+    if (!input || input.disabled) return false;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, title);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  }, title));
+}
+
+async function expectCompletedTask(evaluate) {
+  await until("completed AT-01 work plan task", () => evaluate((title) => {
+    const label = document.querySelector(".overview-work-plan li label");
+    const checkbox = label?.querySelector("input");
+    return label?.textContent.trim() === title && checkbox?.checked && !checkbox.disabled;
+  }, completedTaskTitle));
+}
+
 const selection = () => [...document.querySelectorAll('tbody input[aria-label^="Выбрать "]:checked')]
   .map((input) => input.getAttribute("aria-label").slice("Выбрать ".length)).sort();
 const original = "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\n"
@@ -226,6 +246,22 @@ await withWindow(async (evaluate, screenshot) => {
     && document.querySelector(".overview-navigation .overview-event")?.textContent.includes("at14-analyses.csv")
     && [...document.querySelectorAll(".overview-navigation aside dd")].map((value) => value.textContent).join(",") === "1,7"));
   await screenshot("AT-01-overview");
+  await click(evaluate, "Добавить задачу");
+  await fillWorkPlanTitle(evaluate, initialTaskTitle);
+  await click(evaluate, "Сохранить задачу");
+  await click(evaluate, "Редактировать план работы");
+  await click(evaluate, `Изменить задачу: ${initialTaskTitle}`);
+  await fillWorkPlanTitle(evaluate, completedTaskTitle);
+  await click(evaluate, "Сохранить задачу");
+  await until("renamed AT-01 task", () => evaluate((title) => {
+    const label = document.querySelector(".overview-work-plan li label");
+    const checkbox = label?.querySelector("input");
+    if (label?.textContent.trim() !== title || !checkbox || checkbox.disabled) return false;
+    if (!checkbox.checked) checkbox.click();
+    return true;
+  }, completedTaskTitle));
+  await expectCompletedTask(evaluate);
+  await screenshot("AT-01-completed-work-plan");
   await click(evaluate, "Открыть источник at14-analyses.csv");
   await until("the source opens its seven search results", () => evaluate(() => document.body.innerText.includes("Найдено анализов: 7")));
   await click(evaluate, "Анализы");
@@ -307,6 +343,10 @@ function savedGroup() {
 }
 
 const before = savedGroup();
+const [workPlanTask, ...unexpectedTasks] = serviceRequest("project.overview").work_plan;
+assert.deepEqual(unexpectedTasks, []);
+assert.deepEqual(workPlanTask && { title: workPlanTask.title, completed: workPlanTask.completed, revision: workPlanTask.revision },
+  { title: completedTaskTitle, completed: true, revision: 3 });
 assert.deepEqual(before.analysis_ids, expectedIds);
 const [saved] = serviceRequest("plot_spec.list");
 const layout = serviceRequest("plot_spec.open", { id: saved.id });
@@ -315,6 +355,8 @@ assert.deepEqual(layout.input.analysis_ids, expectedIds);
 assert.deepEqual(layout.panels.map(({ kind }) => kind), ["binary", "ternary"]);
 
 await withWindow(async (evaluate, screenshot) => {
+  await expectCompletedTask(evaluate);
+  await screenshot("AT-01-restored-work-plan");
   await click(evaluate, "Анализы");
   await until("all seven analyses after restarting", () => evaluate(() => document.querySelectorAll("tbody tr").length === 7));
   assert.deepEqual(await evaluate(selection), []);
@@ -335,6 +377,7 @@ await withWindow(async (evaluate, screenshot) => {
     && document.body.innerText.includes("Связь восстановлена.")));
   await screenshot("AT-37-link-restored");
 });
+assert.deepEqual(serviceRequest("project.overview").work_plan, [workPlanTask]);
 
 const operations = serviceRequest("operation_journal.list").entries;
 const journal = Object.fromEntries(["assign_generation", "hide_plot_points", "unlink_analytical_point"].map((action) => {
@@ -497,6 +540,6 @@ const editDraft = {
 await writeFile(join(evidence, "acceptance.json"), JSON.stringify({
   scenarios: ["AT-01", "AT-06", "AT-07", "AT-09", "AT-32", "AT-37 (domain and visibility actions)"],
   selected: chosenLabels.map((label, index) => ({ label, analysisId: expectedIds[index] })),
-  workGroup: before, plotSpecification: layout, journal, editDraft, sourceSha256: sha256(finalSource),
+  workPlanTask, workGroup: before, plotSpecification: layout, journal, editDraft, sourceSha256: sha256(finalSource),
 }, null, 2));
 console.log("Native project, selection, plots, restart, AT-32 edit and AT-37 journal checks passed.");
