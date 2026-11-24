@@ -4,7 +4,7 @@ import { cleanup, configure, fireEvent, render, screen, waitFor, within } from "
 import userEvent from "@testing-library/user-event";
 import { execFileSync, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -283,6 +283,52 @@ test("overview opens a project source and global search opens an exact analysis 
   await user.click(await enabledButton("Показать анализы источника"));
   await screen.findByText(/Найдено анализов: 2\. Отмечено: 0\. В отборе: 1/);
   expect(requests.findLast(({ command }) => command === "analysis.query").payload.source_id).toBeTruthy();
+}, 20000);
+
+test("AT-08 excludes only the focused source from both plots and restores it from search", async () => {
+  const alternate = join(folder, "alternate");
+  await mkdir(alternate);
+  const sameName = join(alternate, "first.csv");
+  const header = "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\n";
+  const files = [[first, header + "P1,20,30,50\n"], [sameName, header + "P2,10,80,10\n"]];
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  for (const [source_path, content] of files) {
+    await writeFile(source_path, content);
+    const { result: { recipe } } = await invokePetrolab("import.recipe.suggest", { source_path });
+    expect((await invokePetrolab("import.plan.apply", { ...database, source_path, recipe })).error).toBeUndefined();
+  }
+  const before = (await invokePetrolab("project.analyses.list", database)).result.analyses;
+  const excluded = before.find((row) => row.identity.Analysis === "P1");
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Поиск"));
+  const focus = async (label) => user.click(await screen.findByRole("cell", { name: label, exact: true }));
+  const point = (label) => screen.queryAllByRole("button", { name: `Выбрать точку ${label}` });
+  const plotAll = async () => {
+    await user.click(screen.getByText("Отметки", { exact: true }));
+    await user.click(await enabledButton("Выбрать весь результат · 2"));
+    await user.click(await enabledButton("Построить диаграммы"));
+  };
+  await user.click(await screen.findByRole("checkbox", { name: "Отметить P1" }));
+  await user.click(await enabledButton("Добавить отмеченные в отбор"));
+  await focus("P1");
+  await user.click(await enabledButton("Исключить источник из графиков"));
+  await screen.findByText(/Найдено анализов: 2\. Отмечено: 1\. В отборе: 1/);
+  await plotAll();
+  await waitFor(() => expect(point("P2")).toHaveLength(2));
+  expect(point("P1")).toHaveLength(0);
+  expect(requests.filter(({ command }) => command === "plot_data.query")
+    .every(({ payload }) => payload.hidden_source_ids.length === 1 && payload.hidden_source_ids[0] === excluded.source_id)).toBe(true);
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  await user.click(await enabledButton("Поиск"));
+  await focus("P1");
+  await user.click(await enabledButton("Вернуть источник на графики"));
+  await plotAll();
+  await waitFor(() => expect(point("P1")).toHaveLength(2));
+  expect(point("P2")).toHaveLength(2);
+  expect(point("P1").every((node) => node.getAttribute("aria-pressed") === "true")).toBe(true);
+  expect((await invokePetrolab("project.analyses.list", database)).result.analyses).toEqual(before);
+  for (const [path, content] of files) expect(await readFile(path, "utf8")).toBe(content);
 }, 20000);
 
 test("one common selection highlights the same analysis on binary and ternary plots and in the table", async () => {

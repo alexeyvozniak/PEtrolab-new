@@ -413,6 +413,11 @@ export function App() {
     setPlotInputIds(ids.length ? [...ids] : null);
     setScreen("Построение");
   };
+  const togglePlotSource = (id) => {
+    setHiddenSourceIds((current) => current.includes(id)
+      ? current.filter((value) => value !== id)
+      : [...current, id]);
+  };
   const loadPlotCatalog = useCallback(async () => unwrap(await getPlotCatalog(databasePath, plotInputIds)), [databasePath, plotInputIds]);
   const loadPlotLayouts = useCallback(async () => unwrap(await listPlotSpecifications(databasePath)), [databasePath]);
   const restorePlotLayout = async (id) => {
@@ -651,6 +656,7 @@ export function App() {
           queryAnalysisIds={async (query) => unwrap(await queryProjectAnalysisIds(databasePath, query))}
           selectionCount={selectedAnalysisIds.length} busy={busy}
           hiddenAnalysisIds={hiddenAnalysisIds} onSetVisibility={setPlotVisibility}
+          hiddenSourceIds={hiddenSourceIds} onToggleSource={togglePlotSource}
           onUndoVisibility={visibilityOperation ? undoVisibility : null}
           onCreateWorkGroup={saveWorkGroup} generationActions={generationActions}
           onBeginPointLink={beginSearchPointLink}
@@ -750,7 +756,7 @@ export function App() {
           hiddenAnalysisIds={hiddenAnalysisIds} hiddenSourceIds={hiddenSourceIds} busy={busy}
           onSetVisibility={setPlotVisibility}
           onUndoVisibility={visibilityOperation ? undoVisibility : null}
-          onToggleSource={(id) => setHiddenSourceIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])} />}
+          onToggleSource={togglePlotSource} />}
         {screen === "Импорт" && (
           <section className={`live-page${sourcePath ? " import-live-page" : ""}`}>
             {!sourcePath && (

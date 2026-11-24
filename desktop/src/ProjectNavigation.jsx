@@ -70,7 +70,8 @@ const PUBLICATION_LABELS = {
 };
 const EMPTY_SEARCH = { query: "", mineral: "", source: "", method: "", source_id: "", sample_id: "" };
 export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnalysis, onOpenSample, onAddSelection, onPlot,
-  selectionCount, hiddenAnalysisIds = [], onSetVisibility, onUndoVisibility, onCreateWorkGroup, generationActions, onBeginPointLink, busy }) {
+  selectionCount, hiddenAnalysisIds = [], onSetVisibility, onUndoVisibility, hiddenSourceIds = [], onToggleSource,
+  onCreateWorkGroup, generationActions, onBeginPointLink, busy }) {
   const initial = { ...EMPTY_SEARCH, ...seed };
   const [fields, setFields] = useState(initial);
   const [applied, setApplied] = useState(initial);
@@ -363,6 +364,10 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
         <section aria-label="Действия со связанными объектами">
           <button type="button" className="outline-button" disabled={locked}
             onClick={() => showSource(focused)}>Показать анализы источника</button>
+          {onToggleSource && <button type="button" className="outline-button" disabled={locked}
+            onClick={() => onToggleSource(focused.source_id)}>
+            {hiddenSourceIds.includes(focused.source_id) ? "Вернуть источник на графики" : "Исключить источник из графиков"}
+          </button>}
           {focused.sample_id && <button type="button" className="outline-button" disabled={locked}
             onClick={() => onOpenSample(focused.sample_id)}>Открыть образец {focused.sample_name}</button>}
         </section>
