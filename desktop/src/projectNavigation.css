@@ -20,6 +20,13 @@
 .search-marking > summary { width: fit-content; padding: 5px 8px; border: 1px solid #cadbd0; border-radius: 6px; cursor: pointer; font-size: 12px; }
 .search-marking > div { position: absolute; z-index: 2; top: calc(100% + 4px); left: 0; display: grid; gap: 4px; min-width: 208px; padding: 6px; border: 1px solid #cadbd0; border-radius: 7px; background: white; box-shadow: 0 5px 16px #23382c20; }
 .search-marking .outline-button { justify-content: flex-start; min-height: 28px; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+.search-bulk-menu { margin-top: 0; }
+.search-bulk-menu > div { left: auto; right: 0; min-width: 240px; }
+.search-bulk-menu .generation-assignment { position: static; width: 100%; box-shadow: none; }
+.search-work-group { display: grid; gap: 8px; padding: 12px; border: 1px solid #b9cbbd; border-radius: 8px; }
+.search-work-group label { display: grid; gap: 4px; }
+.search-work-group input, .search-work-group textarea { width: 100%; min-height: 32px; padding: 4px 6px; border: 1px solid #b9cbbd; border-radius: 4px; font: inherit; }
+.search-work-group textarea { resize: vertical; }
 .project-search-table { margin-top: 8px; overflow: auto; }
 .project-search-table table { border-collapse: collapse; width: 100%; font-size: 12px; }
 .project-search-table td, .project-search-table th { padding: 8px; text-align: left; border-bottom: 1px solid #dde5df; white-space: nowrap; }
@@ -29,6 +36,7 @@
 .project-search-table tbody td:first-child { user-select: none; }
 .project-search-table input { accent-color: #365b49; }
 @media (max-width: 1250px) {
+  .search-bulk-menu > div { left: 0; right: auto; }
   .project-navigation { grid-template-columns: minmax(0, 1fr) 215px; }
   .project-navigation > main { padding-inline: 14px; }
   .project-search-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }

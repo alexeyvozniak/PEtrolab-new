@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Database, FileArrowUp, MagnifyingGlass, SquaresFour, X } from "@phosphor-icons/react";
+import { GenerationAssignment } from "./GenerationAssignment";
 import "./projectNavigation.css";
 import { selectionRange } from "./selectionRange";
 
@@ -64,7 +65,7 @@ export function ProjectOverview({ load, project, workspace, selectionCount, busy
 const SEARCH_FIELDS = { query: "Анализ или образец", mineral: "Минерал", source: "Источник", method: "Метод" };
 const EMPTY_SEARCH = { query: "", mineral: "", source: "", method: "", source_id: "", sample_id: "" };
 export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnalysis, onAddSelection, onPlot,
-  selectionCount, hiddenAnalysisIds = [], onSetVisibility, onUndoVisibility, busy }) {
+  selectionCount, hiddenAnalysisIds = [], onSetVisibility, onUndoVisibility, onCreateWorkGroup, generationActions, busy }) {
   const initial = { ...EMPTY_SEARCH, ...seed };
   const [fields, setFields] = useState(initial);
   const [applied, setApplied] = useState(initial);
@@ -74,6 +75,9 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
   const [pending, setPending] = useState(true);
   const [error, setError] = useState("");
   const [marked, setMarked] = useState([]);
+  const [groupScope, setGroupScope] = useState(null);
+  const [savingGroup, setSavingGroup] = useState(false);
+  const [groupNotice, setGroupNotice] = useState("");
   const [markingAll, setMarkingAll] = useState(false);
   const [dragIds, setDragIds] = useState([]);
   const [focused, setFocused] = useState(null);
@@ -122,6 +126,8 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
     setPending(true);
     setOffset(0);
     setMarked([]);
+    setGroupScope(null);
+    setGroupNotice("");
     setApplied({ ...next });
   };
   const remove = (key) => {
@@ -134,7 +140,7 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
   const dragSet = new Set(dragIds);
   const rows = [...(result?.analyses || [])].sort((a, b) => Number(markedSet.has(b.analysis_id)) - Number(markedSet.has(a.analysis_id)));
   const visibleIds = rows.map(({ analysis_id }) => analysis_id);
-  const locked = pending || busy || markingAll;
+  const locked = pending || busy || markingAll || savingGroup;
   const markedHidden = marked.filter((id) => hiddenSet.has(id)).length;
 
   function changePage(nextOffset, nextSize = pageSize) {
@@ -155,6 +161,7 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
       }
     }
     anchor.current = markedSet.has(id) ? null : { id, order: visibleIds, base: marked, page: result };
+    if (markedSet.has(id) && marked.length === 1) setGroupScope(null);
     setMarked(markedSet.has(id) ? marked.filter((item) => item !== id) : [...marked, id]);
   }
 
@@ -184,6 +191,23 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
     }
   }
 
+  async function saveGroup(event) {
+    event.preventDefault();
+    if (locked) return;
+    const fields = Object.fromEntries(new FormData(event.currentTarget));
+    setSavingGroup(true);
+    setError("");
+    try {
+      const group = await onCreateWorkGroup({ ...fields, analysis_ids: groupScope });
+      setGroupScope(null);
+      setGroupNotice(`Сохранена группа «${group.name}» · записей: ${group.analysis_ids.length}.`);
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setSavingGroup(false);
+    }
+  }
+
   return <section className="project-navigation search-navigation">
     <main>
       <h2>Поиск по проекту</h2>
@@ -206,6 +230,7 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
       </div>
       {error && <p role="alert">{error}</p>}
       <p role="status">{pending ? "Ищу анализы…" : `Найдено анализов: ${result?.total || 0}. Отмечено: ${marked.length}. В отборе: ${selectionCount}.${markedHidden ? ` Скрыто на графиках из отмеченных: ${markedHidden}.` : ""}`}</p>
+      {groupNotice && <p role="status">{groupNotice}</p>}
       {marked.length > 0 && <div className="project-search-chips search-marked-actions" aria-label="Действия с отмеченными анализами">
         <button type="button" className="outline-button" disabled={locked}
           onClick={() => onAddSelection(marked)}>Добавить отмеченные в отбор</button>
@@ -215,6 +240,25 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
           onClick={() => onSetVisibility(marked, true)}>Скрыть отмеченные на графиках</button>}
         {onSetVisibility && markedHidden > 0 && <button type="button" className="outline-button" disabled={locked}
           onClick={() => onSetVisibility(marked, false)}>Вернуть отмеченные на графики</button>}
+        <details className="search-marking search-bulk-menu">
+          <summary aria-label="Другие действия с отмеченными">…</summary>
+          <div>
+            {onCreateWorkGroup && <button type="button" className="outline-button" disabled={locked || Boolean(groupScope)}
+              onClick={() => { setGroupScope([...marked]); setGroupNotice(""); setError(""); }}>Сохранить как рабочую группу</button>}
+            {groupScope && <form className="search-work-group" aria-label="Новая рабочая группа" onSubmit={saveGroup}>
+              <b>Новая рабочая группа · {groupScope.length}</b>
+              <label>Название<input name="name" required maxLength={120} autoFocus disabled={savingGroup} /></label>
+              <label>Автор<input name="created_by" required disabled={savingGroup} /></label>
+              <label>Описание<textarea name="description" maxLength={2000} rows={2} disabled={savingGroup} /></label>
+              <div className="analysis-selection-actions">
+                <button type="submit" className="primary-button" disabled={locked}>Сохранить группу</button>
+                <button type="button" className="outline-button" disabled={savingGroup}
+                  onClick={() => { setGroupScope(null); setError(""); }}>Отмена</button>
+              </div>
+            </form>}
+            {generationActions && <GenerationAssignment actions={generationActions} selectedIds={marked} busy={locked} />}
+          </div>
+        </details>
       </div>}
       {onUndoVisibility && <button type="button" className="outline-button" disabled={locked} onClick={onUndoVisibility}>
         Отменить изменение видимости
@@ -232,7 +276,7 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
               Выбрать весь результат · {result.total}
             </button>}
             {marked.length > 0 && <button type="button" className="outline-button" disabled={locked}
-              onClick={() => { clearRange(); setMarked([]); }}>Снять отметки</button>}
+              onClick={() => { clearRange(); setMarked([]); setGroupScope(null); }}>Снять отметки</button>}
           </div>
         </details>
         <div className="project-search-table"><table>

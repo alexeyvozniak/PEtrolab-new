@@ -473,6 +473,19 @@ export function App() {
   const loadMediaDraft = useCallback(async () => unwrap(await loadMediaImportDraft(databasePath)), [databasePath]);
   const queryProject = useCallback(async (query) => databasePath
     ? unwrap(await queryProjectAnalyses(databasePath, query)) : { analyses: [], total: 0, has_more: false }, [databasePath]);
+  const saveWorkGroup = async (metadata) => unwrap(await createWorkGroup(databasePath, metadata));
+  const generationActions = {
+    list: async () => unwrap(await listGenerations(databasePath)),
+    assign: async (value) => {
+      const entry = unwrap(await assignGeneration(databasePath, value));
+      await refreshAnalyses().catch((caught) => setError(caught.message));
+      return entry;
+    },
+    undo: async (id, actor) => {
+      unwrap(await undoGeneration(databasePath, id, actor));
+      await refreshAnalyses().catch((caught) => setError(caught.message));
+    },
+  };
   const openSearchSource = (source) => {
     setSearchSeed({ source: source.source_name, source_id: source.source_id });
     setScreen("Поиск");
@@ -606,6 +619,7 @@ export function App() {
           selectionCount={selectedAnalysisIds.length} busy={busy}
           hiddenAnalysisIds={hiddenAnalysisIds} onSetVisibility={setPlotVisibility}
           onUndoVisibility={visibilityOperation ? undoVisibility : null}
+          onCreateWorkGroup={saveWorkGroup} generationActions={generationActions}
           onPlot={openPlots}
           onAddSelection={(ids) => setSelectedAnalysisIds((current) => [...new Set([...current, ...ids])])} />}
         {["Образцы", "Связи", "Изображения"].includes(screen) && <SampleWorkspace key={screen} loadSamples={loadSamples} loadSample={loadSample}
@@ -772,19 +786,8 @@ export function App() {
             selectedIds={selectedAnalysisIds}
             setSelectedIds={setSelectedAnalysisIds}
             onListWorkGroups={async () => unwrap(await listWorkGroups(databasePath))}
-            onCreateWorkGroup={async (metadata) => unwrap(await createWorkGroup(databasePath, metadata))}
-            generationActions={{
-              list: async () => unwrap(await listGenerations(databasePath)),
-              assign: async (value) => {
-                const entry = unwrap(await assignGeneration(databasePath, value));
-                await refreshAnalyses().catch((caught) => setError(caught.message));
-                return entry;
-              },
-              undo: async (id, actor) => {
-                unwrap(await undoGeneration(databasePath, id, actor));
-                await refreshAnalyses().catch((caught) => setError(caught.message));
-              },
-            }}
+            onCreateWorkGroup={saveWorkGroup}
+            generationActions={generationActions}
             onExportSelection={exportSelection}
             onPublishSelection={publishSelection}
             onOpenPlots={() => openPlots()}
