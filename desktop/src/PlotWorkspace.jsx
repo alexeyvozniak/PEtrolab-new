@@ -3,8 +3,10 @@ import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import "./plotWorkspace.css";
 
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
+const FULL_VIEW = { x: 0, y: 0, width: VIEW.width, height: VIEW.height };
 const px = (value) => VIEW.left + value * (VIEW.right - VIEW.left);
 const py = (value) => VIEW.bottom - value * (VIEW.bottom - VIEW.top);
+const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
 const axisKey = (axis) => JSON.stringify([axis.field, axis.unit, axis.measurement_set, axis.method]);
 const axisLabel = (axis) => [axis.field, axis.unit, axis.measurement_set, axis.method].filter(Boolean).join(" · ");
 const SERIES_COLORS = ["#3b70a0", "#a75d32", "#7654a3", "#34796d", "#ae4563", "#755b36", "#4a6584", "#84506d"];
@@ -74,7 +76,52 @@ function initialPanels(axes) {
 
 function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
   const drag = useRef(null);
+  const canvas = useRef(null);
+  const hovered = useRef(false);
+  const space = useRef(false);
   const [rubber, setRubber] = useState(null);
+  const [view, setView] = useState(FULL_VIEW);
+  const zoomed = view.width < FULL_VIEW.width;
+  useEffect(() => {
+    const svg = canvas.current;
+    const wheel = (event) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      if (!event.deltaY || drag.current) return;
+      const bounds = svg.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      const x = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
+      const y = clamp((event.clientY - bounds.top) / bounds.height, 0, 1);
+      setView((current) => {
+        const width = clamp(current.width * (event.deltaY > 0 ? 1.25 : 0.8), FULL_VIEW.width / 8, FULL_VIEW.width);
+        const height = width * FULL_VIEW.height / FULL_VIEW.width;
+        return {
+          x: clamp(current.x + x * (current.width - width), 0, FULL_VIEW.width - width),
+          y: clamp(current.y + y * (current.height - height), 0, FULL_VIEW.height - height),
+          width, height,
+        };
+      });
+    };
+    const keyDown = (event) => {
+      if (!event.ctrlKey && !event.altKey && !event.metaKey && event.code === "Space" && (hovered.current || event.target === svg)
+          && !event.target.closest?.("button, input, select, textarea, [role=button], [contenteditable=true]")) {
+        event.preventDefault();
+        space.current = true;
+      }
+    };
+    const releaseSpace = () => { space.current = false; };
+    const keyUp = (event) => { if (event.code === "Space") releaseSpace(); };
+    svg.addEventListener("wheel", wheel, { passive: false });
+    window.addEventListener("keydown", keyDown);
+    window.addEventListener("keyup", keyUp);
+    window.addEventListener("blur", releaseSpace);
+    return () => {
+      svg.removeEventListener("wheel", wheel);
+      window.removeEventListener("keydown", keyDown);
+      window.removeEventListener("keyup", keyUp);
+      window.removeEventListener("blur", releaseSpace);
+    };
+  }, []);
   const isPattern = Boolean(data.normalization);
   const isHistogram = data.kind === "histogram";
   const denseLabels = isPattern && data.axes.length > 20;
@@ -95,12 +142,21 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
     tabIndex: index === 0 ? 0 : -1,
     label: `${point.label} · ${vertex.element}`, title: `${point.label} · ${point.source_name} · ${vertex.element}: ${vertex.ratio.toPrecision(5)}`,
   })) : [{ ...point, title: `${point.label} · ${point.source_name} · ${point.values.join(" / ")}` }]);
+  const contains = (x, y) => x >= view.x && x <= view.x + view.width && y >= view.y && y <= view.y + view.height;
+  const visibleMarkers = zoomed ? markers.filter((point) => contains(px(point.u), py(point.v))) : markers;
   const position = (event) => {
     const bounds = event.currentTarget.getBoundingClientRect();
-    return { x: (event.clientX - bounds.left) * VIEW.width / bounds.width,
-      y: (event.clientY - bounds.top) * VIEW.height / bounds.height };
+    return { x: view.x + (event.clientX - bounds.left) * view.width / bounds.width,
+      y: view.y + (event.clientY - bounds.top) * view.height / bounds.height };
   };
   const start = (event) => {
+    if (event.button === 1 || (event.button === 0 && space.current)) {
+      event.preventDefault();
+      if (!zoomed) return;
+      drag.current = { pointer: event.pointerId, pan: view, x: event.clientX, y: event.clientY };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
     if (event.button !== 0 || (event.pointerType === "touch" && !event.isPrimary)) return;
     const point = position(event);
     drag.current = { origin: point, pointer: event.pointerId, trail: [point], analysisId: event.target.dataset?.analysisId,
@@ -109,6 +165,15 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
   };
   const move = (event) => {
     if (drag.current?.pointer !== event.pointerId) return;
+    if (drag.current.pan) {
+      const { pan, x, y } = drag.current;
+      const bounds = event.currentTarget.getBoundingClientRect();
+      setView({ ...pan,
+        x: clamp(pan.x + (x - event.clientX) * pan.width / bounds.width, 0, FULL_VIEW.width - pan.width),
+        y: clamp(pan.y + (y - event.clientY) * pan.height / bounds.height, 0, FULL_VIEW.height - pan.height),
+      });
+      return;
+    }
     const first = drag.current.origin;
     const last = position(event);
     if (shape === "lasso") {
@@ -125,6 +190,7 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
   };
   const end = (event) => {
     if (drag.current?.pointer !== event.pointerId) return;
+    if (drag.current.pan) { drag.current = null; return; }
     const first = drag.current.origin;
     const trail = drag.current.trail;
     const pressedAnalysisId = drag.current.analysisId;
@@ -133,25 +199,29 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
     drag.current = null;
     setRubber(null);
     const freehand = shape === "lasso" && trail.length >= 3;
-    if (!freehand && Math.hypot(first.x - last.x, first.y - last.y) < 4) {
+    if (!freehand && Math.hypot(first.x - last.x, first.y - last.y) < 4 * view.width / VIEW.width) {
       if (isHistogram) {
         if (pressedBar) onSelect(pressedBar.analysis_ids);
         return;
       }
-      const hit = markers.findLast((point) => Math.hypot(px(point.u) - last.x, py(point.v) - last.y) <= 7);
+      const hit = visibleMarkers.findLast((point) => Math.hypot(px(point.u) - last.x, py(point.v) - last.y) <= 7 * view.width / VIEW.width);
       const id = hit?.analysis_id || pressedAnalysisId;
       if (id) onSelect([id]);
       return;
     }
     if (shape === "lasso" && !freehand) return;
     const inside = (current, a, b) => current >= Math.min(a, b) && current <= Math.max(a, b);
-    onSelect([...new Set(markers.filter((point) => freehand
+    onSelect([...new Set(visibleMarkers.filter((point) => freehand
       ? insidePolygon({ x: px(point.u), y: py(point.v) }, [...trail, last])
       : inside(px(point.u), first.x, last.x) && inside(py(point.v), first.y, last.y))
       .flatMap((point) => point.analysis_ids || [point.analysis_id]))]);
   };
   const clear = () => { drag.current = null; setRubber(null); };
-  return <svg className="plot-canvas" viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} aria-label="Диаграмма"
+  return <>
+  {zoomed && <button type="button" className="outline-button plot-reset-zoom" onClick={() => setView(FULL_VIEW)}>Автомасштаб</button>}
+  <svg ref={canvas} className="plot-canvas" viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`} aria-label="Диаграмма"
+    tabIndex={0} onPointerEnter={() => { hovered.current = true; }} onPointerLeave={() => { hovered.current = false; }}
+    onKeyDown={(event) => { if (event.key === "Escape" && zoomed) setView(FULL_VIEW); }}
     data-plot-projection={data.projection_sha256}
     onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={clear} onLostPointerCapture={clear}>
     {data.kind === "ternary" ? <>
@@ -183,9 +253,12 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
       const highlighted = bar.analysis_ids.some((id) => selected.has(id));
       const rect = { x: px(bar.left), y: py(bar.base + bar.height), width: px(bar.right) - px(bar.left),
         height: py(bar.base) - py(bar.base + bar.height) };
+      const inView = rect.x < view.x + view.width && rect.x + rect.width > view.x
+        && rect.y < view.y + view.height && rect.y + rect.height > view.y;
       return <g key={`${bar.lower}:${bar.source_id}`}>
         <rect className="plot-point" data-plot-bar={index} {...rect} fill={colorFor(bar.source_id)} role="button"
-          tabIndex={0} aria-label={`Выбрать интервал ${bar.label}`} aria-pressed={highlighted}
+          tabIndex={inView ? 0 : -1} aria-hidden={inView ? undefined : true}
+          aria-label={`Выбрать интервал ${bar.label}`} aria-pressed={highlighted}
           onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(bar.analysis_ids); } }}>
           <title>{bar.label}</title>
         </rect>
@@ -194,7 +267,9 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
     {selectedOutline && <path className="plot-halo" d={selectedOutline} />}
     {!isHistogram && markers.map((point) => <g key={`${point.analysis_id}:${point.element || ""}`}>
       <circle className="plot-point" data-analysis-id={point.analysis_id} fill={colorFor(point.source_id)}
-        cx={px(point.u)} cy={py(point.v)} r={isPattern ? 2.5 : 3.5} role="button" tabIndex={point.tabIndex ?? 0}
+        cx={px(point.u)} cy={py(point.v)} r={isPattern ? 2.5 : 3.5} role="button"
+        tabIndex={!zoomed || contains(px(point.u), py(point.v)) ? point.tabIndex ?? 0 : -1}
+        aria-hidden={zoomed && !contains(px(point.u), py(point.v)) ? true : undefined}
         opacity={point.opacity}
         aria-label={`Выбрать точку ${point.label}`} aria-pressed={selected.has(point.analysis_id)}
         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect([point.analysis_id]); } }}>
@@ -204,7 +279,7 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
     {!isHistogram && markers.filter((point) => selected.has(point.analysis_id)).map((point) =>
       <circle key={`${point.analysis_id}:${point.element || ""}`} className="plot-halo" cx={px(point.u)} cy={py(point.v)} r={isPattern ? 4.5 : 6} />)}
     {rubber && (rubber.path ? <polygon className="plot-rubber" points={rubber.path} /> : <rect className="plot-rubber" {...rubber} />)}
-  </svg>;
+  </svg></>;
 }
 
 function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, canRemove, shape, colorFor, openExport, layers }) {

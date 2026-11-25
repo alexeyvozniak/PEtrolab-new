@@ -23,6 +23,7 @@
 .plot-panel-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .plot-panel .outline-button, .plot-workspace aside .outline-button { min-height: 28px; padding: 5px 7px; font-size: 11px; }
 .plot-canvas { display: block; width: 100%; height: auto; aspect-ratio: 460 / 280; touch-action: none; user-select: none; }
+.plot-reset-zoom { margin-top: 6px; }
 .plot-canvas text { fill: #31473a; font-size: 10px; }
 .plot-canvas line { stroke: #e2e8e2; }
 .plot-frame { fill: none; stroke: #76897b; }

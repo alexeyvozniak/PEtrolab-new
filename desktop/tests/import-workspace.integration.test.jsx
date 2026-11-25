@@ -413,8 +413,8 @@ test("one common selection highlights the same analysis on binary and ternary pl
   canvas.setPointerCapture = () => {};
   const x = Number(point.getAttribute("cx"));
   const y = Number(point.getAttribute("cy"));
-  function pointer(type, clientX, clientY) {
-    const event = new MouseEvent(type, { bubbles: true, clientX, clientY, button: 0 });
+  function pointer(type, clientX, clientY, button = 0) {
+    const event = new MouseEvent(type, { bubbles: true, clientX, clientY, button });
     Object.defineProperty(event, "pointerId", { value: 1 });
     fireEvent(canvas, event);
   }
@@ -425,6 +425,20 @@ test("one common selection highlights the same analysis on binary and ternary pl
   pointer("pointerup", x - 12, y - 12);
   expect(screen.getAllByRole("button", { name: "Выбрать точку P1" })
     .every((point) => point.getAttribute("aria-pressed") === "true")).toBe(true);
+  const originalView = canvas.getAttribute("viewBox");
+  fireEvent.wheel(canvas, { deltaY: -120, clientX: 230, clientY: 140 });
+  expect(canvas.getAttribute("viewBox")).toBe(originalView);
+  fireEvent.wheel(canvas, { deltaY: -120, clientX: 230, clientY: 140, ctrlKey: true });
+  const zoomedView = canvas.getAttribute("viewBox");
+  expect(Number(zoomedView.split(" ")[2])).toBeLessThan(460);
+  expect(screen.getAllByLabelText("Диаграмма")[1].getAttribute("viewBox")).toBe(originalView);
+  pointer("pointerdown", 230, 140, 1);
+  pointer("pointermove", 250, 130, 1);
+  pointer("pointerup", 250, 130, 1);
+  expect(canvas.getAttribute("viewBox")).not.toBe(zoomedView);
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  await user.click(await enabledButton("Автомасштаб"));
+  expect(canvas.getAttribute("viewBox")).toBe(originalView);
   for (let count = 0; count < 6; count += 1) {
     await user.click(screen.getByRole("button", { name: "Добавить диаграмму" }));
   }
