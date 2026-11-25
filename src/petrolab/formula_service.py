@@ -6,15 +6,35 @@ import json
 from .desktop_workflow import _measurement_numeric_value
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError, value_status
+from .mineral_formulae import FELDSPAR, ILMENITE, PYROXENE, SPINEL, ZIRCON, calculate_mineral_formula
 from .olivine_formula import OLIVINE, calculate_olivine
 from .plot_data import _selection
 from .statistics_service import _fingerprint
 
 
+_OXIDE_METHODS = {method["method_id"]: method for method in (FELDSPAR, PYROXENE, SPINEL, ILMENITE, ZIRCON)}
+_DERIVED_UNITS = {
+    "apfu": "APFU", "divalent_component_mol_percent": "mol.%", "end_member_mol_percent": "mol.%",
+    "quadrilateral_apfu": "APFU", "indices": "1",
+}
+
+
+def list_formula_methods():
+    return [OLIVINE, *_OXIDE_METHODS.values()]
+
+
 def _method(method_id):
-    if method_id != OLIVINE["method_id"]:
+    if method_id == OLIVINE["method_id"]:
+        return OLIVINE
+    if not isinstance(method_id, str) or method_id not in _OXIDE_METHODS:
         raise ImportCommandError("FORMULA_METHOD_UNAVAILABLE", "Метод расчёта формулы недоступен.")
-    return OLIVINE
+    return _OXIDE_METHODS[method_id]
+
+
+def _calculate(values, method):
+    if method["method_id"] == OLIVINE["method_id"]:
+        return calculate_olivine(values, method)
+    return calculate_mineral_formula(values, method)
 
 
 def _read_input(connection, analysis_id, measurement_ids, method):
@@ -76,7 +96,7 @@ def review_formula(database_path, method_id, analysis_id, measurement_ids):
     with closing(open_project(database_path)) as connection:
         connection.execute("BEGIN")
         review, values = _read_input(connection, analysis_id, measurement_ids, method)
-        result = calculate_olivine(values, method)
+        result = _calculate(values, method)
     return {**review, "method_definition": method, "method_definition_fingerprint": _fingerprint(method), "preview": result}
 
 
@@ -89,11 +109,11 @@ def run_formula(database_path, method_id, analysis_id, measurement_ids, input_fi
         reviewed, values = _read_input(connection, analysis_id, measurement_ids, method)
         if reviewed["input_fingerprint"] != input_fingerprint:
             raise ImportCommandError("FORMULA_REVIEW_STALE", "Входные измерения изменились. Повторите проверку.")
-        result = calculate_olivine(values, method)
+        result = _calculate(values, method)
         run_id = _id()
         derived = [{"id": _id(), "run_id": run_id, "analysis_id": analysis_id, "field": f"{series}.{key}", "unit": unit, "value": value}
-                   for series, unit in (("apfu", "APFU"), ("divalent_component_mol_percent", "mol.%"))
-                   for key, value in result[series].items()]
+                   for series, unit in _DERIVED_UNITS.items()
+                   for key, value in result.get(series, {}).items()]
         project_id = connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0]
         record = {**reviewed, "id": run_id, "project_id": project_id, "method_id": method_id, "method_version": method["version"],
                   "method_definition": method, "method_definition_fingerprint": method_fingerprint,

@@ -1,0 +1,142 @@
+import csv
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+from uuid import uuid4
+
+from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe
+from petrolab.import_apply import apply_import_plan
+from petrolab.import_preview import ImportCommandError
+from petrolab.mineral_formulae import FELDSPAR, ILMENITE, PYROXENE, SPINEL, ZIRCON, calculate_mineral_formula
+from petrolab.ndjson_service import handle_request
+
+
+class MineralFormulaTests(unittest.TestCase):
+    def test_published_feldspar_and_zircon_apfu(self):
+        # Kim et al. (2019), Table 1, grain 1, crystalline plagioclase.
+        feldspar = calculate_mineral_formula(
+            dict(SiO2=44.82, Al2O3=34.55, Na2O=0.67, CaO=18.63, K2O=0.05, FeO=0.30,
+                 MgO=0.04, TiO2=0.02, Cr2O3=0, MnO=0.03), FELDSPAR)
+        for key, expected in dict(Si=2.088, Al=1.897, Ca=0.930, Na=0.060, K=0.003).items():
+            self.assertAlmostEqual(feldspar["apfu"][key], expected, delta=0.002)
+        self.assertAlmostEqual(feldspar["end_member_mol_percent"]["An"], 93.66, delta=0.1)
+
+        # Zaman and Antao (2020), Table 1, 1:CB. Unquantified oxides are omitted.
+        zircon = calculate_mineral_formula(
+            dict(SiO2=32.67, ZrO2=65.74, HfO2=1.11, UO2=0.02, ThO2=0.01, CaO=0.02,
+                 Y2O3=0.10, Cr2O3=0.01, MnO=0.01, SO3=0.03), ZIRCON)
+        for key, expected in dict(Si=1.003, Zr=0.984, Hf=0.010).items():
+            self.assertAlmostEqual(zircon["apfu"][key], expected, delta=0.002)
+
+    def test_published_pyroxenes_and_explicit_iron(self):
+        # Journal of Petrology, Table 6, E17–016 Opx and E16–085 Cpx.
+        cases = [
+            ([52.43, 0.21, 9.10, 0.65, 6.73, 30.39, 1.19, 0.06, 0], (1.80, 1.56, 0.04), (2.45, 86.76, 10.79)),
+            ([50.00, 0.48, 8.39, 0.62, 5.78, 19.00, 14.79, 0.20, 0.02], (1.81, 1.03, 0.57), (32.34, 57.79, 9.87)),
+        ]
+        oxides = ("SiO2", "TiO2", "Al2O3", "Cr2O3", "FeO", "MgO", "CaO", "Na2O", "K2O")
+        for values, apfu, components in cases:
+            with self.subTest(values=values):
+                result = calculate_mineral_formula(dict(zip(oxides, values)), PYROXENE)
+                for field, expected in zip(("Si", "Mg", "Ca"), apfu):
+                    self.assertAlmostEqual(result["apfu"][field], expected, delta=0.01)
+                for field, expected in zip(("Wo", "En", "Fs"), components):
+                    self.assertAlmostEqual(result["end_member_mol_percent"][field], expected, delta=0.12)
+                self.assertNotIn("Fe3+/ΣFe", result["indices"])
+        measured_iron = calculate_mineral_formula(dict(SiO2=53, FeO=8, Fe2O3=4, MgO=23, CaO=10), PYROXENE)
+        self.assertGreater(measured_iron["apfu"]["Fe3+"], 0)
+        self.assertAlmostEqual(measured_iron["indices"]["Fe3+/ΣFe"], 0.3103, delta=0.0002)
+        with self.assertRaises(ImportCommandError):
+            calculate_mineral_formula(dict(SiO2=53, FeOt=8, MgO=23, CaO=10), PYROXENE)
+
+    def test_end_members_do_not_replace_missing_values_with_zero(self):
+        with self.assertRaises(ImportCommandError):
+            calculate_mineral_formula(dict(SiO2=33), ZIRCON)
+        with self.assertRaises(ImportCommandError):
+            calculate_mineral_formula(dict(SiO2=62, Al2O3=20), FELDSPAR)
+        incomplete = calculate_mineral_formula(dict(SiO2=68, Al2O3=20, Na2O=12), FELDSPAR)
+        self.assertNotIn("Ca", incomplete["apfu"])
+        self.assertEqual(incomplete["end_member_mol_percent"], {})
+        warning = next(item for item in incomplete["warnings"] if item["kind"] == "components_unavailable")
+        self.assertEqual(warning["missing_species"], ["Ca", "K"])
+        albite = calculate_mineral_formula(dict(SiO2=68.74, Al2O3=19.44, Na2O=11.82, CaO=0, K2O=0), FELDSPAR)
+        self.assertAlmostEqual(albite["apfu"]["Si"], 3, delta=0.002)
+        self.assertEqual(albite["end_member_mol_percent"], {"An": 0, "Ab": 100, "Or": 0})
+
+    def test_published_spinel_indices_and_ilmenite_apfu(self):
+        # ODP Leg 163X, Table AT5, SEG40A-1-2, first analysis.
+        spinel = calculate_mineral_formula(
+            dict(SiO2=0, TiO2=1.24, Al2O3=13.66, Fe2O3=15.33, FeO=19.86, MnO=0.32,
+                 MgO=9.73, CaO=0.01, Cr2O3=40.03, NiO=0.15), SPINEL)
+        self.assertAlmostEqual(spinel["indices"]["XFe3_B"], 0.195, delta=0.002)
+        self.assertAlmostEqual(spinel["indices"]["Cr#"], 0.6625, delta=0.002)
+        self.assertAlmostEqual(spinel["cation_sum_apfu"], 3, delta=0.003)
+        ideal = calculate_mineral_formula(dict(MgO=28.33, Al2O3=71.67), SPINEL)
+        self.assertAlmostEqual(ideal["apfu"]["Al"], 2, delta=0.001)
+        self.assertNotIn("Cr#", ideal["indices"])
+        with self.assertRaises(ImportCommandError):
+            calculate_mineral_formula(dict(Al2O3=100), SPINEL)
+
+        # McEnroe et al. (2007), Table 2, AL36b 138a, reported split Fe oxides.
+        ilmenite = calculate_mineral_formula(
+            dict(SiO2=0.012, TiO2=53.400, Al2O3=0.005, Cr2O3=0.048, V2O3=0.233, Fe2O3=2.062,
+                 MgO=3.859, NiO=0.040, FeO=40.834, MnO=0.278, ZnO=0, CaO=0), ILMENITE)
+        for key, expected in {"Ti": 0.9780, "Fe2+": 0.8317, "Fe3+": 0.0378}.items():
+            self.assertAlmostEqual(ilmenite["apfu"][key], expected, delta=0.0003)
+        self.assertAlmostEqual(ilmenite["indices"]["Fe3+/ΣFe"], 0.0435, delta=0.0003)
+        ideal = calculate_mineral_formula(dict(TiO2=52.64, FeO=47.36), ILMENITE)
+        self.assertAlmostEqual(ideal["apfu"]["Ti"], 1, delta=0.001)
+        self.assertNotIn("Fe3+/ΣFe", ideal["indices"])
+
+    def test_all_methods_round_trip_through_the_versioned_service(self):
+        with TemporaryDirectory() as folder:
+            source, database = Path(folder) / "epma.csv", Path(folder) / "project.sqlite"
+            with source.open("w", newline="", encoding="utf-8") as stream:
+                output = csv.writer(stream)
+                output.writerow(["Analysis", "SiO2 (wt.%)", "Al2O3 (wt.%)", "CaO (wt.%)", "Na2O (wt.%)",
+                                 "K2O (wt.%)", "MgO (wt.%)", "FeO (wt.%)", "ZrO2 (wt.%)", "HfO2 (wt.%)",
+                                 "TiO2 (wt.%)"])
+                output.writerow(["F1", 44.82, 34.55, 18.63, 0.67, 0.05, "", "", "", ""])
+                output.writerow(["P1", 50, 8.39, 14.79, 0.20, 0.02, 19, 5.78, "", ""])
+                output.writerow(["Z1", 32.67, "", "", "", "", "", "", 65.74, "<0.01"])
+                output.writerow(["S1", "", 71.67, "", "", "", 28.33, "", "", ""])
+                output.writerow(["I1", "", "", "", "", "", "", 47.36, "", "", 52.64])
+            original = source.read_bytes()
+            apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
+            baseline = list_project_analyses(database)["analyses"]
+
+            def call(command, **parameters):
+                return handle_request({"request_id": str(uuid4()), "protocol_version": "1.0", "command": command,
+                                       "payload": {"project_database_path": str(database), **parameters}})
+
+            rows = {row["identity"]["Analysis"]: row for row in baseline}
+            choices = [
+                ("F1", FELDSPAR, {"SiO2", "Al2O3", "CaO", "Na2O", "K2O"}, "end_member_mol_percent.An", "mol.%"),
+                ("P1", PYROXENE, {"SiO2", "CaO", "MgO", "FeO"}, "indices.Mg#", "1"),
+                ("Z1", ZIRCON, {"SiO2", "ZrO2"}, "apfu.Zr", "APFU"),
+                ("S1", SPINEL, {"MgO", "Al2O3"}, "apfu.Al", "APFU"),
+                ("I1", ILMENITE, {"FeO", "TiO2"}, "apfu.Ti", "APFU"),
+            ]
+            catalog = {method["method_id"]: method for method in call("formula.methods.list")["result"]}
+            self.assertIn("formula.olivine.4o", catalog)
+            for label, method, components, expected_field, expected_unit in choices:
+                with self.subTest(label=label):
+                    self.assertEqual(catalog[method["method_id"]], method)
+                    row = rows[label]
+                    measurements = {item["field"]: item["measurement_id"] for item in row["measurement_list"]}
+                    fields = {"method_id": method["method_id"], "analysis_id": row["analysis_id"],
+                              "measurement_ids": [measurements[field] for field in sorted(components)]}
+                    if label == "Z1":
+                        blocked = call("formula.review", **{**fields, "measurement_ids": [*fields["measurement_ids"],
+                                                                                       measurements["HfO2"]]})
+                        self.assertEqual(blocked["error"]["code"], "FORMULA_INVALID_MEASUREMENT")
+                    review = call("formula.review", **fields)["result"]
+                    fingerprints = {name: review[name] for name in ("input_fingerprint", "method_definition_fingerprint")}
+                    run = call("formula.run", **fields, **fingerprints)["result"]
+                    reopened = call("formula.run.open", run_id=run["id"])["result"]
+                    self.assertEqual(reopened, run)
+                    self.assertEqual(reopened["status"], "current")
+                    derived = {item["field"]: item["unit"] for item in run["result_manifest"]["derived_values"]}
+                    self.assertEqual(derived[expected_field], expected_unit)
+            self.assertEqual(list_project_analyses(database)["analyses"], baseline)
+            self.assertEqual(source.read_bytes(), original)

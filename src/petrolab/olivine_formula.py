@@ -43,6 +43,18 @@ def calculate_olivine(values, method=OLIVINE):
         raise ImportCommandError("FORMULA_UNSUPPORTED_COMPONENTS", "Нужны SiO₂, MgO и FeO; выберите только поддерживаемые оксиды.")
     if any(type(value) not in (int, float) or not 0 <= value <= 100 for value in values.values()) or values["SiO2"] <= 0:
         raise ImportCommandError("FORMULA_INVALID_MEASUREMENT", "Для расчёта нужны массовые доли от 0 до 100 wt.% и положительный SiO₂.")
+    result = oxygen_normalized_formula(values, method)
+    apfu = result["apfu"]
+    species = method["end_member_rules"]["species"]
+    modelled = {name: apfu[element] for name, element in species.items() if element in apfu}
+    denominator = math.fsum(modelled.values())
+    fractions = {key: value / denominator * 100 for key, value in modelled.items()} if denominator else {}
+    return {**result, "divalent_component_mol_percent": fractions}
+
+
+def oxygen_normalized_formula(values, method):
+    """Normalize already validated oxide inputs and report stoichiometric diagnostics."""
+    components = method["components"]
     moles = {oxide: value / components[oxide]["molar_mass"] for oxide, value in values.items()}
     oxygen = math.fsum(amount * components[oxide]["oxygens"] for oxide, amount in moles.items())
     if oxygen <= 0:
@@ -57,9 +69,5 @@ def calculate_olivine(values, method=OLIVINE):
         lower, upper = bounds[code]
         if not lower <= value <= upper:
             warnings.append({"kind": "outside_model_check", "field": code, "value": value, "range": [lower, upper]})
-    species = method["end_member_rules"]["species"]
-    modelled = {name: apfu[element] for name, element in species.items() if element in apfu}
-    denominator = math.fsum(modelled.values())
-    fractions = {key: value / denominator * 100 for key, value in modelled.items()} if denominator else {}
-    return {"apfu": apfu, "divalent_component_mol_percent": fractions, "oxide_sum_wt_pct": total, "cation_sum_apfu": cations,
+    return {"apfu": apfu, "oxide_sum_wt_pct": total, "cation_sum_apfu": cations,
             "unmodelled_optional_oxides": sorted(components.keys() - values.keys()), "warnings": warnings}

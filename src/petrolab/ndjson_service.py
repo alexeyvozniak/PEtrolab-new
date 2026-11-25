@@ -44,8 +44,7 @@ from .media_import import (apply_media_import_plan, create_analytical_point, cre
                            inspect_media_sources, load_media_import_draft, save_media_import_draft)
 from .media_display import export_media_batch, export_media_original, export_media_rendered, preview_input_media, preview_project_media
 from .statistics_service import list_calculation_runs, open_calculation_run, review_statistics, run_clustering, save_calculated_cluster
-from .formula_service import list_formula_runs, open_formula_run, review_formula, run_formula
-from .olivine_formula import OLIVINE
+from .formula_service import list_formula_methods, list_formula_runs, open_formula_run, review_formula, run_formula
 from .publication import (
     capture_publication_media, capture_publication_plot, capture_publication_table, export_publication,
     prepare_publication, publication_catalog,
@@ -375,7 +374,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "statistics.cluster.save_group": lambda params: {"result": save_calculated_cluster(
         _project_database_path(params), params.get("run_id"), params.get("cluster"), params.get("name"), params.get("actor"),
     )},
-    "formula.methods.list": lambda _: {"result": [OLIVINE]},
+    "formula.methods.list": lambda _: {"result": list_formula_methods()},
     "formula.review": lambda params: {"result": review_formula(_project_database_path(params), params.get("method_id"),
         params.get("analysis_id"), params.get("measurement_ids"))},
     "formula.run": lambda params: {"result": run_formula(_project_database_path(params), params.get("method_id"),

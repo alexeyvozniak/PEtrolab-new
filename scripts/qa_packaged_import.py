@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sqlite3
 import subprocess
 import sys
@@ -52,6 +53,41 @@ def archive_command(executable: Path, *args, expected_error: str | None = None) 
     if completed.returncode:
         raise RuntimeError(f"Packaged archive command failed: {completed.stderr.strip()}")
     return json.loads(completed.stdout)
+
+
+def check_mineral_formulae(executable: Path, directory: Path) -> None:
+    source = directory / "formulae.csv"
+    original = (b"Analysis,SiO2 [wt.%],Al2O3 [wt.%],CaO [wt.%],Na2O [wt.%],K2O [wt.%]\n"
+                b"F1,44.82,34.55,18.63,0.67,0.05\n")
+    source.write_bytes(original)
+    project = {"project_database_path": str(directory / "formulae.sqlite")}
+    catalog, _, listed = [item["result"] for item in run(executable, [
+        request("formula.methods.list", {}),
+        request("import.plan.apply", {**project, "source_path": str(source), "recipe": suggest_import_recipe(source)["recipe"]}),
+        request("project.analyses.list", project),
+    ])]
+    methods = {item["method_id"] for item in catalog}
+    expected = {"formula.olivine.4o", "formula.feldspar.8o", "formula.pyroxene.6o", "formula.zircon.4o",
+                "formula.spinel.4o", "formula.ilmenite.3o"}
+    if not expected <= methods:
+        raise AssertionError(f"Packaged formula catalog is missing methods: {methods}")
+    analysis, = listed["analyses"]
+    inputs = {**project, "method_id": "formula.feldspar.8o", "analysis_id": analysis["analysis_id"],
+              "measurement_ids": [item["measurement_id"] for item in analysis["measurement_list"]]}
+    review = run(executable, [request("formula.review", inputs)])[0]["result"]
+    saved = run(executable, [request("formula.run", {**inputs, **{
+        name: review[name] for name in ("input_fingerprint", "method_definition_fingerprint")
+    }})])[0]["result"]
+    reopened, after = [item["result"] for item in run(executable, [
+        request("formula.run.open", {**project, "run_id": saved["id"]}),
+        request("project.analyses.list", project),
+    ])]
+    anorthite = reopened["result_manifest"]["end_member_mol_percent"]["An"]
+    if reopened != saved or reopened["status"] != "current" or not math.isclose(anorthite, 93.66, abs_tol=0.2):
+        raise AssertionError("Packaged feldspar method did not restore the verified An result")
+    if after != listed or source.read_bytes() != original:
+        raise AssertionError("Packaged formula calculation changed source data")
+    print("Packaged AT-31 service: method catalog, feldspar review and immutable calculation round trip.")
 
 
 def check_workspace_archive(executable: Path, directory: Path) -> None:
@@ -465,6 +501,7 @@ def main() -> None:
         check_lithos_package(executable, Path(directory), database,
                              [row["analysis_id"] for row in reopened["result"]["analyses"]])
         check_workspace_archive(executable, Path(directory))
+        check_mineral_formulae(executable, Path(directory))
         check_operation_journal(executable, Path(directory))
         check_portable_archive(executable, Path(directory) / "archive-qa")
         selection_book = Path(directory) / "selection.xlsx"
