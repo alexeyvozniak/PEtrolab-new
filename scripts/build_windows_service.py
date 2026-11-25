@@ -40,6 +40,7 @@ def main() -> None:
             str(ROOT / "build" / "pyinstaller"),
             str(ROOT / "scripts" / "petrolab_service.py"),
         ],
+        env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
         check=True,
     )
 

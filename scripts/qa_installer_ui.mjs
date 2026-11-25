@@ -159,7 +159,7 @@ async function withWindow(check, { projectPath = database, editConfirmations = n
     };
     await command("Page.enable");
     await command("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-    await check(evaluate, screenshot);
+    await check(evaluate, screenshot, command);
     const close = `$app = Get-Process -Id ${child.pid} -ErrorAction Stop; if (-not $app.CloseMainWindow() -or -not $app.WaitForExit(15000)) { exit 1 }`;
     execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", close], { windowsHide: true, timeout: 18000 });
   } catch (error) {
@@ -227,6 +227,44 @@ async function expectCompletedTask(evaluate) {
 
 const selection = () => [...document.querySelectorAll('tbody input[aria-label^="Выбрать "]:checked')]
   .map((input) => input.getAttribute("aria-label").slice("Выбрать ".length)).sort();
+const plotViewBoxes = () => [...document.querySelectorAll(".plot-canvas")]
+  .map((canvas) => canvas.getAttribute("viewBox"));
+
+async function checkPlotZoom(evaluate, screenshot, command) {
+  const full = await evaluate(plotViewBoxes);
+  const selectedByPanel = () => [...document.querySelectorAll(".plot-panel")].map((panel) =>
+    [...panel.querySelectorAll('.plot-point[aria-pressed="true"]')].map((point) => point.dataset.analysisId).sort());
+  const selected = await evaluate(selectedByPanel);
+  const position = await evaluate(() => {
+    const { x, y, width, height } = document.querySelector(".plot-canvas").getBoundingClientRect();
+    return { x: x + width / 2, y: y + height / 2 };
+  });
+  const mouse = (type, parameters) => command("Input.dispatchMouseEvent", { type, ...parameters });
+  await mouse("mouseWheel", { ...position, deltaY: -120, deltaX: 0, modifiers: 2 });
+  const zoomed = await until("AT-17 zoom on the first panel", async () => {
+    const views = await evaluate(plotViewBoxes);
+    return views[0] !== full[0] ? views : null;
+  });
+  assert.equal(zoomed[1], full[1]);
+  await screenshot("AT-17-zoomed-panel");
+
+  const end = { x: position.x + 25, y: position.y - 15 };
+  await mouse("mousePressed", { ...position, button: "middle", buttons: 4, clickCount: 1 });
+  await mouse("mouseMoved", { ...end, button: "middle", buttons: 4 });
+  await mouse("mouseReleased", { ...end, button: "middle", buttons: 0 });
+  const panned = await until("AT-17 pan on the first panel", async () => {
+    const views = await evaluate(plotViewBoxes);
+    return views[0] !== zoomed[0] ? views : null;
+  });
+  assert.equal(panned[1], full[1]);
+
+  await click(evaluate, "Автомасштаб");
+  await until("AT-17 restoration of the full plot extent", async () =>
+    JSON.stringify(await evaluate(plotViewBoxes)) === JSON.stringify(full));
+  assert.deepEqual(await evaluate(selectedByPanel), selected);
+  await screenshot("AT-17-reset-panels");
+  return { full, zoomed, panned, selected };
+}
 const original = "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\n"
   + "P1,11,22,67\nP2,23,41,36\nP3,25,35,40\nP4,29,35,36\nP5,31,12,57\nP6,44,31,25\nP7,35,14,51\n";
 await writeFile(source, original);
@@ -240,7 +278,8 @@ const point = serviceRequest("analytical_point.create", {
   sample_name: "AT-37 Sample", point_name: "AT-37 Point", analysis_ids: expectedIds.slice(0, 2), link_type: "same_point",
 });
 
-await withWindow(async (evaluate, screenshot) => {
+let plotZoom;
+await withWindow(async (evaluate, screenshot, command) => {
   await until("project name, status and recent import", () => evaluate(() =>
     document.querySelector(".overview-navigation .project-name b")?.textContent === "AT 14 Project"
     && document.querySelector(".overview-navigation .overview-event")?.textContent.includes("at14-analyses.csv")
@@ -288,6 +327,7 @@ await withWindow(async (evaluate, screenshot) => {
   for (const panel of panels) assert.deepEqual([...panel.analysisIds].sort(), [...expectedIds].sort());
   await screenshot("AT-07-binary", ".plot-panel:nth-child(1)");
   await screenshot("AT-07-ternary", ".plot-panel:nth-child(2)");
+  plotZoom = await checkPlotZoom(evaluate, screenshot, command);
 
   await click(evaluate, "Скрыть отбор на графиках");
   await until("the selected analyses are hidden on both panels", () => evaluate(() =>
@@ -538,8 +578,9 @@ const editDraft = {
   imported_measurements_unchanged: true,
 };
 await writeFile(join(evidence, "acceptance.json"), JSON.stringify({
-  scenarios: ["AT-01", "AT-06", "AT-07", "AT-09", "AT-32", "AT-37 (domain and visibility actions)"],
+  scenarios: ["AT-01", "AT-06", "AT-07", "AT-09", "AT-17 (zoom, pan and reset)", "AT-32", "AT-37 (domain and visibility actions)"],
   selected: chosenLabels.map((label, index) => ({ label, analysisId: expectedIds[index] })),
-  workPlanTask, workGroup: before, plotSpecification: layout, journal, editDraft, sourceSha256: sha256(finalSource),
+  workPlanTask, workGroup: before, plotSpecification: layout, plotZoom, journal, editDraft,
+  sourceSha256: sha256(finalSource),
 }, null, 2));
-console.log("Native project, selection, plots, restart, AT-32 edit and AT-37 journal checks passed.");
+console.log("Native project, selection, plots, restart, AT-17 zoom, AT-32 edit and AT-37 journal checks passed.");
