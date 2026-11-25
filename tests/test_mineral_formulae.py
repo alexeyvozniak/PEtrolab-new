@@ -8,7 +8,8 @@ from petrolab.desktop_workflow import list_project_analyses, suggest_import_reci
 from petrolab.import_apply import apply_import_plan
 from petrolab.import_preview import ImportCommandError
 from petrolab.mineral_formulae import (
-    APATITE, CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, ILMENITE, NEPHELINE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
+    AMPHIBOLE, APATITE, CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, ILMENITE, MICA_11, MICA_22,
+    NEPHELINE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
     TITANITE, calculate_mineral_formula,
 )
 from petrolab.ndjson_service import handle_request
@@ -215,6 +216,39 @@ class MineralFormulaTests(unittest.TestCase):
         self.assertLess(excessive["anion_balance_apfu"]["OH_residual"], 0)
         self.assertNotIn("estimated_anions_apfu", excessive)
 
+    def test_mica_reference_and_formula_scales(self):
+        # Schneiderman and Tracy (1991), Table 3, OR-8A biotite.
+        values = dict(SiO2=38.25, TiO2=1.54, Al2O3=18.54, FeO=15.46, MnO=0, MgO=14.38, Na2O=0.65, K2O=8.02)
+        half = calculate_mineral_formula(values, MICA_11)
+        double = calculate_mineral_formula(values, MICA_22)
+        for field, expected in {"Si": 2.773, "Fe2+": 0.937, "Mg": 1.554, "K": 0.742}.items():
+            self.assertAlmostEqual(half["apfu"][field], expected, delta=0.004)
+            self.assertAlmostEqual(double["apfu"][field], expected * 2, delta=0.008)
+        self.assertAlmostEqual(half["site_sum_apfu"]["Al_IV"], 1.227, delta=0.004)
+        self.assertAlmostEqual(half["site_sum_apfu"]["Al_VI"], 0.357, delta=0.004)
+        self.assertNotIn("estimated_anions_apfu", half)
+        self.assertEqual(half["warnings"][-1]["missing_species"], ["Cl", "F"])
+        with_halogens = calculate_mineral_formula({**values, "F": 0.4, "Cl": 0.02}, MICA_11)
+        self.assertEqual(with_halogens["apfu"]["Si"], half["apfu"]["Si"])
+        self.assertLess(with_halogens["estimated_anions_apfu"]["OH_upper_bound"], 2)
+        ideal = calculate_mineral_formula(dict(SiO2=45.25, Al2O3=38.40, K2O=11.82, F=0, Cl=0), MICA_11)
+        self.assertAlmostEqual(ideal["apfu"]["Si"], 3, delta=0.002)
+        self.assertEqual(ideal["estimated_anions_apfu"], {"OH_upper_bound": 2})
+
+    def test_amphibole_reference_and_explicit_valence(self):
+        # Schneiderman and Tracy (1991), Table 2, OR-8A anthophyllite.
+        values = dict(SiO2=52.10, TiO2=0.16, Al2O3=2.83, FeO=24.13, MnO=0.50,
+                      MgO=17.52, CaO=0.16, Na2O=0.44, K2O=0)
+        result = calculate_mineral_formula(values, AMPHIBOLE)
+        for field, expected in {"Si": 7.643, "Fe2+": 2.960, "Mg": 3.835, "Ca": 0.024}.items():
+            self.assertAlmostEqual(result["apfu"][field], expected, delta=0.008)
+        self.assertAlmostEqual(result["indices"]["Mg#"], 0.564, delta=0.002)
+        self.assertNotIn("Fe3+/ΣFe", result["indices"])
+        measured = calculate_mineral_formula({**values, "Fe2O3": 2}, AMPHIBOLE)
+        self.assertGreater(measured["indices"]["Fe3+/ΣFe"], 0)
+        with self.assertRaises(ImportCommandError):
+            calculate_mineral_formula(dict(SiO2=52, MgO=18, FeOt=25), AMPHIBOLE)
+
     def test_all_methods_round_trip_through_the_versioned_service(self):
         with TemporaryDirectory() as folder:
             source, database = Path(folder) / "epma.csv", Path(folder) / "project.sqlite"
@@ -235,6 +269,8 @@ class MineralFormulaTests(unittest.TestCase):
                 output.writerow(["AP1", "", "", 54.48, "", "", "", "", "", "", "", "", "", 41.37, 2.133, 1.016])
                 output.writerow(["AP2", "", "", 54.48, "", "", "", "", "", "", "", "", "", 41.37, 2.133, "<0.01"])
                 output.writerow(["T1", 30.67, "", 28.61, "", "", "", "", "", "", 40.72])
+                output.writerow(["M1", 38.25, 18.54, "", 0.65, 8.02, 14.38, 15.46, "", "", 1.54, "", 0])
+                output.writerow(["AM1", 52.10, 2.83, 0.16, 0.44, 0, 17.52, 24.13, "", "", 0.16, "", 0.50])
             original = source.read_bytes()
             apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
             baseline = list_project_analyses(database)["analyses"]
@@ -257,6 +293,9 @@ class MineralFormulaTests(unittest.TestCase):
                 ("N1", NEPHELINE, {"SiO2", "Al2O3", "CaO", "Na2O", "K2O"}, "charge_per_formula.delta_Al_cc", "e/f.u."),
                 ("AP1", APATITE, {"CaO", "P2O5", "F", "Cl"}, "estimated_anions_apfu.OH", "APFU"),
                 ("T1", TITANITE, {"CaO", "SiO2", "TiO2"}, "site_sum_apfu.T_plus_M", "APFU"),
+                ("M1", MICA_11, {"SiO2", "Al2O3", "K2O"}, "site_sum_apfu.Al_IV", "APFU"),
+                ("M1", MICA_22, {"SiO2", "Al2O3", "K2O"}, "site_sum_apfu.Al_VI", "APFU"),
+                ("AM1", AMPHIBOLE, {"SiO2", "MgO", "FeO"}, "indices.Mg#", "1"),
             ]
             catalog = {method["method_id"]: method for method in call("formula.methods.list")["result"]}
             self.assertIn("formula.olivine.4o", catalog)

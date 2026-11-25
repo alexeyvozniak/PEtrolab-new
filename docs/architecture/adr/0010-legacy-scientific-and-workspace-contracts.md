@@ -29,6 +29,8 @@ Scientific Method Definition становится единственным ко�
 
 Титанит нормируется на два катиона T + M. В основу входят Si, Ti, Al, Fe³⁺, Mg, Mn, Cr и Sn при их наличии. Результат содержит APFU и долю Ti среди выбранных катионов M. Оценка OH использует допущение, что Al и Fe³⁺ входят в M-позицию. Она вычисляется при явно выбранных Al₂O₃, Fe₂O₃ и F. Отрицательный остаток или сумма F + OH больше единицы приводят к диагностике, а оценка не сохраняется. Для проверки опубликованные APFU на один Si приведены к той же основе T + M. [Walters](https://doi.org/10.2478/mipo-2022-0005) · [Ordosch et al., таблица 4](https://doi.org/10.1007/s00710-019-00675-x).
 
+Слюды имеют две основы: 11 кислородных эквивалентов (22 положительных заряда) и удвоенную формулу на 22 кислородных эквивалента. Расчёт Al IV ограничен выбранным Al и вместимостью тетраэдров с учётом Si. Невязка отмечается как диагностическое предупреждение. При количественных F и Cl доступна условная верхняя оценка OH. Амфиболы нормируются на 23 кислородных эквивалента с заданной формой Fe. Mg# требует Mg и Fe²⁺, а доля Fe³⁺ — обе формы Fe. Нормировка служит для проверки состава, без определения вида и распределения по позициям амфибола. [Контрольные составы, таблицы 2 и 3](https://msaweb.org/AmMin/AM76/AM76_942.pdf).
+
 Import Recipe, Edit Draft, Table View, Workspace Snapshot, Analysis Template and Operation Journal Entry are separate domain entities. Snapshot contains concrete research state; Template contains no concrete Analysis IDs. Portable archives have explicit inclusion levels and validated restore semantics.
 
 Streamlit UI, wrappers, compatibility routes and session keys are not migrated. Legacy implementations are evidence and test input, not a code dependency.

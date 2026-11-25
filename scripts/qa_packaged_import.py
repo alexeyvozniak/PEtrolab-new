@@ -70,7 +70,8 @@ def check_mineral_formulae(executable: Path, directory: Path) -> None:
     expected = {"formula.olivine.4o", "formula.feldspar.8o", "formula.pyroxene.6o", "formula.zircon.4o",
                 "formula.spinel.4o", "formula.ilmenite.3o", "formula.perovskite.3o",
                 "formula.carbonate.1cat", "formula.carbonate.2cat", "formula.garnet.12o", "formula.nepheline.32o",
-                "formula.apatite.25oeq", "formula.titanite.2cat"}
+                "formula.apatite.25oeq", "formula.titanite.2cat", "formula.mica.11oeq", "formula.mica.22oeq",
+                "formula.amphibole.23oeq"}
     if not expected <= methods:
         raise AssertionError(f"Packaged formula catalog is missing methods: {methods}")
     analysis, = listed["analyses"]

@@ -176,6 +176,58 @@ TITANITE = {
     "oh_basis": "Conditional estimate OH = Al + Fe3+ - F for the coupled substitution; requires explicit quantitative "
                 "Al2O3, Fe2O3 and F. Assumes the selected Al and Fe3+ occupy the M site. No redox or water measurement.",
 }
+_SCHNEIDERMAN_TRACY = "https://msaweb.org/AmMin/AM76/AM76_942.pdf"
+
+
+def _mica_definition(basis):
+    scale = basis // 11
+    return {
+        **_definition(
+            f"formula.mica.{basis}oeq", f"Слюда на {basis} кислородных эквивалентов", basis,
+            ["SiO2", "Al2O3"], "TiO2 Cr2O3 FeO Fe2O3 MnO MgO CaO Na2O K2O BaO F Cl",
+            [6.6 * scale, 8.3 * scale],
+            ["https://doi.org/10.5194/ejm-36-657-2024", _SCHNEIDERMAN_TRACY],
+            "Schneiderman and Tracy (1991), Table 3, OR-8A; 22 O equivalents double the 11-O values",
+            {"mica_sites": {"tetrahedral": 4 * scale, "anion": 2 * scale}},
+            positive_groups=(("K2O", "Na2O", "CaO", "BaO"),),
+            indices={"Mg#": list(_MG_NUMBER)},
+        ),
+        "oh_basis": "Conditional maximum OH = anion site capacity - F - Cl. Requires quantitative F and Cl; "
+                    "other occupants can lower OH. This is not a water measurement.",
+    }
+
+
+MICA_11 = _mica_definition(11)
+MICA_22 = _mica_definition(22)
+AMPHIBOLE = _definition(
+    "formula.amphibole.23oeq", "Амфибол на 23 кислородных эквивалента", 23,
+    ["SiO2"], "TiO2 Al2O3 Cr2O3 FeO Fe2O3 MnO MgO CaO Na2O K2O F Cl", [14.5, 16.3],
+    ["https://doi.org/10.2138/am.2012.4276", _SCHNEIDERMAN_TRACY],
+    "Schneiderman and Tracy (1991), Table 2, OR-8A A",
+    {"basis": "Anhydrous 23-oxygen-equivalent cation normalization; no species naming or site assignment"},
+    positive_groups=(("FeO", "MgO", "MnO", "Na2O", "CaO"),),
+    indices={"Mg#": list(_MG_NUMBER), "Fe3+/ΣFe": list(_IRON_FRACTION)},
+)
+
+
+def _mica_sites(result, sites):
+    apfu = result["apfu"]
+    tetrahedral_deficit = sites["tetrahedral"] - apfu["Si"]
+    al_iv = min(apfu["Al"], max(0, tetrahedral_deficit))
+    result["site_sum_apfu"] = {"Al_IV": al_iv, "Al_VI": apfu["Al"] - al_iv}
+    if not 0 <= tetrahedral_deficit <= apfu["Al"]:
+        result["warnings"].append({"kind": "outside_model_check", "field": "mica_tetrahedral_site"})
+    missing = sorted({"F", "Cl"} - apfu.keys())
+    if missing:
+        result["warnings"].append({"kind": "components_unavailable", "field": "mica_OH_upper_bound",
+                                   "missing_species": missing})
+        return
+    residual = sites["anion"] - math.fsum(apfu[species] for species in ("F", "Cl"))
+    result["anion_balance_apfu"] = {"W_site_residual": residual}
+    if residual < 0:
+        result["warnings"].append({"kind": "outside_model_check", "field": "mica_W_site"})
+    else:
+        result["estimated_anions_apfu"] = {"OH_upper_bound": residual}
 
 
 def _titanite_result(result, octahedral_cations):
@@ -320,6 +372,8 @@ def calculate_mineral_formula(values, method):
         for index, (numerator, terms) in method["index_rules"].items():
             if set(terms) <= apfu.keys() and (total := math.fsum(apfu[element] for element in terms)):
                 result["indices"][index] = apfu[numerator] / total
+    if "mica_sites" in rules:
+        _mica_sites(result, rules["mica_sites"])
     if "site_proxies" in rules:
         sums = {site: math.fsum(apfu[key] for key in species if key in apfu)
                 for site, species in rules["site_proxies"].items()}
