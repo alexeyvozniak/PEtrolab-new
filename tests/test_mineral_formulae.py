@@ -8,7 +8,7 @@ from petrolab.desktop_workflow import list_project_analyses, suggest_import_reci
 from petrolab.import_apply import apply_import_plan
 from petrolab.import_preview import ImportCommandError
 from petrolab.mineral_formulae import (
-    CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, ILMENITE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
+    CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, ILMENITE, NEPHELINE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
     calculate_mineral_formula,
 )
 from petrolab.ndjson_service import handle_request
@@ -146,6 +146,27 @@ class MineralFormulaTests(unittest.TestCase):
         with self.assertRaises(ImportCommandError):
             calculate_mineral_formula(dict(SiO2=60, MgO=40), GARNET)
 
+    def test_nepheline_reference_and_missing_cavity_components(self):
+        # Henderson (2020), Table 4 column 2, Barth sample recalculation.
+        values = dict(SiO2=42.85, Al2O3=33.36, Fe2O3=0.10, CaO=1.42, Na2O=15.00, K2O=5.81)
+        result = calculate_mineral_formula(values, NEPHELINE)
+        for field, expected in dict(Si=8.333, Al=7.646, Na=5.655, K=1.441, Ca=0.296).items():
+            self.assertAlmostEqual(result["apfu"][field], expected, delta=0.005)
+        fractions = result["end_member_mol_percent"]
+        for field, expected in dict(Ne=70.69, Ks=18.02, CaNe=7.40, Qxs=3.89).items():
+            self.assertAlmostEqual(fractions[field], expected, delta=0.08)
+        self.assertAlmostEqual(result["charge_per_formula"]["delta_Al_cc"], -0.028, delta=0.005)
+        ideal = calculate_mineral_formula(dict(SiO2=42.30, Al2O3=35.89, Na2O=21.81, K2O=0, CaO=0), NEPHELINE)
+        self.assertAlmostEqual(ideal["site_sum_apfu"]["framework_sum"], 16, delta=0.003)
+        self.assertAlmostEqual(ideal["end_member_mol_percent"]["Ne"], 100, delta=0.03)
+        incomplete = calculate_mineral_formula({key: value for key, value in values.items() if key != "K2O"}, NEPHELINE)
+        self.assertNotIn("Qxs", incomplete["end_member_mol_percent"])
+        self.assertIn({"kind": "components_unavailable", "field": "nepheline_cavity", "missing_species": ["K"]},
+                      incomplete["warnings"])
+        enriched = calculate_mineral_formula({**values, "Na2O": 24}, NEPHELINE)
+        self.assertLess(enriched["end_member_mol_percent"]["Qxs"], 0)
+        self.assertIn({"kind": "outside_model_check", "field": "nepheline_stoichiometry"}, enriched["warnings"])
+
     def test_all_methods_round_trip_through_the_versioned_service(self):
         with TemporaryDirectory() as folder:
             source, database = Path(folder) / "epma.csv", Path(folder) / "project.sqlite"
@@ -162,6 +183,7 @@ class MineralFormulaTests(unittest.TestCase):
                 output.writerow(["V1", "", "", 41.25, "", "", "", "", "", "", 58.75])
                 output.writerow(["C1", "", "", 27.48, "", "", 20.66, "", "", "", "", 3.45])
                 output.writerow(["G1", 33.77, 21.16, 0.52, "", "", 0.02, 2.93, "", "", "", "", 41.51])
+                output.writerow(["N1", 42.85, 33.36, 1.42, 15, 5.81])
             original = source.read_bytes()
             apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
             baseline = list_project_analyses(database)["analyses"]
@@ -181,6 +203,7 @@ class MineralFormulaTests(unittest.TestCase):
                 ("C1", CARBONATE_1CAT, {"CaO", "MgO"}, "cation_fraction.Ca", "1"),
                 ("C1", CARBONATE_2CAT, {"CaO", "MgO", "FeOt"}, "apfu.Fe_total", "APFU"),
                 ("G1", GARNET, {"SiO2", "Al2O3", "CaO", "MgO", "FeO", "MnO"}, "end_member_mol_percent.Sps", "mol.%"),
+                ("N1", NEPHELINE, {"SiO2", "Al2O3", "CaO", "Na2O", "K2O"}, "charge_per_formula.delta_Al_cc", "e/f.u."),
             ]
             catalog = {method["method_id"]: method for method in call("formula.methods.list")["result"]}
             self.assertIn("formula.olivine.4o", catalog)

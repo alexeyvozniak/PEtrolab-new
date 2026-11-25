@@ -135,6 +135,63 @@ GARNET = _definition(
     positive_groups=(("MgO", "FeO", "MnO", "CaO"), ("Al2O3", "Fe2O3", "Cr2O3")),
     indices={"Mg#": list(_MG_NUMBER)},
 )
+NEPHELINE = _definition(
+    "formula.nepheline.32o", "Нефелин по Henderson на 32 атома кислорода", 32,
+    ["SiO2", "Al2O3", "Na2O"], "K2O CaO TiO2 FeO Fe2O3 MgO MnO Cr2O3", [21.3, 24],
+    ["https://doi.org/10.1180/mgm.2020.78"], "Henderson (2020), Table 4, Barth sample 1, recalculated column 2",
+    {"nepheline": {"framework_sites": 16, "cavity_sites": 8,
+                   "framework_cations": ["Si", "Ti", "Al", "Fe3+"],
+                   "cavity_cations": ["Na", "K", "Ca"],
+                   "charge_difference_max": 0.25, "near_zero_charge": 0.02,
+                   "framework_sum_range": [15.9, 16.1], "delta_ratio_range": [1.0, 1.2]},
+     "basis": "Table 2 equations 3–6 and 14, before Na excess correction; selected oxides only"},
+)
+
+
+def _nepheline_result(result, rules):
+    apfu = result["apfu"]
+    framework = rules["framework_cations"]
+    cavity = rules["cavity_cations"]
+    measured_framework = {cation: apfu[cation] for cation in framework if cation in apfu}
+    framework_sum = math.fsum(measured_framework.values())
+    if not framework_sum:
+        raise ImportCommandError("FORMULA_INVALID_MEASUREMENT", "Сумма катионов каркаса ниже числовой точности.")
+    framework_charge = math.fsum(value * (4 if cation in {"Si", "Ti"} else 3)
+                                for cation, value in measured_framework.items())
+    trivalent = math.fsum(apfu[cation] for cation in ("Al", "Fe3+") if cation in apfu)
+    delta_t = (framework_charge / framework_sum) * (rules["framework_sites"] - framework_sum)
+    site_sums = {"framework_sum": framework_sum}
+    charge = {"delta_T_charge": delta_t}
+    indices = {"Si_Al": apfu["Si"] / trivalent} if trivalent else {}
+    sites = rules["cavity_sites"]
+    fractions = {"Ne": 100 * apfu["Na"] / sites}
+    if "K" in apfu:
+        fractions["Ks"] = 100 * apfu["K"] / sites
+    if "Ca" in apfu:
+        fractions["CaNe"] = 200 * apfu["Ca"] / sites
+    if {"Mg", "Fe2+", "Mn"} <= apfu.keys():
+        fractions["KsM"] = 200 * math.fsum(apfu[cation] for cation in ("Mg", "Fe2+", "Mn")) / sites
+
+    missing = sorted(set(cavity) - apfu.keys())
+    if missing:
+        result["warnings"].append({"kind": "components_unavailable", "field": "nepheline_cavity",
+                                   "missing_species": missing})
+    else:
+        cavity_charge = apfu["Na"] + apfu["K"] + 2 * apfu["Ca"]
+        delta_al = trivalent - cavity_charge
+        charge.update(cavity_charge=cavity_charge, delta_Al_cc=delta_al)
+        site_sums["cavity_vacancy_proxy"] = sites - math.fsum(apfu[cation] for cation in cavity)
+        fractions["Qxs"] = 100 * (sites - cavity_charge) / sites
+        if delta_t:
+            indices["delta_ratio"] = delta_al / delta_t
+        near_zero = max(abs(delta_al), abs(delta_t)) < rules["near_zero_charge"]
+        ratio = abs(indices.get("delta_ratio", 0))
+        if (not rules["framework_sum_range"][0] <= framework_sum <= rules["framework_sum_range"][1]
+                or max(abs(delta_al), abs(delta_t)) > rules["charge_difference_max"]
+                or not (near_zero or rules["delta_ratio_range"][0] <= ratio <= rules["delta_ratio_range"][1])):
+            result["warnings"].append({"kind": "outside_model_check", "field": "nepheline_stoichiometry"})
+    return {**result, "site_sum_apfu": site_sums, "charge_per_formula": charge,
+            "indices": indices, "end_member_mol_percent": fractions}
 
 
 def calculate_mineral_formula(values, method):
@@ -155,6 +212,8 @@ def calculate_mineral_formula(values, method):
     result = normalize_oxide_formula(values, method)
     apfu = result["apfu"]
     rules = method["end_member_rules"]
+    if "nepheline" in rules:
+        return _nepheline_result(result, rules["nepheline"])
     if "fractions" in rules:
         species = rules["fractions"]
         missing = sorted(set(species.values()) - apfu.keys())

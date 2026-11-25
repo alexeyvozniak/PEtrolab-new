@@ -23,6 +23,8 @@ Scientific Method Definition становится единственным ко�
 
 Гранаты на 12 O сохраняют Prp–Alm–Sps и долю Ca из четырёх явно заданных катионов X. Для распределения ненулевой доли Ca между Grs, Adr и Uv нужны выбранные значения Al, Fe³⁺ и Cr. При неполном входе остаётся общая доля Ca и диагностическое сообщение. Режим использует исходные формы Fe. [Составы гранатов, таблица 1](https://doi.org/10.1016/j.gsf.2023.101699) · [Номенклатура IMA](https://doi.org/10.2138/am.2013.4201).
 
+Нефелин на 32 O сохраняет APFU, Ne–Ks–CaNe–Qxs и отдельно диагностические суммы катионов и заряды. В расчёте используются выбранные оксиды и заданная форма Fe. Без явных значений K и Ca для полостных позиций Qxs не выводится. Отрицательное значение Qxs сохраняется с диагностикой стехиометрии. Дополнительный KsM требует Mg, Fe²⁺ и Mn. [Henderson, таблицы 2 и 4](https://doi.org/10.1180/mgm.2020.78).
+
 Import Recipe, Edit Draft, Table View, Workspace Snapshot, Analysis Template and Operation Journal Entry are separate domain entities. Snapshot contains concrete research state; Template contains no concrete Analysis IDs. Portable archives have explicit inclusion levels and validated restore semantics.
 
 Streamlit UI, wrappers, compatibility routes and session keys are not migrated. Legacy implementations are evidence and test input, not a code dependency.
