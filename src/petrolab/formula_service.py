@@ -7,7 +7,7 @@ from .desktop_workflow import _measurement_numeric_value
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError, value_status
 from .mineral_formulae import (
-    CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, ILMENITE, NEPHELINE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
+    APATITE, CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, ILMENITE, NEPHELINE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
     calculate_mineral_formula,
 )
 from .olivine_formula import OLIVINE, calculate_olivine
@@ -17,10 +17,12 @@ from .statistics_service import _fingerprint
 
 _OXIDE_METHODS = {method["method_id"]: method for method in (
     FELDSPAR, PYROXENE, SPINEL, ILMENITE, ZIRCON, PEROVSKITE, CARBONATE_1CAT, CARBONATE_2CAT, GARNET, NEPHELINE,
+    APATITE,
 )}
 _DERIVED_UNITS = {
     "apfu": "APFU", "divalent_component_mol_percent": "mol.%", "end_member_mol_percent": "mol.%",
     "quadrilateral_apfu": "APFU", "site_sum_apfu": "APFU", "charge_per_formula": "e/f.u.",
+    "anion_balance_apfu": "APFU", "estimated_anions_apfu": "APFU",
     "indices": "1", "cation_fraction": "1",
 }
 

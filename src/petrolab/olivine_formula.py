@@ -63,8 +63,10 @@ def normalize_oxide_formula(values, method):
     apfu = {components[oxide]["species"]: (amount / denominator) * method[basis_field] * components[oxide]["cations"]
             for oxide, amount in moles.items()}
     bounds = method["applicability_checks"]
-    total = math.fsum(values.values())
-    cations = math.fsum(apfu.values())
+    anions = {oxide for oxide in values if components[oxide].get("kind") == "anion"}
+    total = math.fsum(value for oxide, value in values.items() if oxide not in anions)
+    anion_species = {components[oxide]["species"] for oxide in anions}
+    cations = math.fsum(value for species, value in apfu.items() if species not in anion_species)
     warnings = []
     for code, value in (("oxide_sum_wt_pct", total), ("cation_sum_apfu", cations)):
         if code not in bounds:

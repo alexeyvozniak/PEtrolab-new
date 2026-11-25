@@ -8,7 +8,7 @@ from petrolab.desktop_workflow import list_project_analyses, suggest_import_reci
 from petrolab.import_apply import apply_import_plan
 from petrolab.import_preview import ImportCommandError
 from petrolab.mineral_formulae import (
-    CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, ILMENITE, NEPHELINE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
+    APATITE, CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, ILMENITE, NEPHELINE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
     calculate_mineral_formula,
 )
 from petrolab.ndjson_service import handle_request
@@ -167,6 +167,26 @@ class MineralFormulaTests(unittest.TestCase):
         self.assertLess(enriched["end_member_mol_percent"]["Qxs"], 0)
         self.assertIn({"kind": "outside_model_check", "field": "nepheline_stoichiometry"}, enriched["warnings"])
 
+    def test_apatite_reference_and_x_site_balance(self):
+        # Li et al. (2024), microprobe precision example; the four reported major components.
+        values = dict(CaO=54.48, P2O5=41.37, F=2.133, Cl=1.016)
+        result = calculate_mineral_formula(values, APATITE)
+        for field, expected in dict(X_F=0.572, X_Cl=0.146, X_OH=0.281).items():
+            self.assertAlmostEqual(result["indices"][field], expected, delta=0.015)
+        self.assertAlmostEqual(result["estimated_anions_apfu"]["OH"], 0.562, delta=0.03)
+        self.assertAlmostEqual(result["cation_sum_apfu"], result["apfu"]["Ca"] + result["apfu"]["P"])
+        ideal = calculate_mineral_formula(dict(CaO=55.82, P2O5=42.39, F=0, Cl=0), APATITE)
+        self.assertAlmostEqual(ideal["apfu"]["Ca"], 10, delta=0.002)
+        self.assertEqual(ideal["estimated_anions_apfu"], {"OH": 2})
+        incomplete = calculate_mineral_formula(dict(CaO=54.48, P2O5=41.37, F=2.133), APATITE)
+        self.assertNotIn("estimated_anions_apfu", incomplete)
+        self.assertIn({"kind": "components_unavailable", "field": "apatite_OH_estimate", "missing_species": ["Cl"]},
+                      incomplete["warnings"])
+        overloaded = calculate_mineral_formula({**values, "F": 6}, APATITE)
+        self.assertLess(overloaded["anion_balance_apfu"]["X_site_residual"], 0)
+        self.assertNotIn("estimated_anions_apfu", overloaded)
+        self.assertTrue(any(warning["field"] == "apatite_X_site" for warning in overloaded["warnings"]))
+
     def test_all_methods_round_trip_through_the_versioned_service(self):
         with TemporaryDirectory() as folder:
             source, database = Path(folder) / "epma.csv", Path(folder) / "project.sqlite"
@@ -174,7 +194,7 @@ class MineralFormulaTests(unittest.TestCase):
                 output = csv.writer(stream)
                 output.writerow(["Analysis", "SiO2 (wt.%)", "Al2O3 (wt.%)", "CaO (wt.%)", "Na2O (wt.%)",
                                  "K2O (wt.%)", "MgO (wt.%)", "FeO (wt.%)", "ZrO2 (wt.%)", "HfO2 (wt.%)",
-                                 "TiO2 (wt.%)", "FeOt (wt.%)", "MnO (wt.%)"])
+                                 "TiO2 (wt.%)", "FeOt (wt.%)", "MnO (wt.%)", "P2O5 (wt.%)", "F (wt.%)", "Cl (wt.%)"])
                 output.writerow(["F1", 44.82, 34.55, 18.63, 0.67, 0.05, "", "", "", ""])
                 output.writerow(["P1", 50, 8.39, 14.79, 0.20, 0.02, 19, 5.78, "", ""])
                 output.writerow(["Z1", 32.67, "", "", "", "", "", "", 65.74, "<0.01"])
@@ -184,6 +204,8 @@ class MineralFormulaTests(unittest.TestCase):
                 output.writerow(["C1", "", "", 27.48, "", "", 20.66, "", "", "", "", 3.45])
                 output.writerow(["G1", 33.77, 21.16, 0.52, "", "", 0.02, 2.93, "", "", "", "", 41.51])
                 output.writerow(["N1", 42.85, 33.36, 1.42, 15, 5.81])
+                output.writerow(["AP1", "", "", 54.48, "", "", "", "", "", "", "", "", "", 41.37, 2.133, 1.016])
+                output.writerow(["AP2", "", "", 54.48, "", "", "", "", "", "", "", "", "", 41.37, 2.133, "<0.01"])
             original = source.read_bytes()
             apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
             baseline = list_project_analyses(database)["analyses"]
@@ -204,6 +226,7 @@ class MineralFormulaTests(unittest.TestCase):
                 ("C1", CARBONATE_2CAT, {"CaO", "MgO", "FeOt"}, "apfu.Fe_total", "APFU"),
                 ("G1", GARNET, {"SiO2", "Al2O3", "CaO", "MgO", "FeO", "MnO"}, "end_member_mol_percent.Sps", "mol.%"),
                 ("N1", NEPHELINE, {"SiO2", "Al2O3", "CaO", "Na2O", "K2O"}, "charge_per_formula.delta_Al_cc", "e/f.u."),
+                ("AP1", APATITE, {"CaO", "P2O5", "F", "Cl"}, "estimated_anions_apfu.OH", "APFU"),
             ]
             catalog = {method["method_id"]: method for method in call("formula.methods.list")["result"]}
             self.assertIn("formula.olivine.4o", catalog)
@@ -226,5 +249,10 @@ class MineralFormulaTests(unittest.TestCase):
                     self.assertEqual(reopened["status"], "current")
                     derived = {item["field"]: item["unit"] for item in run["result_manifest"]["derived_values"]}
                     self.assertEqual(derived[expected_field], expected_unit)
+            censored = rows["AP2"]
+            blocked = call("formula.review", method_id=APATITE["method_id"], analysis_id=censored["analysis_id"],
+                           measurement_ids=[item["measurement_id"] for item in censored["measurement_list"]
+                                            if item["field"] in {"CaO", "P2O5", "F", "Cl"}])
+            self.assertEqual(blocked["error"]["code"], "FORMULA_INVALID_MEASUREMENT")
             self.assertEqual(list_project_analyses(database)["analyses"], baseline)
             self.assertEqual(source.read_bytes(), original)

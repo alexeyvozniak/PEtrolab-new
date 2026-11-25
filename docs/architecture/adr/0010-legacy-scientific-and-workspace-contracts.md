@@ -25,6 +25,8 @@ Scientific Method Definition становится единственным ко�
 
 Нефелин на 32 O сохраняет APFU, Ne–Ks–CaNe–Qxs и отдельно диагностические суммы катионов и заряды. В расчёте используются выбранные оксиды и заданная форма Fe. Без явных значений K и Ca для полостных позиций Qxs не выводится. Отрицательное значение Qxs сохраняется с диагностикой стехиометрии. Дополнительный KsM требует Mg, Fe²⁺ и Mn. [Henderson, таблицы 2 и 4](https://doi.org/10.1180/mgm.2020.78).
 
+Апатит на 25 кислородных эквивалентов сохраняет F и Cl в APFU отдельно от суммы катионов. Замыкание X-позиции на F, Cl и OH даёт оценку OH только при количественных F и Cl. Если их сумма больше 2 APFU, сохраняется отрицательный диагностический остаток и предупреждение. Оценку OH в этом случае не вычисляют. Для других анионов канала нужен отдельный метод. [Ketcham](https://doi.org/10.2138/am-2015-5171) · [Контрольный состав Li et al.](https://doi.org/10.1007/s00410-024-02147-8).
+
 Import Recipe, Edit Draft, Table View, Workspace Snapshot, Analysis Template and Operation Journal Entry are separate domain entities. Snapshot contains concrete research state; Template contains no concrete Analysis IDs. Portable archives have explicit inclusion levels and validated restore semantics.
 
 Streamlit UI, wrappers, compatibility routes and session keys are not migrated. Legacy implementations are evidence and test input, not a code dependency.

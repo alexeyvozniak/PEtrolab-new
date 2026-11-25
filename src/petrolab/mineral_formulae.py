@@ -31,6 +31,8 @@ _COMPONENTS = {
     "Ce2O3": _component("Ce", 140.12, 2, 3),
     "Nd2O3": _component("Nd", 144.24, 2, 3),
     "FeOt": _component("Fe_total", 55.845, 1, 1),
+    "F": {**_component("F", 18.998, 1, 0), "kind": "anion"},
+    "Cl": {**_component("Cl", 35.45, 1, 0), "kind": "anion"},
 }
 
 
@@ -146,6 +148,36 @@ NEPHELINE = _definition(
                    "framework_sum_range": [15.9, 16.1], "delta_ratio_range": [1.0, 1.2]},
      "basis": "Table 2 equations 3–6 and 14, before Na excess correction; selected oxides only"},
 )
+APATITE = {
+    **_definition(
+        "formula.apatite.25oeq", "Апатит по Ketcham на 25 кислородных эквивалентов", 25,
+        ["CaO", "P2O5"], "SiO2 Al2O3 FeO Fe2O3 MgO MnO Na2O K2O SrO BaO La2O3 Ce2O3 Nd2O3 Y2O3 SO3 F Cl",
+        [15.6, 16.4],
+        ["https://doi.org/10.2138/am-2015-5171", "https://doi.org/10.1007/s00410-024-02147-8"],
+        "Li et al. (2024), volatile precision example",
+        {"apatite_x_site_capacity": 2},
+    ),
+    "oh_basis": "Closure estimate OH = 2 - F - Cl on 25 oxygen equivalents. Requires selected quantitative F and Cl; "
+                "assumes a full X site occupied only by these three anions. Other channel anions are outside this model.",
+}
+
+
+def _apatite_result(result, capacity):
+    apfu = result["apfu"]
+    missing = sorted({"F", "Cl"} - apfu.keys())
+    if missing:
+        result["warnings"].append({"kind": "components_unavailable", "field": "apatite_OH_estimate",
+                                   "missing_species": missing})
+        return result
+    residual = capacity - math.fsum(apfu[key] for key in ("F", "Cl"))
+    result["anion_balance_apfu"] = {"X_site_residual": residual}
+    if residual < 0:
+        result["warnings"].append({"kind": "outside_model_check", "field": "apatite_X_site",
+                                   "value": capacity - residual, "range": [0, capacity]})
+        return result
+    result["estimated_anions_apfu"] = {"OH": residual}
+    result["indices"] = {"X_F": apfu["F"] / capacity, "X_Cl": apfu["Cl"] / capacity, "X_OH": residual / capacity}
+    return result
 
 
 def _nepheline_result(result, rules):
@@ -214,6 +246,8 @@ def calculate_mineral_formula(values, method):
     rules = method["end_member_rules"]
     if "nepheline" in rules:
         return _nepheline_result(result, rules["nepheline"])
+    if "apatite_x_site_capacity" in rules:
+        return _apatite_result(result, rules["apatite_x_site_capacity"])
     if "fractions" in rules:
         species = rules["fractions"]
         missing = sorted(set(species.values()) - apfu.keys())
