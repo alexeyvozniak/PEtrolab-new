@@ -27,6 +27,8 @@ Scientific Method Definition становится единственным ко�
 
 Апатит на 25 кислородных эквивалентов сохраняет F и Cl в APFU отдельно от суммы катионов. Замыкание X-позиции на F, Cl и OH даёт оценку OH только при количественных F и Cl. Если их сумма больше 2 APFU, сохраняется отрицательный диагностический остаток и предупреждение. Оценку OH в этом случае не вычисляют. Для других анионов канала нужен отдельный метод. [Ketcham](https://doi.org/10.2138/am-2015-5171) · [Контрольный состав Li et al.](https://doi.org/10.1007/s00410-024-02147-8).
 
+Титанит нормируется на два катиона T + M. В основу входят Si, Ti, Al, Fe³⁺, Mg, Mn, Cr и Sn при их наличии. Результат содержит APFU и долю Ti среди выбранных катионов M. Оценка OH использует допущение, что Al и Fe³⁺ входят в M-позицию. Она вычисляется при явно выбранных Al₂O₃, Fe₂O₃ и F. Отрицательный остаток или сумма F + OH больше единицы приводят к диагностике, а оценка не сохраняется. Для проверки опубликованные APFU на один Si приведены к той же основе T + M. [Walters](https://doi.org/10.2478/mipo-2022-0005) · [Ordosch et al., таблица 4](https://doi.org/10.1007/s00710-019-00675-x).
+
 Import Recipe, Edit Draft, Table View, Workspace Snapshot, Analysis Template and Operation Journal Entry are separate domain entities. Snapshot contains concrete research state; Template contains no concrete Analysis IDs. Portable archives have explicit inclusion levels and validated restore semantics.
 
 Streamlit UI, wrappers, compatibility routes and session keys are not migrated. Legacy implementations are evidence and test input, not a code dependency.

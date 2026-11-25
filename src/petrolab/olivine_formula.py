@@ -57,7 +57,9 @@ def normalize_oxide_formula(values, method):
     components = method["components"]
     moles = {oxide: value / components[oxide]["molar_mass"] for oxide, value in values.items()}
     basis_field, coefficient = ("cation_basis", "cations") if method["cation_basis"] else ("oxygen_basis", "oxygens")
-    denominator = math.fsum(amount * components[oxide][coefficient] for oxide, amount in moles.items())
+    basis_species = method.get("cation_basis_species")
+    denominator = math.fsum(amount * components[oxide][coefficient] for oxide, amount in moles.items()
+                            if basis_species is None or components[oxide]["species"] in basis_species)
     if denominator <= 0:
         raise ImportCommandError("FORMULA_INVALID_MEASUREMENT", "Знаменатель нормировки ниже числовой точности.")
     apfu = {components[oxide]["species"]: (amount / denominator) * method[basis_field] * components[oxide]["cations"]

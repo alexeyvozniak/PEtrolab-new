@@ -9,7 +9,7 @@ from petrolab.import_apply import apply_import_plan
 from petrolab.import_preview import ImportCommandError
 from petrolab.mineral_formulae import (
     APATITE, CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, ILMENITE, NEPHELINE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
-    calculate_mineral_formula,
+    TITANITE, calculate_mineral_formula,
 )
 from petrolab.ndjson_service import handle_request
 
@@ -187,6 +187,34 @@ class MineralFormulaTests(unittest.TestCase):
         self.assertNotIn("estimated_anions_apfu", overloaded)
         self.assertTrue(any(warning["field"] == "apatite_X_site" for warning in overloaded["warnings"]))
 
+    def test_titanite_reference_and_conditional_hydroxyl(self):
+        # Ordosch et al. (2019), Table 4, P40 and P43. Their 1-Si benchmark is
+        # rescaled to 2 T+M. Published iron is assigned to Fe3+ by the authors.
+        cases = [
+            (dict(SiO2=29.89, SnO2=0.32, TiO2=38.30, Al2O3=2.43, Fe2O3=0.39 * 1.1113, CaO=27.16, F=0.65),
+             (0.964, 0.096, 0.011, 0.004, 0.974, 0.069, 0.038)),
+            (dict(SiO2=29.71, SnO2=4.84, TiO2=32.11, Al2O3=4.83, Fe2O3=0.85 * 1.1113, CaO=26.80, F=1.39),
+             (0.813, 0.191, 0.024, 0.065, 0.966, 0.148, 0.068)),
+        ]
+        for values, expected in cases:
+            with self.subTest(values=values):
+                ti, al, fe3, sn, ca, fluorine, oh = expected
+                scale = 2 / (1 + ti + al + fe3 + sn)
+                result = calculate_mineral_formula(values, TITANITE)
+                for field, value in dict(Si=1, Ti=ti, Al=al, Sn=sn, Ca=ca, F=fluorine).items():
+                    self.assertAlmostEqual(result["apfu"][field], value * scale, delta=0.002)
+                self.assertAlmostEqual(result["estimated_anions_apfu"]["OH"], oh * scale, delta=0.003)
+                self.assertAlmostEqual(result["site_sum_apfu"]["T_plus_M"], 2)
+        ideal = calculate_mineral_formula(dict(CaO=28.61, TiO2=40.72, SiO2=30.67, Al2O3=0, Fe2O3=0, F=0), TITANITE)
+        self.assertAlmostEqual(ideal["apfu"]["Ca"], 1, delta=0.002)
+        self.assertEqual(ideal["estimated_anions_apfu"], {"OH": 0})
+        unknown = calculate_mineral_formula(dict(CaO=28.61, TiO2=40.72, SiO2=30.67, Al2O3=0, F=0), TITANITE)
+        self.assertNotIn("estimated_anions_apfu", unknown)
+        self.assertEqual(unknown["warnings"][-1]["missing_species"], ["Fe3+"])
+        excessive = calculate_mineral_formula({**cases[0][0], "F": 3}, TITANITE)
+        self.assertLess(excessive["anion_balance_apfu"]["OH_residual"], 0)
+        self.assertNotIn("estimated_anions_apfu", excessive)
+
     def test_all_methods_round_trip_through_the_versioned_service(self):
         with TemporaryDirectory() as folder:
             source, database = Path(folder) / "epma.csv", Path(folder) / "project.sqlite"
@@ -206,6 +234,7 @@ class MineralFormulaTests(unittest.TestCase):
                 output.writerow(["N1", 42.85, 33.36, 1.42, 15, 5.81])
                 output.writerow(["AP1", "", "", 54.48, "", "", "", "", "", "", "", "", "", 41.37, 2.133, 1.016])
                 output.writerow(["AP2", "", "", 54.48, "", "", "", "", "", "", "", "", "", 41.37, 2.133, "<0.01"])
+                output.writerow(["T1", 30.67, "", 28.61, "", "", "", "", "", "", 40.72])
             original = source.read_bytes()
             apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
             baseline = list_project_analyses(database)["analyses"]
@@ -227,6 +256,7 @@ class MineralFormulaTests(unittest.TestCase):
                 ("G1", GARNET, {"SiO2", "Al2O3", "CaO", "MgO", "FeO", "MnO"}, "end_member_mol_percent.Sps", "mol.%"),
                 ("N1", NEPHELINE, {"SiO2", "Al2O3", "CaO", "Na2O", "K2O"}, "charge_per_formula.delta_Al_cc", "e/f.u."),
                 ("AP1", APATITE, {"CaO", "P2O5", "F", "Cl"}, "estimated_anions_apfu.OH", "APFU"),
+                ("T1", TITANITE, {"CaO", "SiO2", "TiO2"}, "site_sum_apfu.T_plus_M", "APFU"),
             ]
             catalog = {method["method_id"]: method for method in call("formula.methods.list")["result"]}
             self.assertIn("formula.olivine.4o", catalog)

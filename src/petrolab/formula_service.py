@@ -8,7 +8,7 @@ from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError, value_status
 from .mineral_formulae import (
     APATITE, CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, ILMENITE, NEPHELINE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
-    calculate_mineral_formula,
+    TITANITE, calculate_mineral_formula,
 )
 from .olivine_formula import OLIVINE, calculate_olivine
 from .plot_data import _selection
@@ -17,7 +17,7 @@ from .statistics_service import _fingerprint
 
 _OXIDE_METHODS = {method["method_id"]: method for method in (
     FELDSPAR, PYROXENE, SPINEL, ILMENITE, ZIRCON, PEROVSKITE, CARBONATE_1CAT, CARBONATE_2CAT, GARNET, NEPHELINE,
-    APATITE,
+    APATITE, TITANITE,
 )}
 _DERIVED_UNITS = {
     "apfu": "APFU", "divalent_component_mol_percent": "mol.%", "end_member_mol_percent": "mol.%",

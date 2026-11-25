@@ -16,6 +16,7 @@ _COMPONENTS = {
     "BaO": _component("Ba", 137.327, 1, 1),
     "SrO": _component("Sr", 87.62, 1, 1),
     "ZrO2": _component("Zr", 91.224, 1, 2),
+    "SnO2": _component("Sn", 118.71, 1, 2),
     "HfO2": _component("Hf", 178.49, 1, 2),
     "ThO2": _component("Th", 232.04, 1, 2),
     "UO2": _component("U", 238.03, 1, 2),
@@ -160,6 +161,41 @@ APATITE = {
     "oh_basis": "Closure estimate OH = 2 - F - Cl on 25 oxygen equivalents. Requires selected quantitative F and Cl; "
                 "assumes a full X site occupied only by these three anions. Other channel anions are outside this model.",
 }
+_TITANITE_M_CATIONS = ["Ti", "Al", "Fe3+", "Mg", "Mn", "Cr", "Sn"]
+TITANITE = {
+    **_definition(
+        "formula.titanite.2cat", "Титанит на 2 катиона T + M", None, ["CaO", "SiO2", "TiO2"],
+        "Al2O3 FeO Fe2O3 MgO MnO Cr2O3 SnO2 F", [2.7, 3.3],
+        ["https://doi.org/10.2478/mipo-2022-0005", "https://doi.org/10.1007/s00710-019-00675-x"],
+        "Ordosch et al. (2019), Table 4, P40 and P43, published APFU rescaled to T + M = 2",
+        {"titanite_M_cations": _TITANITE_M_CATIONS,
+         "basis": "T + M normalization of measured components; selected Al is assigned to M in this model"},
+    ),
+    "cation_basis": 2,
+    "cation_basis_species": ["Si", *_TITANITE_M_CATIONS],
+    "oh_basis": "Conditional estimate OH = Al + Fe3+ - F for the coupled substitution; requires explicit quantitative "
+                "Al2O3, Fe2O3 and F. Assumes the selected Al and Fe3+ occupy the M site. No redox or water measurement.",
+}
+
+
+def _titanite_result(result, octahedral_cations):
+    apfu = result["apfu"]
+    octahedral_sum = math.fsum(apfu[species] for species in octahedral_cations if species in apfu)
+    result["site_sum_apfu"] = {"T_plus_M": apfu["Si"] + octahedral_sum, "M": octahedral_sum}
+    if octahedral_sum:
+        result["indices"] = {"X_titanite_proxy": apfu["Ti"] / octahedral_sum}
+    missing = sorted({"Al", "Fe3+", "F"} - apfu.keys())
+    if missing:
+        result["warnings"].append({"kind": "components_unavailable", "field": "titanite_OH_estimate",
+                                   "missing_species": missing})
+        return result
+    residual = apfu["Al"] + apfu["Fe3+"] - apfu["F"]
+    result["anion_balance_apfu"] = {"OH_residual": residual}
+    if residual < 0 or apfu["F"] + residual > 1:
+        result["warnings"].append({"kind": "outside_model_check", "field": "titanite_OH_estimate"})
+        return result
+    result["estimated_anions_apfu"] = {"OH": residual}
+    return result
 
 
 def _apatite_result(result, capacity):
@@ -248,6 +284,8 @@ def calculate_mineral_formula(values, method):
         return _nepheline_result(result, rules["nepheline"])
     if "apatite_x_site_capacity" in rules:
         return _apatite_result(result, rules["apatite_x_site_capacity"])
+    if "titanite_M_cations" in rules:
+        return _titanite_result(result, rules["titanite_M_cations"])
     if "fractions" in rules:
         species = rules["fractions"]
         missing = sorted(set(species.values()) - apfu.keys())
