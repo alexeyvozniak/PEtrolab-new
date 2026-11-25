@@ -6,16 +6,21 @@ import json
 from .desktop_workflow import _measurement_numeric_value
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError, value_status
-from .mineral_formulae import FELDSPAR, ILMENITE, PYROXENE, SPINEL, ZIRCON, calculate_mineral_formula
+from .mineral_formulae import (
+    CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, ILMENITE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
+    calculate_mineral_formula,
+)
 from .olivine_formula import OLIVINE, calculate_olivine
 from .plot_data import _selection
 from .statistics_service import _fingerprint
 
 
-_OXIDE_METHODS = {method["method_id"]: method for method in (FELDSPAR, PYROXENE, SPINEL, ILMENITE, ZIRCON)}
+_OXIDE_METHODS = {method["method_id"]: method for method in (
+    FELDSPAR, PYROXENE, SPINEL, ILMENITE, ZIRCON, PEROVSKITE, CARBONATE_1CAT, CARBONATE_2CAT,
+)}
 _DERIVED_UNITS = {
     "apfu": "APFU", "divalent_component_mol_percent": "mol.%", "end_member_mol_percent": "mol.%",
-    "quadrilateral_apfu": "APFU", "indices": "1",
+    "quadrilateral_apfu": "APFU", "site_sum_apfu": "APFU", "indices": "1", "cation_fraction": "1",
 }
 
 
@@ -77,7 +82,7 @@ def _read_input(connection, analysis_id, measurement_ids, method):
     for row in rows:
         measurement = dict(row)
         oxide = row["canonical_field"]
-        if oxide in {"FeO", "Fe2O3"} and row["reported_fe_form"] != oxide:
+        if oxide in {"FeO", "Fe2O3", "FeOt"} and row["reported_fe_form"] != oxide:
             raise ImportCommandError("FORMULA_UNRESOLVED_IRON", "Форма железа в источнике не соответствует выбранному оксиду.")
         correction = corrections.get(row["measurement_id"])
         effective = measurement if correction is None else {**measurement, "raw_token": correction["raw_token"],

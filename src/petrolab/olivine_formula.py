@@ -43,7 +43,7 @@ def calculate_olivine(values, method=OLIVINE):
         raise ImportCommandError("FORMULA_UNSUPPORTED_COMPONENTS", "Нужны SiO₂, MgO и FeO; выберите только поддерживаемые оксиды.")
     if any(type(value) not in (int, float) or not 0 <= value <= 100 for value in values.values()) or values["SiO2"] <= 0:
         raise ImportCommandError("FORMULA_INVALID_MEASUREMENT", "Для расчёта нужны массовые доли от 0 до 100 wt.% и положительный SiO₂.")
-    result = oxygen_normalized_formula(values, method)
+    result = normalize_oxide_formula(values, method)
     apfu = result["apfu"]
     species = method["end_member_rules"]["species"]
     modelled = {name: apfu[element] for name, element in species.items() if element in apfu}
@@ -52,20 +52,23 @@ def calculate_olivine(values, method=OLIVINE):
     return {**result, "divalent_component_mol_percent": fractions}
 
 
-def oxygen_normalized_formula(values, method):
+def normalize_oxide_formula(values, method):
     """Normalize already validated oxide inputs and report stoichiometric diagnostics."""
     components = method["components"]
     moles = {oxide: value / components[oxide]["molar_mass"] for oxide, value in values.items()}
-    oxygen = math.fsum(amount * components[oxide]["oxygens"] for oxide, amount in moles.items())
-    if oxygen <= 0:
-        raise ImportCommandError("FORMULA_INVALID_MEASUREMENT", "Кислородный знаменатель ниже числовой точности.")
-    apfu = {components[oxide]["species"]: (amount / oxygen) * method["oxygen_basis"] * components[oxide]["cations"]
+    basis_field, coefficient = ("cation_basis", "cations") if method["cation_basis"] else ("oxygen_basis", "oxygens")
+    denominator = math.fsum(amount * components[oxide][coefficient] for oxide, amount in moles.items())
+    if denominator <= 0:
+        raise ImportCommandError("FORMULA_INVALID_MEASUREMENT", "Знаменатель нормировки ниже числовой точности.")
+    apfu = {components[oxide]["species"]: (amount / denominator) * method[basis_field] * components[oxide]["cations"]
             for oxide, amount in moles.items()}
     bounds = method["applicability_checks"]
     total = math.fsum(values.values())
     cations = math.fsum(apfu.values())
     warnings = []
     for code, value in (("oxide_sum_wt_pct", total), ("cation_sum_apfu", cations)):
+        if code not in bounds:
+            continue
         lower, upper = bounds[code]
         if not lower <= value <= upper:
             warnings.append({"kind": "outside_model_check", "field": code, "value": value, "range": [lower, upper]})

@@ -7,7 +7,10 @@ from uuid import uuid4
 from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe
 from petrolab.import_apply import apply_import_plan
 from petrolab.import_preview import ImportCommandError
-from petrolab.mineral_formulae import FELDSPAR, ILMENITE, PYROXENE, SPINEL, ZIRCON, calculate_mineral_formula
+from petrolab.mineral_formulae import (
+    CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, ILMENITE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
+    calculate_mineral_formula,
+)
 from petrolab.ndjson_service import handle_request
 
 
@@ -88,6 +91,35 @@ class MineralFormulaTests(unittest.TestCase):
         self.assertAlmostEqual(ideal["apfu"]["Ti"], 1, delta=0.001)
         self.assertNotIn("Fe3+/ΣFe", ideal["indices"])
 
+    def test_published_perovskite_and_dolomite(self):
+        # Gravina et al. (2008), Tapira EPMA composition, section S1.
+        perovskite = calculate_mineral_formula(
+            dict(CaO=38.9, TiO2=56.6, Na2O=0.224, Fe2O3=1.2, Ce2O3=1.4), PEROVSKITE)
+        for species, expected, tolerance in (("Ca", 0.96, 0.02), ("Ti", 0.98, 0.01), ("Fe3+", 0.022, 0.002),
+                                             ("Na", 0.01, 0.001), ("Ce", 0.011, 0.002)):
+            self.assertAlmostEqual(perovskite["apfu"][species], expected, delta=tolerance)
+        self.assertAlmostEqual(perovskite["site_sum_apfu"]["B"], 1, delta=0.01)
+        ideal = calculate_mineral_formula(dict(CaO=41.25, TiO2=58.75), PEROVSKITE)
+        self.assertAlmostEqual(ideal["site_sum_apfu"]["A"], 1, delta=0.001)
+        with self.assertRaises(ImportCommandError):
+            calculate_mineral_formula(dict(CaO=40), PEROVSKITE)
+
+        # Adami et al. (2025), Table 3 EPMA, with total iron represented as FeO-equivalent.
+        values = dict(CaO=27.48, MgO=20.66, FeOt=3.45, MnO=0.10, Na2O=0.39, SrO=0.05, BaO=0.04,
+                      NiO=0.03, Cr2O3=0.18, V2O3=0.06)
+        dolomite = calculate_mineral_formula(values, CARBONATE_2CAT)
+        for species, expected in (("Ca", 0.92), ("Mg", 0.97), ("Fe_total", 0.09)):
+            self.assertAlmostEqual(dolomite["apfu"][species], expected, delta=0.015)
+        self.assertNotIn("Fe2+", dolomite["apfu"])
+        self.assertNotIn("Fe3+", dolomite["apfu"])
+        self.assertEqual(dolomite["warnings"], [])
+        self.assertAlmostEqual(dolomite["cation_sum_apfu"], 2)
+        calcite = calculate_mineral_formula(dict(CaO=56.03), CARBONATE_1CAT)
+        self.assertEqual(calcite["cation_fraction"], {"Ca": 1})
+        with self.assertRaises(ImportCommandError) as error:
+            calculate_mineral_formula({**values, "FeO": 0}, CARBONATE_2CAT)
+        self.assertEqual(error.exception.code, "FORMULA_UNRESOLVED_IRON")
+
     def test_all_methods_round_trip_through_the_versioned_service(self):
         with TemporaryDirectory() as folder:
             source, database = Path(folder) / "epma.csv", Path(folder) / "project.sqlite"
@@ -95,12 +127,14 @@ class MineralFormulaTests(unittest.TestCase):
                 output = csv.writer(stream)
                 output.writerow(["Analysis", "SiO2 (wt.%)", "Al2O3 (wt.%)", "CaO (wt.%)", "Na2O (wt.%)",
                                  "K2O (wt.%)", "MgO (wt.%)", "FeO (wt.%)", "ZrO2 (wt.%)", "HfO2 (wt.%)",
-                                 "TiO2 (wt.%)"])
+                                 "TiO2 (wt.%)", "FeOt (wt.%)"])
                 output.writerow(["F1", 44.82, 34.55, 18.63, 0.67, 0.05, "", "", "", ""])
                 output.writerow(["P1", 50, 8.39, 14.79, 0.20, 0.02, 19, 5.78, "", ""])
                 output.writerow(["Z1", 32.67, "", "", "", "", "", "", 65.74, "<0.01"])
                 output.writerow(["S1", "", 71.67, "", "", "", 28.33, "", "", ""])
                 output.writerow(["I1", "", "", "", "", "", "", 47.36, "", "", 52.64])
+                output.writerow(["V1", "", "", 41.25, "", "", "", "", "", "", 58.75])
+                output.writerow(["C1", "", "", 27.48, "", "", 20.66, "", "", "", "", 3.45])
             original = source.read_bytes()
             apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
             baseline = list_project_analyses(database)["analyses"]
@@ -116,6 +150,9 @@ class MineralFormulaTests(unittest.TestCase):
                 ("Z1", ZIRCON, {"SiO2", "ZrO2"}, "apfu.Zr", "APFU"),
                 ("S1", SPINEL, {"MgO", "Al2O3"}, "apfu.Al", "APFU"),
                 ("I1", ILMENITE, {"FeO", "TiO2"}, "apfu.Ti", "APFU"),
+                ("V1", PEROVSKITE, {"CaO", "TiO2"}, "site_sum_apfu.B", "APFU"),
+                ("C1", CARBONATE_1CAT, {"CaO", "MgO"}, "cation_fraction.Ca", "1"),
+                ("C1", CARBONATE_2CAT, {"CaO", "MgO", "FeOt"}, "apfu.Fe_total", "APFU"),
             ]
             catalog = {method["method_id"]: method for method in call("formula.methods.list")["result"]}
             self.assertIn("formula.olivine.4o", catalog)

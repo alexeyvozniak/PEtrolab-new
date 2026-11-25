@@ -3,7 +3,7 @@
 import math
 
 from .import_preview import ImportCommandError
-from .olivine_formula import OLIVINE, oxygen_normalized_formula
+from .olivine_formula import OLIVINE, normalize_oxide_formula
 
 
 def _component(species, atomic_weight, cations, oxygens):
@@ -25,6 +25,12 @@ _COMPONENTS = {
     "PbO": _component("Pb", 207.2, 1, 1),
     "ZnO": _component("Zn", 65.38, 1, 1),
     "V2O3": _component("V3+", 50.942, 2, 3),
+    "Nb2O5": _component("Nb", 92.906, 2, 5),
+    "Ta2O5": _component("Ta", 180.948, 2, 5),
+    "La2O3": _component("La", 138.91, 2, 3),
+    "Ce2O3": _component("Ce", 140.12, 2, 3),
+    "Nd2O3": _component("Nd", 144.24, 2, 3),
+    "FeOt": _component("Fe_total", 55.845, 1, 1),
 }
 
 
@@ -91,6 +97,33 @@ ILMENITE = _definition(
     positive_groups=(("FeO", "Fe2O3", "MgO", "MnO"),),
     indices={"Fe3+/ΣFe": list(_IRON_FRACTION)},
 )
+PEROVSKITE = _definition(
+    "formula.perovskite.3o", "Перовскит на 3 атома кислорода", 3, ["CaO", "TiO2"],
+    "Na2O SrO BaO La2O3 Ce2O3 Nd2O3 Nb2O5 Ta2O5 FeO Fe2O3 Al2O3 Cr2O3 ZrO2 MgO MnO V2O3", [1.9, 2.1],
+    ["https://pubs.geoscienceworld.org/minersoc/minmag/article/81/3/411/285322/Nomenclature-of-the-perovskite-supergroup-A",
+     "https://doi.org/10.1107/S1600536808026421"],
+    "Gravina et al. (2008), Tapira perovskite, S1 EPMA composition",
+    {"site_proxies": {"A": ["Ca", "Na", "Sr", "Ba", "La", "Ce", "Nd"],
+                      "B": ["Ti", "Nb", "Fe3+", "Al", "Cr", "Zr"]},
+     "basis": "PetroLab v1 provisional sums over selected components; no site assignment or classification"},
+)
+
+
+def _carbonate_definition(basis, name):
+    method = _definition(
+        f"formula.carbonate.{basis}cat", name, None, [],
+        "CaO MgO FeO Fe2O3 FeOt MnO SrO BaO ZnO NiO Na2O Cr2O3 V2O3", None,
+        ["https://doi.org/10.5194/ejm-37-517-2025"], "Adami et al. (2025), Table 3, green dolomite",
+        {"cation_fractions": "Cation proportion of selected quantified oxides"},
+        positive_groups=(("CaO", "MgO", "FeO", "Fe2O3", "FeOt", "MnO", "SrO", "BaO", "ZnO"),),
+    )
+    return {**method, "cation_basis": basis, "applicability_checks": {},
+            "iron_policy": "FeO as Fe2+, Fe2O3 as Fe3+, or FeOt as Fe_total without a redox assignment",
+            "oh_basis": "Cation normalization only; CO2, OH and water are outside the calculation"}
+
+
+CARBONATE_1CAT = _carbonate_definition(1, "Карбонаты кальцитового ряда на 1 катион")
+CARBONATE_2CAT = _carbonate_definition(2, "Карбонаты доломитового ряда на 2 катиона")
 
 
 def calculate_mineral_formula(values, method):
@@ -106,7 +139,9 @@ def calculate_mineral_formula(values, method):
         if not any(values.get(oxide, 0) > 0 for oxide in alternatives):
             raise ImportCommandError("FORMULA_UNSUPPORTED_COMPONENTS",
                                      "Нужен хотя бы один положительный компонент: " + ", ".join(alternatives) + ".")
-    result = oxygen_normalized_formula(values, method)
+    if "FeOt" in values and {"FeO", "Fe2O3"} & values.keys():
+        raise ImportCommandError("FORMULA_UNRESOLVED_IRON", "Выберите либо суммарное железо, либо раздельно заданные формы.")
+    result = normalize_oxide_formula(values, method)
     apfu = result["apfu"]
     rules = method["end_member_rules"]
     if "fractions" in rules:
@@ -131,4 +166,12 @@ def calculate_mineral_formula(values, method):
         for index, (numerator, terms) in method["index_rules"].items():
             if set(terms) <= apfu.keys() and (total := math.fsum(apfu[element] for element in terms)):
                 result["indices"][index] = apfu[numerator] / total
+    if "site_proxies" in rules:
+        sums = {site: math.fsum(apfu[key] for key in species if key in apfu)
+                for site, species in rules["site_proxies"].items()}
+        result["site_sum_apfu"] = sums
+        if sums["B"]:
+            result["indices"] = {"Ti_B_fraction_proxy": apfu["Ti"] / sums["B"]}
+    if "cation_fractions" in rules:
+        result["cation_fraction"] = {key: value / method["cation_basis"] for key, value in apfu.items()}
     return result
