@@ -208,6 +208,63 @@ AMPHIBOLE = _definition(
     positive_groups=(("FeO", "MgO", "MnO", "Na2O", "CaO"),),
     indices={"Mg#": list(_MG_NUMBER), "Fe3+/ΣFe": list(_IRON_FRACTION)},
 )
+_DROOP_REFERENCE = "https://doi.org/10.1180/minmag.1987.051.361.10"
+
+
+def _droop_definition(base, name, ideal_cations, benchmark, extra_components=(), positive_groups=None):
+    components = {oxide: spec for oxide, spec in base["components"].items() if oxide not in {"FeO", "Fe2O3"}}
+    components.update({oxide: _COMPONENTS[oxide] for oxide in ("FeOt", *extra_components)})
+    groups = positive_groups if positive_groups is not None else [
+        [oxide if oxide != "FeO" else "FeOt" for oxide in group if oxide != "Fe2O3"]
+        for group in base["positive_groups"]
+    ]
+    return {
+        **base, "method_id": base["method_id"] + ".droop", "name": name,
+        "required_components": [*base["required_components"], "FeOt"],
+        "positive_groups": groups, "components": components,
+        "iron_policy": "FeOt is total iron as FeO-equivalent. Droop (1987) estimates partition only with fixed "
+                       "stoichiometry, full cation sites, oxygen as the only anion and Fe as the only variable-valence element. "
+                       "Unphysical estimates are withheld; no FeO or Fe2O3 measurement is inferred.",
+        "droop_ideal_cations": ideal_cations,
+        "references": [_DROOP_REFERENCE, *base["references"]],
+        "independent_benchmarks": [benchmark],
+    }
+
+
+PYROXENE_DROOP = _droop_definition(PYROXENE, "Пироксен 6 O с оценкой Fe³⁺ по Droop", 4,
+                                    "Droop (1987), Tables 1 and 3, pyroxene")
+GARNET_DROOP = _droop_definition(GARNET, "Гранат 12 O с оценкой Fe³⁺ по Droop", 8,
+                                  "Droop (1987), Table 3, ferrian uvarovite", extra_components=("ZnO",))
+SPINEL_DROOP = _droop_definition(SPINEL, "Шпинель 4 O с оценкой Fe³⁺ по Droop", 3,
+                                  "Droop (1987), Table 3, pleonaste; rescaled from 32 O",
+                                  positive_groups=[])
+ILMENITE_DROOP = _droop_definition(ILMENITE, "Ильменит 3 O с оценкой Fe³⁺ по Droop", 2,
+                                    "McEnroe et al. (2007), Table 2, ilmenite AL36b, 138a, FeO total")
+
+
+def _partition_iron_by_droop(result, method):
+    observed = result["cation_sum_apfu"]
+    ideal = method["droop_ideal_cations"]
+    factor = ideal / observed
+    ferric = 2 * method["oxygen_basis"] * (1 - factor)
+    available = result["apfu"]["Fe_total"] * factor
+    result["droop_diagnostics_apfu"] = {
+        "initial_cation_sum": observed, "target_cation_sum": ideal,
+        "unconstrained_Fe3+": ferric, "normalized_total_Fe": available,
+    }
+    tolerance = 1e-12
+    if ferric < -tolerance or ferric > available + tolerance:
+        result["warnings"].append({"kind": "outside_model_check", "field": "droop_Fe3+",
+                                   "value": ferric, "range": [0, available]})
+        return False
+    # Snap only floating-point noise at the physical interval endpoints.
+    ferric = min(available, max(0, ferric))
+    result["apfu"] = {species: value * factor for species, value in result["apfu"].items() if species != "Fe_total"}
+    partition = {"Fe2+": available - ferric, "Fe3+": ferric}
+    result["apfu"].update(partition)
+    result["iron_partition_apfu"] = partition
+    result["cation_sum_apfu"] = math.fsum(result["apfu"].values())
+    return True
 
 
 def _mica_sites(result, sites):
@@ -315,6 +372,8 @@ def _nepheline_result(result, rules):
 
 
 def calculate_mineral_formula(values, method):
+    if "FeOt" in values and {"FeO", "Fe2O3"} & values.keys():
+        raise ImportCommandError("FORMULA_UNRESOLVED_IRON", "Выберите либо суммарное железо, либо раздельно заданные формы.")
     required = set(method["required_components"])
     if not required <= values.keys() or values.keys() - method["components"].keys():
         raise ImportCommandError("FORMULA_UNSUPPORTED_COMPONENTS",
@@ -327,9 +386,9 @@ def calculate_mineral_formula(values, method):
         if not any(values.get(oxide, 0) > 0 for oxide in alternatives):
             raise ImportCommandError("FORMULA_UNSUPPORTED_COMPONENTS",
                                      "Нужен хотя бы один положительный компонент: " + ", ".join(alternatives) + ".")
-    if "FeOt" in values and {"FeO", "Fe2O3"} & values.keys():
-        raise ImportCommandError("FORMULA_UNRESOLVED_IRON", "Выберите либо суммарное железо, либо раздельно заданные формы.")
     result = normalize_oxide_formula(values, method)
+    if "droop_ideal_cations" in method and not _partition_iron_by_droop(result, method):
+        return result
     apfu = result["apfu"]
     rules = method["end_member_rules"]
     if "nepheline" in rules:

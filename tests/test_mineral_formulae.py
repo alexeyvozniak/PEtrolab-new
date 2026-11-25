@@ -8,9 +8,9 @@ from petrolab.desktop_workflow import list_project_analyses, suggest_import_reci
 from petrolab.import_apply import apply_import_plan
 from petrolab.import_preview import ImportCommandError
 from petrolab.mineral_formulae import (
-    AMPHIBOLE, APATITE, CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, ILMENITE, MICA_11, MICA_22,
-    NEPHELINE, PEROVSKITE, PYROXENE, SPINEL, ZIRCON,
-    TITANITE, calculate_mineral_formula,
+    AMPHIBOLE, APATITE, CARBONATE_1CAT, CARBONATE_2CAT, FELDSPAR, GARNET, GARNET_DROOP, ILMENITE, ILMENITE_DROOP,
+    MICA_11, MICA_22, NEPHELINE, PEROVSKITE, PYROXENE, PYROXENE_DROOP, SPINEL, SPINEL_DROOP, TITANITE, ZIRCON,
+    calculate_mineral_formula,
 )
 from petrolab.ndjson_service import handle_request
 
@@ -249,6 +249,43 @@ class MineralFormulaTests(unittest.TestCase):
         with self.assertRaises(ImportCommandError):
             calculate_mineral_formula(dict(SiO2=52, MgO=18, FeOt=25), AMPHIBOLE)
 
+    def test_droop_matches_published_iron_partitions(self):
+        # Droop (1987), Table 3, uncorrected oxides. Spinel APFU are divided by 8.
+        # McEnroe et al. (2007), Table 2, ilmenite AL36b 138a, FeO total.
+        cases = [
+            (GARNET_DROOP, dict(SiO2=35.94, TiO2=0.12, Al2O3=0.28, Cr2O3=18.11, FeOt=11.37,
+                               MnO=0.03, MgO=0, CaO=33.33, ZnO=0.19), (0.013, 0.779, 8)),
+            (PYROXENE_DROOP, dict(SiO2=56.21, TiO2=0, Al2O3=10.56, FeOt=6.10, MnO=0.01, MgO=7.33,
+                                CaO=12.13, Na2O=7.64, K2O=0.04), (0.091, 0.091, 4)),
+            (SPINEL_DROOP, dict(TiO2=0, Al2O3=61.99, FeOt=24.68, MnO=0.11, MgO=13.70, CaO=0),
+             (3.689 / 8, 0.647 / 8, 3)),
+            (ILMENITE_DROOP, dict(SiO2=0.012, TiO2=53.4, Al2O3=0.005, Cr2O3=0.048, V2O3=0.233,
+                                 FeOt=42.690, MgO=3.859, NiO=0.040, MnO=0.278, ZnO=0, CaO=0),
+             (0.8317, 0.0378, 2)),
+        ]
+        for method, values, (ferrous, ferric, cations) in cases:
+            with self.subTest(method=method["method_id"]):
+                result = calculate_mineral_formula(values, method)
+                self.assertAlmostEqual(result["iron_partition_apfu"]["Fe2+"], ferrous, delta=0.001)
+                self.assertAlmostEqual(result["iron_partition_apfu"]["Fe3+"], ferric, delta=0.001)
+                self.assertAlmostEqual(result["cation_sum_apfu"], cations)
+        magnetite = calculate_mineral_formula({"FeOt": 93.09}, SPINEL_DROOP)
+        self.assertAlmostEqual(magnetite["iron_partition_apfu"]["Fe3+"], 2)
+        self.assertAlmostEqual(magnetite["iron_partition_apfu"]["Fe2+"], 1)
+
+    def test_droop_preserves_diagnostics_when_partition_is_outside_domain(self):
+        for values in (dict(SiO2=95, MgO=1, FeOt=1), dict(SiO2=40, CaO=55, FeOt=1)):
+            result = calculate_mineral_formula(values, PYROXENE_DROOP)
+            self.assertIn("Fe_total", result["apfu"])
+            self.assertNotIn("iron_partition_apfu", result)
+            self.assertEqual(result["warnings"][-1]["field"], "droop_Fe3+")
+            self.assertNotIn("end_member_mol_percent", result)
+        with self.assertRaises(ImportCommandError) as error:
+            calculate_mineral_formula(dict(SiO2=40, CaO=10, MgO=15, FeOt=20, Fe2O3=0), PYROXENE_DROOP)
+        self.assertEqual(error.exception.code, "FORMULA_UNRESOLVED_IRON")
+        with self.assertRaises(ImportCommandError):
+            calculate_mineral_formula(dict(SiO2=40, CaO=10, MgO=15, FeO=20), PYROXENE_DROOP)
+
     def test_all_methods_round_trip_through_the_versioned_service(self):
         with TemporaryDirectory() as folder:
             source, database = Path(folder) / "epma.csv", Path(folder) / "project.sqlite"
@@ -271,6 +308,7 @@ class MineralFormulaTests(unittest.TestCase):
                 output.writerow(["T1", 30.67, "", 28.61, "", "", "", "", "", "", 40.72])
                 output.writerow(["M1", 38.25, 18.54, "", 0.65, 8.02, 14.38, 15.46, "", "", 1.54, "", 0])
                 output.writerow(["AM1", 52.10, 2.83, 0.16, 0.44, 0, 17.52, 24.13, "", "", 0.16, "", 0.50])
+                output.writerow(["PX1", 56.21, 10.56, 12.13, 7.64, 0.04, 7.33, "", "", "", 0, 6.10, 0.01])
             original = source.read_bytes()
             apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
             baseline = list_project_analyses(database)["analyses"]
@@ -296,6 +334,8 @@ class MineralFormulaTests(unittest.TestCase):
                 ("M1", MICA_11, {"SiO2", "Al2O3", "K2O"}, "site_sum_apfu.Al_IV", "APFU"),
                 ("M1", MICA_22, {"SiO2", "Al2O3", "K2O"}, "site_sum_apfu.Al_VI", "APFU"),
                 ("AM1", AMPHIBOLE, {"SiO2", "MgO", "FeO"}, "indices.Mg#", "1"),
+                ("PX1", PYROXENE_DROOP, {"SiO2", "Al2O3", "CaO", "Na2O", "K2O", "MgO", "TiO2", "FeOt", "MnO"},
+                 "iron_partition_apfu.Fe3+", "APFU"),
             ]
             catalog = {method["method_id"]: method for method in call("formula.methods.list")["result"]}
             self.assertIn("formula.olivine.4o", catalog)
@@ -318,6 +358,10 @@ class MineralFormulaTests(unittest.TestCase):
                     self.assertEqual(reopened["status"], "current")
                     derived = {item["field"]: item["unit"] for item in run["result_manifest"]["derived_values"]}
                     self.assertEqual(derived[expected_field], expected_unit)
+                    if label == "PX1":
+                        iron = next(item for item in reopened["measurements"] if item["reported_fe_form"] == "FeOt")
+                        self.assertEqual(iron["effective_value"], 6.10)
+                        self.assertEqual(iron["measurement_id"], measurements["FeOt"])
             censored = rows["AP2"]
             blocked = call("formula.review", method_id=APATITE["method_id"], analysis_id=censored["analysis_id"],
                            measurement_ids=[item["measurement_id"] for item in censored["measurement_list"]
