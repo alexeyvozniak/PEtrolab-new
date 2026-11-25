@@ -471,9 +471,10 @@ const byLabel = Object.fromEntries(editBefore.map((row) => [row.identity.Analysi
 
 async function openEditDrafts(evaluate, label) {
   await until(`analysis ${label}`, () => evaluate((name) => {
-    const cell = [...document.querySelectorAll("tbody td")].find((item) => item.textContent === name);
-    if (!cell) return false;
-    cell.click();
+    const checkbox = [...document.querySelectorAll("tbody input[type=checkbox]")]
+      .find((item) => item.getAttribute("aria-label") === `Выбрать ${name}`);
+    if (!checkbox) return false;
+    checkbox.closest("tr").click();
     return true;
   }, label));
   await until(`draft panel ${label}`, () => evaluate((name) => {
