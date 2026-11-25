@@ -21,6 +21,8 @@ Scientific Method Definition становится единственным ко�
 
 Перовскит на 3 O сохраняет APFU и приближённые суммы выбранных катионов A и B по реестру v1. Для карбонатов выбор 1 или 2 катионов определяет масштаб APFU. Cation Fraction хранит долю от общей суммы выбранных катионов. CO₂ находится вне нормировки. FeOt учитывается как Fe_total без предположения о валентности. Одновременный выбор FeOt и любой раздельной формы блокируется. [Перовскит из Тапиры](https://doi.org/10.1107/S1600536808026421) · [Карбонаты, таблица 3](https://doi.org/10.5194/ejm-37-517-2025).
 
+Гранаты на 12 O сохраняют Prp–Alm–Sps и долю Ca из четырёх явно заданных катионов X. Для распределения ненулевой доли Ca между Grs, Adr и Uv нужны выбранные значения Al, Fe³⁺ и Cr. При неполном входе остаётся общая доля Ca и диагностическое сообщение. Режим использует исходные формы Fe. [Составы гранатов, таблица 1](https://doi.org/10.1016/j.gsf.2023.101699) · [Номенклатура IMA](https://doi.org/10.2138/am.2013.4201).
+
 Import Recipe, Edit Draft, Table View, Workspace Snapshot, Analysis Template and Operation Journal Entry are separate domain entities. Snapshot contains concrete research state; Template contains no concrete Analysis IDs. Portable archives have explicit inclusion levels and validated restore semantics.
 
 Streamlit UI, wrappers, compatibility routes and session keys are not migrated. Legacy implementations are evidence and test input, not a code dependency.

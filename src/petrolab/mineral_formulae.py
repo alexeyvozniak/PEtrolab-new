@@ -124,6 +124,17 @@ def _carbonate_definition(basis, name):
 
 CARBONATE_1CAT = _carbonate_definition(1, "Карбонаты кальцитового ряда на 1 катион")
 CARBONATE_2CAT = _carbonate_definition(2, "Карбонаты доломитового ряда на 2 катиона")
+GARNET = _definition(
+    "formula.garnet.12o", "Гранат на 12 атомов кислорода (исходная форма Fe)", 12, ["SiO2"],
+    "TiO2 Al2O3 Cr2O3 FeO Fe2O3 MnO MgO CaO Na2O K2O P2O5 Y2O3", [7.7, 8.3],
+    ["https://doi.org/10.2138/am.2013.4201", "https://doi.org/10.1016/j.gsf.2023.101699"],
+    "Yin et al. (2024), Table 1, Grt 1 and Grt 2",
+    {"fractions": {"Prp": "Mg", "Alm": "Fe2+", "Sps": "Mn", "Ca_pool": "Ca"},
+     "calcium_partition": {"Grs": "Al", "Adr": "Fe3+", "Uv": "Cr"},
+     "basis": "PetroLab v1 X and Y stoichiometric proportions; no site refinement or species naming"},
+    positive_groups=(("MgO", "FeO", "MnO", "CaO"), ("Al2O3", "Fe2O3", "Cr2O3")),
+    indices={"Mg#": list(_MG_NUMBER)},
+)
 
 
 def calculate_mineral_formula(values, method):
@@ -154,6 +165,18 @@ def calculate_mineral_formula(values, method):
                                        "missing_species": missing})
         if not missing and "celsian" in rules and "Ba" in apfu and (alkalis_with_ba := denominator + apfu["Ba"]):
             fractions["Cn"] = 100 * apfu["Ba"] / alkalis_with_ba
+        if fractions and "calcium_partition" in rules:
+            calcium = fractions["Ca_pool"]
+            partition = rules["calcium_partition"]
+            missing_y = sorted(set(partition.values()) - apfu.keys())
+            total_y = math.fsum(apfu[element] for element in partition.values()) if not missing_y else 0
+            if total_y or calcium == 0:
+                del fractions["Ca_pool"]
+                fractions.update({name: calcium * apfu[element] / total_y if total_y else 0
+                                  for name, element in partition.items()})
+            else:
+                result["warnings"].append({"kind": "components_unavailable", "field": "calcium_partition",
+                                           "missing_species": missing_y})
         result["end_member_mol_percent"] = fractions
     if "quadrilateral" in rules:
         result["quadrilateral_apfu"] = {}
