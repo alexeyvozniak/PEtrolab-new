@@ -76,3 +76,5 @@
 .plot-category-legend > div > i { width:9px; height:9px; flex:none; border-radius:50%; }
 .plot-category-legend > div > span { flex:1; overflow-wrap:anywhere; }
 .plot-category-legend > div > small { flex:none; }
+
+.plot-category-legend input[type=color],.plot-source-legend input[type=color] { width:23px;height:20px;padding:0;border:0;background:transparent;flex:none;cursor:pointer; }

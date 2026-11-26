@@ -33,7 +33,7 @@ import {
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
   getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication, capturePublicationPlot,
   capturePublicationTable, capturePublicationMedia,
-  getPlotCatalog, getPlotData, recordPlotVisibility, undoPlotVisibility,
+  getPlotCatalog, getPlotData, recordPlotVisibility, undoPlotVisibility, getProjectPlotColors, saveProjectPlotColors,
   listPlotSpecifications, openPlotSpecification, savePlotSpecification, pickPlotExportPath, exportPlot,
   isPetrolabDesktop,
   listProjectAnalyses,
@@ -482,6 +482,8 @@ export function App() {
         ...(alreadyIsolated ? [] : sourceIds.filter(value => value !== id))];
     });
   };
+  const loadColorScheme = useCallback(async () => unwrap(await getProjectPlotColors(databasePath)),[databasePath]);
+  const saveColorScheme = useCallback(async (scheme,revision) => unwrap(await saveProjectPlotColors(databasePath,scheme,revision)),[databasePath]);
   const loadPlotCatalog = useCallback(async (includeCategories = false) => unwrap(await getPlotCatalog(databasePath, plotInputIds, includeCategories)), [databasePath, plotInputIds]);
   const loadPlotAnalysis = useCallback(async id => unwrap(await getProjectAnalysis(databasePath, id)), [databasePath]);
   const loadPlotSelection = useCallback(async (analysisIds, offset, limit) =>
@@ -828,7 +830,7 @@ export function App() {
             return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination, settings)) : null;
           }} />}
         {screen === "Построение" && <PlotWorkspace viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
-          loadSelection={loadPlotSelection} loadAnalysis={loadPlotAnalysis}
+          loadSelection={loadPlotSelection} loadAnalysis={loadPlotAnalysis} loadColorScheme={loadColorScheme} saveColorScheme={saveColorScheme}
           loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}
           openLayout={restorePlotLayout} onExport={async (svg, options) => {
             const destination = await pickPlotExportPath(options.name);

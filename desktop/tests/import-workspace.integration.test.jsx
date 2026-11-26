@@ -521,12 +521,20 @@ test("categorical mineral colors use reported labels and preserve selection and 
   await user.click(await enabledButton("Построение"));
   await screen.findAllByRole("button", { name: /^Выбрать точку C1/ });
   const mode = screen.getByRole("combobox",{name:"Окрашивать по"});
+  await waitFor(()=>expect(mode.disabled).toBe(false));
   await user.selectOptions(mode,"mineral");
   const legend = await screen.findByLabelText("Легенда категорий");
   expect(within(legend).getByText("olivine")).toBeTruthy();
   expect(within(legend).getByText("pyroxene")).toBeTruthy();
+  fireEvent.change(within(legend).getByLabelText("Цвет: olivine"),{target:{value:"#112233"}});
+  await user.click(await enabledButton("Сохранить цветовую схему проекта"));
+  await screen.findByText("Цветовая схема сохранена в проекте.");
+  const stored = (await invokePetrolab("project.plot_colors.get",{project_database_path:join(folder,"project.sqlite")})).result;
+  expect(stored.scheme.mode).toBe("mineral");
+  expect(stored.scheme.colors).toContainEqual({mode:"mineral",key:"olivine",color:"#112233"});
   const first = screen.getAllByRole("button", {name:/^Выбрать точку C1/})[0];
   const secondMarker = screen.getAllByRole("button", {name:/^Выбрать точку C2/})[0];
+  expect(first.getAttribute("fill")).toBe("#112233");
   expect(first.getAttribute("fill")).not.toBe(secondMarker.getAttribute("fill"));
   fireEvent.keyDown(first,{key:"Enter"});
   expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
@@ -541,6 +549,10 @@ test("categorical mineral colors use reported labels and preserve selection and 
   expect(screen.queryByLabelText("Легенда категорий")).toBeNull();
   expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
   expect(requests.filter(request=>request.command==="plot_data.catalog" && request.payload.include_categories)).toHaveLength(1);
+  await user.click(await enabledButton("Загрузить сохранённую схему"));
+  await screen.findByText("Загружена сохранённая цветовая схема.");
+  expect(mode.value).toBe("mineral");
+  expect(first.getAttribute("fill")).toBe("#112233");
 }, 20000);
 
 test("axis catalog drops an exact catalog key and rejects an unknown key", async () => {

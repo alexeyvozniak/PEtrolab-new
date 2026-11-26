@@ -9,7 +9,7 @@ const EMPTY_BINS = [];
 const COLOR_MODES = { source: "Источник", sample: "Физический образец", mineral: "Минерал (исходное название)", generation: "Generation" };
 const CATEGORY_COLORS = ["#356ca2","#ae5431","#39856b","#8c56a1","#bf8a28","#be456e","#367f91","#75643c","#647a2c","#485496","#ad675c","#7a7294","#248277","#a43d91","#66533f","#b67513"];
 const MISSING_COLOR = "#8c9590";
-function categoryStyle(rows, mode) {
+function categoryStyle(rows, mode, overrides) {
   if (mode === "source" || !rows) return null;
   const byId = new Map(), groups = new Map();
   for (const row of rows) {
@@ -25,7 +25,7 @@ function categoryStyle(rows, mode) {
   entries.forEach(entry => names.set(entry.label,(names.get(entry.label)||0)+1));
   entries.forEach((entry,index) => {
     if (entry.key !== null && names.get(entry.label)>1) entry.label += " · " + entry.key.slice(0,8);
-    entry.color = entry.key === null ? MISSING_COLOR : CATEGORY_COLORS[index % CATEGORY_COLORS.length];
+    entry.color = entry.key === null ? MISSING_COLOR : overrides.get(JSON.stringify([mode,entry.key])) || CATEGORY_COLORS[index % CATEGORY_COLORS.length];
   });
   const colors = new Map(entries.map(entry => [entry.key,entry.color]));
   return {entries, colorFor: id => colors.get(byId.get(id) ?? null) || MISSING_COLOR};
@@ -649,7 +649,7 @@ function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
 
 export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
   hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
-  onExport, onAddPublication }) {
+  onExport, onAddPublication, loadColorScheme, saveColorScheme }) {
   const [axes, setAxes] = useState([]);
   const [axisQuery, setAxisQuery] = useState("");
   const [axisCatalogOpen, setAxisCatalogOpen] = useState(false);
@@ -696,6 +696,45 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
   const [savedColors, setSavedColors] = useState(() => viewMemory?.savedColors ?? {});
   const [colorMode, setColorMode] = useState(() => viewMemory?.colorMode || "source");
   const [categoryResult, setCategoryResult] = useState(null);
+  const [schemeColors, setSchemeColors] = useState(() => viewMemory?.schemeColors || []);
+  const [schemeRevision, setSchemeRevision] = useState(null);
+  const [schemeStatus, setSchemeStatus] = useState("");
+  const [schemeBusy,setSchemeBusy] = useState(false);
+  const overrides = useMemo(() => new Map(schemeColors.map(entry=>[JSON.stringify([entry.mode,entry.key]),entry.color])),[schemeColors]);
+  const applyScheme = result => {
+    setColorMode(result.scheme.mode);
+    setSchemeColors(result.scheme.colors);
+    setSchemeRevision(result.revision);
+  };
+  useEffect(() => {
+    if (!loadColorScheme) return;
+    let active = true;
+    loadColorScheme().then(result => {
+      if (!active) return;
+      if (!viewMemory?.schemeLoaded) {
+        applyScheme(result);
+        if (viewMemory) viewMemory.schemeLoaded = true;
+      } else setSchemeRevision(viewMemory.schemeRevision ?? result.revision);
+    },error=>{if(active)setSchemeStatus(error.message || String(error));});
+    return ()=>{active=false;};
+  },[loadColorScheme,viewMemory]);
+  useLayoutEffect(()=>{if(viewMemory)Object.assign(viewMemory,{schemeColors,schemeRevision});},[viewMemory,schemeColors,schemeRevision]);
+  const changeColor = (mode,key,color) => setSchemeColors(current=>[...current.filter(entry=>entry.mode!==mode||entry.key!==key),{mode,key,color}]);
+  const storeScheme = async () => {
+    setSchemeBusy(true);setSchemeStatus("");
+    try {
+      const result=await saveColorScheme({mode:colorMode,colors:schemeColors},schemeRevision);
+      applyScheme(result);
+      setSchemeStatus("Цветовая схема сохранена в проекте.");
+    } catch(error){setSchemeStatus(error.message || String(error));}
+    finally{setSchemeBusy(false);}
+  };
+  const reloadScheme = async () => {
+    setSchemeBusy(true);setSchemeStatus("");
+    try{applyScheme(await loadColorScheme());setSchemeStatus("Загружена сохранённая цветовая схема.");}
+    catch(error){setSchemeStatus(error.message || String(error));}
+    finally{setSchemeBusy(false);}
+  };
   useEffect(() => {
     if (colorMode === "source" || categoryResult?.load === loadCatalog) return;
     let active = true;
@@ -705,7 +744,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     return () => { active = false; };
   }, [colorMode, loadCatalog, categoryResult]);
   const categoryData = categoryResult?.load === loadCatalog ? categoryResult : null;
-  const category = useMemo(() => categoryStyle(categoryData?.rows, colorMode), [categoryData, colorMode]);
+  const category = useMemo(() => categoryStyle(categoryData?.rows, colorMode, overrides), [categoryData, colorMode, overrides]);
   const colorReady = colorMode === "source" || Boolean(category && !categoryData?.error);
   useLayoutEffect(() => { if (viewMemory) viewMemory.colorMode = colorMode; }, [viewMemory, colorMode]);
   const [layers, setLayers] = useState(() => viewMemory?.layers ?? []);
@@ -750,7 +789,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     content.current.scrollTop = viewMemory.scrollTop || 0;
     content.current.scrollLeft = viewMemory.scrollLeft || 0;
   }, [viewMemory, loading]);
-  const colorFor = (sourceId) => savedColors[sourceId] || sourceColor(sourceId);
+  const colorFor = (sourceId) => overrides.get(JSON.stringify(["source",sourceId])) || savedColors[sourceId] || sourceColor(sourceId);
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
   useEffect(() => {
     let active = true;
@@ -994,7 +1033,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
       </details>
       <section className="plot-source-legend" aria-label="Окрашивание точек">
         <h3>Окрашивание</h3>
-        <select aria-label="Окрашивать по" value={colorMode} disabled={loading || busy || exportBusy}
+        <select aria-label="Окрашивать по" value={colorMode} disabled={loading || busy || exportBusy || schemeBusy || (loadColorScheme && schemeRevision === null)}
           onChange={event => {setColorMode(event.target.value);setExportOptions(null);}}>
           {Object.entries(COLOR_MODES).map(([key,label]) => <option key={key} value={key}>{label}</option>)}
         </select>
@@ -1002,10 +1041,17 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
           {!colorReady && <small role="status">{categoryData?.error ? "Не удалось загрузить категории: " + categoryData.error : "Загружаю категории…"}</small>}
           {categoryData?.error && <button type="button" className="outline-button" onClick={() => setCategoryResult(null)}>Повторить</button>}
           {category && <div className="plot-category-legend" aria-label="Легенда категорий">
-            {category.entries.map(entry => <div key={entry.key === null ? "missing" : "value:" + entry.key}><i style={{backgroundColor:entry.color}} aria-hidden="true"/><span>{entry.label}</span><small>{entry.count}</small></div>)}
+            {category.entries.map(entry => <div key={entry.key === null ? "missing" : "value:" + entry.key}>
+              {entry.key === null ? <i style={{backgroundColor:entry.color}} aria-hidden="true"/> : <input type="color" aria-label={"Цвет: "+entry.label} value={entry.color} disabled={schemeBusy} onChange={event=>changeColor(colorMode,entry.key,event.target.value)}/>}
+              <span>{entry.label}</span><small>{entry.count}</small></div>)}
           </div>}
           {category?.entries.length > CATEGORY_COLORS.length && <small>Цвета могут повторяться; сузьте набор для различения групп.</small>}
           <small>Гистограммы и управление видимостью источников сохраняют исходные цвета. Для сохранённой раскладки и пакета публикации верните окрашивание по источнику.</small>
+        </>}
+        {loadColorScheme && saveColorScheme && <>
+          <button type="button" className="outline-button" disabled={schemeBusy || busy || !colorReady || schemeRevision===null} onClick={storeScheme}>Сохранить цветовую схему проекта</button>
+          <button type="button" className="outline-button" disabled={schemeBusy || busy} onClick={reloadScheme}>Загрузить сохранённую схему</button>
+          {schemeStatus && <small role="status">{schemeStatus}</small>}
         </>}
       </section>
       <section className="plot-source-legend" aria-label="Легенда источников">
@@ -1021,7 +1067,8 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
           }}>
             <input type="checkbox" checked={!hiddenSourceIds.includes(source.source_id)}
               disabled={!onToggleSource || busy} onChange={() => onToggleSource(source.source_id)} />
-            <i style={{ backgroundColor: colorFor(source.source_id) }} aria-hidden="true" />{label}
+            <input type="color" aria-label={"Цвет источника: "+label} value={colorFor(source.source_id)} disabled={schemeBusy}
+              onClick={event=>event.stopPropagation()} onChange={event=>changeColor("source",source.source_id,event.target.value)}/>{label}
           </label>;
         })}
         <p>Зелёный контур — текущий отбор</p>
