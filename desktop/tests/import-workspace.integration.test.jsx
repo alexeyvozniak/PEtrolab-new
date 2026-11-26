@@ -503,7 +503,8 @@ test("AT-08 excludes only the focused source from both plots and restores it fro
   await waitFor(() => expect(point("P1")).toHaveLength(2));
   expect(point("P2")).toHaveLength(2);
   expect(point("P1").every((node) => node.getAttribute("aria-pressed") === "true")).toBe(true);
-  await user.click(await enabledButton("Развернуть таблицу"));
+  // The dock remains expanded when returning to the same plot workspace.
+  expect(screen.getByRole("button", { name: "Свернуть таблицу" }).getAttribute("aria-expanded")).toBe("true");
   expect(within(await screen.findByRole("table", { name: "Таблица выбранных анализов" })).getByText("Не скрыт")).toBeTruthy();
   expect((await invokePetrolab("project.analyses.list", database)).result.analyses).toEqual(before);
   for (const [path, content] of files) expect(await readFile(path, "utf8")).toBe(content);
@@ -686,7 +687,10 @@ test("one common selection highlights the same analysis on binary and ternary pl
   expect([...single.querySelectorAll("g")].map((group) => group.id)).toEqual(["panel-b"]);
   const layout = await readSvg(await savePlot(user));
   expect([...layout.querySelectorAll("g")].map((group) => group.id)).toEqual(["panel-a", "panel-b", "panel-c"]);
-  expect(layout.querySelector("clipPath, mask, foreignObject, image, circle")).toBeNull();
+  expect(layout.querySelector("clipPath, mask, foreignObject, image")).toBeNull();
+  // Returning to the layout preserves the original input P1/P2. P1 is
+  // explicitly hidden, so exactly one visible P2 marker per panel remains.
+  expect(layout.querySelectorAll("circle")).toHaveLength(3);
   expect(layout.querySelector("text")?.textContent).toBe("a");
   app.unmount();
   await stopService();
@@ -1152,6 +1156,9 @@ test("selected analyses can be assigned to a new physical sample during import",
   await screen.findByRole("heading", { name: "Анализы" });
   expect(within(await screen.findByRole("table")).getByRole("checkbox", { name: "Выбрать B2" }).checked).toBe(true);
   await user.click(await enabledButton("Образцы"));
+  const sampleTabs = within(await screen.findByRole("navigation", { name: "Разделы образца" }));
+  expect(sampleTabs.getByRole("button", { name: "Источники" }).getAttribute("aria-current")).toBe("page");
+  await user.click(sampleTabs.getByRole("button", { name: "Обзор" }));
   expect(await screen.findByText("Северный массив")).toBeTruthy();
   expect(await screen.findByText("Полевое описание образца")).toBeTruthy();
 }, 20000);

@@ -126,6 +126,30 @@ test("drag, Shift and Ctrl select stable analysis IDs without changing focus sem
   expect(screen.getByText("Скрыто фильтром: 12")).toBeTruthy();
 });
 
+test("large table virtualizes rows while selection, search and keyboard cover the full loaded result", () => {
+  const analyses = Array.from({ length: 1000 }, (_, index) => ({
+    analysis_id: "row-" + index, source_id: "source", source_name: "large.xlsx", sheet_name: "Sheet",
+    source_row_number: index + 2, identity: { Analysis: "V-" + String(index + 1).padStart(4, "0") },
+    measurements: { SiO2: { raw_token: "40", numeric_value: 40, unit: "wt.%" } }, source_metadata: {},
+  }));
+  render(<SelectionTestWorkspace project={{ total: 1000, source_count: 1, analyses }} busy={false} />);
+  const table = screen.getByRole("table");
+  const scroll = screen.getByLabelText(/Таблица анализов: Ctrl\+A/);
+  Object.defineProperty(scroll, "clientHeight", { value: 420, configurable: true });
+  expect(table.getAttribute("aria-rowcount")).toBe("1002");
+  expect(table.querySelectorAll("tbody tr:not(.analysis-row-spacer)").length).toBeLessThan(60);
+  expect(within(table).queryByRole("checkbox", { name: "Выбрать V-1000" })).toBeNull();
+  fireEvent.keyDown(scroll, { key: "a", ctrlKey: true });
+  expect(screen.getByText("1000 выбрано")).toBeTruthy();
+  fireEvent.keyDown(scroll, { key: "End" });
+  expect(within(table).getByRole("checkbox", { name: "Выбрать V-1000" }).checked).toBe(true);
+  expect(table.querySelectorAll("tbody tr:not(.analysis-row-spacer)").length).toBeLessThan(60);
+  fireEvent.change(screen.getByRole("textbox", { name: "Поиск анализов" }), { target: { value: "V-1000" } });
+  expect(within(table).getByRole("checkbox", { name: "Выбрать V-1000" }).checked).toBe(true);
+  expect(screen.getByText("Скрыто фильтром: 999")).toBeTruthy();
+  expect(screen.getByText("1000 выбрано")).toBeTruthy();
+});
+
 test("same-named sources filter independently without changing selection", async () => {
   const user = userEvent.setup();
   const analyses = [

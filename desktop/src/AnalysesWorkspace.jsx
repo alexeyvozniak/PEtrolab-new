@@ -15,6 +15,7 @@ import { EditDraftPanel } from "./EditDraftPanel";
 import { GenerationAssignment } from "./GenerationAssignment";
 import { selectionRange } from "./selectionRange";
 import { ContextActions } from "./ContextActions";
+import { virtualRowRange, ROW_HEIGHT, TABLE_HEADER_HEIGHT } from "./virtualRows";
 
 function originLabel(analysis) {
   return analysis.source_orientation === "columns_are_analyses"
@@ -315,6 +316,20 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const selectionDrag = useRef(null);
   const [focusedId, setFocusedId] = useState(initialFocusedId || viewMemory?.focusedId || "");
   const tableScroll = useRef(null);
+  const [viewport, setViewport] = useState(() => ({ top: viewMemory?.scrollTop || 0, height: 420 }));
+  useLayoutEffect(() => {
+    const element = tableScroll.current;
+    if (!element) return;
+    const measure = () => setViewport(current => {
+      const next = { top: element.scrollTop, height: element.clientHeight || 420 };
+      return current.top === next.top && current.height === next.height ? current : next;
+    });
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [analyses.length > 0]);
   const [sort, setSort] = useState(() => viewMemory?.sort ?? { id: "source", direction: "asc" });
 
   useLayoutEffect(() => {
@@ -328,6 +343,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
     if (!element || !viewMemory) return;
     element.scrollTop = viewMemory.scrollTop || 0;
     element.scrollLeft = viewMemory.scrollLeft || 0;
+    setViewport({ top: element.scrollTop, height: element.clientHeight || 420 });
   }, [viewMemory, visibleColumnIds.length > 0]);
   useEffect(() => {
     const finish = (event) => {
@@ -456,6 +472,18 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const filteredSet = useMemo(() => new Set(filteredIds), [filteredIds]);
   const hiddenSelectionCount = selectedIds.filter(id => !filteredSet.has(id)).length;
   const allVisibleSelected = filteredIds.length > 0 && filteredIds.every(id => selected.has(id));
+  const virtual = ordered.length > 300;
+  const rowRange = virtual ? virtualRowRange(ordered.length, viewport.top, viewport.height) : { start: 0, end: ordered.length };
+  const renderedRows = ordered.slice(rowRange.start, rowRange.end);
+  useLayoutEffect(() => {
+    const element = tableScroll.current;
+    if (!element) return;
+    const top = Math.min(element.scrollTop, Math.max(0, ordered.length * ROW_HEIGHT + TABLE_HEADER_HEIGHT - viewport.height));
+    if (top !== element.scrollTop) {
+      element.scrollTop = top;
+      setViewport(current => ({ ...current, top }));
+    }
+  }, [ordered.length, viewport.height]);
 
   const toggleSelection = (id, extend = false) => {
     const anchor = selectionAnchor.current;
@@ -680,13 +708,26 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
         } else {
           selectionAnchor.current = null;
         }
-        event.currentTarget.querySelectorAll(".analyses-data-table tbody tr")[next]?.scrollIntoView?.({ block: "nearest" });
+        const element = tableScroll.current;
+        if (virtual && element) {
+          // Keep keyboard navigation in the logical full result, even when a row is not mounted.
+          const top = next * ROW_HEIGHT;
+          const available = Math.max(ROW_HEIGHT, viewport.height - TABLE_HEADER_HEIGHT);
+          if (top < element.scrollTop) element.scrollTop = top;
+          else if (top + ROW_HEIGHT > element.scrollTop + available) element.scrollTop = top + ROW_HEIGHT - available;
+          setViewport(current => ({ ...current, top: element.scrollTop }));
+        } else {
+          event.currentTarget.querySelectorAll(".analyses-data-table tbody tr")[next]?.scrollIntoView?.({ block: "nearest" });
+        }
       }
     }
   };
 
   const resizeColumn = (id, width) => setColumnWidths(current => ({ ...current, [id]: Math.max(104, Math.min(600, Math.round(width))) }));
-  const columnStyle = id => columnWidths[id] ? { width: columnWidths[id], minWidth: columnWidths[id], maxWidth: columnWidths[id] } : undefined;
+  const columnStyle = id => {
+    const width = columnWidths[id] || (virtual ? 150 : undefined);
+    return width ? { width, minWidth: width, maxWidth: width } : undefined;
+  };
   const autoWidth = column => {
     // Measure displayed text (including raw tokens and units), not a numerical conversion.
     const canvas = document.createElement("canvas");
@@ -825,14 +866,17 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
         </div>
 
         <div className="analyses-table-scroll" ref={tableScroll} onScroll={event => {
-          if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
+          const element = event.currentTarget;
+          if (viewMemory) Object.assign(viewMemory, { scrollTop: element.scrollTop, scrollLeft: element.scrollLeft });
+          setViewport(current => current.top === element.scrollTop ? current : { ...current, top: element.scrollTop });
         }} tabIndex={0} aria-label="Таблица анализов: Ctrl+A — выбрать показанные, Esc — снять выбор, стрелки — перейти к анализу, Ctrl+C — копировать показанные выбранные строки" onCopy={copyVisibleSelection} onClick={event => {
           if (event.target === event.currentTarget) {
             selectionAnchor.current = null;
             setSelectedIds([]);
           }
         }}>
-          <table className={`analyses-data-table${dragIds.length ? " selecting-range" : ""}`}>
+          <table aria-rowcount={ordered.length + 2} className={`analyses-data-table${dragIds.length ? " selecting-range" : ""}${virtual ? " virtual-rows" : ""}`}
+            style={virtual ? { width: 42 + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 150), 0) } : undefined}>
             <thead>
               <tr>
                 <th className="analysis-select-cell"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} aria-label="Выбрать показанные анализы" /></th>
@@ -874,11 +918,12 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
               </tr>
             </thead>
             <tbody>
-              {ordered.map((analysis) => {
+              {virtual && rowRange.start > 0 && <tr aria-hidden="true" className="analysis-row-spacer"><td colSpan={visibleColumns.length + 1} style={{ height: rowRange.start * ROW_HEIGHT }} /></tr>}
+              {renderedRows.map((analysis, index) => {
                 const checked = selected.has(analysis.analysis_id);
                 const focusedRow = focused?.analysis_id === analysis.analysis_id;
                 return (
-                  <tr className={`${checked || dragged.has(analysis.analysis_id) ? "selected " : ""}${focusedRow ? "focused" : ""}`} key={analysis.analysis_id}
+                  <tr className={`${checked || dragged.has(analysis.analysis_id) ? "selected " : ""}${focusedRow ? "focused" : ""}`} key={analysis.analysis_id} aria-rowindex={rowRange.start + index + 3}
                     onPointerEnter={(event) => extendSelectionDrag(event, analysis.analysis_id)}
                     onContextMenu={event => {
                       if (event.target.closest?.("input, textarea, select")) return;
@@ -907,6 +952,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                   </tr>
                 );
               })}
+              {virtual && rowRange.end < ordered.length && <tr aria-hidden="true" className="analysis-row-spacer"><td colSpan={visibleColumns.length + 1} style={{ height: (ordered.length - rowRange.end) * ROW_HEIGHT }} /></tr>}
             </tbody>
           </table>
           {ordered.length === 0 && <div className="analyses-no-results"><MagnifyingGlass size={25} /><b>Ничего не найдено</b><span>Сбрось поиск или фильтры колонок.</span></div>}
