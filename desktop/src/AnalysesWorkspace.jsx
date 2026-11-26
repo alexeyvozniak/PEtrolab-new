@@ -193,7 +193,15 @@ function AnalysisMineralReview({ analysis }) {
   </section>;
 }
 
-function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlotAnalysisIds, onSetPlotVisibility, onUndoPlotVisibility, busy }) {
+function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlotAnalysisIds, onSetPlotVisibility, onUndoPlotVisibility, busy, provenanceFocus }) {
+  const detailRef = useRef(null);
+  useEffect(() => {
+    if (!provenanceFocus || provenanceFocus.analysisId !== analysis?.analysis_id) return;
+    const node = [...(detailRef.current?.querySelectorAll("[data-source-cell]") || [])].find(item =>
+      item.dataset.sourceCell === provenanceFocus.cell && item.dataset.measurementField === provenanceFocus.field);
+    node?.scrollIntoView?.({block:"nearest"});
+    node?.focus();
+  }, [analysis?.analysis_id, provenanceFocus]);
   if (!analysis) {
     return <aside className="analysis-detail empty"><SquaresFour size={24} /><span>Выбери строку, чтобы увидеть все поля и происхождение значений.</span></aside>;
   }
@@ -204,7 +212,7 @@ function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlot
     : Object.entries(analysis.source_metadata || {}).map(([field, value]) => [field, value, ""]);
   const measurements = analysis.measurement_list || Object.entries(analysis.measurements || {}).map(([field, item]) => ({ field, ...item }));
   return (
-    <aside className="analysis-detail" aria-label="Подробности анализа">
+    <aside ref={detailRef} className="analysis-detail" aria-label="Подробности анализа">
       <div className="analysis-detail-head">
         <span>Выбранный анализ</span>
         <h2>{mainIdentity(analysis)}</h2>
@@ -247,7 +255,9 @@ function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlot
         <div className="analysis-detail-section-head"><h3>Все измерения</h3><span>{measurements.length}</span></div>
         <div className="analysis-measurement-list">
           {measurements.map((measurement, index) => (
-            <div className="analysis-measurement" key={`${measurement.field}-${measurement.source_cell}-${index}`}>
+            <div className={`analysis-measurement${provenanceFocus?.analysisId === analysis.analysis_id && provenanceFocus.cell === measurement.source_cell && provenanceFocus.field === measurement.field ? " provenance-focused" : ""}`}
+              key={`${measurement.field}-${measurement.source_cell}-${index}`} tabIndex={-1}
+              data-source-cell={measurement.source_cell || undefined} data-measurement-field={measurement.field}>
               <div><b>{measurement.field}</b><small>{measurement.source_header || "Без исходного заголовка"}{measurement.source_cell ? ` · ${measurement.source_cell}` : ""}</small></div>
               <div><b>{measurement.raw_token ?? "∅"}</b><small>{measurement.unit}{measurementContext(measurement) ? ` · ${measurementContext(measurement)}` : ""}</small></div>
             </div>
@@ -304,6 +314,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const columnResize = useRef(null);
   const [dragIds, setDragIds] = useState([]);
   const [contextMenu, setContextMenu] = useState(null);
+  const [provenanceFocus, setProvenanceFocus] = useState(null);
   const [workGroups, setWorkGroups] = useState(null);
   const [groupForm, setGroupForm] = useState(false);
   const [groupBusy, setGroupBusy] = useState(false);
@@ -943,7 +954,9 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                       if (event.target.closest?.("input, textarea, select")) return;
                       event.preventDefault();
                       setFocusedId(analysis.analysis_id);
-                      setContextMenu({ id: analysis.analysis_id, label: mainIdentity(analysis), x: event.clientX, y: event.clientY });
+                      const cell=event.target.closest?.("td[data-source-cell]");
+                      setContextMenu({ id: analysis.analysis_id, label: mainIdentity(analysis), x: event.clientX, y: event.clientY,
+                        ...(cell ? {cell:cell.dataset.sourceCell,field:cell.dataset.measurementField} : {}) });
                     }}
                     onClick={(event) => {
                       if (event.shiftKey || event.ctrlKey || event.metaKey) {
@@ -957,7 +970,9 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                     {visibleColumns.map((column) => {
                       const measurement = column.kind === "measurement" ? analysis.measurements?.[column.field] : null;
                       return (
-                        <td key={column.id} className={pinClass(column.id)} style={columnStyle(column.id)} title={String(valueFor(analysis, column))}>
+                        <td key={column.id} className={pinClass(column.id)} style={columnStyle(column.id)}
+                          data-source-cell={measurement?.source_cell || undefined} data-measurement-field={measurement?.source_cell ? column.field : undefined}
+                          title={measurement?.source_cell ? `${valueFor(analysis,column)} · ${analysis.sheet_name || ""}!${measurement.source_cell}` : String(valueFor(analysis, column))}>
                           <span>{valueFor(analysis, column)}</span>
                           {measurement ? <small>{measurement.unit}{measurementContext(measurement) ? ` · ${measurementContext(measurement)}` : ""}</small> : null}
                         </td>
@@ -976,6 +991,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
       </main>
 
       <ContextActions menu={contextMenu} onClose={() => setContextMenu(null)} actions={contextMenu ? [
+        ...(contextMenu.cell ? [{label:`Показать исходную ячейку ${contextMenu.cell}`, run:()=>setProvenanceFocus({analysisId:contextMenu.id,cell:contextMenu.cell,field:contextMenu.field})}] : []),
         { label: selected.has(contextMenu.id) ? "Снять выделение анализа" : "Добавить анализ в отбор", run: () => toggleSelection(contextMenu.id) },
         { label: "Построить диаграммы для анализа", disabled: busy || !onOpenPlots, run: () => onOpenPlots([contextMenu.id]) },
         { label: "Фильтровать по источнику", run: () => { const analysis = byId.get(contextMenu.id); if (analysis) { setSourceFilter(analysis.source_id); setSheetFilter("all"); } } },
@@ -984,7 +1000,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
           if (details) { details.open = true; details.scrollIntoView?.({ block: "nearest" }); details.querySelector("input[name=new_value]")?.focus(); }
         } },
       ] : []} />
-      <AnalysisDetail analysis={focused} editDraftActions={editDraftActions} initialDraftId={initialDraftId} hiddenPlotAnalysisIds={hiddenPlotAnalysisIds}
+      <AnalysisDetail analysis={focused} provenanceFocus={provenanceFocus} editDraftActions={editDraftActions} initialDraftId={initialDraftId} hiddenPlotAnalysisIds={hiddenPlotAnalysisIds}
         onSetPlotVisibility={onSetPlotVisibility} onUndoPlotVisibility={onUndoPlotVisibility} busy={busy} />
 
       {selectedIds.length > 0 && (

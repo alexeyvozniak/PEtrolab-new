@@ -130,7 +130,7 @@ test("large table virtualizes rows while selection, search and keyboard cover th
   const analyses = Array.from({ length: 1000 }, (_, index) => ({
     analysis_id: "row-" + index, source_id: "source", source_name: "large.xlsx", sheet_name: "Sheet",
     source_row_number: index + 2, identity: { Analysis: "V-" + String(index + 1).padStart(4, "0") },
-    measurements: { SiO2: { raw_token: "40", numeric_value: 40, unit: "wt.%" } }, source_metadata: {},
+    measurements: { SiO2: { raw_token: "40", numeric_value: 40, unit: "wt.%",source_cell:"B"+(index+2) } }, source_metadata: {},
   }));
   render(<SelectionTestWorkspace project={{ total: 1000, source_count: 1, analyses }} busy={false} />);
   const table = screen.getByRole("table");
@@ -154,6 +154,11 @@ test("large table virtualizes rows while selection, search and keyboard cover th
   expect(screen.getByText("Скрыто фильтром: 999")).toBeTruthy();
   expect(screen.getByText("1000 выбрано")).toBeTruthy();
   expect(table.querySelector("tbody tr:not(.analysis-row-spacer) td.analysis-pinned-column").textContent).toBe("V-1000");
+  fireEvent.contextMenu(table.querySelector('td[data-source-cell="B1001"]'),{clientX:100,clientY:100});
+  fireEvent.click(screen.getByRole("menuitem",{name:"Показать исходную ячейку B1001"}));
+  expect(document.activeElement.dataset.sourceCell).toBe("B1001");
+  expect(document.activeElement.classList.contains("provenance-focused")).toBe(true);
+  expect(screen.getByText("1000 выбрано")).toBeTruthy();
   fireEvent.change(pin,{target:{value:""}});
   expect(table.querySelector(".analysis-pinned-column")).toBeNull();
 });

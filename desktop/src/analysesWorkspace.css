@@ -191,3 +191,5 @@
 .analyses-data-table thead tr.analysis-filter-row th.analysis-select-cell { z-index:6; }
 .analysis-columns-menu .analysis-pin-control { display:flex;flex-direction:column;align-items:stretch;gap:4px; }
 .analysis-pin-control select { width:100%;min-width:0; }
+
+.analysis-measurement.provenance-focused { outline:2px solid #397450;outline-offset:-2px;background:#eaf4ec; }
