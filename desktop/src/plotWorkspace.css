@@ -70,3 +70,9 @@
 .plot-presets button { min-width:0; white-space:normal; overflow-wrap:anywhere; text-align:left; font-size:10px; }
 .plot-preset-row { display:flex; gap:4px; }
 .plot-preset-row > button:first-child { flex:1; }
+
+.plot-category-legend { display:grid; gap:4px; max-height:220px; overflow:auto; }
+.plot-category-legend > div { display:flex; align-items:center; gap:5px; min-width:0; }
+.plot-category-legend > div > i { width:9px; height:9px; flex:none; border-radius:50%; }
+.plot-category-legend > div > span { flex:1; overflow-wrap:anywhere; }
+.plot-category-legend > div > small { flex:none; }

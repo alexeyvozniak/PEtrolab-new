@@ -238,8 +238,9 @@ export const queryProjectAnalysisIds = (projectDatabasePath, query) =>
   invokePetrolab("analysis.query.ids", { project_database_path: projectDatabasePath, ...query });
 export const getProjectAnalysis = (projectDatabasePath, analysisId) =>
   invokePetrolab("project.analysis.get", { project_database_path: projectDatabasePath, analysis_id: analysisId });
-export const getPlotCatalog = (projectDatabasePath, analysisIds) =>
-  invokePetrolab("plot_data.catalog", { project_database_path: projectDatabasePath, analysis_ids: analysisIds });
+export const getPlotCatalog = (projectDatabasePath, analysisIds, includeCategories = false) =>
+  invokePetrolab("plot_data.catalog", { project_database_path: projectDatabasePath, analysis_ids: analysisIds,
+    ...(includeCategories ? { include_categories: true } : {}) });
 export const listPlotSpecifications = (projectDatabasePath) =>
   invokePetrolab("plot_spec.list", { project_database_path: projectDatabasePath });
 export const savePlotSpecification = (projectDatabasePath, layout) =>

@@ -482,7 +482,7 @@ export function App() {
         ...(alreadyIsolated ? [] : sourceIds.filter(value => value !== id))];
     });
   };
-  const loadPlotCatalog = useCallback(async () => unwrap(await getPlotCatalog(databasePath, plotInputIds)), [databasePath, plotInputIds]);
+  const loadPlotCatalog = useCallback(async (includeCategories = false) => unwrap(await getPlotCatalog(databasePath, plotInputIds, includeCategories)), [databasePath, plotInputIds]);
   const loadPlotAnalysis = useCallback(async id => unwrap(await getProjectAnalysis(databasePath, id)), [databasePath]);
   const loadPlotSelection = useCallback(async (analysisIds, offset, limit) =>
     unwrap(await queryProjectAnalyses(databasePath, { analysis_ids: analysisIds, offset, limit })), [databasePath]);

@@ -510,6 +510,39 @@ test("AT-08 excludes only the focused source from both plots and restores it fro
   for (const [path, content] of files) expect(await readFile(path, "utf8")).toBe(content);
 }, 20000);
 
+test("categorical mineral colors use reported labels and preserve selection and vector export", async () => {
+  await writeFile(second, "Analysis,Mineral,SiO2 [wt.%],MgO [wt.%]\nC1,olivine,40,50\nC2,pyroxene,50,20\n");
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton(/^(Импортировать таблицу|Сохранить импорт в проект)$/));
+  await screen.findByRole("heading", { name: "Анализы" });
+  await user.click(await enabledButton("Построение"));
+  await screen.findAllByRole("button", { name: /^Выбрать точку C1/ });
+  const mode = screen.getByRole("combobox",{name:"Окрашивать по"});
+  await user.selectOptions(mode,"mineral");
+  const legend = await screen.findByLabelText("Легенда категорий");
+  expect(within(legend).getByText("olivine")).toBeTruthy();
+  expect(within(legend).getByText("pyroxene")).toBeTruthy();
+  const first = screen.getAllByRole("button", {name:/^Выбрать точку C1/})[0];
+  const secondMarker = screen.getAllByRole("button", {name:/^Выбрать точку C2/})[0];
+  expect(first.getAttribute("fill")).not.toBe(secondMarker.getAttribute("fill"));
+  fireEvent.keyDown(first,{key:"Enter"});
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  const svg = await readFile(await savePlot(user),"utf8");
+  expect(svg).toContain("category-legend");
+  expect(svg).toContain("olivine");
+  expect(svg).toContain("pyroxene");
+  expect(svg).toContain(first.getAttribute("fill"));
+  await user.selectOptions(mode,"generation");
+  expect(within(await screen.findByLabelText("Легенда категорий")).getByText("Не указано")).toBeTruthy();
+  await user.selectOptions(mode,"source");
+  expect(screen.queryByLabelText("Легенда категорий")).toBeNull();
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  expect(requests.filter(request=>request.command==="plot_data.catalog" && request.payload.include_categories)).toHaveLength(1);
+}, 20000);
+
 test("axis catalog drops an exact catalog key and rejects an unknown key", async () => {
   await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\nP1,20,30,50\nP2,10,80,10\n");
   queue = [second];

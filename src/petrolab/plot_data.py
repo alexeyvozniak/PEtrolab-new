@@ -48,9 +48,11 @@ def _selection(ids):
     return 1, json.dumps(ids)
 
 
-def plot_catalog(database_path, analysis_ids=None, *, include_formula=False):
+def plot_catalog(database_path, analysis_ids=None, *, include_formula=False, include_categories=False):
     if type(include_formula) is not bool:
         raise ValueError('include_formula')
+    if type(include_categories) is not bool:
+        raise ValueError('include_categories')
     with closing(open_project(database_path)) as connection:
         connection.execute('BEGIN')
         parameters = _selection(analysis_ids)
@@ -66,6 +68,22 @@ def plot_catalog(database_path, analysis_ids=None, *, include_formula=False):
                   "patterns": pattern_catalog()}
         if include_formula:
             result['formula_series'] = _plot_formula_series(connection, parameters)
+        if include_categories:
+            # Explicit stored assignments only; do not classify or substitute
+            # predictions for the reported mineral name. One read snapshot.
+            category_rows = connection.execute(f"""
+                WITH active AS (SELECT a.analysis_id {_ACTIVE_ANALYSES})
+                SELECT active.analysis_id, s.sample_id, s.sample_name,
+                       g.id AS generation_id, g.name AS generation_name,
+                       json_extract(e.reported_mineral_json, '$.value') AS reported_mineral
+                FROM active
+                LEFT JOIN analysis_import_semantics e USING (analysis_id)
+                LEFT JOIN sample s ON s.sample_id = json_extract(e.sample_association_json, '$.sample_id')
+                LEFT JOIN analysis_generation ag USING (analysis_id)
+                LEFT JOIN generation g ON g.id = ag.generation_id
+                ORDER BY active.analysis_id
+            """, parameters)
+            result['categories'] = [dict(row) for row in category_rows]
         return result
 
 

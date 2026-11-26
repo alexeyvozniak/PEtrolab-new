@@ -6,6 +6,30 @@ import "./plotWorkspace.css";
 
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
 const EMPTY_BINS = [];
+const COLOR_MODES = { source: "Источник", sample: "Физический образец", mineral: "Минерал (исходное название)", generation: "Generation" };
+const CATEGORY_COLORS = ["#356ca2","#ae5431","#39856b","#8c56a1","#bf8a28","#be456e","#367f91","#75643c","#647a2c","#485496","#ad675c","#7a7294","#248277","#a43d91","#66533f","#b67513"];
+const MISSING_COLOR = "#8c9590";
+function categoryStyle(rows, mode) {
+  if (mode === "source" || !rows) return null;
+  const byId = new Map(), groups = new Map();
+  for (const row of rows) {
+    const raw = mode === "sample" ? row.sample_id : mode === "generation" ? row.generation_id : row.reported_mineral;
+    const name = mode === "sample" ? row.sample_name : mode === "generation" ? row.generation_name : row.reported_mineral;
+    const key = raw == null || String(raw).trim() === "" ? null : String(raw);
+    byId.set(row.analysis_id, key);
+    if (!groups.has(key)) groups.set(key, { key, label: key === null ? "Не указано" : String(name || raw), count: 0 });
+    groups.get(key).count++;
+  }
+  const entries = [...groups.values()].sort((a,b) => a.key === null ? 1 : b.key === null ? -1 : a.label.localeCompare(b.label,"ru") || a.key.localeCompare(b.key));
+  const names = new Map();
+  entries.forEach(entry => names.set(entry.label,(names.get(entry.label)||0)+1));
+  entries.forEach((entry,index) => {
+    if (entry.key !== null && names.get(entry.label)>1) entry.label += " · " + entry.key.slice(0,8);
+    entry.color = entry.key === null ? MISSING_COLOR : CATEGORY_COLORS[index % CATEGORY_COLORS.length];
+  });
+  const colors = new Map(entries.map(entry => [entry.key,entry.color]));
+  return {entries, colorFor: id => colors.get(byId.get(id) ?? null) || MISSING_COLOR};
+}
 const AXIS_DRAG_TYPE = "application/x-petrolab-axis";
 function PointTooltip({ hover, detail, shift, loadAnalysis }) {
   if (!hover) return null;
@@ -112,7 +136,7 @@ function initialPanels(axes) {
     : make("binary", [axes[1], axes[0]])];
 }
 
-function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, shape, colorFor, points, rememberedView, rememberView }) {
+function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, shape, colorFor, categoryColor, points, rememberedView, rememberView }) {
   const drag = useRef(null);
   const canvas = useRef(null);
   const hovered = useRef(false);
@@ -359,7 +383,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
       <polygon key={field.layer_id} className="plot-field" fill="#99b9a0" fillOpacity={0.26}
         stroke="#5c7d66" strokeWidth={1} points={field.vertices.map(([u, v]) => `${px(u)},${py(v)}`).join(" ")} />)}
     {paths.map(({ point, path }) => <path key={point.analysis_id} className="plot-series" data-analysis-id={point.analysis_id}
-      d={path} fill="none" stroke={colorFor(point.source_id)} strokeWidth={1.25} opacity={point.opacity} />)}
+      d={path} fill="none" stroke={categoryColor ? categoryColor(point.analysis_id) : colorFor(point.source_id)} strokeWidth={1.25} opacity={point.opacity} />)}
     {bars.map((bar, index) => {
       const highlighted = bar.analysis_ids.some((id) => selected.has(id));
       const rect = { x: px(bar.left), y: py(bar.base + bar.height), width: px(bar.right) - px(bar.left),
@@ -377,7 +401,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
     })}
     {selectedOutline && <path className="plot-halo" d={selectedOutline} />}
     {!isHistogram && markers.map((point) => <g key={`${point.analysis_id}:${point.element || ""}`}>
-      <circle className="plot-point" data-analysis-id={point.analysis_id} fill={colorFor(point.source_id)}
+      <circle className="plot-point" data-analysis-id={point.analysis_id} fill={categoryColor ? categoryColor(point.analysis_id) : colorFor(point.source_id)}
         cx={px(point.u)} cy={py(point.v)} r={isPattern ? 2.5 : 3.5} role="button"
         tabIndex={!zoomed || contains(px(point.u), py(point.v)) ? point.tabIndex ?? 0 : -1}
         aria-hidden={zoomed && !contains(px(point.u), py(point.v)) ? true : undefined}
@@ -401,7 +425,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
   ] : []} /></>;
 }
 
-function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite }) {
+function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor }) {
   const [projection, setProjection] = useState(null);
   const current = projection?.load === load && projection.panel === panel ? projection : null;
   const data = current?.data;
@@ -498,7 +522,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
     </div>
     {status && <p role="status">{status}</p>}
     {data && <>
-      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} points={points}
+      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} categoryColor={categoryColor} points={points}
         rememberedView={viewMemory?.views.get(panel.id)?.fingerprint === data.projection_sha256 ? viewMemory.views.get(panel.id).view : undefined}
         rememberView={view => viewMemory?.views.set(panel.id, { fingerprint: data.projection_sha256, view })} />
       <small>{pattern ? "Спектров" : panel.kind === "histogram" ? "Анализов" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
@@ -670,6 +694,20 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
   const [layoutStatus, setLayoutStatus] = useState(null);
   const [layoutBusy, setLayoutBusy] = useState(false);
   const [savedColors, setSavedColors] = useState(() => viewMemory?.savedColors ?? {});
+  const [colorMode, setColorMode] = useState(() => viewMemory?.colorMode || "source");
+  const [categoryResult, setCategoryResult] = useState(null);
+  useEffect(() => {
+    if (colorMode === "source" || categoryResult?.load === loadCatalog) return;
+    let active = true;
+    loadCatalog(true).then(catalog => {
+      if (active) setCategoryResult({load:loadCatalog, rows:catalog.categories || []});
+    }, error => { if (active) setCategoryResult({load:loadCatalog, error:error.message || String(error)}); });
+    return () => { active = false; };
+  }, [colorMode, loadCatalog, categoryResult]);
+  const categoryData = categoryResult?.load === loadCatalog ? categoryResult : null;
+  const category = useMemo(() => categoryStyle(categoryData?.rows, colorMode), [categoryData, colorMode]);
+  const colorReady = colorMode === "source" || Boolean(category && !categoryData?.error);
+  useLayoutEffect(() => { if (viewMemory) viewMemory.colorMode = colorMode; }, [viewMemory, colorMode]);
   const [layers, setLayers] = useState(() => viewMemory?.layers ?? []);
   const [layerName, setLayerName] = useState("");
   const layerInput = inputIds ? selectedIds.filter((id) => inputIds.includes(id)) : selectedIds;
@@ -742,6 +780,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     setLayoutBusy(true);
     setLayoutStatus(null);
     try {
+      if (colorMode !== "source") throw new Error("Для сохранения раскладки верните окрашивание по источнику.");
       const saved = await saveLayout({
         name: layoutName, analysis_ids: inputIds, panels,
         colors: Object.fromEntries(sources.map(({ source_id }) => [source_id, colorFor(source_id)])),
@@ -762,6 +801,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     setLayoutStatus(null);
     try {
       const saved = await openLayout(id);
+      setColorMode("source");
       setPanels(saved.panels.map(({ id: panelId, kind, axes: savedAxes, normalization }) => ({
         id: panelId, kind, axes: savedAxes.map(({ scale, manual_range, ...axis }) => axis),
         ...(PATTERN_LABELS[kind] ? { normalization } : {}),
@@ -829,6 +869,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
   });
   const hasVisibleFields = layers.some((layer) => layer.field?.visible);
   const openExport = (panelId) => {
+    if (!colorReady) return;
     const visibleIds = Array.from(grid.current.children).flatMap((node, index) => {
       const area = node.getBoundingClientRect();
       return area.right > 0 && area.left < window.innerWidth && area.bottom > 0 && area.top < window.innerHeight
@@ -853,8 +894,14 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     setExportBusy(true);
     setExportStatus(null);
     try {
+      if (!colorReady) throw new Error("Дождитесь загрузки категорий окрашивания.");
+      if (addToPackage && colorMode !== "source") throw new Error("Для воспроизводимого пакета публикации верните окрашивание по источнику.");
+      const hasCategoryPanels = requested.some(({panelIndex}) => panels[panelIndex].kind !== "histogram");
+      const legend = category && hasCategoryPanels ? { title: COLOR_MODES[colorMode] + " · категории входного набора",
+        entries: category.entries, histogramNote: requested.some(({panelIndex}) => panels[panelIndex].kind === "histogram") } : null;
+      if (legend && legend.entries.length > 60) throw new Error("Слишком много категорий для читаемой легенды. Сузьте входной набор или выберите окрашивание по источнику.");
       const svg = buildPlotSvg(requested, { ...options, showLabel: requested.length > 1 || options.showLabel,
-        alphabet: labels.split("-")[0], uppercase: labels.endsWith("-upper") });
+        alphabet: labels.split("-")[0], uppercase: labels.endsWith("-upper"), legend });
       const base = name.trim().replace(/\.(svg|pdf|png|tiff?)$/i, "");
       if (addToPackage) {
         await onAddPublication({
@@ -945,6 +992,22 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         <button type="button" className="outline-button" disabled={loading || !mineralGroup || panels.length + mineralGroup.presets.length > 32}
           onClick={() => addPresets(mineralGroup.presets)}>Добавить графики шаблона</button>
       </details>
+      <section className="plot-source-legend" aria-label="Окрашивание точек">
+        <h3>Окрашивание</h3>
+        <select aria-label="Окрашивать по" value={colorMode} disabled={loading || busy || exportBusy}
+          onChange={event => {setColorMode(event.target.value);setExportOptions(null);}}>
+          {Object.entries(COLOR_MODES).map(([key,label]) => <option key={key} value={key}>{label}</option>)}
+        </select>
+        {colorMode !== "source" && <>
+          {!colorReady && <small role="status">{categoryData?.error ? "Не удалось загрузить категории: " + categoryData.error : "Загружаю категории…"}</small>}
+          {categoryData?.error && <button type="button" className="outline-button" onClick={() => setCategoryResult(null)}>Повторить</button>}
+          {category && <div className="plot-category-legend" aria-label="Легенда категорий">
+            {category.entries.map(entry => <div key={entry.key === null ? "missing" : "value:" + entry.key}><i style={{backgroundColor:entry.color}} aria-hidden="true"/><span>{entry.label}</span><small>{entry.count}</small></div>)}
+          </div>}
+          {category?.entries.length > CATEGORY_COLORS.length && <small>Цвета могут повторяться; сузьте набор для различения групп.</small>}
+          <small>Гистограммы и управление видимостью источников сохраняют исходные цвета. Для сохранённой раскладки и пакета публикации верните окрашивание по источнику.</small>
+        </>}
+      </section>
       <section className="plot-source-legend" aria-label="Легенда источников">
         <h3>Источники</h3>
         {sources.map((source) => {
@@ -1010,7 +1073,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         <form onSubmit={save}>
           <label>Название раскладки<input value={layoutName} maxLength={120}
             onChange={(event) => setLayoutName(event.target.value)} /></label>
-          <button className="outline-button" type="submit" disabled={layoutBusy || busy || loading || !layoutName.trim() || !panels.length}>
+          <button className="outline-button" type="submit" disabled={layoutBusy || busy || loading || colorMode !== "source" || !layoutName.trim() || !panels.length}>
             Сохранить раскладку
           </button>
         </form>
@@ -1026,7 +1089,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
           <option value="replace">Новый отбор</option><option value="union">Добавить к отбору</option><option value="subtract">Исключить из отбора</option>
         </select></label>
         <button className="primary-button" type="button" onClick={add} disabled={!axes.length || panels.length >= 32}>Добавить диаграмму</button>
-        {onExport && <button className="outline-button" type="button" disabled={exportBusy || loading || !panels.length}
+        {onExport && <button className="outline-button" type="button" disabled={exportBusy || loading || !colorReady || !panels.length}
           onClick={() => openExport(null)}>Выгрузить раскладку</button>}
       </header>
       {exportStatus && <p role={exportStatus.error ? "alert" : "status"}>{exportStatus.error || exportStatus.notice}</p>}
@@ -1037,8 +1100,8 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
       }}>
         <div className="plot-grid" ref={grid}>
-          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} layers={layers} viewMemory={viewMemory}
-            openExport={onExport && !exportBusy ? () => openExport(panel.id) : undefined}
+          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} layers={layers} viewMemory={viewMemory}
+            openExport={onExport && !exportBusy && colorReady ? () => openExport(panel.id) : undefined}
             favorite={Boolean(makePreset(panel) && favoritePresets.some(item => presetKey(item) === presetKey(makePreset(panel))))}
             onFavorite={() => toggleFavorite(panel)}
             update={(next) => {
@@ -1049,7 +1112,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}
         </div>
         {exportOptions && <PlotExport options={exportOptions} panels={panels} pending={exportBusy} submit={submitExport}
-          canAddPublication={Boolean(onAddPublication)}
+          canAddPublication={Boolean(onAddPublication) && colorMode === "source"}
           close={() => setExportOptions(null)} onChange={(values) => setExportOptions((current) => ({ ...current, ...values }))} />}
       </div>
       <footer className="plot-selection-footer"><b>Выбранные анализы · {selectedIds.length}</b>

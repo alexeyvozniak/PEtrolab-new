@@ -402,7 +402,8 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
         params.get("hidden_analysis_ids"),
     )},
     "plot_data.catalog": lambda params: {"result": plot_catalog(_project_database_path(params), params.get("analysis_ids"),
-                                                               include_formula=params.get("include_formula", False))},
+                                                               include_formula=params.get("include_formula", False),
+                                                               include_categories=params.get("include_categories", False))},
     "plot_data.query": lambda params: {"result": query_plot_data(
         _project_database_path(params), params.get("kind"), params.get("axes"), params.get("analysis_ids"),
         params.get("hidden_analysis_ids"), params.get("hidden_source_ids"), params.get("layers"),
