@@ -1,0 +1,52 @@
+name: Import performance comparison
+
+on:
+  pull_request:
+    branches: [codex/petrolab-2-release]
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    if: github.head_ref == 'codex/import-performance'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+      - uses: actions/checkout@v4
+        with:
+          ref: 006f6fc8b5a73a6b820c8fb4c85a3f65676e6df3
+          path: baseline
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check ./candidate
+      - name: Benchmark release and candidate on identical files
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$PWD/baseline/src" python candidate/scripts/benchmark_import.py --fixtures "$RUNNER_TEMP/import-fixtures" --output results/baseline.json
+          PYTHONPATH="$PWD/candidate/src" python candidate/scripts/benchmark_import.py --fixtures "$RUNNER_TEMP/import-fixtures" --output results/candidate.json
+      - name: Compare measurement fingerprints and durations
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          old = json.loads(Path("results/baseline.json").read_text())["results"]
+          new = json.loads(Path("results/candidate.json").read_text())["results"]
+          assert len(old) == len(new)
+          for a, b in zip(old, new):
+              for k in ("rows", "format", "source_sha256", "measurement_sha256", "measurements"):
+                  assert a[k] == b[k], (k, a, b)
+              ratios = {k: round(a[k] / b[k], 2) for k in ("create_s", "get_s", "preview_median_s", "commit_s") if b[k] > 0}
+              print(a["format"], a["rows"], "speedup (baseline/candidate):", ratios)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: import-performance-comparison
+          path: results/

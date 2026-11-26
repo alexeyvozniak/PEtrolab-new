@@ -27,3 +27,7 @@
 ## 2026-11-26: проверка первого среза
 
 Architecture CI на 5cfb96d: контракты прошли, 214 тестов, одна ошибка в прежнем тесте Windows-only записи XLSX на Linux (EDIT_EXCLUSIVE_ACCESS_UNAVAILABLE). Windows Python step прошёл. Отдельный коммит 9c911ca добавляет проверку безопасного отказа на не-Windows и оставляет полный Windows-сценарий неизменным. Следующий срез: ограниченный cache без кэша Import Plan. Не считать готовым до полного CI и измерений.
+
+## Сравнительный замер
+
+Добавлен `scripts/benchmark_import.py`: CSV/XLSX 1 000 и 10 000 анализов с 12 оксидами, отдельно create/get/пять preview/commit и размер JSON, точные SHA-256 исходника и измерений, SQLite integrity/foreign keys. Workflow Import performance comparison запускает тот же скрипт и те же файлы на baseline 006f6fc8 и candidate на одном Linux runner. Прирост скорости не утверждается до получения результатов; 100 000 строк, реальные книги и Windows остаются отдельной проверкой.
