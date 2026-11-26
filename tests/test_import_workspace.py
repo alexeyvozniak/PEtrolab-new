@@ -150,6 +150,47 @@ class ImportWorkspaceTests(unittest.TestCase):
         with closing(sqlite3.connect(database)) as connection:
             self.assertEqual(connection.execute('SELECT COUNT(*) FROM analysis').fetchone()[0], 3)
 
+    def test_batched_provenance_failure_rolls_back_earlier_flushes(self):
+        from petrolab import import_apply
+        database = self.source.parent / 'batched.sqlite'
+        self.source.write_text('Analysis,SiO2 [wt.%],FeO [wt.%]\nA1,40,10\nA2,41,11\nA3,42,12\n',
+                               encoding='utf-8')
+        original = self.source.read_bytes()
+        self.current = self.store.command('create', {'project_database_path': str(database),
+            'sources': [{'staged_path': str(self.source)}]})
+        self.assertTrue(self.current['session']['readiness']['ready_to_commit'])
+        workspace_id = self.current['session']['workspace_id']
+        with closing(sqlite3.connect(database)) as connection:
+            connection.execute("""
+                CREATE TRIGGER reject_late_cell BEFORE INSERT ON source_cell_provenance
+                WHEN NEW.raw_token = '42'
+                BEGIN SELECT RAISE(ABORT, 'late cell failed'); END
+            """)
+        # Force several executemany flushes inside the same transaction.
+        with patch.object(import_apply, 'IMPORT_WRITE_BATCH_ROWS', 1):
+            with self.assertRaisesRegex(sqlite3.IntegrityError, 'late cell failed'):
+                self.call('commit')
+            self.assertIn(workspace_id, self.store.sessions)
+            with closing(sqlite3.connect(database)) as connection:
+                for table in ('source_file', 'import_batch', 'analysis', 'measurement',
+                              'analysis_import_semantics', 'analysis_source_metadata',
+                              'source_row_provenance', 'source_cell_provenance'):
+                    self.assertEqual(connection.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0], 0, table)
+                connection.execute('DROP TRIGGER reject_late_cell')
+            self.assertEqual(list((database.parent / 'sources').iterdir()), [])
+            result = self.call('commit')
+        self.assertEqual(result['analysis_count'], 3)
+        self.assertEqual(result['measurement_count'], 6)
+        with closing(sqlite3.connect(database)) as connection:
+            self.assertEqual(connection.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
+            self.assertIsNone(connection.execute('PRAGMA foreign_key_check').fetchone())
+            for table in ('measurement', 'source_row_provenance', 'source_cell_provenance'):
+                self.assertEqual(connection.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0], 6)
+            self.assertEqual(connection.execute(
+                "SELECT raw_token FROM source_cell_provenance ORDER BY source_row_number, source_column_index"
+            ).fetchall(), [('40',), ('10',), ('41',), ('11',), ('42',), ('12',)])
+        self.assertEqual(self.source.read_bytes(), original)
+
     def test_stale_revision_is_structured_and_does_not_overwrite(self):
         previous = deepcopy(self.current['session'])
         self.call('replan')

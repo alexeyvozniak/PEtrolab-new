@@ -40,7 +40,7 @@ jobs:
           new = json.loads(Path("results/candidate.json").read_text())["results"]
           assert len(old) == len(new)
           for a, b in zip(old, new):
-              for k in ("rows", "format", "source_sha256", "measurement_sha256", "measurements"):
+              for k in ("rows", "format", "source_sha256", "measurement_sha256", "provenance_sha256", "measurements"):
                   assert a[k] == b[k], (k, a, b)
               ratios = {k: round(a[k] / b[k], 2) for k in ("create_s", "get_s", "preview_median_s", "commit_s") if b[k] > 0}
               print(a["format"], a["rows"], "speedup (baseline/candidate):", ratios)

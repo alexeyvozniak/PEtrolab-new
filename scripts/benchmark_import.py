@@ -82,9 +82,30 @@ def benchmark(source, count):
                 FROM measurement m JOIN analysis a ON a.analysis_id = m.analysis_id
                 ORDER BY a.sheet_name, m.source_row_number, m.physical_source_column_index, m.canonical_field"""):
                 observed.update(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n")
+            provenance = hashlib.sha256()
+            for query in (
+                """SELECT a.sheet_name, p.source_row_number, p.source_column_index, p.source_cell,
+                          p.source_header, p.raw_token, p.qualifier, p.value_status
+                   FROM source_cell_provenance p JOIN analysis a ON a.analysis_id = p.analysis_id
+                   ORDER BY a.sheet_name, p.source_row_number, p.source_column_index, p.source_header""",
+                """SELECT a.sheet_name, p.row_number, p.source_column_name, p.raw_token,
+                          p.normalized_token, p.qualifier, p.value_status
+                   FROM source_row_provenance p JOIN analysis a ON a.analysis_id = p.analysis_id
+                   ORDER BY a.sheet_name, p.row_number, p.source_column_name""",
+                """SELECT a.sheet_name, a.source_row_number, s.sample_association_json,
+                          s.reported_mineral_json, s.mineral_assignment_json,
+                          s.mineral_verification_json, s.analytical_method_json
+                   FROM analysis_import_semantics s JOIN analysis a ON a.analysis_id = s.analysis_id
+                   ORDER BY a.sheet_name, a.source_row_number""",
+            ):
+                for row in connection.execute(query):
+                    provenance.update(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n")
+            for table in ("source_row_provenance", "source_cell_provenance"):
+                assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == saved["measurement_count"]
         finally:
             connection.close()
         return {"rows": count, "format": source.suffix[1:], "source_sha256": before,
+                "provenance_sha256": provenance.hexdigest(),
                 "measurement_sha256": observed.hexdigest(), "measurements": saved["measurement_count"],
                 "create_s": create, "get_s": get, "preview_samples_s": times,
                 "preview_median_s": statistics.median(times), "commit_s": commit,
