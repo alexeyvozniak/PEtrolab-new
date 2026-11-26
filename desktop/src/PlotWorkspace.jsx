@@ -748,7 +748,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
   }, [colorMode, loadCatalog, categoryResult]);
   const categoryData = categoryResult?.load === loadCatalog ? categoryResult : null;
   const category = useMemo(() => categoryStyle(categoryData?.rows, colorMode, overrides), [categoryData, colorMode, overrides]);
-  const colorReady = colorMode === "source" || Boolean(category && !categoryData?.error);
+  const colorReady = (!loadColorScheme || schemeRevision !== null) && (colorMode === "source" || Boolean(category && !categoryData?.error));
   useLayoutEffect(() => { if (viewMemory) viewMemory.colorMode = colorMode; }, [viewMemory, colorMode]);
   const [layers, setLayers] = useState(() => viewMemory?.layers ?? []);
   const [layerName, setLayerName] = useState("");

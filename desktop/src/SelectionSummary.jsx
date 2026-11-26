@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-const number = value => value == null ? "—" : Number(value).toLocaleString("ru",{maximumSignificantDigits:7});
+const number = value => value == null ? "—" : Number(value).toLocaleString("ru",{maximumSignificantDigits:7,useGrouping:false});
 export function SelectionSummary({ids,load,close}) {
   const loader=useRef(load);
   const [result,setResult]=useState(null),[error,setError]=useState("");
