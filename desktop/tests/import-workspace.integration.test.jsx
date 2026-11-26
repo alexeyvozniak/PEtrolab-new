@@ -543,6 +543,16 @@ test("axis catalog drops an exact catalog key and rejects an unknown key", async
   fireEvent.drop(axis, { dataTransfer });
   expect(axis.value).toBe(target.value);
   expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
+  await user.click(within(panel).getByRole("button", {name:"Добавить диаграмму в избранное"}));
+  await user.click(screen.getByText("Избранное и недавние оси"));
+  const presets = screen.getByText("Избранные комбинации").closest("details");
+  const favorite = within(presets).getByRole("button",{name:"Удалить избранную комбинацию"}).parentElement.firstElementChild;
+  await user.click(favorite);
+  await waitFor(() => expect(screen.getAllByRole("combobox", {name:"Тип диаграммы"})).toHaveLength(3));
+  await user.click(screen.getByText("Минеральные шаблоны"));
+  await user.click(await enabledButton("Добавить графики шаблона"));
+  await waitFor(() => expect(screen.getAllByRole("combobox", {name:"Тип диаграммы"})).toHaveLength(4));
+  expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
 }, 20000);
 
 test("one common selection highlights the same analysis on binary and ternary plots and in the table", async () => {
@@ -561,7 +571,7 @@ test("one common selection highlights the same analysis on binary and ternary pl
   fireEvent.mouseEnter(point, { shiftKey: true });
   const tooltip = await screen.findByRole("tooltip");
   await within(tooltip).findByText("Исходные измерения (без пересчёта)");
-  expect(within(tooltip).getByText(/MgO: 50 wt\.%/)).toBeTruthy();
+  expect(within(tooltip).getAllByText(/MgO: 50 wt\.%/).some(node => node.closest(".plot-tooltip-measurements"))).toBe(true);
   expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
   fireEvent.mouseLeave(point);
   expect(screen.queryByRole("tooltip")).toBeNull();

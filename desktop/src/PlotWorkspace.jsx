@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import { ContextActions } from "./ContextActions";
+import { makePreset, presetKey, rememberPreset, resolvePreset, templateGroups, MINERAL_TEMPLATES } from "./plotPresets";
 import "./plotWorkspace.css";
 
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
@@ -400,7 +401,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
   ] : []} /></>;
 }
 
-function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory }) {
+function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite }) {
   const [projection, setProjection] = useState(null);
   const current = projection?.load === load && projection.panel === panel ? projection : null;
   const data = current?.data;
@@ -452,6 +453,8 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
   return <article className="plot-panel" id={`plot-${panel.id}`}>
     <header><b>{panelTitle(panel)}</b>
       <div className="plot-panel-actions">
+        {onFavorite && <button type="button" className="outline-button" aria-label={favorite ? "Убрать диаграмму из избранного" : "Добавить диаграмму в избранное"}
+          aria-pressed={favorite} disabled={!makePreset(panel)} title="Избранное сохраняет комбинацию осей, а не исходные данные" onClick={onFavorite}>{favorite ? "★" : "☆"}</button>}
         {openExport && <button type="button" className="outline-button" disabled={!data} onClick={openExport}>Выгрузить панель</button>}
         {canRemove && <button type="button" className="outline-button" onClick={remove}>Убрать панель</button>}
       </div>
@@ -626,6 +629,15 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
   const [axes, setAxes] = useState([]);
   const [axisQuery, setAxisQuery] = useState("");
   const [axisCatalogOpen, setAxisCatalogOpen] = useState(false);
+  const [recentPresets, setRecentPresets] = useState(() => viewMemory?.recentPresets || []);
+  const [favoritePresets, setFavoritePresets] = useState(() => viewMemory?.favoritePresets || []);
+  const [templateName, setTemplateName] = useState(MINERAL_TEMPLATES[0].name);
+  const [templateGroupKey, setTemplateGroupKey] = useState("");
+  const mineralGroups = useMemo(() => templateGroups(MINERAL_TEMPLATES.find(item => item.name === templateName), axes), [templateName, axes]);
+  const mineralGroup = mineralGroups.find(item => item.key === templateGroupKey) || mineralGroups[0];
+  useLayoutEffect(() => {
+    if (viewMemory) Object.assign(viewMemory, { recentPresets, favoritePresets });
+  }, [viewMemory, recentPresets, favoritePresets]);
   const cachedAnalysis = useMemo(() => {
     if (!loadAnalysis) return undefined;
     const cache = new Map();
@@ -775,6 +787,23 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     return [...new Set([...current, ...incoming])];
   });
   const add = () => setPanels((current) => [...current, initialPanels(axes)[0]]);
+  const addPresets = presets => {
+    const resolved = presets.map(preset => resolvePreset(preset, axes, patterns));
+    if (resolved.some(panel => !panel) || panels.length + resolved.length > 32) return;
+    setPanels(current => [...current, ...resolved.map(panel => ({...panel, id:crypto.randomUUID()}))]);
+    setRecentPresets(current => presets.reduce((items, preset) => rememberPreset(items, preset), current));
+  };
+  const toggleFavorite = panel => {
+    const preset = makePreset(panel);
+    if (!preset) return;
+    setFavoritePresets(current => current.some(item => presetKey(item) === presetKey(preset))
+      ? current.filter(item => presetKey(item) !== presetKey(preset)) : rememberPreset(current,preset,24));
+  };
+  const presetTitle = preset => {
+    const resolved = resolvePreset(preset,axes,patterns);
+    return resolved ? panelTitle(resolved) + " · " + resolved.axes.map(axisLabel).join(" / ")
+      : preset.keys.map(key => { try { return JSON.parse(key).filter(Boolean).join(" · "); } catch { return key; } }).join(" / ") + " · поля недоступны";
+  };
   const movePanel = (fromId, toId) => {
     if (fromId === toId) return;
     setPanels(current => {
@@ -885,6 +914,37 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
           </div>
         </>}
       </details>
+      <details className="plot-presets">
+        <summary>Избранное и недавние оси</summary>
+        <small>Сохраняются в текущем сеансе проекта; для постоянного хранения используйте сохранённые раскладки.</small>
+        <b>Избранные комбинации</b>
+        {!favoritePresets.length && <small>Нажмите ☆ на панели.</small>}
+        {favoritePresets.map(preset => <div key={presetKey(preset)} className="plot-preset-row">
+          <button type="button" className="outline-button" disabled={loading || panels.length >= 32 || !resolvePreset(preset,axes,patterns)}
+            onClick={() => addPresets([preset])}>{presetTitle(preset)}</button>
+          <button type="button" aria-label="Удалить избранную комбинацию" onClick={() => setFavoritePresets(current => current.filter(item => presetKey(item) !== presetKey(preset)))}>×</button>
+        </div>)}
+        <b>Недавние комбинации</b>
+        {!recentPresets.length && <small>Появятся после изменения осей.</small>}
+        {recentPresets.map(preset => <button key={presetKey(preset)} type="button" className="outline-button"
+          disabled={loading || panels.length >= 32 || !resolvePreset(preset,axes,patterns)} onClick={() => addPresets([preset])}>{presetTitle(preset)}</button>)}
+      </details>
+      <details className="plot-presets">
+        <summary>Минеральные шаблоны</summary>
+        <small>Наборы бинарных графиков по исходным wt.%; не определяют минерал и не фильтруют анализы автоматически.</small>
+        <select aria-label="Минеральный шаблон" value={templateName} onChange={event => {setTemplateName(event.target.value);setTemplateGroupKey("");}}>
+          {MINERAL_TEMPLATES.map(template => <option key={template.name}>{template.name}</option>)}
+        </select>
+        {mineralGroups.length > 1 && <select aria-label="Аналитический набор шаблона" value={mineralGroup?.key || ""} onChange={event => setTemplateGroupKey(event.target.value)}>
+          {mineralGroups.map(group => <option key={group.key} value={group.key}>{group.label}</option>)}
+        </select>}
+        {mineralGroup ? <>
+          <small>{mineralGroup.label}</small>
+          {mineralGroup.presets.map(preset => <small key={presetKey(preset)}>{presetTitle(preset)}</small>)}
+        </> : <small>Нет совместимых пар полей в одном аналитическом наборе.</small>}
+        <button type="button" className="outline-button" disabled={loading || !mineralGroup || panels.length + mineralGroup.presets.length > 32}
+          onClick={() => addPresets(mineralGroup.presets)}>Добавить графики шаблона</button>
+      </details>
       <section className="plot-source-legend" aria-label="Легенда источников">
         <h3>Источники</h3>
         {sources.map((source) => {
@@ -979,7 +1039,13 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         <div className="plot-grid" ref={grid}>
           {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} layers={layers} viewMemory={viewMemory}
             openExport={onExport && !exportBusy ? () => openExport(panel.id) : undefined}
-            update={(next) => setPanels((current) => current.map((item) => item.id === panel.id ? next : item))}
+            favorite={Boolean(makePreset(panel) && favoritePresets.some(item => presetKey(item) === presetKey(makePreset(panel))))}
+            onFavorite={() => toggleFavorite(panel)}
+            update={(next) => {
+              setPanels(current => current.map(item => item.id === panel.id ? next : item));
+              const preset = makePreset(next);
+              if (preset) setRecentPresets(current => rememberPreset(current,preset));
+            }}
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}
         </div>
         {exportOptions && <PlotExport options={exportOptions} panels={panels} pending={exportBusy} submit={submitExport}
