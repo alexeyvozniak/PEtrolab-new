@@ -68,3 +68,7 @@ Reuse the successful clean-table classification plan and parsed source when addi
 ### Import polish — 2/6
 
 Prepare immutable measurement mapping evidence once per field in row-oriented and transposed blocks, instead of resolving Fe header and mapping metadata for every measurement. Keep the exact measurement shape, coordinate construction, token handling, and independent mutable measurement objects. Regression checks mapping resolution count and coordinates; existing transposed and provenance fixtures remain in the full suite.
+
+### Import polish — 3/6
+
+Reuse the already parsed qualifier when computing the measurement value status. Public value_status continues to use the same helper. Tests include numeric zero, decimal comma, censored limits including underflow/overflow, <DL, ND, non-finite and missing values; no change to token or status semantics.

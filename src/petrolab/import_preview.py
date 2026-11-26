@@ -692,6 +692,10 @@ def _qualifier(token: str | None) -> tuple[str | None, float | None]:
 def value_status(token: str | None) -> str:
     """Classify notation, without substituting a concentration or guessing ND's meaning."""
     qualifier, _ = _qualifier(token)
+    return _value_status_from_qualifier(token, qualifier)
+
+
+def _value_status_from_qualifier(token: str | None, qualifier: str | None) -> str:
     if qualifier:
         return qualifier
     if str(token).strip().lower() in {"n.d.", "nd"}:
@@ -753,7 +757,7 @@ def _measurement_from_template(template: dict[str, Any], token: str | None, phys
         "raw_token": token,
         "qualifier": qualifier,
         "detection_limit": detection_limit,
-        "value_status": value_status(token),
+        "value_status": _value_status_from_qualifier(token, qualifier),
         "reported_fe_form": template["reported_fe_form"],
         "fe_handling": template["fe_handling"],
         "source_header": template["source_header"],

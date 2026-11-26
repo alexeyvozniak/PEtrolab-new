@@ -29,6 +29,22 @@ FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
 
 
 class HeaderRecognitionPerformanceTests(unittest.TestCase):
+    def test_measurement_qualifier_parsed_once_without_changing_status(self):
+        from petrolab import import_preview as preview
+        from unittest.mock import patch
+        field = next(item for item in fixture_recipe()["sections"][0]["mappings"] if item["target_role"] == "measurement")
+        template = preview._measurement_template(field)
+        tokens = [None, "", " ", "0", "0.00", "1,25", "<0.01", "<1e-500", "<1e500",
+                  "<DL", "<dl>", "BDL", "n.d.", "ND", "NaN", "inf", "text", "-0.1"]
+        expected = [(preview._qualifier(token), preview.value_status(token)) for token in tokens]
+        with patch.object(preview, "_qualifier", wraps=preview._qualifier) as qualifier:
+            measurements = [preview._measurement_from_template(template, token, 3, 4) for token in tokens]
+            self.assertEqual(qualifier.call_count, len(tokens))
+        for token, measurement, ((kind, limit), status) in zip(tokens, measurements, expected, strict=True):
+            self.assertEqual(measurement["raw_token"], token)
+            self.assertEqual((measurement["qualifier"], measurement["detection_limit"]), (kind, limit))
+            self.assertEqual(measurement["value_status"], status)
+
     def test_measurement_template_preserves_exact_values_and_coordinates(self):
         from petrolab import import_preview as preview
         from unittest.mock import patch
