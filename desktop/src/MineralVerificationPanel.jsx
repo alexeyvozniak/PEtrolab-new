@@ -17,6 +17,10 @@ const diagnosticLabels = {
   mica_OH_upper_bound: 'Для оценки верхней границы OH нужны F и Cl', mica_W_site: 'Сумма F и Cl превышает вместимость W-позиции',
 };
 const number = new Intl.NumberFormat('ru', { maximumSignificantDigits: 6 });
+const droopDiagnosticLabels = {
+  initial_cation_sum: 'Исходная сумма катионов', target_cation_sum: 'Целевая сумма катионов',
+  'unconstrained_Fe3+': 'Оценка Fe³⁺ до проверки', normalized_total_Fe: 'Суммарное Fe после нормировки',
+};
 
 function FormulaBatchResult({ result }) {
   const [limit, setLimit] = useState(20);
@@ -44,13 +48,14 @@ function FormulaBatchResult({ result }) {
   </>;
 }
 
-function FormulaPreview({ selection, methods, busy, onPreview, onAccept, onClose }) {
+function FormulaPreview({ selection, record, methods, busy, onPreview, onAccept, onClose }) {
   const [methodId, setMethodId] = useState('');
   const [result, setResult] = useState(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const method = methods.find((item) => item.method_id === methodId);
   const batch = Array.isArray(selection);
+  const iron = record?.measurements.filter((item) => item.reported_fe_form) ?? [];
   async function calculate(event) {
     event.preventDefault();
     if (!method || busy || pending) return;
@@ -82,9 +87,17 @@ function FormulaPreview({ selection, methods, busy, onPreview, onAccept, onClose
       {methods.map((item) => <option key={item.method_id} value={item.method_id}>{item.name}</option>)}
     </select></label>
     {method && <p>Версия {method.version} · {method.oxygen_basis ? `${method.oxygen_basis} O` : `${method.cation_basis} кат.`}</p>}
-    {batch && method && <details><summary>Входные компоненты и допущения</summary>
+    {method && <details key={methodId} open={method.droop_ideal_cations != null || undefined}><summary>Входные компоненты и допущения</summary>
       <p>{method.required_components.join(' · ')} · {method.input_unit}</p>
-      <p>{method.iron_policy}</p><p>{method.oh_basis}</p>
+      {method.droop_ideal_cations != null ? <>
+        <p>Для оценки Fe³⁺ по Droop нужен FeOt — суммарное железо, выраженное как FeO.</p>
+        <p>Целевая сумма — {method.droop_ideal_cations} катионов. Модель предполагает заполненные позиции, кислород как единственный анион и Fe как единственный элемент переменной валентности.</p>
+      </> : <p>{method.iron_policy}</p>}
+      <p>{method.oh_basis}</p>
+      {iron.map(({ source_cell, field, raw_token, unit, reported_fe_form }) => <p key={source_cell}>
+        {source_cell} · {field} · {raw_token ?? 'пусто'} {unit}
+        {reported_fe_form === 'unresolved' ? ' · форма Fe не определена' : reported_fe_form !== field && ` · форма в источнике ${reported_fe_form}`}
+      </p>)}
     </details>}
     <div className="mineral-formula-actions">
       <button type="submit" disabled={!method || busy || pending}>{pending ? 'Вычисление…' : 'Рассчитать'}</button>
@@ -106,8 +119,12 @@ function FormulaPreview({ selection, methods, busy, onPreview, onAccept, onClose
       </dl></section>)}
       {result.preview.warnings.map(({ field, missing_species }) =>
         <p key={field}>{diagnosticLabels[field] || field}{missing_species?.length ? ` · ${missing_species.join(', ')}` : ''}</p>)}
-      <details><summary>Исходные измерения и допущения</summary>
-        <p>{method.iron_policy}</p><p>{method.oh_basis}</p>
+      {result.preview.droop_diagnostics_apfu && <details><summary>Проверка допущений Droop, APFU</summary><dl>
+        {Object.entries(result.preview.droop_diagnostics_apfu).map(([field, value]) => <div key={field}>
+          <dt>{droopDiagnosticLabels[field] || field}</dt><dd>{number.format(value)}</dd>
+        </div>)}
+      </dl></details>}
+      <details><summary>Измерения, использованные в расчёте</summary>
         {result.measurements.map(({ source_cell, field, raw_token, unit }) =>
           <p key={source_cell}>{source_cell} · {field} · {raw_token} {unit}</p>)}
         {result.excluded_measurements.map(({ source_cell, field, raw_token, reason }) =>
@@ -179,7 +196,7 @@ export function MineralVerificationPanel({ records, scopes, busy, onAccept, onRe
         {formula && formula.scope === formulaScope && formula.previewId === record.preview_id && <>
           {methodsPending && <p role="status">Загрузка методов…</p>}
           {methodsError && <p role="alert">{methodsError}</p>}
-          {methods && <FormulaPreview key={formulaScope} selection={record.preview_id} methods={methods} busy={busy}
+          {methods && <FormulaPreview key={formulaScope} selection={record.preview_id} record={record} methods={methods} busy={busy}
             onPreview={onPreviewFormula} onAccept={onAcceptFormula} onClose={() => setFormula(null)} />}
         </>}
       </div>;

@@ -1628,6 +1628,40 @@ test("real Python mineral review separates conflicts and persists only explicit 
   expect(await readFile(second, "utf8")).toBe(raw);
 }, 20000);
 
+test("pyroxene Droop review exposes the iron assumption and preserves reported FeOt", async () => {
+  const raw = "Analysis,SiO2 (wt.%),TiO2 (wt.%),Al2O3 (wt.%),FeOt (wt.%),MnO (wt.%),MgO (wt.%),CaO (wt.%),Na2O (wt.%),K2O (wt.%)\nP1,56.21,0,10.56,6.10,0.01,7.33,12.13,7.64,0.04\n";
+  await writeFile(second, raw);
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton("2 · Проверить минералы"));
+  await user.click(await enabledButton("Рассчитать формулу"));
+  const formula = within(await screen.findByRole("form", { name: "Предпросмотр формулы" }));
+  await user.selectOptions(formula.getByRole("combobox"), "formula.pyroxene.6o.droop");
+  expect(formula.getByText(/Целевая сумма — 4 катионов/).closest("details").open).toBe(true);
+  expect(formula.getByText(/E2 · FeOt · 6\.10 wt\.%/).closest("details").open).toBe(true);
+  await user.click(formula.getByRole("button", { name: "Рассчитать", exact: true }));
+  await formula.findByText("Предварительный расчёт");
+  await user.click(formula.getByText("Проверка допущений Droop, APFU"));
+  expect(formula.getByText("Целевая сумма катионов").nextElementSibling.textContent).toBe("4");
+  expect(formula.getByText("Fe3+", { exact: true }).nextElementSibling.textContent).toMatch(/^0,09/);
+  await user.click(formula.getByRole("button", { name: "Принять расчёт" }));
+  await user.click(await enabledButton(/^(Импортировать таблицу|Сохранить импорт в проект)$/));
+  await screen.findByRole("heading", { name: "Анализы" });
+
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  const [run] = (await invokePetrolab("formula.runs.list", database)).result;
+  const saved = (await invokePetrolab("formula.run.open", { ...database, run_id: run.id })).result;
+  expect(saved).toMatchObject({ status: "current", method_id: "formula.pyroxene.6o.droop" });
+  expect(saved.result_manifest.iron_partition_apfu["Fe3+"]).toBeCloseTo(0.091, 3);
+  const [analysis] = (await invokePetrolab("project.analyses.list", database)).result.analyses;
+  expect(analysis.measurement_list.filter(({ reported_fe_form }) => reported_fe_form)).toMatchObject([
+    { field: "FeOt", reported_fe_form: "FeOt", raw_token: "6.10", source_cell: "E2" },
+  ]);
+  expect(await readFile(second, "utf8")).toBe(raw);
+}, 20000);
+
 test("mineral formula batch uses the highlighted range and leaves censored rows out", async () => {
   const raw = "Analysis,Mineral,SiO2 (wt.%),MgO (wt.%),FeO (wt.%)\nA1,olivine,40,50,10\nA2,olivine,40,<DL,10\nA3,olivine,39,48,12\nA4,olivine,39,48,12\n";
   await writeFile(second, raw);
