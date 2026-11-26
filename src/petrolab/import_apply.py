@@ -201,8 +201,8 @@ def open_project(database_path: str | Path) -> sqlite3.Connection:
             "Файл не содержит истории миграций PetroLab. Проект не изменён.",
             {},
         )
-    connection.execute("CREATE TABLE IF NOT EXISTS schema_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
-    applied = {row[0] for row in connection.execute("SELECT version FROM schema_migration")}
+    applied = ({row[0] for row in connection.execute("SELECT version FROM schema_migration")}
+               if "schema_migration" in existing_tables else set())
     if not applied and existing_tables - {"schema_migration"}:
         connection.close()
         raise ImportCommandError(
@@ -279,8 +279,8 @@ def open_project(database_path: str | Path) -> sqlite3.Connection:
         connection.close()
         raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции поколений.",
                                  {"incompatible_migration": 22})
-    meta_exists = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_meta'").fetchone()
-    if meta_exists:
+    meta = None
+    if "project_meta" in existing_tables:
         meta = connection.execute("SELECT project_schema_version FROM project_meta WHERE singleton = 1").fetchone()
         if meta and meta[0] > max(applied, default=0):
             connection.close()
@@ -295,38 +295,50 @@ def open_project(database_path: str | Path) -> sqlite3.Connection:
         backup_path = Path(str(database_path) + f".before-v{int(pending[0].name.split('_', 1)[0])}-{_id()}.bak")
         with closing(sqlite3.connect(backup_path)) as backup:
             connection.backup(backup)
-    for migration in migrations:
-        version = int(migration.name.split("_", 1)[0])
-        if version in applied:
-            continue
-        # executescript commits a pending transaction before executing its input;
-        # an outer `with connection` therefore cannot roll back partial DDL.
-        # Put both the migration and its history entry in the same transaction.
+    latest_version = max(supported_versions)
+    if pending:
+        migrating = pending[0].name
+
+        def mark_migration(name):
+            nonlocal migrating
+            migrating = name
+
+        # executescript starts outside the transaction. Include all suffix SQL,
+        # history entries and project metadata before the single commit.
         try:
-            connection.executescript(
-                "BEGIN IMMEDIATE;\n"
-                + migration.read_text(encoding="utf-8")
-                + f"\nINSERT INTO schema_migration (version, applied_at) VALUES ({version}, '{_now()}');\nCOMMIT;"
-            )
+            script = ["BEGIN IMMEDIATE;",
+                      "CREATE TABLE IF NOT EXISTS schema_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);"]
+            for migration in pending:
+                migrating = migration.name
+                version = int(migrating.split("_", 1)[0])
+                label = migrating.replace("'", "''")
+                script.extend([f"SELECT petrolab_migration_step('{label}');", migration.read_text(encoding="utf-8"),
+                               f"INSERT INTO schema_migration (version, applied_at) VALUES ({version}, '{_now()}');"])
+            script.extend([
+                f"INSERT OR IGNORE INTO project_meta (singleton, project_schema_version, created_at) VALUES (1, {latest_version}, '{_now()}');",
+                f"UPDATE project_meta SET project_schema_version = {latest_version} WHERE singleton = 1;",
+                "COMMIT;",
+            ])
+            migrating = pending[0].name
+            connection.create_function("petrolab_migration_step", 1, mark_migration)
+            connection.executescript("\n".join(script))
+            connection.create_function("petrolab_migration_step", 1, None)
         except (sqlite3.Error, OSError, UnicodeError) as exc:
             connection.rollback()
             connection.close()
             raise ImportCommandError(
                 "PROJECT_MIGRATION_FAILED",
-                ("Не удалось обновить проект. Последняя миграция отменена; перед повторной попыткой проверьте резервную копию."
-                 if backup_path else "Не удалось создать проект. Последняя миграция отменена; резервная копия не создавалась."),
-                {"migration": migration.name, "backup_path": str(backup_path) if backup_path else None},
+                ("Не удалось обновить проект. Обновление отменено. Доступна резервная копия."
+                 if backup_path else "Не удалось создать проект. Изменения схемы отменены."),
+                {"migration": migrating, "backup_path": str(backup_path) if backup_path else None},
             ) from exc
-    latest_version = max(int(migration.name.split("_", 1)[0]) for migration in migrations)
-    with connection:
-        connection.execute(
-            "INSERT OR IGNORE INTO project_meta (singleton, project_schema_version, created_at) VALUES (1, ?, ?)",
-            (latest_version, _now()),
-        )
-        connection.execute(
-            "UPDATE project_meta SET project_schema_version = ? WHERE singleton = 1 AND project_schema_version <> ?",
-            (latest_version, latest_version),
-        )
+    elif not meta or meta[0] != latest_version:
+        with connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO project_meta (singleton, project_schema_version, created_at) VALUES (1, ?, ?)",
+                (latest_version, _now()),
+            )
+            connection.execute("UPDATE project_meta SET project_schema_version = ? WHERE singleton = 1", (latest_version,))
     return connection
 
 

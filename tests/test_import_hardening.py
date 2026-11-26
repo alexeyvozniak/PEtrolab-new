@@ -96,7 +96,7 @@ class ImportHardeningTests(unittest.TestCase):
             self.assertEqual(caught.exception.code, 'PROJECT_SCHEMA_UNSUPPORTED')
             self.assertEqual(database.read_bytes(), before)
 
-    def test_failed_migration_rolls_back_ddl_and_retains_backup(self):
+    def test_failed_migration_rolls_back_the_entire_upgrade_and_retains_backup(self):
         from petrolab.import_apply import MIGRATIONS
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
@@ -110,21 +110,30 @@ class ImportHardeningTests(unittest.TestCase):
                 connection.commit()
             latest_version = max(int(path.name.split('_', 1)[0]) for path in migrations.glob('*.sql'))
             next_version = latest_version + 1
-            (migrations / f'{next_version:04d}_test_failure.sql').write_text('CREATE TABLE should_rollback (id INTEGER);\nTHIS IS INVALID SQL;', encoding='utf-8')
+            first = migrations / f'{next_version:04d}_test_first.sql'
+            first.write_text("CREATE TABLE should_rollback (id INTEGER);\nUPDATE sample SET sample_name = 'Changed';\n", encoding='utf-8')
+            failing = migrations / f'{next_version + 1:04d}_test_failure.sql'
+            failing.write_text('INSERT INTO should_rollback VALUES (1);\nTHIS IS INVALID SQL;', encoding='utf-8')
             with patch('petrolab.import_apply.MIGRATIONS', migrations):
                 with self.assertRaises(ImportCommandError) as caught:
                     open_project(database)
             self.assertEqual(caught.exception.code, 'PROJECT_MIGRATION_FAILED')
+            self.assertEqual(caught.exception.details['migration'], failing.name)
             self.assertTrue(Path(caught.exception.details['backup_path']).is_file())
             with closing(sqlite3.connect(database)) as connection:
                 self.assertEqual(connection.execute("SELECT count(*) FROM sqlite_master WHERE name='should_rollback'").fetchone()[0], 0)
                 self.assertEqual(connection.execute('SELECT MAX(version) FROM schema_migration').fetchone()[0], latest_version)
+                self.assertEqual(connection.execute('SELECT project_schema_version FROM project_meta').fetchone()[0], latest_version)
                 self.assertEqual(connection.execute('SELECT sample_name FROM sample WHERE sample_id=?', ('s1',)).fetchone()[0], 'Original')
                 self.assertEqual(connection.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
             backups = list(folder.glob(f'project.sqlite.before-v{next_version}-*.bak'))
             self.assertEqual(len(backups), 1)
             with closing(sqlite3.connect(backups[0])) as connection:
                 self.assertEqual(connection.execute('SELECT sample_name FROM sample WHERE sample_id=?', ('s1',)).fetchone()[0], 'Original')
+            failing.write_text('INSERT INTO should_rollback VALUES (1);', encoding='utf-8')
+            with patch('petrolab.import_apply.MIGRATIONS', migrations), closing(open_project(database)) as connection:
+                self.assertEqual(connection.execute('SELECT id FROM should_rollback').fetchone()[0], 1)
+                self.assertEqual(connection.execute('SELECT project_schema_version FROM project_meta').fetchone()[0], next_version + 1)
 
     def test_newer_project_is_rejected_without_changing_the_database(self):
         with tempfile.TemporaryDirectory() as folder:
