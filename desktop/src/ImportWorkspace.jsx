@@ -228,6 +228,8 @@ export function ImportWorkspace({
   onAcceptMineral,
   onListFormulaMethods,
   onPreviewFormula,
+  onAcceptFormula,
+  onClearFormula,
   onSelectSource,
   onToggleSource,
   sourceName,
@@ -470,10 +472,19 @@ export function ImportWorkspace({
 
         <aside className="import-inspector-pane">
           {onVerifyMinerals && <div className="import-stage-tabs"><button type="button" onClick={() => setMineralReview(false)} disabled={busy}>1 · Структура</button><button type="button" disabled={busy || blockDraftDirty || mappingDraftDirty || plan.ready_to_commit === false} onClick={() => recipe.global_decisions.mineral_verification_enabled ? setMineralReview(true) : onVerifyMinerals()}>2 · Проверить минералы</button></div>}
+          {!!semanticTools.formulaAcceptances?.length && <details className="mineral-review-item" open={semanticTools.formulaAcceptances.some((item) => item.stale) || undefined}>
+            <summary>Формулы к сохранению · {semanticTools.formulaAcceptances.length}</summary>
+            {semanticTools.formulaAcceptances.map((item) => <div key={item.preview_id}>
+              <b>{item.label || item.preview_id}</b>
+              <p>{item.method_name} · версия {item.method_version}</p>
+              {item.stale && <p role="status">Входные данные или метод изменились. Снимите подтверждение и пересчитайте формулу.</p>}
+              <button type="button" disabled={busy} onClick={() => onClearFormula(item.preview_id)}>Снять подтверждение</button>
+            </div>)}
+          </details>}
           {mineralReview ? <MineralVerificationPanel
             formulaScope={`${workspace?.workspace_id}:${workspace?.active_source_id}:${workspace?.draft_revision}`}
             records={plan.planned_records || []} scopes={semanticTools.mineralScopes || []} busy={busy}
-            onAccept={onAcceptMineral} onListFormulaMethods={onListFormulaMethods} onPreviewFormula={onPreviewFormula}
+            onAccept={onAcceptMineral} onListFormulaMethods={onListFormulaMethods} onPreviewFormula={onPreviewFormula} onAcceptFormula={onAcceptFormula}
             onReveal={(record) => { setMineralFocus({ ...record, source_column_index: (record.source_column_number || 1) - 1 }); selectBlock(record.block_id); }}
           /> : <>
           <div className="import-pane-label">Вопросы · {issueGroups.length} типов · {issues.length} мест</div>

@@ -6,11 +6,14 @@ import tempfile
 import unittest
 import uuid
 from contextlib import closing
+from unittest.mock import patch
 
 from petrolab.import_preview import ImportCommandError
 from petrolab.import_apply import retract_latest_import
 from petrolab.desktop_workflow import list_project_analyses
 from petrolab.import_workspace import ImportWorkspaceStore
+from petrolab.formula_service import list_formula_runs, open_formula_run
+from petrolab.olivine_formula import OLIVINE
 from petrolab.ndjson_service import handle_request
 from test_import_preview import FIXTURE
 
@@ -112,6 +115,54 @@ class ImportWorkspaceTests(unittest.TestCase):
             self.store.command('discard', {'workspace_id': previous['workspace_id'], 'expected_revision': previous['draft_revision']})
         self.assertEqual(caught.exception.code, 'STALE_WORKSPACE_REVISION')
         self.assertIn(previous['workspace_id'], self.store.sessions)
+
+    def test_formula_acceptance_restores_and_commits_with_exact_measurements(self):
+        database = self.source.parent / 'project.sqlite'
+        self.source.write_text('Analysis,SiO2 [wt.%],MgO [wt.%],FeO [wt.%],CaO [wt.%]\nA1,40,50,10,<DL\nA2,41,49,10,0\n', encoding='utf-8')
+        original = self.source.read_bytes()
+        self.current = self.store.command('create', {'project_database_path': str(database),
+            'sources': [{'staged_path': str(self.source)}]})
+        session = self.current['session']
+        preview_id = self.current['active']['plan']['planned_records'][0]['preview_id']
+        preview = self.store.command('preview_formula', {'workspace_id': session['workspace_id'],
+            'expected_revision': session['draft_revision'], 'source_id': session['active_source_id'],
+            'preview_id': preview_id, 'method_id': OLIVINE['method_id']})
+        decision = {'kind': 'accept_formula', 'preview_id': preview_id, 'method_id': OLIVINE['method_id'],
+                    'confirmation_fingerprint': preview['confirmation_fingerprint']}
+        with self.assertRaises(ImportCommandError) as caught:
+            self.call('apply_decision', decision={**decision, 'confirmation_fingerprint': 'obsolete'})
+        self.assertEqual(caught.exception.code, 'FORMULA_REVIEW_STALE')
+        self.call('apply_decision', decision=decision)
+        self.assertEqual(list_formula_runs(database), [])
+
+        self.store = ImportWorkspaceStore()
+        self.current = self.store.command('restore', {'project_database_path': str(database)})['workspace']
+        self.assertFalse(self.current['active']['formula_acceptances'][0]['stale'])
+        with patch.dict(OLIVINE, version='changed'):
+            self.call('replan')
+            self.assertTrue(self.current['active']['formula_acceptances'][0]['stale'])
+            with self.assertRaises(ImportCommandError) as blocked:
+                self.call('commit')
+            self.assertEqual(blocked.exception.code, 'WORKSPACE_NOT_READY')
+
+        with closing(sqlite3.connect(database)) as connection:
+            connection.execute("CREATE TRIGGER reject_formula BEFORE INSERT ON calculation_run BEGIN SELECT RAISE(ABORT, 'formula failed'); END")
+            with self.assertRaisesRegex(sqlite3.IntegrityError, 'formula failed'):
+                self.call('commit')
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM measurement').fetchone()[0], 0)
+            connection.execute('DROP TRIGGER reject_formula')
+        self.assertEqual(list((database.parent / 'sources').iterdir()), [])
+
+        committed = self.call('commit')
+        run_id, = committed['sources'][0]['formula_run_ids']
+        run = open_formula_run(database, run_id)
+        self.assertEqual(run['status'], 'current')
+        self.assertEqual(run['result_manifest']['apfu'], preview['preview']['apfu'])
+        self.assertEqual({row['canonical_field']: row['raw_token'] for row in run['measurements']},
+                         {'SiO2': '40', 'MgO': '50', 'FeO': '10'})
+        with closing(sqlite3.connect(database)) as connection:
+            self.assertEqual(connection.execute("SELECT count(*) FROM measurement WHERE raw_token = '<DL'").fetchone()[0], 1)
+        self.assertEqual(self.source.read_bytes(), original)
 
     def test_probe_header_warnings_are_not_reused_for_current_mapping(self):
         state = self.store.sessions[self.current['session']['workspace_id']]

@@ -75,8 +75,11 @@ def review_import_formula(record, method_id):
         inputs.append({**measurement, "effective_value": value})
     if len(contexts) > 1:
         raise ImportCommandError("FORMULA_MIXED_INPUT", "Для пересчёта нужен один аналитический метод и набор.")
+    fingerprint = _fingerprint({"preview_id": record["preview_id"], "method": method,
+                                "measurements": record["measurements"]})
     return {"preview_id": record["preview_id"], "method_definition": method, "measurements": inputs,
-            "excluded_measurements": excluded, "preview": _calculate(values, method)}
+            "excluded_measurements": excluded, "preview": _calculate(values, method),
+            "confirmation_fingerprint": fingerprint}
 
 
 def _read_input(connection, analysis_id, measurement_ids, method):
@@ -151,19 +154,60 @@ def run_formula(database_path, method_id, analysis_id, measurement_ids, input_fi
         reviewed, values = _read_input(connection, analysis_id, measurement_ids, method)
         if reviewed["input_fingerprint"] != input_fingerprint:
             raise ImportCommandError("FORMULA_REVIEW_STALE", "Входные измерения изменились. Повторите проверку.")
-        result = _calculate(values, method)
-        run_id = _id()
-        derived = [{"id": _id(), "run_id": run_id, "analysis_id": analysis_id, "field": f"{series}.{key}", "unit": unit, "value": value}
-                   for series, unit in _DERIVED_UNITS.items()
-                   for key, value in result.get(series, {}).items()]
-        project_id = connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0]
-        record = {**reviewed, "id": run_id, "project_id": project_id, "method_id": method_id, "method_version": method["version"],
-                  "method_definition": method, "method_definition_fingerprint": method_fingerprint,
-                  "input_measurement_ids": [row["measurement_id"] for row in reviewed["measurements"]],
-                  "result_manifest": {**result, "derived_values": derived}, "created_at": _now(), "status": "current", "stale_reasons": []}
-        connection.execute("INSERT INTO calculation_run VALUES (?, ?, ?, ?)",
-                           (record["id"], project_id, record["created_at"], json.dumps(record, ensure_ascii=False, allow_nan=False)))
-        return record
+        return _persist_formula_run(connection, reviewed, values, method)
+
+
+def _persist_formula_run(connection, reviewed, values, method):
+    result = _calculate(values, method)
+    run_id = _id()
+    derived = [{"id": _id(), "run_id": run_id, "analysis_id": reviewed["analysis_id"],
+                "field": f"{series}.{key}", "unit": unit, "value": value}
+               for series, unit in _DERIVED_UNITS.items() for key, value in result.get(series, {}).items()]
+    project_id = connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0]
+    record = {**reviewed, "id": run_id, "project_id": project_id, "method_id": method["method_id"],
+              "method_version": method["version"], "method_definition": method,
+              "method_definition_fingerprint": _fingerprint(method),
+              "input_measurement_ids": [row["measurement_id"] for row in reviewed["measurements"]],
+              "result_manifest": {**result, "derived_values": derived}, "created_at": _now(), "status": "current", "stale_reasons": []}
+    connection.execute("INSERT INTO calculation_run VALUES (?, ?, ?, ?)",
+                       (run_id, project_id, record["created_at"], json.dumps(record, ensure_ascii=False, allow_nan=False)))
+    return record
+
+
+def persist_import_formulae(connection, batch_id, plan, acceptances):
+    records = {row["preview_id"]: row for row in plan["planned_records"]}
+    run_ids = []
+    for preview_id, acceptance in acceptances.items():
+        record = records.get(preview_id)
+        review = check_import_formula_acceptance(record, acceptance)
+        analysis = connection.execute("SELECT analysis_id FROM analysis WHERE import_batch_id = ? AND preview_id = ?",
+                                      (batch_id, preview_id)).fetchone()
+        if analysis is None:
+            raise ImportCommandError("FORMULA_INPUT_UNAVAILABLE", "Подтверждённый анализ отсутствует в импорте.")
+        analysis_id = analysis["analysis_id"]
+        fields = {(row["source_cell"], row["field"]) for row in review["measurements"]}
+        measurement_ids = [row["measurement_id"] for row in connection.execute(
+            "SELECT measurement_id, source_cell, canonical_field FROM measurement WHERE analysis_id = ?", (analysis_id,)
+        ) if (row["source_cell"], row["canonical_field"]) in fields]
+        if len(measurement_ids) != len(fields):
+            raise ImportCommandError("FORMULA_INPUT_UNAVAILABLE", "Не найдены точные измерения для подтверждённого расчёта.")
+        method = review["method_definition"]
+        reviewed, values = _read_input(connection, analysis_id, measurement_ids, method)
+        if values != {row["field"]: row["effective_value"] for row in review["measurements"]}:
+            raise ImportCommandError("FORMULA_REVIEW_STALE", "Измерения отличаются от подтверждённого расчёта.")
+        run_ids.append(_persist_formula_run(connection, reviewed, values, method)["id"])
+    return run_ids
+
+
+def check_import_formula_acceptance(record, acceptance):
+    try:
+        if record is not None:
+            review = review_import_formula(record, acceptance["method_id"])
+            if review["confirmation_fingerprint"] == acceptance["confirmation_fingerprint"]:
+                return review
+    except ImportCommandError as error:
+        raise ImportCommandError("FORMULA_REVIEW_STALE", "Повторите или снимите подтверждение формулы.") from error
+    raise ImportCommandError("FORMULA_REVIEW_STALE", "Повторите или снимите подтверждение формулы.")
 
 
 def open_formula_run(database_path, run_id):

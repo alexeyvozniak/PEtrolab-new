@@ -206,7 +206,7 @@ Implement the workspace through versioned scientific-service commands:
 - `import.workspace.get`;
 - `import.workspace.preview_window`;
 - `import.workspace.preview_formula` — пересчёт выбранной строки в текущей ревизии очереди. Сервис проверяет отпечаток источника, указывает использованные и исключённые измерения и возвращает только предварительный результат. Команда не сохраняет Calculation Run и не назначает минерал;
-- `import.workspace.apply_decision`;
+- `import.workspace.apply_decision` — `accept_formula` связывает выбранный метод и отпечаток предпросмотра с одним `preview_id` в источнике. `clear_formula` снимает это подтверждение. Изменение состава или определения метода требует повторного подтверждения либо снятия решения;
 - `import.workspace.apply_bulk_decision`;
 - `import.workspace.replan`;
 - `import.workspace.commit`;
@@ -215,6 +215,8 @@ Implement the workspace through versioned scientific-service commands:
 Existing single-source commands remain internal building blocks until compatibility can be removed safely.
 
 Every mutating command accepts the expected draft revision. Revision mismatch returns a stale-draft error instead of overwriting newer decisions.
+
+Подтверждённая формула хранится в черновике до `commit`. При записи очереди импорт передаёт актуальный план и открытое соединение финализатору источника. Это позволяет связать принятую формулу с точными Measurement ID, которые появляются только после записи анализа, и сохранить обычный Calculation Run в той же транзакции. Ошибка расчёта откатывает весь импорт очереди. Создание `Calculation Run` не меняет измерение или назначение минерала.
 
 ## Required contract tests
 

@@ -18,7 +18,7 @@ const diagnosticLabels = {
 };
 const number = new Intl.NumberFormat('ru', { maximumSignificantDigits: 6 });
 
-function FormulaPreview({ record, methods, busy, onPreview, onClose }) {
+function FormulaPreview({ record, methods, busy, onPreview, onAccept, onClose }) {
   const [methodId, setMethodId] = useState('');
   const [result, setResult] = useState(null);
   const [pending, setPending] = useState(false);
@@ -73,12 +73,16 @@ function FormulaPreview({ record, methods, busy, onPreview, onClose }) {
         {result.excluded_measurements.map(({ source_cell, field, raw_token, reason }) =>
           <p key={source_cell}>{source_cell} · {field} · {raw_token || 'пусто'} · {excludedLabels[reason]}</p>)}
       </details>
-      <p>Формула показана только для проверки.</p>
+      {onAccept && <div className="mineral-formula-accept">
+        <button type="button" disabled={busy || pending} onClick={() => onAccept({ preview_id: result.preview_id,
+          method_id: result.method_definition.method_id, confirmation_fingerprint: result.confirmation_fingerprint })}>Принять расчёт</button>
+        <small>Сохранится при добавлении анализов в проект.</small>
+      </div>}
     </div>}
   </form>;
 }
 
-export function MineralVerificationPanel({ records, scopes, busy, onAccept, onReveal, formulaScope, onListFormulaMethods, onPreviewFormula }) {
+export function MineralVerificationPanel({ records, scopes, busy, onAccept, onReveal, formulaScope, onListFormulaMethods, onPreviewFormula, onAcceptFormula }) {
   const [showAll, setShowAll] = useState(false);
   const [visibleCount, setVisibleCount] = useState(100);
   const [formula, setFormula] = useState(null);
@@ -120,7 +124,7 @@ export function MineralVerificationPanel({ records, scopes, busy, onAccept, onRe
           {methodsPending && <p role="status">Загрузка методов…</p>}
           {methodsError && <p role="alert">{methodsError}</p>}
           {methods && <FormulaPreview key={formulaScope} record={record} methods={methods} busy={busy}
-            onPreview={onPreviewFormula} onClose={() => setFormula(null)} />}
+            onPreview={onPreviewFormula} onAccept={onAcceptFormula} onClose={() => setFormula(null)} />}
         </>}
       </div>;
     })}

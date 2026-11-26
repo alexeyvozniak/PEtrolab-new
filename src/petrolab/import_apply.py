@@ -640,7 +640,7 @@ def workspace_commit_exists(connection, workspace_id):
     ).fetchone() is not None
 
 
-def apply_import_batch(database_path, sources, *, workspace_commit=None):
+def apply_import_batch(database_path, sources, *, workspace_commit=None, finalize_source=None):
     prepared = []
     for source_path, recipe, expected_fingerprint, original_source_path in sources:
         inspection, plan = _validated_import(source_path, recipe, expected_fingerprint)
@@ -667,10 +667,13 @@ def apply_import_batch(database_path, sources, *, workspace_commit=None):
                 _persist_samples(connection, (
                     record for _, _, _, plan in prepared for record in plan["planned_records"]
                 ), _now())
-                return [
-                    _persist_import(connection, database_path, *source, managed_files)
-                    for source in prepared
-                ]
+                results = []
+                for index, source in enumerate(prepared):
+                    result = _persist_import(connection, database_path, *source, managed_files)
+                    if finalize_source is not None:
+                        finalize_source(connection, index, source[3], result)
+                    results.append(result)
+                return results
         except Exception:
             for managed_file in managed_files:
                 managed_file.unlink(missing_ok=True)

@@ -14,7 +14,7 @@ from tempfile import NamedTemporaryFile
 from .clean_table import classify_clean_table
 from .desktop_workflow import (suggest_import_recipe, bulk_unit_scopes, bulk_ignore_scopes,
                                apply_bulk_unit_scope, apply_bulk_ignore_scope)
-from .formula_service import review_import_formula
+from .formula_service import check_import_formula_acceptance, persist_import_formulae, review_import_formula
 from .import_apply import (apply_import_batch, open_project, workspace_commit_exists,
                            _require_duplicate_review, _require_non_empty_plan)
 from .import_preview import (ImportCommandError, inspect_source, create_import_plan, validate_recipe,
@@ -186,10 +186,7 @@ class ImportWorkspaceStore:
                 return self._commit(session)
             if operation == 'preview_formula':
                 source = self._source(session, params.get('source_id'))
-                plan = create_import_plan(self._check(source), source['recipe'])
-                record = next((row for row in plan['planned_records'] if row['preview_id'] == params.get('preview_id')), None)
-                if record is None or not source['included']:
-                    raise ImportCommandError('FORMULA_INPUT_UNAVAILABLE', 'Выбранный анализ больше недоступен в импорте.')
+                record = self._formula_record(source, params.get('preview_id'))
                 return review_import_formula(record, params.get('method_id'))
             if operation == 'preview_window':
                 source = self._source(session, params.get('source_id'))
@@ -243,6 +240,20 @@ class ImportWorkspaceStore:
                         raise ImportCommandError('STRUCTURE_REVIEW_REQUIRED', 'Сначала завершите обязательные решения по структуре.')
                     source['recipe']['global_decisions']['mineral_verification_enabled'] = True
                     source['recipe']['semantic_fingerprint'] = semantic_fingerprint(source['recipe'])
+                elif kind == 'accept_formula':
+                    record = self._formula_record(source, decision.get('preview_id'))
+                    acceptance = {key: decision.get(key) for key in ('method_id', 'confirmation_fingerprint')}
+                    reviewed = check_import_formula_acceptance(record, acceptance)
+                    source.setdefault('formula_acceptances', {})[record['preview_id']] = {
+                        **acceptance, 'method_name': reviewed['method_definition']['name'],
+                        'method_version': reviewed['method_definition']['version'],
+                        'label': ' · '.join(value for value in record['identity'] if value),
+                    }
+                elif kind == 'clear_formula':
+                    preview_id = decision.get('preview_id')
+                    if not isinstance(preview_id, str) or preview_id not in source.get('formula_acceptances', {}):
+                        raise ValueError('preview_id')
+                    del source['formula_acceptances'][preview_id]
                 elif kind == 'accept_mineral':
                     from .mineral_verification import acceptance_scopes
                     review = self._review(source)
@@ -365,6 +376,13 @@ class ImportWorkspaceStore:
                 assignments[preview_id] = assignment
         source['recipe']['semantic_fingerprint'] = semantic_fingerprint(source['recipe'])
 
+    def _formula_record(self, source, preview_id):
+        plan = create_import_plan(self._check(source), source['recipe'])
+        record = next((row for row in plan['planned_records'] if row['preview_id'] == preview_id), None)
+        if record is None or not source['included']:
+            raise ImportCommandError('FORMULA_INPUT_UNAVAILABLE', 'Выбранный анализ больше недоступен в импорте.')
+        return record
+
     def _commit(self, session):
         database_path = session['database_path']
         if not database_path:
@@ -376,11 +394,16 @@ class ImportWorkspaceStore:
                                      {'blocking_reason_codes': readiness['blocking_reason_codes']})
         included = [source for source in session['sources'] if source['included']]
         commit_id = str(uuid4())
+
+        def finalize_source(connection, index, plan, result):
+            acceptances = included[index].get('formula_acceptances', {})
+            result['formula_run_ids'] = persist_import_formulae(connection, result['import_batch_id'], plan, acceptances) if acceptances else []
+
         results = apply_import_batch(database_path, [
             (source['staged_path'], source['recipe'], source['sha256'], source['original_display_path']) for source in included
         ], workspace_commit={'commit_id': commit_id, 'workspace_id': session['workspace_id'],
                              'draft_revision': session['draft_revision'],
-                             'duplicate_review': session.get('duplicate_review')})
+                             'duplicate_review': session.get('duplicate_review')}, finalize_source=finalize_source)
         del self.sessions[session['workspace_id']]
         try:
             self._remove_draft(session)
@@ -433,6 +456,18 @@ class ImportWorkspaceStore:
             ignores = bulk_ignore_scopes(source['staged_path'], source['recipe'])['scopes']
         except ImportCommandError as error:
             issues.append({'code': error.code, 'message': error.message, 'severity': 'error', 'blocking': True})
+        formula_acceptances = []
+        if source.get('formula_acceptances'):
+            records = {row['preview_id']: row for row in plan['planned_records']}
+            for preview_id, acceptance in source['formula_acceptances'].items():
+                stale = False
+                try:
+                    check_import_formula_acceptance(records.get(preview_id), acceptance)
+                except ImportCommandError as error:
+                    stale = True
+                    if not any(issue['code'] == error.code for issue in issues):
+                        issues.append({'code': error.code, 'message': error.message, 'severity': 'error', 'blocking': True})
+                formula_acceptances.append({'preview_id': preview_id, **acceptance, 'stale': stale})
         if not source['included']:
             issues = []
         ready = source['included'] and not any(i.get('blocking') for i in issues)
@@ -440,7 +475,7 @@ class ImportWorkspaceStore:
         return {'inspection': source['inspection'], 'recipe': source['recipe'], 'plan': plan,
                 'classification': source['classification'], 'issues': issues,
                 'bulk_unit_scopes': units, 'bulk_ignore_scopes': ignores, 'ready': ready,
-                'decisions': source['decisions'], 'source_id': source['source_id']}
+                'decisions': source['decisions'], 'source_id': source['source_id'], 'formula_acceptances': formula_acceptances}
 
     def _compare_sources(self, state, reviews):
         included = [source for source in state['sources'] if source['included']]

@@ -347,6 +347,9 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .mineral-formula-preview select { width: 100%; min-width: 0; }
 .mineral-formula-preview p { margin: 4px 0; overflow-wrap: anywhere; }
 .mineral-formula-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.mineral-formula-accept { display: grid; gap: 5px; margin-top: 8px; }
+.mineral-review-item .mineral-formula-accept button { background: #30543c; color: #fff; border-color: #30543c; }
+.mineral-review-item .mineral-formula-accept button:disabled { opacity: .55; }
 .mineral-formula-preview section { margin-top: 8px; }
 .mineral-formula-preview section dl { grid-template-columns: 1fr 1fr; }
 .mineral-formula-preview section dl div { display: flex; justify-content: space-between; gap: 4px; }

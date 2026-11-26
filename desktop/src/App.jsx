@@ -204,7 +204,7 @@ export function App() {
     setInspection(active.inspection);
     setRecipe(active.recipe);
     setSourceIssues(active.issues);
-    setSemanticTools({ actions: active.semantic_actions || [], analytes: active.canonical_analytes || [], mineralScopes: active.mineral_acceptance_scopes || [], records: active.plan.planned_records || [], samples: active.project_samples });
+    setSemanticTools({ actions: active.semantic_actions || [], analytes: active.canonical_analytes || [], mineralScopes: active.mineral_acceptance_scopes || [], formulaAcceptances: active.formula_acceptances || [], records: active.plan.planned_records || [], samples: active.project_samples });
     setBulkUnitScopes(active.bulk_unit_scopes);
     setBulkIgnoreScopes(active.bulk_ignore_scopes);
     setPlan(active.plan);
@@ -791,6 +791,8 @@ export function App() {
                 onAcceptMineral={(decision) => decide({ ...decision, kind: 'accept_mineral' })}
                 onListFormulaMethods={async () => unwrap(await listFormulaMethods())}
                 onPreviewFormula={async (previewId, methodId) => unwrap(await previewImportFormula(workspace, previewId, methodId))}
+                onAcceptFormula={(decision) => decide({ ...decision, kind: 'accept_formula' })}
+                onClearFormula={(previewId) => decide({ kind: 'clear_formula', preview_id: previewId })}
                 onSelectSource={selectWorkspaceSource}
                 onToggleSource={toggleWorkspaceSource}
                 sourceName={fileName(sourceDisplayPath || sourcePath)}
