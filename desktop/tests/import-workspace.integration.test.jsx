@@ -522,6 +522,13 @@ test("one common selection highlights the same analysis on binary and ternary pl
   await waitFor(() => expect(screen.getAllByRole("button", { name: "Выбрать точку P1" })).toHaveLength(2));
   await user.selectOptions(screen.getByRole("combobox", { name: "Область" }), "lasso");
   const point = screen.getAllByRole("button", { name: "Выбрать точку P1" })[0];
+  fireEvent.mouseEnter(point, { shiftKey: true });
+  const tooltip = await screen.findByRole("tooltip");
+  await within(tooltip).findByText("Исходные измерения (без пересчёта)");
+  expect(within(tooltip).getByText(/MgO: 50 wt\.%/)).toBeTruthy();
+  expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
+  fireEvent.mouseLeave(point);
+  expect(screen.queryByRole("tooltip")).toBeNull();
   const canvas = point.closest("svg");
   canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 460, height: 280 });
   canvas.setPointerCapture = () => {};

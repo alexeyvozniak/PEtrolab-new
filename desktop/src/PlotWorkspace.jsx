@@ -5,6 +5,29 @@ import "./plotWorkspace.css";
 
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
 const EMPTY_BINS = [];
+const AXIS_DRAG_TYPE = "application/x-petrolab-axis";
+function PointTooltip({ hover, detail, shift, loadAnalysis }) {
+  if (!hover) return null;
+  const { point, x, y } = hover;
+  const analysis = detail?.analysis;
+  const rows = analysis?.measurement_list || Object.entries(analysis?.measurements || {}).map(([field, value]) => ({ field, ...value }));
+  return <div className="plot-point-tooltip" role="tooltip" style={{
+    left: Math.max(8, Math.min(x + 12, window.innerWidth - 328)),
+    top: Math.max(8, Math.min(y + 12, window.innerHeight - (shift ? 370 : 130))),
+  }}>
+    <b>{point.label}</b><small>{point.source_name || ""}</small>
+    {point.axisValues?.map((item, index) => <div key={index}>{item}</div>)}
+    {shift && loadAnalysis ? <>
+      {detail?.error ? <small>Состав недоступен: {detail.error}</small> : !analysis ? <small>Загружаю состав…</small> : <>
+        {analysis.identity?.Sample && <small>Образец: {analysis.identity.Sample}</small>}
+        <small>Исходные измерения (без пересчёта)</small>
+        <div className="plot-tooltip-measurements">{rows.slice(0, 20).map((row, index) =>
+          <span key={index} title={row.source_cell || ""}>{row.field}: {row.raw_token ?? "∅"} {row.unit}</span>)}</div>
+        {rows.length > 20 && <small>Ещё {rows.length - 20} измерений — в карточке анализа.</small>}
+      </>}
+    </> : <small>Shift — исходный состав; двойной клик — анализ</small>}
+  </div>;
+}
 const selectionModifier = (event) => event.altKey ? "subtract" : event.ctrlKey || event.metaKey ? "toggle" : event.shiftKey ? "union" : undefined;
 const FULL_VIEW = { x: 0, y: 0, width: VIEW.width, height: VIEW.height };
 const px = (value) => VIEW.left + value * (VIEW.right - VIEW.left);
@@ -88,13 +111,48 @@ function initialPanels(axes) {
     : make("binary", [axes[1], axes[0]])];
 }
 
-function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor, points, rememberedView, rememberView }) {
+function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, shape, colorFor, points, rememberedView, rememberView }) {
   const drag = useRef(null);
   const canvas = useRef(null);
   const hovered = useRef(false);
   const space = useRef(false);
   const [rubber, setRubber] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
+  const [hover, setHover] = useState(null);
+  const [shift, setShift] = useState(false);
+  const [detail, setDetail] = useState(null);
+  const hoveredId = hover?.point.analysis_id;
+  useEffect(() => {
+    if (!hoveredId) return;
+    const down = event => { if (event.key === "Shift") setShift(true); };
+    const up = event => { if (event.key === "Shift") setShift(false); };
+    const clear = () => { setHover(null); setShift(false); };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", clear);
+    window.addEventListener("scroll", clear, true);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", clear);
+      window.removeEventListener("scroll", clear, true);
+    };
+  }, [hoveredId]);
+  useEffect(() => {
+    setDetail(null);
+    if (!hoveredId || !shift || !loadAnalysis) return;
+    let active = true;
+    loadAnalysis(hoveredId).then(analysis => {
+      if (active) setDetail({ id: hoveredId, analysis });
+    }, error => { if (active) setDetail({ id: hoveredId, error: error.message || String(error) }); });
+    return () => { active = false; };
+  }, [hoveredId, shift, loadAnalysis]);
+  const showPoint = (event, point) => {
+    if (drag.current || contextMenu) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    setShift(Boolean(event.shiftKey));
+    setHover({ point, x: rect.right, y: rect.top });
+  };
   const [view, setView] = useState(rememberedView || FULL_VIEW);
   useLayoutEffect(() => { rememberView?.(view); }, [view, rememberView]);
   const zoomed = view.width < FULL_VIEW.width;
@@ -154,10 +212,12 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor,
       `V ${py(selectedCounts[index] / maximumCount)} H ${px(bin.right)}`).join(" ")} V ${VIEW.bottom}`
     : "";
   const markers = useMemo(() => isHistogram ? bars : points.flatMap((point) => isPattern ? point.vertices.filter(({ v }) => v !== null).map((vertex, index) => ({
-    ...vertex, analysis_id: point.analysis_id, source_id: point.source_id, opacity: point.opacity,
+    ...vertex, analysis_id: point.analysis_id, source_id: point.source_id, source_name: point.source_name, opacity: point.opacity,
+    axisValues: [`${vertex.element}: ${vertex.ratio.toPrecision(5)} · отношение к эталону`],
     tabIndex: index === 0 ? 0 : -1,
     label: `${point.label} · ${vertex.element}`, title: `${point.label} · ${point.source_name} · ${vertex.element}: ${vertex.ratio.toPrecision(5)}`,
-  })) : [{ ...point, title: `${point.label} · ${point.source_name} · ${point.values.join(" / ")}` }]), [isHistogram, bars, points, isPattern]);
+  })) : [{ ...point, axisValues: data.axes.map((axis, index) => `${axis.field}: ${point.values[index]} ${axis.unit}`),
+    title: `${point.label} · ${point.source_name} · ${point.values.join(" / ")}` }]), [isHistogram, bars, points, isPattern, data.axes]);
   const contains = (x, y) => x >= view.x && x <= view.x + view.width && y >= view.y && y <= view.y + view.height;
   const visibleMarkers = useMemo(() => zoomed ? markers.filter((point) => contains(px(point.u), py(point.v))) : markers, [markers, view, zoomed]);
   const paths = useMemo(() => isPattern ? points.map(point => ({ point, path: patternPath(point.vertices) })) : [], [isPattern, points]);
@@ -167,6 +227,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor,
       y: view.y + (event.clientY - bounds.top) * view.height / bounds.height };
   };
   const start = (event) => {
+    setHover(null);
     if (event.button === 1 || (event.button === 0 && space.current)) {
       event.preventDefault();
       if (!zoomed) return;
@@ -240,7 +301,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor,
   return <>
   {zoomed && <button type="button" className="outline-button plot-reset-zoom" onClick={() => setView(FULL_VIEW)}>Автомасштаб</button>}
   <svg ref={canvas} className="plot-canvas" viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`} aria-label="Диаграмма"
-    tabIndex={0} onPointerEnter={() => { hovered.current = true; }} onPointerLeave={() => { hovered.current = false; }}
+    tabIndex={0} onPointerEnter={() => { hovered.current = true; }} onPointerLeave={() => { hovered.current = false; setHover(null); }}
     onKeyDown={(event) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -260,6 +321,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor,
       const id = event.target.closest?.("[data-analysis-id]")?.dataset.analysisId;
       if (!id) return;
       event.preventDefault();
+      setHover(null);
       setContextMenu({ id, label: points.find(point => point.analysis_id === id)?.label || "Анализ", x: event.clientX, y: event.clientY });
     }}
     onDoubleClick={(event) => {
@@ -320,6 +382,8 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor,
         aria-hidden={zoomed && !contains(px(point.u), py(point.v)) ? true : undefined}
         opacity={point.opacity}
         aria-label={`Выбрать точку ${point.label}`} aria-pressed={selected.has(point.analysis_id)}
+        onMouseEnter={event => showPoint(event, point)} onMouseLeave={() => setHover(null)}
+        onFocus={event => showPoint(event, point)} onBlur={() => setHover(null)}
         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect([point.analysis_id], selectionModifier(event)); } }}>
         <title>{point.title}</title>
       </circle>
@@ -328,6 +392,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor,
       <circle key={`${point.analysis_id}:${point.element || ""}`} className="plot-halo" cx={px(point.u)} cy={py(point.v)} r={isPattern ? 4.5 : 6} />)}
     {rubber && (rubber.path ? <polygon className="plot-rubber" points={rubber.path} /> : <rect className="plot-rubber" {...rubber} />)}
   </svg>
+  <PointTooltip hover={hover} shift={shift} detail={detail?.id === hoveredId ? detail : null} loadAnalysis={loadAnalysis} />
   <ContextActions menu={contextMenu} onClose={() => setContextMenu(null)} actions={contextMenu ? [
     { label: "Открыть анализ", disabled: !onOpenAnalysis, run: () => onOpenAnalysis(contextMenu.id) },
     { label: selected.has(contextMenu.id) ? "Снять выделение" : "Добавить к отбору", run: () => onSelect([contextMenu.id], "toggle") },
@@ -335,7 +400,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor,
   ] : []} /></>;
 }
 
-function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory }) {
+function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory }) {
   const [projection, setProjection] = useState(null);
   const current = projection?.load === load && projection.panel === panel ? projection : null;
   const data = current?.data;
@@ -379,7 +444,10 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
     const next = initialPanels(axes).find((item) => item.kind === kind);
     update({ id: panel.id, kind, axes: next ? next.axes : axes.slice(0, 3) });
   };
-  const updateAxis = (index, axis) => update({ ...panel, axes: panel.axes.map((value, position) => position === index ? axis : value) });
+  const updateAxis = (index, axis) => {
+    if (!axis) return;
+    update({ ...panel, axes: panel.axes.map((value, position) => position === index ? axis : value) });
+  };
 
   return <article className="plot-panel" id={`plot-${panel.id}`}>
     <header><b>{panelTitle(panel)}</b>
@@ -409,7 +477,17 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
         const candidates = locked ? [axis] : pattern ? group?.fields.get(axis.field) || [] : axes;
         if (pattern && candidates.length < 2) return null;
         return <select key={index} aria-label={pattern ? `Предпочтительная единица ${axis.field}` : `Ось ${index + 1}`} value={axisKey(axis)} disabled={locked}
-          title={locked ? axisLabel(axis) : undefined}
+          title={locked ? axisLabel(axis) : "Выберите поле или перетащите его из каталога осей"}
+          onDragOver={event => {
+            if (!locked && event.dataTransfer.types.includes(AXIS_DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }
+          }}
+          onDrop={event => {
+            if (locked) return;
+            const key = event.dataTransfer.getData(AXIS_DRAG_TYPE);
+            if (!key) return;
+            event.preventDefault();
+            updateAxis(index, candidates.find(item => axisKey(item) === key));
+          }}
           onChange={(event) => updateAxis(index, candidates.find((item) => axisKey(item) === event.target.value))}>
           {candidates.map((item) => <option key={axisKey(item)} value={axisKey(item)}>{axisLabel(item)}</option>)}
         </select>;
@@ -417,7 +495,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
     </div>
     {status && <p role="status">{status}</p>}
     {data && <>
-      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} shape={shape} colorFor={colorFor} points={points}
+      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} points={points}
         rememberedView={viewMemory?.views.get(panel.id)?.fingerprint === data.projection_sha256 ? viewMemory.views.get(panel.id).view : undefined}
         rememberView={view => viewMemory?.views.set(panel.id, { fingerprint: data.projection_sha256, view })} />
       <small>{pattern ? "Спектров" : panel.kind === "histogram" ? "Анализов" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
@@ -542,10 +620,31 @@ function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
   </>;
 }
 
-export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection, selectedIds, setSelectedIds, inputIds, onBack,
+export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
   hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
   onExport, onAddPublication }) {
   const [axes, setAxes] = useState([]);
+  const [axisQuery, setAxisQuery] = useState("");
+  const [axisCatalogOpen, setAxisCatalogOpen] = useState(false);
+  const cachedAnalysis = useMemo(() => {
+    if (!loadAnalysis) return undefined;
+    const cache = new Map();
+    return id => {
+      if (cache.has(id)) {
+        const request = cache.get(id);
+        cache.delete(id);
+        cache.set(id, request);
+        return request;
+      }
+      const request = Promise.resolve().then(() => loadAnalysis(id));
+      cache.set(id, request);
+      while (cache.size > 16) cache.delete(cache.keys().next().value);
+      request.then(analysis => {
+        if ((analysis.measurement_list?.length || Object.keys(analysis.measurements || {}).length) > 1000 && cache.get(id) === request) cache.delete(id);
+      }, () => { if (cache.get(id) === request) cache.delete(id); });
+      return request;
+    };
+  }, [loadAnalysis, loadData]);
   const [patterns, setPatterns] = useState({});
   const [panels, setPanels] = useState(() => viewMemory?.panels ?? []);
   const [error, setError] = useState("");
@@ -774,6 +873,18 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
           onClick={() => movePanel(panel.id, panels[index + 1].id)}>↓</button>
       </div>)}
       <p>{inputIds ? `Входной набор: ${inputIds.length} анализов` : "Входной набор: проект"}</p>
+      <details className="plot-axis-catalog" onToggle={event => setAxisCatalogOpen(event.currentTarget.open)}>
+        <summary>Каталог осей · {axes.length}</summary>
+        {axisCatalogOpen && <>
+          <small>Перетащите поле на список выбора оси панели.</small>
+          <input aria-label="Поиск полей осей" value={axisQuery} onChange={event => setAxisQuery(event.target.value)} placeholder="SiO2, MgO, La…" />
+          <div className="plot-axis-catalog-list">
+            {axes.filter(axis => !isCalculatedAxis(axis) && axisLabel(axis).toLowerCase().includes(axisQuery.trim().toLowerCase())).map(axis =>
+              <div key={axisKey(axis)} draggable tabIndex={0} title="Перетащить на ось"
+                onDragStart={event => { event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData(AXIS_DRAG_TYPE, axisKey(axis)); }}>{axisLabel(axis)}</div>)}
+          </div>
+        </>}
+      </details>
       <section className="plot-source-legend" aria-label="Легенда источников">
         <h3>Источники</h3>
         {sources.map((source) => {
@@ -866,7 +977,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
       }}>
         <div className="plot-grid" ref={grid}>
-          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} shape={shape} colorFor={colorFor} layers={layers} viewMemory={viewMemory}
+          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} layers={layers} viewMemory={viewMemory}
             openExport={onExport && !exportBusy ? () => openExport(panel.id) : undefined}
             update={(next) => setPanels((current) => current.map((item) => item.id === panel.id ? next : item))}
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}

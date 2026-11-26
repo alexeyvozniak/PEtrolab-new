@@ -55,3 +55,11 @@
 .plot-panel-order a { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .plot-panel-order button { border:1px solid #dce5dd; border-radius:4px; background:#fff; color:#315d45; padding:2px 5px; }
 .plot-panel-order button:disabled { opacity:.35; }
+
+.plot-point-tooltip { position:fixed; z-index:1100; width:max-content; max-width:min(320px,calc(100vw - 16px)); max-height:360px; overflow:hidden; display:grid; gap:4px; padding:10px 12px; background:#fff; color:#23372c; border:1px solid #c8d3cb; border-radius:7px; box-shadow:0 4px 18px #182f2026; font-size:11px; pointer-events:none; overflow-wrap:anywhere; }
+.plot-point-tooltip small { font-size:10px; color:#61746a; }
+.plot-tooltip-measurements { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:2px 12px; }
+.plot-axis-catalog { margin:8px 0; }
+.plot-axis-catalog input { width:100%; min-width:0; margin:5px 0; }
+.plot-axis-catalog-list { display:grid; gap:4px; max-height:180px; overflow:auto; }
+.plot-axis-catalog-list > div { padding:4px 6px; border:1px solid #dce5dd; border-radius:4px; cursor:grab; overflow-wrap:anywhere; }
