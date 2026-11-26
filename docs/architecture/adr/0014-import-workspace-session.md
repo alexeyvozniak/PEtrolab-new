@@ -216,6 +216,8 @@ Existing single-source commands remain internal building blocks until compatibil
 
 Every mutating command accepts the expected draft revision. Revision mismatch returns a stale-draft error instead of overwriting newer decisions.
 
+Физический предпросмотр строится из той же инспекции, по которой проверен отпечаток staged-файла. Запрос диапазона читает книгу один раз. Смена файла по-прежнему блокирует предпросмотр и сохранение до повторного добавления источника.
+
 Подтверждённая формула хранится в черновике до `commit`. При записи очереди импорт передаёт актуальный план и открытое соединение финализатору источника. Это позволяет связать принятую формулу с точными Measurement ID, которые появляются только после записи анализа, и сохранить обычный Calculation Run в той же транзакции. Ошибка расчёта откатывает весь импорт очереди. Создание `Calculation Run` не меняет измерение или назначение минерала.
 
 ## Required contract tests

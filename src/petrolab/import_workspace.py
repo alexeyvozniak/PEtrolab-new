@@ -193,10 +193,10 @@ class ImportWorkspaceStore:
                 return review_import_formula(record, params.get('method_id'))
             if operation == 'preview_window':
                 source = self._source(session, params.get('source_id'))
-                self._check(source)
+                inspection = self._check(source)
                 if params.get('semantic_extension'):
                     return apply_semantic_decision(source['staged_path'], source['recipe'], params['semantic_extension'], preview=True)
-                result = preview_source_window(source['staged_path'], params['sheet_name'], params.get('start_row', 1),
+                result = preview_source_window(inspection, params['sheet_name'], params.get('start_row', 1),
                                                params.get('row_count', 30), params.get('start_column', 0), params.get('column_count', 24))
                 return {**result, 'source_path': source['staged_path']}
             if operation == 'add_sources':

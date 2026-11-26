@@ -459,8 +459,9 @@ def _sheet(inspection: SourceInspection, name: str) -> SheetInspection:
     raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Recipe refers to an absent worksheet.", {"sheet_name": name})
 
 
-def preview_source_window(source_path: str | Path, sheet_name: str, start_row: int, row_count: int = 12, start_column: int = 0, column_count: int = 24) -> dict[str, Any]:
-    sheet = _sheet(inspect_source(source_path), sheet_name)
+def preview_source_window(source_path: str | Path | SourceInspection, sheet_name: str, start_row: int, row_count: int = 12, start_column: int = 0, column_count: int = 24) -> dict[str, Any]:
+    inspection = source_path if isinstance(source_path, SourceInspection) else inspect_source(source_path)
+    sheet = _sheet(inspection, sheet_name)
     start_row = max(1, int(start_row))
     row_count = max(1, min(int(row_count), 60))
     start_column = max(0, int(start_column))
@@ -475,7 +476,6 @@ def preview_source_window(source_path: str | Path, sheet_name: str, start_row: i
             "row_number": row_number,
             "values": [row[column] if column < len(row) else None for column in range(start_column, end_column)],
         })
-    end_column = min(max_columns, start_column + column_count)
     return {
         "sheet_name": sheet.name,
         "start_row": start_row,

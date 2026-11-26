@@ -8,7 +8,7 @@ import uuid
 from contextlib import closing
 from unittest.mock import patch
 
-from petrolab.import_preview import ImportCommandError
+from petrolab.import_preview import ImportCommandError, _read_delimited
 from petrolab.import_apply import retract_latest_import
 from petrolab.desktop_workflow import list_project_analyses
 from petrolab.import_workspace import ImportWorkspaceStore
@@ -210,6 +210,19 @@ class ImportWorkspaceTests(unittest.TestCase):
         self.assertIn('SOURCE_FINGERPRINT_MISMATCH', self.current['session']['readiness']['blocking_reason_codes'])
         with self.assertRaises(ImportCommandError):
             self.call('apply_decision', decision={'kind': 'source_inclusion', 'included': False, 'reason': 'changed'})
+
+    def test_preview_window_reads_one_verified_source_and_rejects_changed_source(self):
+        session = self.current['session']
+        params = {'workspace_id': session['workspace_id'], 'source_id': session['active_source_id'],
+                  'sheet_name': 'first', 'start_row': 2, 'row_count': 1}
+        with patch('petrolab.import_preview._read_delimited', wraps=_read_delimited) as reader:
+            preview = self.store.command('preview_window', params)
+        self.assertEqual(reader.call_count, 1)
+        self.assertEqual(preview['rows'][0]['values'][-1], '<DL')
+        self.source.write_text('Analysis,Fe (wt.%),F (wt.%)\nA1,11,0\n', encoding='utf-8')
+        with self.assertRaises(ImportCommandError) as error:
+            self.store.command('preview_window', params)
+        self.assertEqual(error.exception.code, 'SOURCE_FINGERPRINT_MISMATCH')
 
     def test_excluded_source_remains_visible_without_contributing_records(self):
         self.call('add_sources', sources=[{'staged_path': str(self.other)}])
