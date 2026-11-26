@@ -78,3 +78,7 @@
 .plot-category-legend > div > small { flex:none; }
 
 .plot-category-legend input[type=color],.plot-source-legend input[type=color] { width:23px;height:20px;padding:0;border:0;background:transparent;flex:none;cursor:pointer; }
+
+.plot-source-color-row { display:flex;align-items:center;gap:5px;min-width:0; }
+.plot-source-color-row label { flex:1;min-width:0; }
+.plot-source-color-row label span { overflow-wrap:anywhere; }

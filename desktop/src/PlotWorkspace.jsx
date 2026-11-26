@@ -1106,17 +1106,20 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         {sources.map((source) => {
           const repeated = sources.some((other) => other.source_id !== source.source_id && other.source_name === source.source_name);
           const label = repeated ? `${source.source_name} · ${source.source_id.slice(0, 8)}` : source.source_name;
-          return <label key={source.source_id} title="Ctrl+клик — изолировать источник; повтор — показать все" onClick={event => {
-            if ((event.ctrlKey || event.metaKey) && onIsolateSource && !busy) {
-              event.preventDefault();
-              onIsolateSource(source.source_id, sources.map(item => item.source_id));
-            }
-          }}>
-            <input type="checkbox" checked={!hiddenSourceIds.includes(source.source_id)}
-              disabled={!onToggleSource || busy} onChange={() => onToggleSource(source.source_id)} />
+          return <div className="plot-source-color-row" key={source.source_id}>
+            <label title="Ctrl+клик — изолировать источник; повтор — показать все" onClick={event => {
+              if ((event.ctrlKey || event.metaKey) && onIsolateSource && !busy) {
+                event.preventDefault();
+                onIsolateSource(source.source_id, sources.map(item => item.source_id));
+              }
+            }}>
+              <input type="checkbox" aria-label={label} checked={!hiddenSourceIds.includes(source.source_id)}
+                disabled={!onToggleSource || busy} onChange={() => onToggleSource(source.source_id)} />
+              <span>{label}</span>
+            </label>
             <input type="color" aria-label={"Цвет источника: "+label} value={colorFor(source.source_id)} disabled={schemeBusy}
-              onClick={event=>event.stopPropagation()} onChange={event=>changeColor("source",source.source_id,event.target.value)}/>{label}
-          </label>;
+              onChange={event=>changeColor("source",source.source_id,event.target.value)}/>
+          </div>;
         })}
         <p>Зелёный контур — текущий отбор</p>
         <p title="Ctrl+колесо — масштаб, пробел+перетаскивание — панорама, Home — автомасштаб">Пустое поле — снять отбор. Shift — добавить, Ctrl — переключить, Alt — исключить. Esc — отмена жеста, масштаба или отбора.</p>
