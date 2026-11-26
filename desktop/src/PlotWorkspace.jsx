@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import "./plotWorkspace.css";
 
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
+const EMPTY_BINS = [];
+const selectionModifier = (event) => event.altKey ? "subtract" : event.ctrlKey || event.metaKey ? "toggle" : event.shiftKey ? "union" : undefined;
 const FULL_VIEW = { x: 0, y: 0, width: VIEW.width, height: VIEW.height };
 const px = (value) => VIEW.left + value * (VIEW.right - VIEW.left);
 const py = (value) => VIEW.bottom - value * (VIEW.bottom - VIEW.top);
@@ -136,25 +138,26 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
   const isPattern = Boolean(data.normalization);
   const isHistogram = data.kind === "histogram";
   const denseLabels = isPattern && data.axes.length > 20;
-  const bins = data.bins || [];
-  const bars = bins.flatMap((bin) => bin.series.map((series) => ({
+  const bins = data.bins || EMPTY_BINS;
+  const bars = useMemo(() => bins.flatMap((bin) => bin.series.map((series) => ({
     ...series, ...bin, u: (bin.left + bin.right) / 2, v: series.base + series.height / 2,
     label: `${bin.lower}–${bin.upper} · ${series.analysis_ids.length} анализов`,
-  })));
-  const maximumCount = Math.max(1, ...bins.map((bin) => bin.count));
+  }))), [bins]);
+  const maximumCount = useMemo(() => bins.reduce((max, bin) => Math.max(max, bin.count), 1), [bins]);
   const selectedCounts = bins.map((bin) => bin.series.flatMap((series) => series.analysis_ids)
     .filter((id) => selected.has(id)).length);
   const selectedOutline = selectedCounts.some(Boolean)
     ? `M ${px(bins[0].left)} ${VIEW.bottom} ${bins.map((bin, index) =>
       `V ${py(selectedCounts[index] / maximumCount)} H ${px(bin.right)}`).join(" ")} V ${VIEW.bottom}`
     : "";
-  const markers = isHistogram ? bars : points.flatMap((point) => isPattern ? point.vertices.filter(({ v }) => v !== null).map((vertex, index) => ({
+  const markers = useMemo(() => isHistogram ? bars : points.flatMap((point) => isPattern ? point.vertices.filter(({ v }) => v !== null).map((vertex, index) => ({
     ...vertex, analysis_id: point.analysis_id, source_id: point.source_id, opacity: point.opacity,
     tabIndex: index === 0 ? 0 : -1,
     label: `${point.label} · ${vertex.element}`, title: `${point.label} · ${point.source_name} · ${vertex.element}: ${vertex.ratio.toPrecision(5)}`,
-  })) : [{ ...point, title: `${point.label} · ${point.source_name} · ${point.values.join(" / ")}` }]);
+  })) : [{ ...point, title: `${point.label} · ${point.source_name} · ${point.values.join(" / ")}` }]), [isHistogram, bars, points, isPattern]);
   const contains = (x, y) => x >= view.x && x <= view.x + view.width && y >= view.y && y <= view.y + view.height;
-  const visibleMarkers = zoomed ? markers.filter((point) => contains(px(point.u), py(point.v))) : markers;
+  const visibleMarkers = useMemo(() => zoomed ? markers.filter((point) => contains(px(point.u), py(point.v))) : markers, [markers, view, zoomed]);
+  const paths = useMemo(() => isPattern ? points.map(point => ({ point, path: patternPath(point.vertices) })) : [], [isPattern, points]);
   const position = (event) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     return { x: view.x + (event.clientX - bounds.left) * view.width / bounds.width,
@@ -171,7 +174,7 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
     if (event.button !== 0 || (event.pointerType === "touch" && !event.isPrimary)) return;
     const point = position(event);
     drag.current = { origin: point, pointer: event.pointerId, trail: [point], analysisId: event.target.dataset?.analysisId,
-      barIndex: event.target.dataset?.plotBar };
+      barIndex: event.target.dataset?.plotBar, modifier: selectionModifier(event) };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const move = (event) => {
@@ -206,18 +209,21 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
     const trail = drag.current.trail;
     const pressedAnalysisId = drag.current.analysisId;
     const pressedBar = bars[drag.current.barIndex];
+    const modifier = drag.current.modifier;
     const last = position(event);
     drag.current = null;
     setRubber(null);
     const freehand = shape === "lasso" && trail.length >= 3;
     if (!freehand && Math.hypot(first.x - last.x, first.y - last.y) < 4 * view.width / VIEW.width) {
       if (isHistogram) {
-        if (pressedBar) onSelect(pressedBar.analysis_ids);
+        if (pressedBar) onSelect(pressedBar.analysis_ids, modifier);
+        else if (!modifier) onSelect([], "replace");
         return;
       }
       const hit = visibleMarkers.findLast((point) => Math.hypot(px(point.u) - last.x, py(point.v) - last.y) <= 7 * view.width / VIEW.width);
       const id = hit?.analysis_id || pressedAnalysisId;
-      if (id) onSelect([id]);
+      if (id) onSelect([id], modifier);
+      else if (!modifier) onSelect([], "replace");
       return;
     }
     if (shape === "lasso" && !freehand) return;
@@ -225,14 +231,28 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
     onSelect([...new Set(visibleMarkers.filter((point) => freehand
       ? insidePolygon({ x: px(point.u), y: py(point.v) }, [...trail, last])
       : inside(px(point.u), first.x, last.x) && inside(py(point.v), first.y, last.y))
-      .flatMap((point) => point.analysis_ids || [point.analysis_id]))]);
+      .flatMap((point) => point.analysis_ids || [point.analysis_id]))], modifier);
   };
   const clear = () => { drag.current = null; setRubber(null); };
   return <>
   {zoomed && <button type="button" className="outline-button plot-reset-zoom" onClick={() => setView(FULL_VIEW)}>Автомасштаб</button>}
   <svg ref={canvas} className="plot-canvas" viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`} aria-label="Диаграмма"
     tabIndex={0} onPointerEnter={() => { hovered.current = true; }} onPointerLeave={() => { hovered.current = false; }}
-    onKeyDown={(event) => { if (event.key === "Escape" && zoomed) setView(FULL_VIEW); }}
+    onKeyDown={(event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (drag.current) clear();
+        else if (zoomed) setView(FULL_VIEW);
+        else onSelect([], "replace");
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && !event.altKey) {
+        event.preventDefault();
+        onSelect([...new Set(visibleMarkers.flatMap(point => point.analysis_ids || [point.analysis_id]))], "replace");
+      } else if (event.key === "Home" && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        setView(FULL_VIEW);
+      }
+    }}
+    onDoubleClick={(event) => { if (!event.target.closest?.("[data-analysis-id], [data-plot-bar]")) setView(FULL_VIEW); }}
     data-plot-projection={data.projection_sha256}
     onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={clear} onLostPointerCapture={clear}>
     {data.kind === "ternary" ? <>
@@ -258,8 +278,8 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
     {(data.fields || []).filter((field) => field.vertices.length >= 3).map((field) =>
       <polygon key={field.layer_id} className="plot-field" fill="#99b9a0" fillOpacity={0.26}
         stroke="#5c7d66" strokeWidth={1} points={field.vertices.map(([u, v]) => `${px(u)},${py(v)}`).join(" ")} />)}
-    {isPattern && points.map((point) => <path key={point.analysis_id} className="plot-series" data-analysis-id={point.analysis_id}
-      d={patternPath(point.vertices)} fill="none" stroke={colorFor(point.source_id)} strokeWidth={1.25} opacity={point.opacity} />)}
+    {paths.map(({ point, path }) => <path key={point.analysis_id} className="plot-series" data-analysis-id={point.analysis_id}
+      d={path} fill="none" stroke={colorFor(point.source_id)} strokeWidth={1.25} opacity={point.opacity} />)}
     {bars.map((bar, index) => {
       const highlighted = bar.analysis_ids.some((id) => selected.has(id));
       const rect = { x: px(bar.left), y: py(bar.base + bar.height), width: px(bar.right) - px(bar.left),
@@ -270,7 +290,7 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
         <rect className="plot-point" data-plot-bar={index} {...rect} fill={colorFor(bar.source_id)} role="button"
           tabIndex={inView ? 0 : -1} aria-hidden={inView ? undefined : true}
           aria-label={`Выбрать интервал ${bar.label}`} aria-pressed={highlighted}
-          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(bar.analysis_ids); } }}>
+          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(bar.analysis_ids, selectionModifier(event)); } }}>
           <title>{bar.label}</title>
         </rect>
       </g>;
@@ -283,7 +303,7 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
         aria-hidden={zoomed && !contains(px(point.u), py(point.v)) ? true : undefined}
         opacity={point.opacity}
         aria-label={`Выбрать точку ${point.label}`} aria-pressed={selected.has(point.analysis_id)}
-        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect([point.analysis_id]); } }}>
+        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect([point.analysis_id], selectionModifier(event)); } }}>
         <title>{point.title}</title>
       </circle>
     </g>)}
@@ -305,12 +325,15 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
       exclusions[label] = (exclusions[label] || 0) + 1;
     }
   }
-  const styles = new Map();
-  layers.forEach(({ analysis_ids, opacity, show_points }, order) => {
-    for (const id of analysis_ids) styles.set(id, { order, opacity: show_points ? opacity : 0 });
-  });
-  const points = panel.kind === "histogram" ? data?.points || [] : (data?.points || []).map((point) => ({ ...point, ...(styles.get(point.analysis_id) || { opacity: 1, order: -1 }) }))
-    .filter((point) => point.opacity > 0).sort((a, b) => a.order - b.order);
+  const styles = useMemo(() => {
+    const result = new Map();
+    layers.forEach(({ analysis_ids, opacity, show_points }, order) => {
+      for (const id of analysis_ids) result.set(id, { order, opacity: show_points ? opacity : 0 });
+    });
+    return result;
+  }, [layers]);
+  const points = useMemo(() => panel.kind === "histogram" ? data?.points || [] : (data?.points || []).map((point) => ({ ...point, ...(styles.get(point.analysis_id) || { opacity: 1, order: -1 }) }))
+    .filter((point) => point.opacity > 0).sort((a, b) => a.order - b.order), [panel.kind, data, styles]);
   const status = current ? current.error : "Загружаю диаграмму…";
   const pattern = patterns[panel.kind];
   const group = pattern?.groups.find(({ key }) => key === measurementGroup(panel.axes[0]));
@@ -521,7 +544,7 @@ export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedId
   const [exportOptions, setExportOptions] = useState(null);
   const grid = useRef(null);
   const colorFor = (sourceId) => savedColors[sourceId] || sourceColor(sourceId);
-  const selected = new Set(selectedIds);
+  const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -583,8 +606,17 @@ export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedId
       setLayoutBusy(false);
     }
   };
-  const select = (ids) => setSelectedIds((current) => mode === "replace" ? [...new Set(ids)]
-    : mode === "subtract" ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])]);
+  const select = (ids, override) => setSelectedIds((current) => {
+    const action = override || mode;
+    const incoming = new Set(ids);
+    if (action === "replace") return [...incoming];
+    if (action === "subtract") return current.filter(id => !incoming.has(id));
+    if (action === "toggle") {
+      const before = new Set(current);
+      return [...current.filter(id => !incoming.has(id)), ...[...incoming].filter(id => !before.has(id))];
+    }
+    return [...new Set([...current, ...incoming])];
+  });
   const add = () => setPanels((current) => [...current, initialPanels(axes)[0]]);
   const addLayer = (event) => {
     event.preventDefault();
@@ -670,6 +702,7 @@ export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedId
           </label>;
         })}
         <p>Зелёный контур — текущий отбор</p>
+        <p title="Ctrl+колесо — масштаб, пробел+перетаскивание — панорама, Home — автомасштаб">Пустое поле — снять отбор. Shift — добавить, Ctrl — переключить, Alt — исключить. Esc — отмена жеста, масштаба или отбора.</p>
         {hiddenAnalysisIds.length > 0 && <button className="outline-button" type="button" disabled={busy || !onSetVisibility}
           onClick={() => onSetVisibility(hiddenAnalysisIds, false)}>Вернуть скрытые точки · {hiddenAnalysisIds.length}</button>}
         {onUndoVisibility && <button className="outline-button" type="button" disabled={busy} onClick={onUndoVisibility}>

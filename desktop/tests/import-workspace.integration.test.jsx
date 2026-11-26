@@ -553,6 +553,23 @@ test("one common selection highlights the same analysis on binary and ternary pl
   expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
   await user.click(await enabledButton("Автомасштаб"));
   expect(canvas.getAttribute("viewBox")).toBe(originalView);
+  // Blank click clears the common selection even in add mode.
+  pointer("pointerdown", 15, 15);
+  pointer("pointerup", 15, 15);
+  expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
+  fireEvent.keyDown(point, { key: "Enter", shiftKey: true });
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  const secondPoint = screen.getAllByRole("button", { name: "Выбрать точку P2" })[0];
+  fireEvent.keyDown(secondPoint, { key: "Enter", ctrlKey: true });
+  expect(screen.getByText("Выбранные анализы · 2")).toBeTruthy();
+  fireEvent.keyDown(secondPoint, { key: "Enter", altKey: true });
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  fireEvent.keyDown(canvas, { key: "Escape" });
+  expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
+  fireEvent.keyDown(canvas, { key: "a", ctrlKey: true });
+  expect(screen.getByText("Выбранные анализы · 2")).toBeTruthy();
+  fireEvent.keyDown(secondPoint, { key: "Enter", ctrlKey: true });
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
   for (let count = 0; count < 6; count += 1) {
     await user.click(screen.getByRole("button", { name: "Добавить диаграмму" }));
   }
