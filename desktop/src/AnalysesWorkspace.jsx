@@ -14,6 +14,7 @@ import "./analysesWorkspace.css";
 import { EditDraftPanel } from "./EditDraftPanel";
 import { GenerationAssignment } from "./GenerationAssignment";
 import { selectionRange } from "./selectionRange";
+import { ContextActions } from "./ContextActions";
 
 function originLabel(analysis) {
   return analysis.source_orientation === "columns_are_analyses"
@@ -298,6 +299,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const [columnFilters, setColumnFilters] = useState(() => viewMemory?.columnFilters ?? {});
   const [visibleColumnIds, setVisibleColumnIds] = useState(() => viewMemory?.visibleColumnIds ?? []);
   const [dragIds, setDragIds] = useState([]);
+  const [contextMenu, setContextMenu] = useState(null);
   const [workGroups, setWorkGroups] = useState(null);
   const [groupForm, setGroupForm] = useState(false);
   const [groupBusy, setGroupBusy] = useState(false);
@@ -833,6 +835,12 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                 return (
                   <tr className={`${checked || dragged.has(analysis.analysis_id) ? "selected " : ""}${focusedRow ? "focused" : ""}`} key={analysis.analysis_id}
                     onPointerEnter={(event) => extendSelectionDrag(event, analysis.analysis_id)}
+                    onContextMenu={event => {
+                      if (event.target.closest?.("input, textarea, select")) return;
+                      event.preventDefault();
+                      setFocusedId(analysis.analysis_id);
+                      setContextMenu({ id: analysis.analysis_id, label: mainIdentity(analysis), x: event.clientX, y: event.clientY });
+                    }}
                     onClick={(event) => {
                       if (event.shiftKey || event.ctrlKey || event.metaKey) {
                         toggleSelection(analysis.analysis_id, event.shiftKey);
@@ -862,6 +870,15 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
         {project.has_more && <button className="analyses-load-more" type="button" onClick={onLoadMore} disabled={busy}>Загрузить ещё анализы</button>}
       </main>
 
+      <ContextActions menu={contextMenu} onClose={() => setContextMenu(null)} actions={contextMenu ? [
+        { label: selected.has(contextMenu.id) ? "Снять выделение анализа" : "Добавить анализ в отбор", run: () => toggleSelection(contextMenu.id) },
+        { label: "Построить диаграммы для анализа", disabled: busy || !onOpenPlots, run: () => onOpenPlots([contextMenu.id]) },
+        { label: "Фильтровать по источнику", run: () => { const analysis = byId.get(contextMenu.id); if (analysis) { setSourceFilter(analysis.source_id); setSheetFilter("all"); } } },
+        { label: "Открыть черновик правки", disabled: busy || !editDraftActions, run: () => {
+          const details = document.querySelector(".analysis-edit-drafts");
+          if (details) { details.open = true; details.scrollIntoView?.({ block: "nearest" }); details.querySelector("input[name=new_value]")?.focus(); }
+        } },
+      ] : []} />
       <AnalysisDetail analysis={focused} editDraftActions={editDraftActions} initialDraftId={initialDraftId} hiddenPlotAnalysisIds={hiddenPlotAnalysisIds}
         onSetPlotVisibility={onSetPlotVisibility} onUndoPlotVisibility={onUndoPlotVisibility} busy={busy} />
 

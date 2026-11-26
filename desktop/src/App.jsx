@@ -116,15 +116,26 @@ export function App() {
   const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
   const [selectedAnalysisIds, setSelectedAnalysisIds, undoSelection, redoSelection] = useSelectionHistory();
   const [shortcutHelp, setShortcutHelp] = useState(false);
+  const [commandPalette, setCommandPalette] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
   useEffect(() => {
     const handle = event => {
-      if (event.key === "F1") {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        setShortcutHelp(false);
+        setCommandQuery("");
+        setCommandPalette(current => !current);
+      } else if (event.key === "F1") {
+        event.preventDefault();
+        setCommandPalette(false);
         setShortcutHelp(current => !current);
+      } else if (commandPalette && event.key === "Escape") {
+        event.preventDefault();
+        setCommandPalette(false);
       } else if (shortcutHelp && event.key === "Escape") {
         event.preventDefault();
         setShortcutHelp(false);
-      } else if (!shortcutHelp && !event.defaultPrevented && !event.isComposing
+      } else if (!shortcutHelp && !commandPalette && !event.defaultPrevented && !event.isComposing
           && (event.ctrlKey || event.metaKey) && !event.altKey
           && ["Анализы", "Построение"].includes(screen)
           && !event.target.closest?.("input, textarea, select, [contenteditable], [role=dialog], form")) {
@@ -136,7 +147,7 @@ export function App() {
     };
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
-  }, [screen, shortcutHelp, undoSelection, redoSelection]);
+  }, [screen, shortcutHelp, commandPalette, undoSelection, redoSelection]);
   const [navigationAnalysis, setNavigationAnalysis] = useState(null);
   const [navigationDraftId, setNavigationDraftId] = useState("");
   const [navigationSampleId, setNavigationSampleId] = useState("");
@@ -665,6 +676,19 @@ export function App() {
     }
   };
 
+  const blockedNavigation = busy || blockDraftDirty || mappingDraftDirty;
+  const paletteCommands = [
+    ...navigation.filter(([, , enabled]) => enabled).map(([, label]) => ({ label: "Открыть: " + label, disabled: blockedNavigation, run: () => goTo(label, true) })),
+    { label: "Добавить данные / импорт Excel", disabled: blockedNavigation || !desktopRuntimeAvailable, run: startNewImport },
+    { label: "Построить диаграммы из отбора", disabled: blockedNavigation || !databasePath || !selectedAnalysisIds.length, run: () => openPlots() },
+    { label: "Снять отбор", disabled: blockedNavigation || !selectedAnalysisIds.length, run: () => setSelectedAnalysisIds([]) },
+    { label: "Горячие клавиши / справка", run: () => setShortcutHelp(true) },
+  ].filter(command => command.label.toLowerCase().includes(commandQuery.trim().toLowerCase()));
+  const runCommand = command => {
+    if (!command || command.disabled) return;
+    setCommandPalette(false);
+    command.run();
+  };
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -899,7 +923,7 @@ export function App() {
             generationActions={generationActions}
             onExportSelection={exportSelection}
             onPublishSelection={publishSelection}
-            onOpenPlots={() => openPlots()}
+            onOpenPlots={(ids) => openPlots(Array.isArray(ids) ? ids : selectedAnalysisIds)}
             hiddenPlotAnalysisIds={hiddenAnalysisIds}
             onSetPlotVisibility={setPlotVisibility}
             onUndoPlotVisibility={visibilityOperation ? undoVisibility : null}
@@ -919,6 +943,22 @@ export function App() {
           />
         )}
       </section>
+      {commandPalette && <div className="import-result-overlay" role="presentation" onMouseDown={event => {
+        if (event.target === event.currentTarget) setCommandPalette(false);
+      }}>
+        <section className="import-result-dialog" role="dialog" aria-modal="true" aria-label="Быстрые команды PetroLab">
+          <header><div><h2>Быстрые команды</h2><p>Найти действие · Ctrl+K</p></div>
+            <button type="button" onClick={() => setCommandPalette(false)} aria-label="Закрыть команды">×</button></header>
+          <div className="import-result-tools"><input autoFocus aria-label="Найти команду" value={commandQuery}
+            onChange={event => setCommandQuery(event.target.value)}
+            onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); runCommand(paletteCommands.find(command => !command.disabled)); } }} /></div>
+          <div className="command-palette-results">
+            {paletteCommands.map(command => <button type="button" className="outline-button" key={command.label} disabled={command.disabled}
+              onClick={() => runCommand(command)}>{command.label}</button>)}
+            {!paletteCommands.length && <p>Команды не найдены.</p>}
+          </div>
+        </section>
+      </div>}
       {shortcutHelp && <div className="import-result-overlay" role="presentation" onMouseDown={event => {
         if (event.target === event.currentTarget) setShortcutHelp(false);
       }}>
@@ -942,6 +982,8 @@ export function App() {
             <tr><td>Ctrl+колесо / пробел+мышь / Home</td><td>Масштаб / панорама / автомасштаб</td></tr>
             <tr><td>Ctrl+Z / Ctrl+Shift+Z</td><td>Отменить / вернуть отбор (таблица и графики)</td></tr>
             <tr><td>F1 / Esc</td><td>Открыть / закрыть памятку</td></tr>
+            <tr><td>Ctrl+K</td><td>Быстрые команды</td></tr>
+            <tr><td>Правый клик</td><td>Действия с анализом или точкой</td></tr>
           </tbody></table></div>
         </section>
       </div>}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
+import { ContextActions } from "./ContextActions";
 import "./plotWorkspace.css";
 
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
@@ -93,6 +94,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor,
   const hovered = useRef(false);
   const space = useRef(false);
   const [rubber, setRubber] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
   const [view, setView] = useState(rememberedView || FULL_VIEW);
   useLayoutEffect(() => { rememberView?.(view); }, [view, rememberView]);
   const zoomed = view.width < FULL_VIEW.width;
@@ -253,6 +255,13 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor,
         setView(FULL_VIEW);
       }
     }}
+    onContextMenu={event => {
+      if (isHistogram) return;
+      const id = event.target.closest?.("[data-analysis-id]")?.dataset.analysisId;
+      if (!id) return;
+      event.preventDefault();
+      setContextMenu({ id, label: points.find(point => point.analysis_id === id)?.label || "Анализ", x: event.clientX, y: event.clientY });
+    }}
     onDoubleClick={(event) => {
       if (isHistogram || selectionModifier(event)) return;
       const last = position(event);
@@ -318,7 +327,12 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor,
     {!isHistogram && markers.filter((point) => selected.has(point.analysis_id)).map((point) =>
       <circle key={`${point.analysis_id}:${point.element || ""}`} className="plot-halo" cx={px(point.u)} cy={py(point.v)} r={isPattern ? 4.5 : 6} />)}
     {rubber && (rubber.path ? <polygon className="plot-rubber" points={rubber.path} /> : <rect className="plot-rubber" {...rubber} />)}
-  </svg></>;
+  </svg>
+  <ContextActions menu={contextMenu} onClose={() => setContextMenu(null)} actions={contextMenu ? [
+    { label: "Открыть анализ", disabled: !onOpenAnalysis, run: () => onOpenAnalysis(contextMenu.id) },
+    { label: selected.has(contextMenu.id) ? "Снять выделение" : "Добавить к отбору", run: () => onSelect([contextMenu.id], "toggle") },
+    { label: "Выбрать только этот анализ", run: () => onSelect([contextMenu.id], "replace") },
+  ] : []} /></>;
 }
 
 function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory }) {
