@@ -258,7 +258,7 @@ function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlot
   );
 }
 
-export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initialDraftId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, generationActions, onExportSelection, onPublishSelection, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, onUndoPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
+export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initialDraftId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, generationActions, onExportSelection, onPublishSelection, onSummary, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, onUndoPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
   const analyses = project.analyses || [];
   const mineralStatusCounts = project.mineral_status_counts || {};
   const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
@@ -987,6 +987,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
             {onCreateWorkGroup && <button className="primary-button" type="button" disabled={busy || groupBusy} onClick={() => setGroupForm(true)}>Сохранить как рабочую группу</button>}
             {generationActions && <GenerationAssignment actions={generationActions} selectedIds={selectedIds} busy={busy} />}
             {onOpenPlots && <button className="outline-button" type="button" disabled={busy} onClick={onOpenPlots}>Построить диаграммы</button>}
+            {onSummary && <button className="outline-button" type="button" disabled={busy || selectedIds.length>50000} onClick={onSummary}>{selectedIds.length===2?"Сравнить составы":"Статистика отбора"}</button>}
             {onExportSelection && <>
               <button className="outline-button" type="button" disabled={busy} onClick={() => onExportSelection("xlsx")}>Экспорт отбора XLSX</button>
               <button className="outline-button" type="button" disabled={busy} onClick={() => onExportSelection("csv")}>Экспорт отбора CSV</button>

@@ -122,3 +122,7 @@ button:disabled { cursor: default; opacity: .48; }
 .context-actions button:disabled { opacity: .45; cursor: default; }
 .command-palette-results { display: grid; gap: 6px; padding: 12px; max-height: 55vh; overflow: auto; }
 .command-palette-results button { text-align: left; justify-content: flex-start; }
+
+.selection-summary-dialog { width:min(1120px,calc(100vw - 32px)); }
+.selection-summary-note { font-size:11px; color:#51655b; padding:4px 12px; }
+.selection-summary-dialog td { font-variant-numeric:tabular-nums; }

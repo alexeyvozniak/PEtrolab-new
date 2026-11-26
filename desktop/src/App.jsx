@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSelectionHistory } from "./selectionHistory";
+import { SelectionSummary } from "./SelectionSummary";
 import {
   CheckCircle,
   Columns,
@@ -33,7 +34,7 @@ import {
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
   getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication, capturePublicationPlot,
   capturePublicationTable, capturePublicationMedia,
-  getPlotCatalog, getPlotData, recordPlotVisibility, undoPlotVisibility, getProjectPlotColors, saveProjectPlotColors,
+  getPlotCatalog, getPlotData, recordPlotVisibility, undoPlotVisibility, getProjectPlotColors, saveProjectPlotColors, getSelectionSummary,
   listPlotSpecifications, openPlotSpecification, savePlotSpecification, pickPlotExportPath, exportPlot,
   isPetrolabDesktop,
   listProjectAnalyses,
@@ -116,6 +117,8 @@ export function App() {
   const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
   const [selectedAnalysisIds, setSelectedAnalysisIds, undoSelection, redoSelection] = useSelectionHistory();
   const [shortcutHelp, setShortcutHelp] = useState(false);
+  const [summaryRequest,setSummaryRequest] = useState(null);
+  const openSummary = () => setSummaryRequest([...selectedAnalysisIds]);
   const [commandPalette, setCommandPalette] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   useEffect(() => {
@@ -830,7 +833,7 @@ export function App() {
             return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination, settings)) : null;
           }} />}
         {screen === "Построение" && <PlotWorkspace viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
-          loadSelection={loadPlotSelection} loadAnalysis={loadPlotAnalysis} loadColorScheme={loadColorScheme} saveColorScheme={saveColorScheme}
+          loadSelection={loadPlotSelection} loadAnalysis={loadPlotAnalysis} loadColorScheme={loadColorScheme} saveColorScheme={saveColorScheme} onSummary={openSummary}
           loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}
           openLayout={restorePlotLayout} onExport={async (svg, options) => {
             const destination = await pickPlotExportPath(options.name);
@@ -926,6 +929,7 @@ export function App() {
             generationActions={generationActions}
             onExportSelection={exportSelection}
             onPublishSelection={publishSelection}
+            onSummary={openSummary}
             onOpenPlots={(ids) => openPlots(Array.isArray(ids) ? ids : selectedAnalysisIds)}
             hiddenPlotAnalysisIds={hiddenAnalysisIds}
             onSetPlotVisibility={setPlotVisibility}
@@ -946,6 +950,7 @@ export function App() {
           />
         )}
       </section>
+      {summaryRequest && <SelectionSummary ids={summaryRequest} load={ids=>getSelectionSummary(databasePath,ids).then(unwrap)} close={()=>setSummaryRequest(null)} />}
       {commandPalette && <div className="import-result-overlay" role="presentation" onMouseDown={event => {
         if (event.target === event.currentTarget) setCommandPalette(false);
       }}>

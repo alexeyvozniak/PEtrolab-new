@@ -649,7 +649,7 @@ function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
 
 export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
   hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
-  onExport, onAddPublication, loadColorScheme, saveColorScheme }) {
+  onExport, onAddPublication, loadColorScheme, saveColorScheme, onSummary }) {
   const [axes, setAxes] = useState([]);
   const [axisQuery, setAxisQuery] = useState("");
   const [axisCatalogOpen, setAxisCatalogOpen] = useState(false);
@@ -723,7 +723,10 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
   const storeScheme = async () => {
     setSchemeBusy(true);setSchemeStatus("");
     try {
-      const result=await saveColorScheme({mode:colorMode,colors:schemeColors},schemeRevision);
+      const colors = new Map(schemeColors.map(entry=>[JSON.stringify([entry.mode,entry.key]),entry]));
+      for(const source of sources) colors.set(JSON.stringify(["source",source.source_id]),{mode:"source",key:source.source_id,color:colorFor(source.source_id)});
+      for(const entry of category?.entries||[]) if(entry.key!==null) colors.set(JSON.stringify([colorMode,entry.key]),{mode:colorMode,key:entry.key,color:entry.color});
+      const result=await saveColorScheme({mode:colorMode,colors:[...colors.values()]},schemeRevision);
       applyScheme(result);
       setSchemeStatus("Цветовая схема сохранена в проекте.");
     } catch(error){setSchemeStatus(error.message || String(error));}
@@ -846,6 +849,9 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         ...(PATTERN_LABELS[kind] ? { normalization } : {}),
       })));
       setSavedColors(Object.fromEntries(saved.legend.entries.map(({ value, color }) => [value, color])));
+      const savedIds=new Set(saved.legend.entries.map(entry=>entry.value));
+      setSchemeColors(current=>[...current.filter(entry=>entry.mode!=="source"||!savedIds.has(entry.key)),
+        ...saved.legend.entries.map(({value,color})=>({mode:"source",key:value,color}))]);
       setLayers(saved.layers || []);
       setLayoutStatus({ notice: `Открыта раскладка «${saved.name}».` });
     } catch (caught) {
@@ -1163,6 +1169,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
           close={() => setExportOptions(null)} onChange={(values) => setExportOptions((current) => ({ ...current, ...values }))} />}
       </div>
       <footer className="plot-selection-footer"><b>Выбранные анализы · {selectedIds.length}</b>
+        {onSummary && selectedIds.length>0 && <button type="button" className="outline-button" disabled={busy||selectedIds.length>50000} onClick={onSummary}>{selectedIds.length===2?"Сравнить составы":"Статистика отбора"}</button>}
         {loadSelection && <button type="button" className="outline-button" aria-expanded={selectionExpanded}
           aria-controls="plot-selection-table" onClick={() => setSelectionExpanded(!selectionExpanded)}>
           {selectionExpanded ? "Свернуть таблицу" : "Развернуть таблицу"}
