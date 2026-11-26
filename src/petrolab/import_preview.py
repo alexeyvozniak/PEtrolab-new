@@ -292,7 +292,7 @@ def candidate_blocks(sheet: SheetInspection) -> list[dict[str, Any]]:
     return blocks
 
 
-def _read_xlsx(path: Path) -> tuple[SheetInspection, ...]:
+def _read_xlsx(path: Path | io.BytesIO) -> tuple[SheetInspection, ...]:
     try:
         archive = zipfile.ZipFile(path)
     except (OSError, zipfile.BadZipFile) as exc:
@@ -363,16 +363,16 @@ def _read_xlsx(path: Path) -> tuple[SheetInspection, ...]:
         return tuple(inspections)
 
 
-def _read_delimited(path: Path, delimiter: str) -> tuple[SheetInspection, ...]:
+def _read_delimited(content: bytes, sheet_name: str, delimiter: str) -> tuple[SheetInspection, ...]:
     try:
-        text = path.read_text(encoding="utf-8-sig")
+        text = content.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise ImportCommandError("UNSUPPORTED_ENCODING", "Delimited source must be UTF-8 encoded.") from exc
-    rows = [[cell if cell != "" else None for cell in row] for row in csv.reader(io.StringIO(text), delimiter=delimiter)]
-    return (SheetInspection(path.stem, tuple(tuple(row) for row in rows), _header_candidates(rows)),)
+    rows = [[cell if cell != "" else None for cell in row] for row in csv.reader(io.StringIO(text, newline=None), delimiter=delimiter)]
+    return (SheetInspection(sheet_name, tuple(tuple(row) for row in rows), _header_candidates(rows)),)
 
 
-def _read_xls(path: Path) -> tuple[SheetInspection, ...]:
+def _read_xls(content: bytes) -> tuple[SheetInspection, ...]:
     """Read legacy BIFF workbooks without converting or rewriting the source."""
     try:
         import xlrd
@@ -383,7 +383,7 @@ def _read_xls(path: Path) -> tuple[SheetInspection, ...]:
         ) from exc
 
     try:
-        workbook = xlrd.open_workbook(path, on_demand=True, formatting_info=True)
+        workbook = xlrd.open_workbook(file_contents=content, on_demand=True, formatting_info=True)
     except (OSError, xlrd.XLRDError, xlrd.compdoc.CompDocError) as exc:
         message = str(exc).lower()
         code = "WORKBOOK_ENCRYPTED" if "encrypt" in message or "password" in message else "SOURCE_UNREADABLE"
@@ -437,19 +437,21 @@ def inspect_source(source_path: str | Path) -> SourceInspection:
         raise ImportCommandError("SOURCE_UNREADABLE", "Source file does not exist.", {"path": str(path)})
     suffix = path.suffix.lower()
     readers = {
-        ".xlsx": ("xlsx", _read_xlsx),
+        ".xlsx": ("xlsx", lambda data: _read_xlsx(io.BytesIO(data))),
         ".xls": ("xls", _read_xls),
-        ".csv": ("csv", lambda file: _read_delimited(file, ",")),
-        ".tsv": ("tsv", lambda file: _read_delimited(file, "\t")),
+        ".csv": ("csv", lambda data: _read_delimited(data, path.stem, ",")),
+        ".tsv": ("tsv", lambda data: _read_delimited(data, path.stem, "\t")),
     }
     if suffix not in readers:
         raise ImportCommandError("SOURCE_UNREADABLE", "Only XLS, XLSX, CSV and TSV are supported by this import build.", {"suffix": suffix})
-    if suffix == ".xlsx":
-        with path.open("rb") as source:
-            if source.read(8) == OLE_COMPOUND_SIGNATURE:
-                raise ImportCommandError("WORKBOOK_ENCRYPTED", "Password-protected XLSX files cannot be inspected.")
+    try:
+        content = path.read_bytes()
+    except OSError as exc:
+        raise ImportCommandError("SOURCE_UNREADABLE", "Cannot read source file.", {"path": str(path)}) from exc
+    if suffix == ".xlsx" and content.startswith(OLE_COMPOUND_SIGNATURE):
+        raise ImportCommandError("WORKBOOK_ENCRYPTED", "Password-protected XLSX files cannot be inspected.")
     source_format, reader = readers[suffix]
-    return SourceInspection(path, source_format, _fingerprint(path), reader(path))
+    return SourceInspection(path, source_format, hashlib.sha256(content).hexdigest(), reader(content))
 
 
 def _sheet(inspection: SourceInspection, name: str) -> SheetInspection:

@@ -10,19 +10,22 @@ import tempfile
 import shutil
 import unittest
 import zipfile
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from petrolab.import_preview import (  # noqa: E402
+    ImportCommandError,
+    _read_delimited,
     inspect_source,
     run_import_inspect_source,
     run_import_plan_create,
     run_import_recipe_validate,
     semantic_fingerprint,
 )
-from petrolab.import_apply import apply_import_plan, check_linked_source, open_project, save_import_recipe_revision  # noqa: E402
+from petrolab.import_apply import apply_import_batch, apply_import_plan, check_linked_source, open_project, save_import_recipe_revision  # noqa: E402
 
 
 FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
@@ -270,6 +273,50 @@ class ImportPreviewTests(unittest.TestCase):
             self.assertEqual(status["state"], "source_changed")
             with closing(sqlite3.connect(directory / "project.sqlite")) as connection:
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM import_batch").fetchone()[0], 1)
+
+    def test_inspection_hash_covers_the_exact_bytes_parsed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.csv"
+            original = b'Analysis,MgO [wt.%]\r\nP1,38\r\n'
+            changed = original.replace(b'38', b'91')
+            source.write_bytes(original)
+
+            def replace_during_parse(content, sheet_name, delimiter):
+                source.write_bytes(changed)
+                return _read_delimited(content, sheet_name, delimiter)
+
+            with patch('petrolab.import_preview._read_delimited', side_effect=replace_during_parse):
+                inspection = inspect_source(source)
+            self.assertEqual(inspection.sheets[0].rows[1], ('P1', '38'))
+            self.assertEqual(inspection.fingerprint, hashlib.sha256(original).hexdigest())
+            self.assertEqual(source.read_bytes(), changed)
+
+    def test_linked_original_changed_since_staging_blocks_the_whole_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / 'project.sqlite'
+            original = root / 'original.xlsx'
+            staged = root / 'staged.xlsx'
+            shutil.copyfile(FIXTURE, staged)
+            changed = staged.read_bytes() + b'published revision'
+            original.write_bytes(changed)
+            recipe = fixture_recipe()
+            managed = root / 'managed.xlsx'
+            shutil.copyfile(FIXTURE, managed)
+            managed_recipe = fixture_recipe()
+            managed_recipe['ownership_mode'] = 'managed_copy'
+            refresh_recipe_fingerprint(managed_recipe)
+            with self.assertRaises(ImportCommandError) as error:
+                apply_import_batch(database, [(managed, managed_recipe, managed_recipe['source_file_sha256'], managed),
+                                              (staged, recipe, recipe['source_file_sha256'], original)])
+            self.assertEqual(error.exception.code, 'SOURCE_FINGERPRINT_MISMATCH')
+            with closing(sqlite3.connect(database)) as connection:
+                for table in ('source_file', 'import_batch', 'analysis', 'measurement'):
+                    self.assertEqual(connection.execute(f'SELECT count(*) FROM {table}').fetchone()[0], 0)
+            self.assertEqual(original.read_bytes(), changed)
+            self.assertEqual(staged.read_bytes(), FIXTURE.read_bytes())
+            self.assertEqual(managed.read_bytes(), FIXTURE.read_bytes())
+            self.assertEqual(list((root / 'sources').iterdir()), [])
 
     def test_saving_recipe_revision_keeps_previous_snapshot_immutable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

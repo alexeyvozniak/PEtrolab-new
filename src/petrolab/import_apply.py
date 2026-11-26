@@ -525,6 +525,18 @@ def _persist_import(connection, database_path, source_path, recipe, inspection, 
     if source_kind == "managed_copy":
         managed_copy = _prepare_managed_copy(database_path, source_id, source_path, inspection.fingerprint)
         managed_files.append(managed_copy)
+    else:
+        from .import_preview import _fingerprint
+
+        linked_path = Path(plan["original_source_path"])
+        try:
+            current_fingerprint = _fingerprint(linked_path)
+        except OSError as exc:
+            raise ImportCommandError("SOURCE_UNREADABLE", "Связанный исходный файл недоступен.",
+                                     {"path": str(linked_path)}) from exc
+        if current_fingerprint != inspection.fingerprint:
+            raise ImportCommandError("SOURCE_FINGERPRINT_MISMATCH", "Связанный исходный файл изменился. Проверьте его заново.",
+                                     {"path": str(linked_path)})
     timestamp = _now()
     metadata_count = 0
     connection.execute(
