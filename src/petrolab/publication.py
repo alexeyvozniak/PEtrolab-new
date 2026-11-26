@@ -19,7 +19,7 @@ from .import_apply import open_project
 from .formula_service import list_formula_runs, open_formula_run
 from .import_preview import ImportCommandError
 from .media_display import _annotations, _asset_source, _publish_new_file, export_media_original, export_media_rendered
-from .plot_data import list_plot_specifications, open_plot_specification, query_plot_data
+from .plot_data import list_plot_specifications, open_plot_specification, query_plot_data, validate_category_style
 from .plot_export import SVG_LIMIT, checked_svg, render_plot
 from .selection_export import selection_xlsx_bytes
 from .statistics_service import list_calculation_runs, open_calculation_run
@@ -110,7 +110,7 @@ def _json_bytes(value):
 
 
 def _plot_capture(database_path, capture):
-    if (not isinstance(capture, dict) or set(capture) != {
+    if (not isinstance(capture, dict) or set(capture) - {"category_style"} != {
             "name", "svg", "format", "width_mm", "dpi", "include_csv", "panels",
             "analysis_ids", "colors", "hidden_analysis_ids", "hidden_source_ids", "layers",
     } or not isinstance(capture["name"], str) or not 1 <= len(capture["name"]) <= 120
@@ -122,12 +122,20 @@ def _plot_capture(database_path, capture):
             or any(not isinstance(color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", color) for color in capture["colors"].values())):
         raise ValueError("plot_capture")
     root = checked_svg(capture["svg"].encode())
-    if len(root) != len(capture["panels"]) or any(not node.tag.endswith("}g") for node in root):
+    category_style = capture.get("category_style")
+    nodes = list(root)
+    if category_style is not None:
+        if not nodes or nodes[-1].get("id") != "category-legend" or not any(panel["kind"] != "histogram" for panel in capture["panels"]):
+            raise ValueError("plot_capture_category_legend")
+        legend = nodes.pop()
+        if [node.get("fill") for node in legend if node.tag.endswith("}rect")] != [entry["color"] for entry in category_style["entries"]]:
+            raise ValueError("plot_capture_category_colors")
+    if len(nodes) != len(capture["panels"]) or any(not node.tag.endswith("}g") for node in root):
         raise ValueError("plot_capture_panels")
     snapshots = []
     contributors = {}
     scope = capture["analysis_ids"]
-    for panel, node in zip(capture["panels"], root):
+    for panel, node in zip(capture["panels"], nodes):
         if not isinstance(panel, dict) or set(panel) - {"normalization"} != {"id", "kind", "axes", "projection_sha256"}:
             raise ValueError("plot_capture_panel")
         projection = query_plot_data(database_path, panel["kind"], panel["axes"], scope,
@@ -152,7 +160,11 @@ def _plot_capture(database_path, capture):
     result = {key: value for key, value in capture.items() if key != "svg"}
     result["analysis_ids"] = scope
     result["panels"] = snapshots
-    result["schema_version"] = 1
+    if category_style is not None:
+        with closing(open_project(database_path)) as connection:
+            connection.execute("BEGIN")
+            validate_category_style(connection, scope, category_style)
+    result["schema_version"] = 2 if category_style is not None else 1
     return result, list(contributors)
 
 

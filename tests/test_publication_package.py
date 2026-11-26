@@ -336,6 +336,43 @@ class PublicationPackageTests(unittest.TestCase):
                 capture_publication_plot(database, altered, "Панель b")
             self.assertEqual(stale.exception.code, "PUBLICATION_PLOT_CHANGED")
 
+    def test_category_layout_and_publication_snapshot(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "input.csv"
+            source.write_text("Analysis,Mineral,SiO2 [wt.%],MgO [wt.%]\\nP1,olivine,40,50\\nP2,pyroxene,50,20\\n", encoding="utf-8")
+            database = root / "project.sqlite"
+            apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
+            catalog = plot_catalog(database, include_categories=True)
+            axes = catalog["axes"]
+            projection = query_plot_data(database, "binary", axes)
+            assignments = {row["analysis_id"]: row["reported_mineral"] for row in catalog["categories"]}
+            self.assertEqual(set(assignments.values()), {"olivine","pyroxene"})
+            style = {"mode":"mineral","assignments":assignments,"entries":[
+                {"key":"olivine","label":"olivine","count":1,"color":"#112233"},
+                {"key":"pyroxene","label":"pyroxene","count":1,"color":"#445566"}]}
+            panel = {"id":str(uuid4()),"kind":"binary","axes":axes}
+            saved = save_plot_specification(database,"Категории",None,[panel],{},[],[],category_style=style)
+            self.assertEqual(saved["schema_version"],2)
+            self.assertEqual(open_plot_specification(database,saved["id"])["category_style"],style)
+            svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g id="panel-a"><text x="1" y="2">a</text></g><g id="category-legend"><rect x="1" y="10" width="10" height="10" fill="#112233"/><rect x="1" y="25" width="10" height="10" fill="#445566"/></g></svg>'
+            capture = {"name":"Categories","format":"svg","width_mm":90,"dpi":600,"include_csv":True,"svg":svg,
+                       "analysis_ids":None,"hidden_analysis_ids":[],"hidden_source_ids":[],"layers":[],"colors":{},
+                       "category_style":style,"panels":[{**panel,"projection_sha256":projection["projection_sha256"]}]}
+            item = capture_publication_plot(database,capture,"Категории")
+            ready = prepare_publication(database,"Пакет", [item])
+            destination = root / "category.zip"
+            export_publication(database,"Пакет",[item],ready["fingerprint"],str(destination))
+            with ZipFile(destination) as archive:
+                snapshot=json.loads(archive.read("materials/01-plot_capture.json"))
+                self.assertEqual(snapshot["category_style"],style)
+                self.assertEqual(snapshot["schema_version"],2)
+                self.assertEqual(archive.read("figures/01-plot_capture.svg"),svg.encode())
+            invalid={**style,"assignments":{id:"other" for id in assignments}}
+            with self.assertRaises(ImportCommandError) as stale:
+                capture_publication_plot(database,{**capture,"category_style":invalid},"Старые назначения")
+            self.assertEqual(stale.exception.code,"PLOT_CATEGORY_CHANGED")
+
     def test_lithos_figures_have_ordered_captions_and_verified_width_and_resolution(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)

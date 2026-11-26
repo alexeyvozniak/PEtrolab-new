@@ -28,7 +28,7 @@ function categoryStyle(rows, mode, overrides) {
     entry.color = entry.key === null ? MISSING_COLOR : overrides.get(JSON.stringify([mode,entry.key])) || CATEGORY_COLORS[index % CATEGORY_COLORS.length];
   });
   const colors = new Map(entries.map(entry => [entry.key,entry.color]));
-  return {entries, colorFor: id => colors.get(byId.get(id) ?? null) || MISSING_COLOR};
+  return {entries, snapshot: {mode,entries,assignments:Object.fromEntries(byId)}, colorFor: id => colors.get(byId.get(id) ?? null) || MISSING_COLOR};
 }
 const AXIS_DRAG_TYPE = "application/x-petrolab-axis";
 function PointTooltip({ hover, detail, shift, loadAnalysis }) {
@@ -822,12 +822,12 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     setLayoutBusy(true);
     setLayoutStatus(null);
     try {
-      if (colorMode !== "source") throw new Error("Для сохранения раскладки верните окрашивание по источнику.");
+      if (!colorReady) throw new Error("Дождитесь загрузки категорий окрашивания.");
       const saved = await saveLayout({
         name: layoutName, analysis_ids: inputIds, panels,
         colors: Object.fromEntries(sources.map(({ source_id }) => [source_id, colorFor(source_id)])),
         hidden_analysis_ids: hiddenAnalysisIds, hidden_source_ids: hiddenSourceIds,
-        layers,
+        layers, ...(category ? {category_style:category.snapshot} : {}),
       });
       setLayouts((current) => [...current, { id: saved.id, name: saved.name }]);
       setLayoutName("");
@@ -843,15 +843,19 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     setLayoutStatus(null);
     try {
       const saved = await openLayout(id);
-      setColorMode("source");
+      setColorMode(saved.category_style?.mode || "source");
       setPanels(saved.panels.map(({ id: panelId, kind, axes: savedAxes, normalization }) => ({
         id: panelId, kind, axes: savedAxes.map(({ scale, manual_range, ...axis }) => axis),
         ...(PATTERN_LABELS[kind] ? { normalization } : {}),
       })));
       setSavedColors(Object.fromEntries(saved.legend.entries.map(({ value, color }) => [value, color])));
       const savedIds=new Set(saved.legend.entries.map(entry=>entry.value));
-      setSchemeColors(current=>[...current.filter(entry=>entry.mode!=="source"||!savedIds.has(entry.key)),
-        ...saved.legend.entries.map(({value,color})=>({mode:"source",key:value,color}))]);
+      const categoryEntries = saved.category_style?.entries.filter(entry=>entry.key!==null) || [];
+      const categoryIds = new Set(categoryEntries.map(entry=>entry.key));
+      setSchemeColors(current=>[...current.filter(entry=>!(entry.mode==="source"&&savedIds.has(entry.key)) &&
+        !(entry.mode===saved.category_style?.mode&&categoryIds.has(entry.key))),
+        ...saved.legend.entries.map(({value,color})=>({mode:"source",key:value,color})),
+        ...categoryEntries.map(({key,color})=>({mode:saved.category_style.mode,key,color}))]);
       setLayers(saved.layers || []);
       setLayoutStatus({ notice: `Открыта раскладка «${saved.name}».` });
     } catch (caught) {
@@ -940,8 +944,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     setExportStatus(null);
     try {
       if (!colorReady) throw new Error("Дождитесь загрузки категорий окрашивания.");
-      if (addToPackage && colorMode !== "source") throw new Error("Для воспроизводимого пакета публикации верните окрашивание по источнику.");
-      const hasCategoryPanels = requested.some(({panelIndex}) => panels[panelIndex].kind !== "histogram");
+       const hasCategoryPanels = requested.some(({panelIndex}) => panels[panelIndex].kind !== "histogram");
       const legend = category && hasCategoryPanels ? { title: COLOR_MODES[colorMode] + " · категории входного набора",
         entries: category.entries, histogramNote: requested.some(({panelIndex}) => panels[panelIndex].kind === "histogram") } : null;
       if (legend && legend.entries.length > 60) throw new Error("Слишком много категорий для читаемой легенды. Сузьте входной набор или выберите окрашивание по источнику.");
@@ -953,6 +956,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
           name: base || "PetroLab-plot", format, svg, width_mm: options.width, dpi: options.dpi, include_csv: includeCsv,
           analysis_ids: inputIds, layers, hidden_analysis_ids: hiddenAnalysisIds, hidden_source_ids: hiddenSourceIds,
           colors: Object.fromEntries(sources.map(({ source_id }) => [source_id, colorFor(source_id)])),
+          ...(legend ? {category_style:category.snapshot} : {}),
           panels: requested.map(({ panelIndex, svg: canvas }) => ({
             ...panels[panelIndex], projection_sha256: canvas.dataset.plotProjection,
           })),
@@ -1052,7 +1056,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
               <span>{entry.label}</span><small>{entry.count}</small></div>)}
           </div>}
           {category?.entries.length > CATEGORY_COLORS.length && <small>Цвета могут повторяться; сузьте набор для различения групп.</small>}
-          <small>Гистограммы и управление видимостью источников сохраняют исходные цвета. Для сохранённой раскладки и пакета публикации верните окрашивание по источнику.</small>
+          <small>Гистограммы и управление видимостью источников сохраняют исходные цвета. Раскладка и пакет фиксируют категории и цвета на момент сохранения.</small>
         </>}
         {loadColorScheme && saveColorScheme && <>
           <button type="button" className="outline-button" disabled={schemeBusy || busy || !colorReady || schemeRevision===null} onClick={storeScheme}>Сохранить цветовую схему проекта</button>
@@ -1126,7 +1130,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         <form onSubmit={save}>
           <label>Название раскладки<input value={layoutName} maxLength={120}
             onChange={(event) => setLayoutName(event.target.value)} /></label>
-          <button className="outline-button" type="submit" disabled={layoutBusy || busy || loading || colorMode !== "source" || !layoutName.trim() || !panels.length}>
+          <button className="outline-button" type="submit" disabled={layoutBusy || busy || loading || !colorReady || !layoutName.trim() || !panels.length}>
             Сохранить раскладку
           </button>
         </form>
@@ -1165,7 +1169,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}
         </div>
         {exportOptions && <PlotExport options={exportOptions} panels={panels} pending={exportBusy} submit={submitExport}
-          canAddPublication={Boolean(onAddPublication) && colorMode === "source"}
+          canAddPublication={Boolean(onAddPublication) && colorReady}
           close={() => setExportOptions(null)} onChange={(values) => setExportOptions((current) => ({ ...current, ...values }))} />}
       </div>
       <footer className="plot-selection-footer"><b>Выбранные анализы · {selectedIds.length}</b>

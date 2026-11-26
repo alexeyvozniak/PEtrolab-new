@@ -71,20 +71,70 @@ def plot_catalog(database_path, analysis_ids=None, *, include_formula=False, inc
         if include_categories:
             # Explicit stored assignments only; do not classify or substitute
             # predictions for the reported mineral name. One read snapshot.
-            category_rows = connection.execute(f"""
-                WITH active AS (SELECT a.analysis_id {_ACTIVE_ANALYSES})
-                SELECT active.analysis_id, s.sample_id, s.sample_name,
-                       g.id AS generation_id, g.name AS generation_name,
-                       json_extract(e.reported_mineral_json, '$.value') AS reported_mineral
-                FROM active
-                LEFT JOIN analysis_import_semantics e USING (analysis_id)
-                LEFT JOIN sample s ON s.sample_id = json_extract(e.sample_association_json, '$.sample_id')
-                LEFT JOIN analysis_generation ag USING (analysis_id)
-                LEFT JOIN generation g ON g.id = ag.generation_id
-                ORDER BY active.analysis_id
-            """, parameters)
-            result['categories'] = [dict(row) for row in category_rows]
+            result['categories'] = _category_rows(connection, parameters)
         return result
+
+
+def _category_rows(connection, parameters):
+    category_rows = connection.execute(f"""
+        WITH active AS (SELECT a.analysis_id {_ACTIVE_ANALYSES})
+        SELECT active.analysis_id, s.sample_id, s.sample_name,
+               g.id AS generation_id, g.name AS generation_name,
+               json_extract(e.reported_mineral_json, '$.value') AS reported_mineral
+        FROM active
+        LEFT JOIN analysis_import_semantics e USING (analysis_id)
+        LEFT JOIN sample s ON s.sample_id = json_extract(e.sample_association_json, '$.sample_id')
+        LEFT JOIN analysis_generation ag USING (analysis_id)
+        LEFT JOIN generation g ON g.id = ag.generation_id
+        ORDER BY active.analysis_id
+    """, parameters)
+    return [dict(row) for row in category_rows]
+
+
+def validate_category_style(connection, analysis_ids, style):
+    """Bind saved colors to exact metadata, without altering numeric projections."""
+    if not isinstance(style, dict) or set(style) != {"mode", "entries", "assignments"}:
+        raise ValueError("category_style")
+    mode = style["mode"]
+    if mode not in ("sample", "generation", "mineral"):
+        raise ValueError("category_style_mode")
+    if not isinstance(style["entries"], list) or len(style["entries"]) > 4001 or not isinstance(style["assignments"], dict):
+        raise ValueError("category_style_entries")
+    rows = _category_rows(connection, _selection(analysis_ids))
+    assignments = {}
+    groups = {}
+    for row in rows:
+        raw = row[{"sample":"sample_id","generation":"generation_id","mineral":"reported_mineral"}[mode]]
+        name = row[{"sample":"sample_name","generation":"generation_name","mineral":"reported_mineral"}[mode]]
+        key = str(raw) if raw is not None and str(raw).strip() else None
+        assignments[row["analysis_id"]] = key
+        entry = groups.setdefault(key, {"label": "Не указано" if key is None else str(name or raw), "count": 0})
+        entry["count"] += 1
+    names = {}
+    for group in groups.values():
+        names[group["label"]] = names.get(group["label"], 0) + 1
+    for key, group in groups.items():
+        if key is not None and names[group["label"]] > 1:
+            group["label"] += " · " + key[:8]
+    if assignments != style["assignments"]:
+        raise ImportCommandError("PLOT_CATEGORY_CHANGED", "Назначения категорий изменились. Обновите окрашивание перед сохранением или публикацией.")
+    seen = set()
+    for entry in style["entries"]:
+        if not isinstance(entry, dict) or set(entry) != {"key", "label", "count", "color"}:
+            raise ValueError("category_style_entry")
+        key = entry["key"]
+        if key is not None and not isinstance(key, str):
+            raise ValueError("category_style_key")
+        if key in seen or key not in groups or type(entry["count"]) is not int or not isinstance(entry["color"], str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", entry["color"]):
+            raise ValueError("category_style_entry")
+        if key is None and entry["color"].lower() != "#8c9590":
+            raise ValueError("category_missing_color")
+        if groups[key] != {"label": entry["label"], "count": entry["count"]}:
+            raise ImportCommandError("PLOT_CATEGORY_CHANGED", "Названия или состав категорий изменились. Обновите окрашивание.")
+        seen.add(key)
+    if seen != groups.keys():
+        raise ValueError("category_style_incomplete")
+    return style
 
 
 def _plot_formula_series(connection, selection):
@@ -642,7 +692,7 @@ def _validated_layers(layers):
     return layers
 
 
-def save_plot_specification(database_path, name, analysis_ids, panels, colors, hidden_analyses, hidden_sources, layers=None, *, transaction=None):
+def save_plot_specification(database_path, name, analysis_ids, panels, colors, hidden_analyses, hidden_sources, layers=None, *, transaction=None, category_style=None):
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
         raise ImportCommandError("PLOT_LAYOUT_NAME_INVALID", "Введите название раскладки до 120 символов.")
     if not isinstance(panels, list) or not 1 <= len(panels) <= 32:
@@ -683,10 +733,10 @@ def save_plot_specification(database_path, name, analysis_ids, panels, colors, h
             if transaction is None:
                 connection.execute("BEGIN IMMEDIATE")
             return _insert_plot_specification(connection, name, analysis_ids, saved_panels, panel_keys, colors,
-                                              hidden_analyses, hidden_sources, layers)
+                                              hidden_analyses, hidden_sources, layers, category_style)
 
 
-def _insert_plot_specification(connection, name, analysis_ids, saved_panels, panel_keys, colors, hidden_analyses, hidden_sources, layers):
+def _insert_plot_specification(connection, name, analysis_ids, saved_panels, panel_keys, colors, hidden_analyses, hidden_sources, layers, category_style=None):
     rows, available = _layout_input(connection, analysis_ids)
     if not panel_keys <= available:
         raise ImportCommandError("PLOT_LAYOUT_AXES_UNAVAILABLE", "Часть полей раскладки недоступна для выбранного набора.")
@@ -719,6 +769,9 @@ def _insert_plot_specification(connection, name, analysis_ids, saved_panels, pan
         "hidden_analysis_ids": [item for item in hidden_analyses if item in scope],
         "hidden_source_ids": [item for item in hidden_sources if item in sources], "created_at": now, "updated_at": now,
     }
+    if category_style is not None:
+        spec["category_style"] = validate_category_style(connection, spec["input"]["analysis_ids"], category_style)
+        spec["schema_version"] = 2
     connection.execute("INSERT INTO plot_specification (id, name, definition_json) VALUES (?, ?, ?)",
                        (spec["id"], name, json.dumps(spec, ensure_ascii=False)))
     return spec
@@ -737,7 +790,7 @@ def open_plot_specification(database_path, spec_id):
         if not row:
             raise ImportCommandError("PLOT_LAYOUT_UNAVAILABLE", "Раскладка недоступна.")
         spec = json.loads(row[0])
-        if spec.get("schema_version") != 1:
+        if spec.get("schema_version") not in (1, 2) or (spec.get("schema_version") == 2) != ("category_style" in spec):
             raise ImportCommandError("PLOT_LAYOUT_VERSION_UNSUPPORTED", "Версия раскладки несовместима с этой версией PetroLab.")
         if any(panel["kind"] == "histogram" and panel.get("binning") != _HISTOGRAM_BINNING for panel in spec["panels"]):
             raise ImportCommandError("PLOT_HISTOGRAM_BINNING_UNSUPPORTED", "Версия интервалов гистограммы не поддерживается.")
@@ -749,4 +802,6 @@ def open_plot_specification(database_path, spec_id):
             keys.update(_required_axis_keys(axes))
         if not keys <= available:
             raise ImportCommandError("PLOT_LAYOUT_AXES_UNAVAILABLE", "Часть сохранённых полей недоступна. Раскладка не изменилась.")
+        if spec.get("schema_version") == 2:
+            validate_category_style(connection, spec["input"]["analysis_ids"], spec["category_style"])
         return spec
