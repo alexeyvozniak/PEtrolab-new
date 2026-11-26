@@ -178,6 +178,29 @@ test("multisheet review requests only the currently visible physical table", asy
   expect(within(await screen.findByRole("table")).getByText("B1")).toBeTruthy();
 }, 20000);
 
+test("import stage indicator follows real awaited operations and clears after completion", async () => {
+  queue = [second];
+  const invoke = bridge.invoke;
+  let release;
+  bridge.invoke = async (command, args) => {
+    if (command === "stage_import_file") await new Promise(resolve => { release = resolve; });
+    return invoke(command, args);
+  };
+  try {
+    render(<App />);
+    fireEvent.click(await enabledButton("Выбрать файл"));
+    const stage = await screen.findByText("2/4 · Копирую файл в рабочую область PetroLab…");
+    expect(stage.closest('[role="status"]')).toBeTruthy();
+    expect(screen.queryByText(/3\/4 · Распознаю/)).toBeNull();
+    release();
+    await enabledButton("Импортировать таблицу");
+    expect(screen.queryByText(/4\/4 · Открываю предпросмотр/)).toBeNull();
+  } finally {
+    release?.();
+    bridge.invoke = invoke;
+  }
+}, 20000);
+
 test("real Python clean single-source still commits and displays persisted analyses", async () => {
   queue = [second];
   const user = userEvent.setup();

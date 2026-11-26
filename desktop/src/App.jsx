@@ -273,7 +273,7 @@ export function App() {
   const chooseFile = async () => {
     if (busy || blockDraftDirty || mappingDraftDirty) return;
     setBusy(true);
-    setActivity("Выберите файл…");
+    setActivity("1/4 · Выберите файл…");
     setError("");
     setSuccess("");
     let newlyStaged = "";
@@ -281,15 +281,16 @@ export function App() {
     try {
       const selectedPath = await pickImportFile();
       if (!selectedPath) return;
-      setActivity("Копирую файл в рабочую область PetroLab…");
+      setActivity("2/4 · Копирую файл в рабочую область PetroLab…");
       const selected = await stageImportFile(selectedPath);
       newlyStaged = selected.local_path;
-      setActivity("Проверяю, соответствует ли файл PetroLab Clean Table…");
+      setActivity("3/4 · Распознаю таблицу и проверяю план импорта…");
       const sources = [{ staged_path: newlyStaged, original_display_path: selected.original_path || selectedPath }];
       const result = unwrap(await (workspace
         ? addWorkspaceSources(workspace.workspace_id, workspace.draft_revision, sources)
         : createImportWorkspace(sources, databasePath)));
       accepted = true;
+      setActivity("4/4 · Открываю предпросмотр исходной таблицы…");
       await receiveWorkspace(result);
       setScreen("Импорт");
     } catch (caught) {
@@ -304,11 +305,12 @@ export function App() {
   const decide = async (decision, sourceId = workspace?.active_source_id, bulk = false) => {
     if (busy || !workspace) return;
     setBusy(true);
-    setActivity(decision.kind === "activate" ? "Открываю исходную таблицу…" : "Проверяю и сохраняю решение…");
+    setActivity(decision.kind === "activate" ? "1/2 · Проверяю выбранный лист…" : "1/2 · Проверяю и сохраняю решение…");
     setError("");
     setSuccess("");
     try {
       const result = unwrap(await applyWorkspaceDecision(workspace.workspace_id, workspace.draft_revision, sourceId, decision, bulk));
+      setActivity("2/2 · Загружаю предпросмотр таблицы…");
       await receiveWorkspace(result, true);
       if (decision.kind !== "activate") setSuccess("Решение сохранено в этой очереди. Исходный файл не изменён.");
     } catch (caught) {
@@ -340,13 +342,15 @@ export function App() {
     if (busy || !canSaveImport || !databasePath || !workspace) return;
     setBusy(true);
     setError("");
-    setActivity("Проверяю очередь перед сохранением…");
+    setActivity("1/3 · Проверяю очередь и сохраняю импорт в проект…");
     try {
       const result = unwrap(await commitImportWorkspace(workspace.workspace_id, workspace.draft_revision));
       // Commit has succeeded. Never offer a second apply if refresh/cleanup fails.
       resetImportState();
       setSuccess(`Импорт сохранён: ${result.analysis_count} Analysis, ${result.measurement_count} Measurement.`);
+      setActivity("2/3 · Убираю временные копии…");
       await Promise.all(result.staged_paths.map((path) => clearImportStaging(path).catch(() => {})));
+      setActivity("3/3 · Обновляю список анализов…");
       await refreshAnalyses(databasePath);
       setScreen("Анализы");
     } catch (caught) {
@@ -652,7 +656,7 @@ export function App() {
           </div>
         </header>
 
-        {activity && <div className="global-message activity"><SpinnerGap className="spin" size={20} /><span>{activity}</span></div>}
+        {activity && <div className="global-message activity" role="status" aria-live="polite" aria-atomic="true"><SpinnerGap className="spin" size={20} /><span>{activity}</span></div>}
         {!desktopRuntimeAvailable && <div className="global-message activity"><Info size={20} /><span>Предпросмотр проверяет компоновку. Выбор и импорт файлов доступны в установленном PetroLab Desktop.</span></div>}
         {error && <div className="global-message error"><Warning size={20} weight="fill" /><span>{error}</span></div>}
         {success && <div className="global-message success"><CheckCircle size={20} weight="fill" /><span>{success}</span></div>}
