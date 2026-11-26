@@ -972,12 +972,16 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
       show_points: true, opacity: 1, field: null }]);
     setLayerName("");
   };
-  const addCloud = () => {
-    if (!layerInput.length || layers.length>=32) return;
-    const name=layerName.trim() || "Облако "+(layers.length+1);
-    setLayers(current=>[...current,{id:crypto.randomUUID(),name,analysis_ids:[...layerInput],
-      show_points:false,opacity:1,field:{method:"convex_hull",visible:true,probability:null,style:{...DEFAULT_FIELD_STYLE}}}]);
+  const addCloud = (ids=layerInput, label=layerName.trim() || "Облако "+(layers.length+1), color=DEFAULT_FIELD_STYLE.color) => {
+    if (!ids.length || layers.length>=32) return;
+    setLayers(current=>current.length>=32 ? current : [...current,{id:crypto.randomUUID(),name:label.slice(0,120),analysis_ids:[...ids],
+      show_points:false,opacity:1,field:{method:"convex_hull",visible:true,probability:null,style:{...DEFAULT_FIELD_STYLE,color}}}]);
     setLayerName("");
+  };
+  const addCategoryCloud = entry => {
+    if (!category) return;
+    const ids=Object.entries(category.snapshot.assignments).filter(([,key])=>key===entry.key).map(([id])=>id);
+    addCloud(ids,entry.label,entry.color);
   };
   const updateLayer = (id, changes) => setLayers((current) => current.map((layer) => layer.id === id ? { ...layer, ...changes } : layer));
   const moveLayer = (index, offset) => setLayers((current) => {
@@ -1127,7 +1131,9 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
           {category && <div className="plot-category-legend" aria-label="Легенда категорий">
             {category.entries.map(entry => <div key={entry.key === null ? "missing" : "value:" + entry.key}>
               {entry.key === null ? <i style={{backgroundColor:entry.color}} aria-hidden="true"/> : <input type="color" aria-label={"Цвет: "+entry.label} value={entry.color} disabled={schemeBusy} onChange={event=>changeColor(colorMode,entry.key,event.target.value)}/>}
-              <span>{entry.label}</span><small>{entry.count}</small></div>)}
+              <span>{entry.label}</span><small>{entry.count}</small>
+              <button type="button" className="outline-button category-cloud-button" disabled={layers.length>=32 || loading || busy}
+                aria-label={"Создать облако: "+entry.label+" · "+entry.count+" анализов"} title="Только облако этой категории" onClick={()=>addCategoryCloud(entry)}>Облако</button></div>)}
           </div>}
           {category?.entries.length > CATEGORY_COLORS.length && <small>Цвета могут повторяться; сузьте набор для различения групп.</small>}
           <small>Гистограммы и управление видимостью источников сохраняют исходные цвета. Раскладка и пакет фиксируют категории и цвета на момент сохранения.</small>
@@ -1210,7 +1216,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         <form onSubmit={addLayer}>
           <label>Название слоя<input value={layerName} maxLength={120} onChange={(event) => setLayerName(event.target.value)} /></label>
           <button className="outline-button" type="submit" disabled={!layerName.trim() || !layerInput.length || layers.length >= 32}>Добавить слой из отбора</button>
-          <button className="outline-button" type="button" disabled={!layerInput.length || layers.length>=32} onClick={addCloud}>Только облако выделения · {layerInput.length}</button>
+          <button className="outline-button" type="button" disabled={!layerInput.length || layers.length>=32} onClick={()=>addCloud()}>Только облако выделения · {layerInput.length}</button>
         </form>
       </details>
       {loadLayouts && <details className="plot-saved-layouts">

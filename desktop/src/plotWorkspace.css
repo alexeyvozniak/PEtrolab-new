@@ -92,3 +92,5 @@
 .plot-cloud-style { display:grid; gap:4px; margin:5px 0; }
 .plot-cloud-style label { display:flex;align-items:center;gap:5px;justify-content:space-between; }
 .plot-cloud-style input[type=range] { min-width:50px;width:45%; }
+
+.plot-category-legend .category-cloud-button { flex:none; padding:2px 4px; font-size:10px; }
