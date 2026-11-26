@@ -614,11 +614,68 @@ const editDraft = {
   confirmed_write: { draft: storedEdit.draft, backup_sha256: sha256(originalEditable), value: 8.5 },
   imported_measurements_unchanged: true,
 };
+
+const importDatabase = join(workspace, "AT-02-Project.sqlite");
+const importProject = { project_database_path: importDatabase };
+const importBook = join(workspace, "two-sheets.xlsx");
+python(`
+import sys
+from openpyxl import Workbook
+book = Workbook()
+book.active.title = "FirstSheet"
+second = book.create_sheet("SecondSheet")
+for sheet, label, value in ((book.active, "A1", 0), (second, "B1", "<DL")):
+    sheet.append(["Analysis", "F (wt.%)"])
+    sheet.append([label, value])
+book.save(sys.argv[1])
+book.close()
+`, importBook);
+const importedBytes = await readFile(importBook);
+const importDraft = serviceRequest("import.workspace.create", {
+  ...importProject, sources: [{ staged_path: importBook }],
+});
+assert.equal(importDraft.session.readiness.planned_analysis_count, 2);
+await withWindow(async (evaluate, screenshot) => {
+  const expectSheet = (sheet, cells) => until(`physical preview ${sheet}`, () => evaluate(({ sheet, cells }) => {
+    const preview = document.querySelector(`.raw-preview-wrap[aria-label="Исходная таблица ${sheet}"]`);
+    return cells.every((text) => [...(preview?.querySelectorAll("td") ?? [])].some((cell) => cell.textContent.trim() === text));
+  }, { sheet, cells }));
+  await expectSheet("FirstSheet", ["A1", "0"]);
+  await screenshot("AT-02-first-sheet");
+  await until("SecondSheet is selectable", () => evaluate(() => {
+    const button = [...document.querySelectorAll(".import-sheet-row")]
+      .find((row) => !row.disabled && row.querySelector("b")?.textContent === "SecondSheet");
+    if (!button) return false;
+    button.click();
+    return true;
+  }));
+  await expectSheet("SecondSheet", ["B1", "<DL"]);
+  await screenshot("AT-02-second-sheet");
+  await click(evaluate, "Сохранить импорт в проект");
+  await until("both imported analyses in the table", () => evaluate(() =>
+    ["A1", "B1"].every((label) => document.querySelector(`tbody input[aria-label="Выбрать ${label}"]`))));
+  await screenshot("AT-02-imported-analyses");
+}, { projectPath: importDatabase });
+const imported = serviceRequest("project.analyses.list", importProject).analyses;
+const importMeasurements = imported.map(({ identity, sheet_name, source_row_number, measurement_list }) => {
+  assert.equal(measurement_list.length, 1);
+  const { raw_token, unit, source_cell, numeric_value } = measurement_list[0];
+  return { label: identity.Analysis, sheet_name, source_row_number, raw_token, unit, source_cell, numeric_value };
+}).sort((a, b) => a.label.localeCompare(b.label));
+assert.deepEqual(importMeasurements, [
+  { label: "A1", sheet_name: "FirstSheet", source_row_number: 2, raw_token: "0", unit: "wt.%", source_cell: "B2", numeric_value: 0 },
+  { label: "B1", sheet_name: "SecondSheet", source_row_number: 2, raw_token: "<DL", unit: "wt.%", source_cell: "B2", numeric_value: null },
+]);
+assert.deepEqual(await readFile(importBook), importedBytes);
+assert.equal(serviceRequest("import.workspace.restore", importProject).workspace, null);
+
 await writeFile(join(evidence, "acceptance.json"), JSON.stringify({
-  scenarios: ["AT-01", "AT-06", "AT-07", "AT-09", "AT-17 (zoom, pan and reset)", "AT-32", "AT-37 (domain and visibility actions)"],
+  scenarios: ["AT-01", "AT-02 (two sheets, zero and <DL)", "AT-03", "AT-06", "AT-07", "AT-09",
+    "AT-17 (zoom, pan and reset)", "AT-32", "AT-37 (domain and visibility actions)"],
   selected: chosenLabels.map((label, index) => ({ label, analysisId: expectedIds[index] })),
   workPlanTask, workGroup: before, plotSpecification: layout, plotZoom, journal, editDraft,
   calculatedLayout, formulaRunId: formulaRun.id,
+  workbookImport: { measurements: importMeasurements, sourceSha256: sha256(importedBytes) },
   sourceSha256: sha256(finalSource),
 }, null, 2));
-console.log("Native project, selection, plots, restart, AT-17 zoom, AT-32 edit and AT-37 journal checks passed.");
+console.log("Native project, workbook import, selection, plots, restart, AT-17 zoom, AT-32 edit and AT-37 journal checks passed.");
