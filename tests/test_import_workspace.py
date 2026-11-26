@@ -1,6 +1,7 @@
 from copy import deepcopy
 from pathlib import Path
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -41,6 +42,7 @@ class ImportWorkspaceTests(unittest.TestCase):
         params = {'workspace_id': session['workspace_id'],
                   'source_id': session['active_source_id']}
         original = self.source.read_bytes()
+        self.store._inspection_cache.clear()
         with patch.object(import_preview, '_read_delimited', wraps=import_preview._read_delimited) as reader:
             reviewed = self.store.command('get', params)
             self.assertEqual(reader.call_count, 1)
@@ -48,13 +50,32 @@ class ImportWorkspaceTests(unittest.TestCase):
             reader.reset_mock()
             preview = self.store.command('preview_window', {**params, 'sheet_name': 'first',
                                                           'start_row': 2, 'row_count': 1})
-            self.assertEqual(reader.call_count, 1)
+            self.assertEqual(reader.call_count, 0)
             self.assertEqual(preview['rows'][0]['values'], ['A1', '10', '<DL'])
+            self.assertEqual(self.store.command('get', params), reviewed)
+            self.assertEqual(reader.call_count, 0)
         self.assertEqual(self.source.read_bytes(), original)
-        self.source.write_bytes(original + b'A3,12,0\n')
+        timestamps = self.source.stat()
+        self.source.write_bytes(original.replace(b'A1,10', b'A1,99'))
+        os.utime(self.source, ns=(timestamps.st_atime_ns, timestamps.st_mtime_ns))
+        self.assertEqual(self.source.stat().st_size, timestamps.st_size)
         with self.assertRaises(ImportCommandError) as caught:
             self.store.command('preview_window', {**params, 'sheet_name': 'first'})
         self.assertEqual(caught.exception.code, 'SOURCE_FINGERPRINT_MISMATCH')
+
+    def test_inspection_cache_is_bounded_and_evicted_files_reparse(self):
+        from petrolab import import_workspace
+        session = self.current['session']
+        first = session['active_source_id']
+        with patch.object(import_workspace, 'MAX_INSPECTION_CACHE_ENTRIES', 1):
+            self.call('add_sources', sources=[{'staged_path': str(self.other)}])
+            self.assertEqual(len(self.store._inspection_cache), 1)
+            with patch.object(import_preview, '_read_delimited', wraps=import_preview._read_delimited) as reader:
+                result = self.store.command('preview_window', {'workspace_id': session['workspace_id'],
+                    'source_id': first, 'sheet_name': 'first', 'start_row': 2, 'row_count': 1})
+                self.assertEqual(reader.call_count, 1)
+                self.assertEqual(result['rows'][0]['values'], ['A1', '10', '<DL'])
+                self.assertEqual(len(self.store._inspection_cache), 1)
 
     def test_two_sources_keep_mapping_identity_issue_and_raw_coordinates(self):
         first = self.current['session']['active_source_id']

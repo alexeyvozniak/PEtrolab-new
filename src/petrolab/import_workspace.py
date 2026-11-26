@@ -1,6 +1,7 @@
 """ADR-0014 review sessions, fingerprint-bound drafts and atomic import commit."""
 from __future__ import annotations
 
+from collections import OrderedDict
 from copy import deepcopy
 from datetime import UTC, datetime
 import hashlib
@@ -25,6 +26,10 @@ from .analyte_dictionary import CANONICAL, confirmed_alias
 
 
 DRAFT_VERSION = 1
+# Bound the transient cache by both entries and physical cells, not just files.
+MAX_INSPECTION_CACHE_ENTRIES = 4
+MAX_INSPECTION_CACHE_CELLS = 250_000
+MAX_INSPECTION_CACHE_CHARS = 8_000_000
 
 
 def now():
@@ -44,6 +49,7 @@ def empty_plan():
 class ImportWorkspaceStore:
     def __init__(self):
         self.sessions: dict[str, dict[str, Any]] = {}
+        self._inspection_cache = OrderedDict()
 
     def _source(self, session, source_id):
         source = next((s for s in session['sources'] if s['source_id'] == source_id), None)
@@ -52,9 +58,42 @@ class ImportWorkspaceStore:
         return source
 
     def _check(self, source):
-        inspection = inspect_source(source['staged_path'])
-        if inspection.fingerprint != source['sha256']:
+        path = Path(source['staged_path'])
+        expected = source['sha256']
+        key = (str(path.resolve()), expected)
+        cached = self._inspection_cache.get(key)
+
+        def verify():
+            try:
+                with path.open('rb') as stream:
+                    observed = hashlib.file_digest(stream, 'sha256').hexdigest()
+            except OSError as error:
+                raise ImportCommandError('SOURCE_UNREADABLE', 'Не удалось прочитать исходный файл.', {'path': str(path)}) from error
+            if observed != expected:
+                self._inspection_cache.pop(key, None)
+                raise ImportCommandError('SOURCE_FINGERPRINT_MISMATCH', 'Файл изменился после добавления. Добавьте его заново.', {'source_id': source['source_id']})
+
+        # The staged bytes are checked even on a warm hit. File size/mtime
+        # cannot substitute for the source fingerprint.
+        if cached is not None:
+            verify()
+            self._inspection_cache.move_to_end(key)
+            return cached[0]
+        inspection = inspect_source(path)
+        if inspection.fingerprint != expected:
             raise ImportCommandError('SOURCE_FINGERPRINT_MISMATCH', 'Файл изменился после добавления. Добавьте его заново.', {'source_id': source['source_id']})
+        # Inspection hashes before parsing. Check again before retaining rows.
+        verify()
+        cells = sum(max(1, len(row)) for sheet in inspection.sheets for row in sheet.rows)
+        chars = sum(len(value) for sheet in inspection.sheets for row in sheet.rows for value in row if value is not None)
+        if cells <= MAX_INSPECTION_CACHE_CELLS and chars <= MAX_INSPECTION_CACHE_CHARS:
+            while self._inspection_cache and (
+                len(self._inspection_cache) >= MAX_INSPECTION_CACHE_ENTRIES
+                or sum(item[1] for item in self._inspection_cache.values()) + cells > MAX_INSPECTION_CACHE_CELLS
+                or sum(item[2] for item in self._inspection_cache.values()) + chars > MAX_INSPECTION_CACHE_CHARS
+            ):
+                self._inspection_cache.popitem(last=False)
+            self._inspection_cache[key] = (inspection, cells, chars)
         return inspection
 
     def _add(self, session, descriptors):
@@ -198,7 +237,7 @@ class ImportWorkspaceStore:
                     return apply_semantic_decision(source['staged_path'], source['recipe'], params['semantic_extension'], preview=True)
                 result = preview_inspection_window(inspection, params['sheet_name'], params.get('start_row', 1),
                                                params.get('row_count', 30), params.get('start_column', 0), params.get('column_count', 24))
-                return {**result, 'source_path': source['staged_path']}
+                return {**deepcopy(result), 'source_path': source['staged_path']}
             if operation == 'add_sources':
                 self._add(session, params.get('sources'))
             elif operation in {'apply_decision', 'apply_bulk_decision'}:
