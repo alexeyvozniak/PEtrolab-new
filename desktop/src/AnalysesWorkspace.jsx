@@ -300,6 +300,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const [columnFilters, setColumnFilters] = useState(() => viewMemory?.columnFilters ?? {});
   const [visibleColumnIds, setVisibleColumnIds] = useState(() => viewMemory?.visibleColumnIds ?? []);
   const [columnWidths, setColumnWidths] = useState(() => viewMemory?.columnWidths ?? {});
+  const [pinnedColumnId, setPinnedColumnId] = useState(() => viewMemory?.pinnedColumnId || "");
   const columnResize = useRef(null);
   const [dragIds, setDragIds] = useState([]);
   const [contextMenu, setContextMenu] = useState(null);
@@ -335,9 +336,9 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   useLayoutEffect(() => {
     if (!viewMemory) return;
     Object.assign(viewMemory, { query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery,
-      sampleLinkFilter, columnFilters, visibleColumnIds, columnWidths, focusedId, sort });
+      sampleLinkFilter, columnFilters, visibleColumnIds, columnWidths, pinnedColumnId, focusedId, sort });
   }, [viewMemory, query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery, sampleLinkFilter,
-    columnFilters, visibleColumnIds, columnWidths, focusedId, sort]);
+    columnFilters, visibleColumnIds, columnWidths, pinnedColumnId, focusedId, sort]);
   useLayoutEffect(() => {
     const element = tableScroll.current;
     if (!element || !viewMemory) return;
@@ -394,7 +395,14 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
       .sort((left, right) => left.label.localeCompare(right.label, "ru"));
   }, [analyses]);
   const sheets = useMemo(() => [...new Set(analyses.filter((analysis) => sourceFilter === "all" || analysis.source_id === sourceFilter).map((analysis) => analysis.sheet_name))].sort((a, b) => a.localeCompare(b, "ru")), [analyses, sourceFilter]);
-  const visibleColumns = availableColumns.filter((column) => visibleColumnIds.includes(column.id));
+  const visibleColumns = useMemo(() => {
+    const columns = availableColumns.filter(column => visibleColumnIds.includes(column.id));
+    const index = columns.findIndex(column => column.id === pinnedColumnId);
+    if (index > 0) columns.unshift(...columns.splice(index, 1));
+    return columns;
+  }, [availableColumns, visibleColumnIds, pinnedColumnId]);
+  const pinned = visibleColumns.some(column => column.id === pinnedColumnId) ? pinnedColumnId : "";
+  const pinClass = id => id === pinned ? "analysis-pinned-column" : undefined;
   const mineralStatuses = useMemo(() => [...new Set(analyses.map(mineralStatus))].sort(), [analyses]);
   const toggleMineralStatus = (status) => setMineralStatusFilter((current) =>
     current.includes(status) ? current.filter((item) => item !== status) : [...current, status]);
@@ -843,6 +851,12 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
           <details className="analysis-columns-menu">
             <summary><SquaresFour size={17} /> Колонки <span>{visibleColumns.length}</span></summary>
             <div>
+              <label className="analysis-pin-control">Закрепить слева
+                <select aria-label="Закреплённая колонка" value={pinned} onChange={event=>setPinnedColumnId(event.target.value)}>
+                  <option value="">Не закреплять</option>
+                  {visibleColumns.map(column=><option key={column.id} value={column.id}>{column.label}</option>)}
+                </select>
+              </label>
               <p>Показывать в таблице</p>
               {availableColumns.map((column) => <label key={column.id}><input type="checkbox" checked={visibleColumnIds.includes(column.id)} onChange={() => toggleColumn(column.id)} /> {column.label}</label>)}
             </div>
@@ -881,7 +895,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
               <tr>
                 <th className="analysis-select-cell"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} aria-label="Выбрать показанные анализы" /></th>
                 {visibleColumns.map((column) => (
-                  <th key={column.id} style={columnStyle(column.id)}><button type="button" onClick={() => changeSort(column.id)}
+                  <th key={column.id} className={pinClass(column.id)} style={columnStyle(column.id)}><button type="button" onClick={() => changeSort(column.id)}
                     onDoubleClick={event => { event.preventDefault(); autoWidth(column); }}>{column.label}{sort.id === column.id ? (sort.direction === "asc" ? <CaretUp size={12} /> : <CaretDown size={12} />) : null}</button>
                     <span className="analysis-column-resizer" role="separator" aria-orientation="vertical" tabIndex={0}
                       aria-label={`Ширина колонки ${column.label}`} aria-valuemin={104} aria-valuemax={600} aria-valuenow={columnWidths[column.id] || 104}
@@ -907,13 +921,13 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                 ))}
               </tr>
               <tr className="analysis-filter-row">
-                <th />
+                <th className="analysis-select-cell" />
                 {visibleColumns.map((column) => {
                   const units = measurementUnits.get(column.field) || [];
                   const hint = column.kind === "measurement"
                     ? `Число, >10, 5..20, пусто, ниже предела${units.length > 1 ? `. Укажите единицу: ${units.join(", ")}` : ""}`
                     : "Поиск по фрагменту";
-                  return <th key={column.id} style={columnStyle(column.id)}><input value={columnFilters[column.id] || ""} onChange={(event) => setColumnFilters((current) => ({ ...current, [column.id]: event.target.value }))} placeholder={column.kind === "measurement" ? ">10, 5..20" : "Фильтр"} title={hint} aria-invalid={invalidFilters.has(column.id)} aria-label={`Фильтр ${column.label}`} /></th>;
+                  return <th key={column.id} className={pinClass(column.id)} style={columnStyle(column.id)}><input value={columnFilters[column.id] || ""} onChange={(event) => setColumnFilters((current) => ({ ...current, [column.id]: event.target.value }))} placeholder={column.kind === "measurement" ? ">10, 5..20" : "Фильтр"} title={hint} aria-invalid={invalidFilters.has(column.id)} aria-label={`Фильтр ${column.label}`} /></th>;
                 })}
               </tr>
             </thead>
@@ -943,7 +957,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                     {visibleColumns.map((column) => {
                       const measurement = column.kind === "measurement" ? analysis.measurements?.[column.field] : null;
                       return (
-                        <td key={column.id} style={columnStyle(column.id)} title={String(valueFor(analysis, column))}>
+                        <td key={column.id} className={pinClass(column.id)} style={columnStyle(column.id)} title={String(valueFor(analysis, column))}>
                           <span>{valueFor(analysis, column)}</span>
                           {measurement ? <small>{measurement.unit}{measurementContext(measurement) ? ` · ${measurementContext(measurement)}` : ""}</small> : null}
                         </td>
