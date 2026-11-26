@@ -2,6 +2,7 @@ from contextlib import closing
 import csv
 from io import StringIO
 import json
+import os
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -92,6 +93,16 @@ class OlivineFormulaTests(unittest.TestCase):
                 self.assertEqual((original["unit"], original["raw_token"]), ("wt.%", "47.971"))
             draft = save_edit_draft(database, measurements["MgO"], "46.5")
             self.assertEqual(call("formula.run.open", run_id=old["id"])["result"]["status"], "current")
+            if os.name != "nt":
+                # Protected XLSX writes are deliberately Windows-only; keep all
+                # publication and formula checks above on every platform.
+                before = source.read_bytes()
+                with self.assertRaises(ImportCommandError) as unsupported:
+                    commit_edit_draft(database, draft["id"], "Проверка", "Контрольная поправка")
+                self.assertEqual(unsupported.exception.code, "EDIT_EXCLUSIVE_ACCESS_UNAVAILABLE")
+                self.assertEqual(source.read_bytes(), before)
+                self.assertEqual(call("formula.run.open", run_id=old["id"])["result"]["status"], "current")
+                return
             self.assertTrue(commit_edit_draft(database, draft["id"], "Проверка", "Контрольная поправка")['applied'])
             stale = call("formula.run.open", run_id=old["id"])["result"]
             self.assertEqual(stale["stale_reasons"], ["inputs_changed"])

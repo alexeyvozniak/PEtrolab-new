@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .import_apply import latest_active_import, open_project
-from .import_preview import ImportCommandError, candidate_blocks, inspect_source, semantic_fingerprint, validate_recipe, value_status
+from .import_preview import ImportCommandError, SourceInspection, candidate_blocks, inspect_source, semantic_fingerprint, validate_recipe, value_status
 from .import_recognition import (
     IRON_FIELDS,
     mappings_for_column_block,
@@ -261,13 +261,16 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
 
 
 def bulk_unit_scopes(source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
+    return bulk_unit_scopes_for_inspection(inspect_source(source_path), recipe)
+
+
+def bulk_unit_scopes_for_inspection(inspection: SourceInspection, recipe: dict[str, Any]) -> dict[str, Any]:
     """Return server-issued scopes for one explicit unit decision.
 
     A scope contains only blocks with the same orientation and the same ordered
     set of unresolved recognised measurements.  The client cannot broaden it
     by filename, sheet name or prior choices.
     """
-    inspection = inspect_source(source_path)
     validate_recipe(inspection, recipe)
     grouped: dict[tuple[str, tuple[tuple[str, str, str], ...]], list[tuple[dict[str, Any], list[dict[str, Any]]]]] = defaultdict(list)
     for section in recipe.get("sections", []):
@@ -349,6 +352,10 @@ def apply_bulk_unit_scope(source_path: str | Path, recipe: dict[str, Any], bulk_
 
 
 def bulk_ignore_scopes(source_path: str | Path, recipe: dict[str, Any]) -> dict[str, Any]:
+    return bulk_ignore_scopes_for_inspection(inspect_source(source_path), recipe)
+
+
+def bulk_ignore_scopes_for_inspection(inspection: SourceInspection, recipe: dict[str, Any]) -> dict[str, Any]:
     """Return the exact current set of unrecognized fields for explicit skip.
 
     Measurement candidates never enter this scope. The user may therefore
@@ -356,7 +363,6 @@ def bulk_ignore_scopes(source_path: str | Path, recipe: dict[str, Any]) -> dict[
     without repeating the same Ignore decision for every physical block. The
     scope is bound to every coordinate and becomes stale after any recipe edit.
     """
-    inspection = inspect_source(source_path)
     validate_recipe(inspection, recipe)
     targets: list[dict[str, Any]] = []
     for section in recipe.get("sections", []):

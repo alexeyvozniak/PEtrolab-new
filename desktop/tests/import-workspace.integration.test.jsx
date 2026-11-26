@@ -11,7 +11,23 @@ import { join, resolve } from "node:path";
 const bridge = vi.hoisted(() => ({ invoke: null }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args) => bridge.invoke(...args) }));
 import { App } from "../src/App";
-import { invokePetrolab } from "../src/desktopApi";
+import { invokePetrolab, expandWorkspaceReview } from "../src/desktopApi";
+
+test("compact measurement transport restores every value and rejects incomplete rows", () => {
+  const plan = { summary: { planned_analysis_count: 1 }, measurement_columns_v1: ["raw_token", "qualifier", "reported_fe_form"],
+    planned_records: [{ preview_id: "A1", measurements: [["<DL", "below_detection_limit", null], ["0", null, "FeO"]] }] };
+  const input = { workspace: { session: { draft_revision: 3 }, active: { plan } } };
+  const restored = expandWorkspaceReview(input);
+  expect(restored.workspace.active.plan.planned_records[0].measurements).toEqual([
+    { raw_token: "<DL", qualifier: "below_detection_limit", reported_fe_form: null },
+    { raw_token: "0", qualifier: null, reported_fe_form: "FeO" },
+  ]);
+  expect(restored.workspace.active.plan.measurement_columns_v1).toBeUndefined();
+  expect(input.workspace.active.plan.measurement_columns_v1).toHaveLength(3);
+  expect(expandWorkspaceReview(restored)).toBe(restored);
+  expect(() => expandWorkspaceReview({ active: { plan: { ...plan, planned_records: [{ measurements: [["<DL"]] }] } } })).toThrow();
+});
+
 configure({ asyncUtilTimeout: 5000 });
 
 let child, folder, first, second, queue, mediaQueue, mediaFolder, original, pending, requests, plotExports, externalUrls;
@@ -142,6 +158,24 @@ test("real Python workspace retains two sources and mapping, identity repair and
   expect(requests.filter(r => r.command === "import.workspace.commit")).toHaveLength(0);
   expect(await readFile(first, "utf8")).toBe(original);
   expect(within(screen.getByRole("table")).getByText("n.d.")).toBeTruthy();
+}, 20000);
+
+test("multisheet review requests only the currently visible physical table", async () => {
+  const workbook = join(folder, "multiple.xlsx");
+  execFileSync("python", ["-c", "from openpyxl import Workbook; import sys; w=Workbook(); a=w.active; a.title='FirstSheet'; b=w.create_sheet('SecondSheet'); a.append(['Analysis','SiO2 [wt.%]']); a.append(['A1',40]); b.append(['Analysis','SiO2 [wt.%]']); b.append(['B1',41]); w.save(sys.argv[1])", workbook]);
+  queue = [workbook];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await enabledButton("Добавить файл");
+  const previews = () => requests.filter(r => r.command === "import.workspace.preview_window");
+  expect(previews()).toHaveLength(1);
+  expect(previews()[0].payload.sheet_name).toBe("FirstSheet");
+  await user.click(await enabledButton(/SecondSheet.*Готов/));
+  await enabledButton("Добавить файл");
+  expect(previews()).toHaveLength(2);
+  expect(previews()[1].payload.sheet_name).toBe("SecondSheet");
+  expect(within(await screen.findByRole("table")).getByText("B1")).toBeTruthy();
 }, 20000);
 
 test("real Python clean single-source still commits and displays persisted analyses", async () => {

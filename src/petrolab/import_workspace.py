@@ -1,6 +1,7 @@
 """ADR-0014 review sessions, fingerprint-bound drafts and atomic import commit."""
 from __future__ import annotations
 
+from collections import OrderedDict
 from copy import deepcopy
 from datetime import UTC, datetime
 import hashlib
@@ -12,19 +13,27 @@ from contextlib import closing
 from tempfile import NamedTemporaryFile
 
 from .clean_table import classify_clean_table
-from .desktop_workflow import (suggest_import_recipe, bulk_unit_scopes, bulk_ignore_scopes,
+from .desktop_workflow import (suggest_import_recipe, bulk_unit_scopes_for_inspection, bulk_ignore_scopes_for_inspection,
                                apply_bulk_unit_scope, apply_bulk_ignore_scope)
 from .formula_service import check_import_formula_acceptance, persist_import_formulae, review_import_formula
 from .import_apply import (apply_import_batch, open_project, workspace_commit_exists,
                            _require_duplicate_review, _require_non_empty_plan)
 from .import_preview import (ImportCommandError, inspect_source, create_import_plan, validate_recipe,
-                             preview_source_window, semantic_fingerprint)
+                             preview_inspection_window, semantic_fingerprint)
 from .manual_mapping import revise_import_mappings, revise_import_sections, review_duplicate_candidates
 from .semantic_import import apply_semantic_decision, SEMANTIC_ACTIONS
 from .analyte_dictionary import CANONICAL, confirmed_alias
 
 
 DRAFT_VERSION = 1
+# Bound the transient cache by both entries and physical cells, not just files.
+MAX_INSPECTION_CACHE_ENTRIES = 4
+MAX_INSPECTION_CACHE_CELLS = 250_000
+MAX_INSPECTION_CACHE_CHARS = 8_000_000
+# Review plans hold substantially more data than the parsed source.
+MAX_REVIEW_CACHE_ENTRIES = 2
+MAX_REVIEW_CACHE_RECORDS = 10_000
+MAX_REVIEW_CACHE_MEASUREMENTS = 150_000
 
 
 def now():
@@ -44,6 +53,8 @@ def empty_plan():
 class ImportWorkspaceStore:
     def __init__(self):
         self.sessions: dict[str, dict[str, Any]] = {}
+        self._inspection_cache = OrderedDict()
+        self._review_plan_cache = OrderedDict()
 
     def _source(self, session, source_id):
         source = next((s for s in session['sources'] if s['source_id'] == source_id), None)
@@ -52,9 +63,42 @@ class ImportWorkspaceStore:
         return source
 
     def _check(self, source):
-        inspection = inspect_source(source['staged_path'])
-        if inspection.fingerprint != source['sha256']:
+        path = Path(source['staged_path'])
+        expected = source['sha256']
+        key = (str(path.resolve()), expected)
+        cached = self._inspection_cache.get(key)
+
+        def verify():
+            try:
+                with path.open('rb') as stream:
+                    observed = hashlib.file_digest(stream, 'sha256').hexdigest()
+            except OSError as error:
+                raise ImportCommandError('SOURCE_UNREADABLE', 'Не удалось прочитать исходный файл.', {'path': str(path)}) from error
+            if observed != expected:
+                self._inspection_cache.pop(key, None)
+                raise ImportCommandError('SOURCE_FINGERPRINT_MISMATCH', 'Файл изменился после добавления. Добавьте его заново.', {'source_id': source['source_id']})
+
+        # The staged bytes are checked even on a warm hit. File size/mtime
+        # cannot substitute for the source fingerprint.
+        if cached is not None:
+            verify()
+            self._inspection_cache.move_to_end(key)
+            return cached[0]
+        inspection = inspect_source(path)
+        if inspection.fingerprint != expected:
             raise ImportCommandError('SOURCE_FINGERPRINT_MISMATCH', 'Файл изменился после добавления. Добавьте его заново.', {'source_id': source['source_id']})
+        # Detect a source change during parsing before caching the snapshot.
+        verify()
+        cells = sum(max(1, len(row)) for sheet in inspection.sheets for row in sheet.rows)
+        chars = sum(len(value) for sheet in inspection.sheets for row in sheet.rows for value in row if value is not None)
+        if cells <= MAX_INSPECTION_CACHE_CELLS and chars <= MAX_INSPECTION_CACHE_CHARS:
+            while self._inspection_cache and (
+                len(self._inspection_cache) >= MAX_INSPECTION_CACHE_ENTRIES
+                or sum(item[1] for item in self._inspection_cache.values()) + cells > MAX_INSPECTION_CACHE_CELLS
+                or sum(item[2] for item in self._inspection_cache.values()) + chars > MAX_INSPECTION_CACHE_CHARS
+            ):
+                self._inspection_cache.popitem(last=False)
+            self._inspection_cache[key] = (inspection, cells, chars)
         return inspection
 
     def _add(self, session, descriptors):
@@ -180,6 +224,7 @@ class ImportWorkspaceStore:
             if operation == 'discard':
                 self._remove_draft(session)
                 del self.sessions[session['workspace_id']]
+                self._clear_review_plans(session)
                 return {'workspace_id': session['workspace_id'], 'status': 'discarded',
                         'staged_paths': [s['staged_path'] for s in session['sources']]}
             if operation == 'commit':
@@ -196,9 +241,11 @@ class ImportWorkspaceStore:
                 inspection = self._check(source)
                 if params.get('semantic_extension'):
                     return apply_semantic_decision(source['staged_path'], source['recipe'], params['semantic_extension'], preview=True)
-                result = preview_source_window(inspection, params['sheet_name'], params.get('start_row', 1),
-                                               params.get('row_count', 30), params.get('start_column', 0), params.get('column_count', 24))
-                return {**result, 'source_path': source['staged_path']}
+                result = preview_inspection_window(
+                    inspection, params['sheet_name'], params.get('start_row', 1),
+                    params.get('row_count', 30), params.get('start_column', 0), params.get('column_count', 24),
+                )
+                return {**deepcopy(result), 'source_path': source['staged_path']}
             if operation == 'add_sources':
                 self._add(session, params.get('sources'))
             elif operation in {'apply_decision', 'apply_bulk_decision'}:
@@ -317,7 +364,9 @@ class ImportWorkspaceStore:
                     raise ValueError('decision.kind')
                 if kind != 'activate':
                     source['decisions'].append({'decision': deepcopy(decision), 'decided_at': now()})
-            elif operation not in {'get', 'replan'}:
+            elif operation == 'replan':
+                self._clear_review_plans(session)
+            elif operation != 'get':
                 raise ImportCommandError('WORKSPACE_COMMAND_UNAVAILABLE', 'Эта операция очереди пока недоступна.')
             if operation != 'get':
                 session['draft_revision'] += 1
@@ -427,8 +476,7 @@ class ImportWorkspaceStore:
         database_path = session['database_path']
         if not database_path:
             raise ImportCommandError('PROJECT_REQUIRED', 'Выберите проект перед сохранением импорта.')
-        projection = self._project(session)['session']
-        readiness = projection['readiness']
+        readiness = self._project(session, readiness_only=True)
         if not readiness['ready_to_commit']:
             raise ImportCommandError('WORKSPACE_NOT_READY', 'Проверьте обязательные вопросы очереди.',
                                      {'blocking_reason_codes': readiness['blocking_reason_codes']})
@@ -445,6 +493,7 @@ class ImportWorkspaceStore:
                              'draft_revision': session['draft_revision'],
                              'duplicate_review': session.get('duplicate_review')}, finalize_source=finalize_source)
         del self.sessions[session['workspace_id']]
+        self._clear_review_plans(session)
         try:
             self._remove_draft(session)
         except OSError:
@@ -466,11 +515,50 @@ class ImportWorkspaceStore:
         source['recipe']['global_decisions'].setdefault('project_aliases', {})[key] = alias
         source['recipe']['semantic_fingerprint'] = semantic_fingerprint(source['recipe'])
 
-    def _review(self, source):
+    def _clear_review_plans(self, session):
+        source_ids = {source['source_id'] for source in session['sources']}
+        for key in list(self._review_plan_cache):
+            if key[0] in source_ids:
+                del self._review_plan_cache[key]
+
+    def _review_plan(self, source, inspection, *, use_cache=True):
+        recipe = source['recipe']
+        decisions = recipe['global_decisions']
+        # Scientific ruleset changes and mutable explicit assignments must
+        # never inherit a cached interpretation. The final commit also
+        # independently validates and rebuilds the authoritative plan.
+        if (not use_cache or decisions.get('mineral_verification_enabled')
+                or decisions.get('semantic_annotations') or decisions.get('sample_assignments')
+                or source.get('formula_acceptances')):
+            return create_import_plan(inspection, recipe)
+        key = (source['source_id'], inspection.fingerprint, digest(recipe))
+        cached = self._review_plan_cache.get(key)
+        if cached is not None:
+            self._review_plan_cache.move_to_end(key)
+            # Readiness is written by _review; the shared plan is read-only.
+            return dict(cached[0])
+        plan = create_import_plan(inspection, recipe)
+        records = len(plan['planned_records'])
+        measurements = plan['summary']['planned_measurement_count']
+        if records <= MAX_REVIEW_CACHE_RECORDS and measurements <= MAX_REVIEW_CACHE_MEASUREMENTS:
+            # At most one recipe revision per source; bounded across the queue.
+            for previous in list(self._review_plan_cache):
+                if previous[0] == source['source_id']:
+                    del self._review_plan_cache[previous]
+            while self._review_plan_cache and (
+                len(self._review_plan_cache) >= MAX_REVIEW_CACHE_ENTRIES
+                or sum(item[1] for item in self._review_plan_cache.values()) + records > MAX_REVIEW_CACHE_RECORDS
+                or sum(item[2] for item in self._review_plan_cache.values()) + measurements > MAX_REVIEW_CACHE_MEASUREMENTS
+            ):
+                self._review_plan_cache.popitem(last=False)
+            self._review_plan_cache[key] = (dict(plan), records, measurements)
+        return plan
+
+    def _review(self, source, *, use_cache=True):
         plan, issues, units, ignores = empty_plan(), [], [], []
         try:
             inspection = self._check(source)
-            plan = create_import_plan(inspection, source['recipe'])
+            plan = self._review_plan(source, inspection, use_cache=use_cache)
             issues = list(plan.get('issues', [])) + list(plan['warnings'])
             # Clean Table rejection used its own tentative header, not the user's
             # current block header. Reusing those blank-header warnings creates
@@ -492,8 +580,8 @@ class ImportWorkspaceStore:
                     check(*args)
                 except ImportCommandError as error:
                     issues.append({'code': error.code, 'message': error.message, 'severity': 'error', 'blocking': True})
-            units = bulk_unit_scopes(source['staged_path'], source['recipe'])['scopes']
-            ignores = bulk_ignore_scopes(source['staged_path'], source['recipe'])['scopes']
+            units = bulk_unit_scopes_for_inspection(inspection, source['recipe'])['scopes']
+            ignores = bulk_ignore_scopes_for_inspection(inspection, source['recipe'])['scopes']
         except ImportCommandError as error:
             issues.append({'code': error.code, 'message': error.message, 'severity': 'error', 'blocking': True})
         formula_acceptances = []
@@ -540,10 +628,11 @@ class ImportWorkspaceStore:
         reviewed = (state.get('duplicate_review') or {}).get('fingerprint') == fingerprint
         return {'groups': groups, 'fingerprint': fingerprint, 'reviewed': reviewed}
 
-    def _project(self, state):
+    def _project(self, state, *, readiness_only=False):
+        """Build the same readiness gates without UI-only work during commit."""
         sources, issues, plans, reviews, scopes = [], [], [], {}, []
         for source in state['sources']:
-            review = self._review(source)
+            review = self._review(source, use_cache=not readiness_only)
             for scope in review['bulk_unit_scopes'] + review['bulk_ignore_scopes']:
                 scope['bulk_scope_id'] = f"{state['draft_revision']}:{source['source_id']}:{scope['bulk_scope_id']}"
                 targets = []
@@ -595,7 +684,8 @@ class ImportWorkspaceStore:
             sources.append({k: source[k] for k in ('source_id', 'original_display_path', 'staged_path', 'sha256', 'size_bytes', 'modified_at', 'source_kind', 'adapter_version', 'inspection_status', 'included', 'exclusion_reason')} | {'sheets': sheets})
             summary = review['plan']['summary']
             plans.append({'source_id': source['source_id'], 'status': 'ready' if review['ready'] else 'invalid',
-                          'recipe_fingerprint': semantic_fingerprint(recipe), 'plan_fingerprint': digest(review['plan']),
+                          'recipe_fingerprint': semantic_fingerprint(recipe),
+                          'plan_fingerprint': None if readiness_only else digest(review['plan']),
                           'planned_analysis_count': summary['planned_analysis_count'] if source['included'] else 0,
                           'planned_measurement_count': summary['planned_measurement_count'] if source['included'] else 0})
         active = self._source(state, state['active_source_id'])
@@ -617,6 +707,8 @@ class ImportWorkspaceStore:
                                       'planned_analysis_count': sum(p['planned_analysis_count'] for p in plans),
                                       'planned_measurement_count': sum(p['planned_measurement_count'] for p in plans),
                                       'blocking_reason_codes': reasons}})
+        if readiness_only:
+            return session['readiness']
         active_review = deepcopy(reviews[active['source_id']])
         active_review['semantic_actions'] = SEMANTIC_ACTIONS
         active_review['canonical_analytes'] = CANONICAL

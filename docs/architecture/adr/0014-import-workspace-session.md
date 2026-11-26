@@ -248,3 +248,7 @@ Architecture is not complete until automated contracts prove:
 - bulk editing remains efficient but scientifically bounded;
 - implementation requires a new orchestration layer and session-level tests;
 - image/media import can later reuse staged-source and draft-revision concepts without entering the table scientific pipeline.
+
+### Transport optimization: measurement columns v1
+
+The existing NDJSON workspace commands may receive `measurement_wire_format: columns_v1`. Only the active plan's uniform measurement dictionaries are encoded as ordered value arrays with `measurement_columns_v1`. The frontend boundary reconstructs every original field before the same React workspace sees it. Missing/null values, literal tokens, measurement ordering, physical coordinates, units, Fe semantics and plan fingerprints remain identical. Heterogeneous object layouts and clients without opt-in use the original projection; malformed encoded values are rejected explicitly. The persisted plan, duplicate comparison, revision and commit validation are unchanged. This is transport encoding, not a new scientific model or UI workflow. AT-02/03/35/38 and the real sidecar UI integration must pass before release.

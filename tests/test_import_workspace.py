@@ -1,6 +1,7 @@
 from copy import deepcopy
 from pathlib import Path
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -8,7 +9,8 @@ import uuid
 from contextlib import closing
 from unittest.mock import patch
 
-from petrolab.import_preview import ImportCommandError, _read_delimited
+from petrolab import import_preview
+from petrolab.import_preview import ImportCommandError
 from petrolab.import_apply import retract_latest_import
 from petrolab.desktop_workflow import list_project_analyses
 from petrolab.import_workspace import ImportWorkspaceStore
@@ -34,6 +36,46 @@ class ImportWorkspaceTests(unittest.TestCase):
         self.current = self.store.command(operation, {'workspace_id': session['workspace_id'],
             'expected_revision': session['draft_revision'], 'source_id': session['active_source_id'], **params})
         return self.current
+
+    def test_review_and_preview_reuse_one_verified_inspection(self):
+        session = self.current['session']
+        params = {'workspace_id': session['workspace_id'],
+                  'source_id': session['active_source_id']}
+        original = self.source.read_bytes()
+        self.store._inspection_cache.clear()
+        with patch.object(import_preview, '_read_delimited', wraps=import_preview._read_delimited) as reader:
+            reviewed = self.store.command('get', params)
+            self.assertEqual(reader.call_count, 1)
+            self.assertEqual(reviewed, self.current)
+            reader.reset_mock()
+            preview = self.store.command('preview_window', {**params, 'sheet_name': 'first',
+                                                          'start_row': 2, 'row_count': 1})
+            self.assertEqual(reader.call_count, 0)
+            self.assertEqual(preview['rows'][0]['values'], ['A1', '10', '<DL'])
+            self.assertEqual(self.store.command('get', params), reviewed)
+            self.assertEqual(reader.call_count, 0)
+        self.assertEqual(self.source.read_bytes(), original)
+        timestamps = self.source.stat()
+        self.source.write_bytes(original.replace(b'A1,10', b'A1,99'))
+        os.utime(self.source, ns=(timestamps.st_atime_ns, timestamps.st_mtime_ns))
+        self.assertEqual(self.source.stat().st_size, timestamps.st_size)
+        with self.assertRaises(ImportCommandError) as caught:
+            self.store.command('preview_window', {**params, 'sheet_name': 'first'})
+        self.assertEqual(caught.exception.code, 'SOURCE_FINGERPRINT_MISMATCH')
+
+    def test_inspection_cache_is_bounded_and_evicted_files_reparse(self):
+        from petrolab import import_workspace
+        session = self.current['session']
+        first = session['active_source_id']
+        with patch.object(import_workspace, 'MAX_INSPECTION_CACHE_ENTRIES', 1):
+            self.call('add_sources', sources=[{'staged_path': str(self.other)}])
+            self.assertEqual(len(self.store._inspection_cache), 1)
+            with patch.object(import_preview, '_read_delimited', wraps=import_preview._read_delimited) as reader:
+                result = self.store.command('preview_window', {'workspace_id': session['workspace_id'],
+                    'source_id': first, 'sheet_name': 'first', 'start_row': 2, 'row_count': 1})
+                self.assertEqual(reader.call_count, 1)
+                self.assertEqual(result['rows'][0]['values'], ['A1', '10', '<DL'])
+                self.assertEqual(len(self.store._inspection_cache), 1)
 
     def test_two_sources_keep_mapping_identity_issue_and_raw_coordinates(self):
         first = self.current['session']['active_source_id']
@@ -107,6 +149,88 @@ class ImportWorkspaceTests(unittest.TestCase):
         self.assertEqual(list_project_analyses(database)['total'], 0)
         with closing(sqlite3.connect(database)) as connection:
             self.assertEqual(connection.execute('SELECT COUNT(*) FROM analysis').fetchone()[0], 3)
+
+    def test_review_plan_cache_reuses_only_unchanged_recipe(self):
+        from petrolab import import_workspace
+        self.source.write_text('Analysis,SiO2 [wt.%]\nA1,40\nA2,41\n', encoding='utf-8')
+        self.current = self.store.command('create', {'sources': [{'staged_path': str(self.source)}]})
+        session = self.current['session']
+        params = {'workspace_id': session['workspace_id'], 'source_id': session['active_source_id']}
+        with patch.object(import_workspace, 'create_import_plan', wraps=import_workspace.create_import_plan) as build:
+            same = self.store.command('get', params)
+            self.assertEqual(build.call_count, 0)
+            self.assertEqual(same, self.current)
+            # The returned client projection must not mutate the retained plan.
+            same['active']['plan']['planned_records'][0]['measurements'][0]['raw_token'] = 'tampered'
+            self.assertEqual(self.store.command('get', params)['active']['plan']['planned_records'][0]['measurements'][0]['raw_token'], '40')
+            self.call('replan')
+            self.assertGreater(build.call_count, 0)
+            build.reset_mock()
+            block = self.current['active']['recipe']['sections'][0]['block_id']
+            self.call('apply_decision', decision={'kind': 'mappings', 'decisions': [
+                {'block_id': block, 'source_axis': 'column', 'source_index': 0, 'target': 'Ignore'}]})
+            self.assertGreater(build.call_count, 0)
+            self.assertFalse(self.current['session']['readiness']['ready_to_commit'])
+
+    def test_commit_readiness_matches_full_projection_and_checks_changed_source(self):
+        database = self.source.parent / 'readiness.sqlite'
+        self.source.write_text('Analysis,SiO2 [wt.%]\nA1,40\n', encoding='utf-8')
+        self.current = self.store.command('create', {'project_database_path': str(database),
+            'sources': [{'staged_path': str(self.source)}]})
+        session = self.store.sessions[self.current['session']['workspace_id']]
+        self.assertEqual(self.store._project(deepcopy(session), readiness_only=True),
+                         self.current['session']['readiness'])
+        self.source.write_text('Analysis,SiO2 [wt.%]\nA1,99\n', encoding='utf-8')
+        full = self.store._project(deepcopy(session))['session']['readiness']
+        self.assertEqual(self.store._project(deepcopy(session), readiness_only=True), full)
+        self.assertFalse(full['ready_to_commit'])
+        self.assertIn('SOURCE_FINGERPRINT_MISMATCH', full['blocking_reason_codes'])
+        with self.assertRaises(ImportCommandError) as caught:
+            self.call('commit')
+        self.assertEqual(caught.exception.code, 'WORKSPACE_NOT_READY')
+        with closing(sqlite3.connect(database)) as connection:
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM analysis').fetchone()[0], 0)
+
+    def test_batched_provenance_failure_rolls_back_earlier_flushes(self):
+        from petrolab import import_apply
+        database = self.source.parent / 'batched.sqlite'
+        self.source.write_text('Analysis,SiO2 [wt.%],FeO [wt.%]\nA1,40,10\nA2,41,11\nA3,42,12\n',
+                               encoding='utf-8')
+        original = self.source.read_bytes()
+        self.current = self.store.command('create', {'project_database_path': str(database),
+            'sources': [{'staged_path': str(self.source)}]})
+        self.assertTrue(self.current['session']['readiness']['ready_to_commit'])
+        workspace_id = self.current['session']['workspace_id']
+        with closing(sqlite3.connect(database)) as connection:
+            connection.execute("""
+                CREATE TRIGGER reject_late_cell BEFORE INSERT ON source_cell_provenance
+                WHEN NEW.raw_token = '42'
+                BEGIN SELECT RAISE(ABORT, 'late cell failed'); END
+            """)
+        # Force several executemany flushes inside the same transaction.
+        with patch.object(import_apply, 'IMPORT_WRITE_BATCH_ROWS', 1):
+            with self.assertRaisesRegex(sqlite3.IntegrityError, 'late cell failed'):
+                self.call('commit')
+            self.assertIn(workspace_id, self.store.sessions)
+            with closing(sqlite3.connect(database)) as connection:
+                for table in ('source_file', 'import_batch', 'analysis', 'measurement',
+                              'analysis_import_semantics', 'analysis_source_metadata',
+                              'source_row_provenance', 'source_cell_provenance'):
+                    self.assertEqual(connection.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0], 0, table)
+                connection.execute('DROP TRIGGER reject_late_cell')
+            self.assertEqual(list((database.parent / 'sources').iterdir()), [])
+            result = self.call('commit')
+        self.assertEqual(result['analysis_count'], 3)
+        self.assertEqual(result['measurement_count'], 6)
+        with closing(sqlite3.connect(database)) as connection:
+            self.assertEqual(connection.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
+            self.assertIsNone(connection.execute('PRAGMA foreign_key_check').fetchone())
+            for table in ('measurement', 'source_row_provenance', 'source_cell_provenance'):
+                self.assertEqual(connection.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0], 6)
+            self.assertEqual(connection.execute(
+                "SELECT raw_token FROM source_cell_provenance ORDER BY source_row_number, source_column_index"
+            ).fetchall(), [('40',), ('10',), ('41',), ('11',), ('42',), ('12',)])
+        self.assertEqual(self.source.read_bytes(), original)
 
     def test_stale_revision_is_structured_and_does_not_overwrite(self):
         previous = deepcopy(self.current['session'])
@@ -215,7 +339,8 @@ class ImportWorkspaceTests(unittest.TestCase):
         session = self.current['session']
         params = {'workspace_id': session['workspace_id'], 'source_id': session['active_source_id'],
                   'sheet_name': 'first', 'start_row': 2, 'row_count': 1}
-        with patch('petrolab.import_preview._read_delimited', wraps=_read_delimited) as reader:
+        self.store._inspection_cache.clear()
+        with patch.object(import_preview, '_read_delimited', wraps=import_preview._read_delimited) as reader:
             preview = self.store.command('preview_window', params)
         self.assertEqual(reader.call_count, 1)
         self.assertEqual(preview['rows'][0]['values'][-1], '<DL')

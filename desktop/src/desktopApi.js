@@ -60,14 +60,46 @@ export function isPetrolabDesktop() {
   return typeof window !== "undefined" && typeof window.__TAURI_INTERNALS__?.invoke === "function";
 }
 
+const WORKSPACE_REVIEW_COMMANDS = new Set([
+  "import.workspace.create", "import.workspace.restore", "import.workspace.add_sources",
+  "import.workspace.get", "import.workspace.apply_decision", "import.workspace.apply_bulk_decision",
+  "import.workspace.replan",
+]);
+
+export function expandWorkspaceReview(result) {
+  const projection = result?.workspace ?? result;
+  const plan = projection?.active?.plan;
+  if (!plan || !Object.hasOwn(plan, "measurement_columns_v1")) return result;
+  const { measurement_columns_v1: columns, planned_records: records, ...rest } = plan;
+  if (!Array.isArray(columns) || !columns.length || columns.some(key => typeof key !== "string")
+      || new Set(columns).size !== columns.length || !Array.isArray(records)) {
+    throw new Error("PetroLab получил несовместимое представление измерений.");
+  }
+  const expanded = records.map(record => ({
+    ...record,
+    measurements: record.measurements.map(values => {
+      if (!Array.isArray(values) || values.length !== columns.length) {
+        throw new Error("PetroLab получил неполное представление измерения.");
+      }
+      return Object.fromEntries(columns.map((key, index) => [key, values[index]]));
+    }),
+  }));
+  const restored = { ...projection, active: { ...projection.active, plan: { ...rest, planned_records: expanded } } };
+  return result?.workspace ? { ...result, workspace: restored } : restored;
+}
+
 export async function invokePetrolab(command, payload) {
+  const compact = WORKSPACE_REVIEW_COMMANDS.has(command);
   const envelope = {
     protocol_version: PROTOCOL_VERSION,
     request_id: crypto.randomUUID(),
     command,
-    payload,
+    payload: compact ? { ...payload, measurement_wire_format: "columns_v1" } : payload,
   };
-  return desktopInvoke("petrolab_command", { envelope });
+  const response = await desktopInvoke("petrolab_command", { envelope });
+  return compact && response?.result
+    ? { ...response, result: expandWorkspaceReview(response.result) }
+    : response;
 }
 
 export const pickImportFile = () => desktopInvoke("pick_import_file");

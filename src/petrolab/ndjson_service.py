@@ -544,9 +544,51 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
 }
 
 WORKSPACES = ImportWorkspaceStore()
+
+
+def compact_workspace_review(result):
+    """Lossless opt-in wire encoding for repeated measurement object keys.
+
+    The original projection and scientific plan are never modified. The
+    client restores the original object layout before rendering or searching.
+    Unknown/heterogeneous measurement shapes retain the normal representation.
+    """
+    projection = result.get("workspace") if "workspace" in result else result
+    if not isinstance(projection, dict) or not isinstance(projection.get("active"), dict):
+        return result
+    active = projection["active"]
+    plan = active.get("plan", {})
+    records = plan.get("planned_records", [])
+    columns = None
+    for record in records:
+        for measurement in record.get("measurements", []):
+            if not isinstance(measurement, dict):
+                return result
+            keys = tuple(measurement)
+            if columns is None:
+                columns = keys
+            elif keys != columns:
+                return result
+    if not columns or "measurement_columns_v1" in plan:
+        return result
+    packed_plan = {**plan, "measurement_columns_v1": list(columns), "planned_records": [
+        {**record, "measurements": [list(measurement.values()) for measurement in record.get("measurements", [])]}
+        for record in records
+    ]}
+    packed = {**projection, "active": {**active, "plan": packed_plan}}
+    return {**result, "workspace": packed} if "workspace" in result else packed
+
+
+def _workspace_response(operation, params):
+    result = WORKSPACES.command(operation, params)
+    if params.get("measurement_wire_format") == "columns_v1":
+        result = compact_workspace_review(result)
+    return {"result": result}
+
+
 for _operation in ('create', 'restore', 'add_sources', 'get', 'preview_window', 'preview_formula',
                    'apply_decision', 'apply_bulk_decision', 'replan', 'discard', 'commit'):
-    COMMANDS[f'import.workspace.{_operation}'] = lambda params, operation=_operation: {'result': WORKSPACES.command(operation, params)}
+    COMMANDS[f'import.workspace.{_operation}'] = lambda params, operation=_operation: _workspace_response(operation, params)
 
 
 def handle_request(request: object) -> dict[str, Any]:

@@ -31,6 +31,28 @@ from petrolab.import_apply import apply_import_batch, apply_import_plan, check_l
 FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
 
 
+class HeaderRecognitionPerformanceTests(unittest.TestCase):
+    def test_header_vocabulary_fast_path_matches_original_predicate(self):
+        from petrolab import import_preview as preview
+        from unittest.mock import patch
+        values = ["Analysis", "Sample ID", "FeO (wt.%)", "Fe₂O₃", "n.d.", "ND", "Nd ppm",
+                  "n/d", "n.a.", "n/a", "#DIV/0!", "#VALUE!", "Li", "Li ppm", "F", "Fe",
+                  "Na2O", "образец", "ТОЧКА", "MgO", "0.012", "<DL", None, "", "other"]
+        rows = [[a, b] for a in values for b in values]
+        missing = {"n.d.", "n/d", "n.a.", "n/a", "#div/0!", "#value!"}
+        expected = tuple(i + 1 for i, row in enumerate(rows) if sum(
+            any(str(value).strip().lower() not in missing
+                and (preview._header_token(value) == token if len(token) <= 2
+                     else preview._header_token(value).startswith(token))
+                for token in preview.KNOWN_HEADER_TOKENS)
+            for value in row if value
+        ) >= 2)
+        self.assertTrue(expected)
+        with patch.object(preview, "_looks_like_generic_header", return_value=False):
+            self.assertEqual(preview._header_candidates(rows), expected)
+
+
+
 def fixture_recipe() -> dict:
     """Legacy schema-v1 recipe with an already explicit keep-all decision.
 

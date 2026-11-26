@@ -530,6 +530,10 @@ def _persist_samples(connection, records, timestamp):
                                (sample_id, name, timestamp))
 
 
+# Limit queued SQL parameters; never split the outer import transaction.
+IMPORT_WRITE_BATCH_ROWS = 8192
+
+
 def _persist_import(connection, database_path, source_path, recipe, inspection, plan, managed_files):
     source_kind = "managed_copy" if recipe["ownership_mode"] == "managed_copy" else "linked_reference"
     source_id, batch_id = _id(), _id()
@@ -571,10 +575,28 @@ def _persist_import(connection, database_path, source_path, recipe, inspection, 
         (batch_id, source_id, recipe_revision_id, inspection.fingerprint,
          json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")), timestamp),
     )
+    # Insertion order of SQL keys preserves parent-before-child foreign keys.
+    # Parameter order within each table is unchanged. Flushes use the caller's
+    # existing transaction; no intermediate commit or constraint bypass.
+    pending = {}
+    queued_count = 0
+
+    def enqueue(sql, parameters):
+        nonlocal queued_count
+        pending.setdefault(sql, []).append(parameters)
+        queued_count += 1
+
+    def flush():
+        nonlocal queued_count
+        for sql, parameters in pending.items():
+            connection.executemany(sql, parameters)
+        pending.clear()
+        queued_count = 0
+
     for record in plan["planned_records"]:
         analysis_id = _id()
         orientation = record.get("orientation", "rows_are_analyses")
-        connection.execute(
+        enqueue(
             """INSERT INTO analysis
             (analysis_id, import_batch_id, source_id, preview_id, sheet_name, source_row_number, block_id,
              identity_json, created_at, source_column_number, source_orientation)
@@ -585,7 +607,7 @@ def _persist_import(connection, database_path, source_path, recipe, inspection, 
                 record.get("source_column_number"), orientation,
             ),
         )
-        connection.execute(
+        enqueue(
             '''INSERT INTO analysis_import_semantics
                (analysis_id, sample_association_json, reported_mineral_json, mineral_assignment_json,
                 mineral_verification_json, analytical_method_json) VALUES (?, ?, ?, ?, ?, ?)''',
@@ -593,7 +615,7 @@ def _persist_import(connection, database_path, source_path, recipe, inspection, 
              ('sample_association', 'reported_mineral', 'mineral_assignment', 'mineral_verification', 'analytical_method'))),
         )
         for metadata in _source_metadata_for_record(inspection, recipe, record):
-            connection.execute(
+            enqueue(
                 """INSERT INTO analysis_source_metadata
                 (analysis_source_metadata_id, analysis_id, import_batch_id, canonical_field, raw_token,
                  source_header, source_row_number, source_column_index, source_cell, created_at)
@@ -606,7 +628,7 @@ def _persist_import(connection, database_path, source_path, recipe, inspection, 
             )
             metadata_count += 1
         for measurement in record["measurements"]:
-            connection.execute(
+            enqueue(
                 """INSERT INTO measurement
                 (measurement_id, analysis_id, canonical_field, unit, raw_token, qualifier, detection_limit,
                  source_column_name, source_column_index, created_at, source_row_number,
@@ -623,7 +645,7 @@ def _persist_import(connection, database_path, source_path, recipe, inspection, 
                 ),
             )
             if orientation == "rows_are_analyses":
-                connection.execute(
+                enqueue(
                     """INSERT INTO source_row_provenance
                     (provenance_id, import_batch_id, sheet_name, row_number, source_column_name, raw_token,
                      normalized_token, qualifier, analysis_id, value_status)
@@ -633,7 +655,7 @@ def _persist_import(connection, database_path, source_path, recipe, inspection, 
                         measurement["source_header"], measurement["raw_token"], measurement["qualifier"], analysis_id, measurement["value_status"],
                     ),
                 )
-            connection.execute(
+            enqueue(
                 """INSERT INTO source_cell_provenance
                 (provenance_id, import_batch_id, analysis_id, sheet_name, source_row_number,
                  source_column_index, source_cell, source_header, raw_token, qualifier, value_status)
@@ -645,6 +667,9 @@ def _persist_import(connection, database_path, source_path, recipe, inspection, 
                     measurement["value_status"],
                 ),
             )
+        if queued_count >= IMPORT_WRITE_BATCH_ROWS:
+            flush()
+    flush()
     connection.execute("UPDATE import_batch SET status = 'applied', applied_at = ? WHERE import_batch_id = ?", (timestamp, batch_id))
     return {
         "import_batch_id": batch_id,
