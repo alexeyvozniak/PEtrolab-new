@@ -31,6 +31,11 @@ export const previewSemanticExtension = (workspaceId, sourceId, decision) => inv
 export const addWorkspaceSources = (workspaceId, revision, sources) =>
   invokePetrolab("import.workspace.add_sources", { workspace_id: workspaceId, expected_revision: revision, sources });
 export const getImportWorkspace = (workspaceId) => invokePetrolab("import.workspace.get", { workspace_id: workspaceId });
+export const listFormulaMethods = () => invokePetrolab("formula.methods.list", {});
+export const previewImportFormula = (workspace, previewId, methodId) =>
+  invokePetrolab("import.workspace.preview_formula", { workspace_id: workspace.workspace_id,
+    expected_revision: workspace.draft_revision, source_id: workspace.active_source_id,
+    preview_id: previewId, method_id: methodId });
 export const applyWorkspaceDecision = (workspaceId, revision, sourceId, decision, bulk = false) =>
   invokePetrolab(bulk ? "import.workspace.apply_bulk_decision" : "import.workspace.apply_decision", {
     workspace_id: workspaceId, expected_revision: revision, source_id: sourceId, decision,

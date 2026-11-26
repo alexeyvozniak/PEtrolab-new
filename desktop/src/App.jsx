@@ -15,7 +15,7 @@ import {
 } from "@phosphor-icons/react";
 import {
   createImportWorkspace, restoreImportWorkspace, addWorkspaceSources, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
-  commitImportWorkspace,
+  commitImportWorkspace, listFormulaMethods, previewImportFormula,
   createWorkGroup, listWorkGroups, listGenerations, assignGeneration, undoGeneration,
   listTableViews, saveTableView,
   listEditDrafts, saveEditDraft, checkEditDraft, commitEditDraft,
@@ -789,6 +789,8 @@ export function App() {
                 onSemanticDecision={(decision) => decide({ ...decision, kind: 'semantic' })}
                 onVerifyMinerals={() => decide({ kind: 'verify_minerals' })}
                 onAcceptMineral={(decision) => decide({ ...decision, kind: 'accept_mineral' })}
+                onListFormulaMethods={async () => unwrap(await listFormulaMethods())}
+                onPreviewFormula={async (previewId, methodId) => unwrap(await previewImportFormula(workspace, previewId, methodId))}
                 onSelectSource={selectWorkspaceSource}
                 onToggleSource={toggleWorkspaceSource}
                 sourceName={fileName(sourceDisplayPath || sourcePath)}

@@ -205,6 +205,7 @@ Implement the workspace through versioned scientific-service commands:
 - `import.workspace.add_sources`;
 - `import.workspace.get`;
 - `import.workspace.preview_window`;
+- `import.workspace.preview_formula` — пересчёт выбранной строки в текущей ревизии очереди. Сервис проверяет отпечаток источника, указывает использованные и исключённые измерения и возвращает только предварительный результат. Команда не сохраняет Calculation Run и не назначает минерал;
 - `import.workspace.apply_decision`;
 - `import.workspace.apply_bulk_decision`;
 - `import.workspace.replan`;

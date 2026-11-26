@@ -47,6 +47,38 @@ def _calculate(values, method):
     return calculate_mineral_formula(values, method)
 
 
+def review_import_formula(record, method_id):
+    method = _method(method_id)
+    inputs = []
+    excluded = []
+    values = {}
+    contexts = set()
+    for measurement in record["measurements"]:
+        field = measurement["field"]
+        value = _measurement_numeric_value(measurement)
+        reason = None
+        if field not in method["components"]:
+            reason = "unsupported_component"
+        elif measurement["unit"] != method["input_unit"]:
+            reason = "incompatible_unit"
+        elif value is None:
+            reason = "non_quantitative"
+        elif field in {"FeO", "Fe2O3", "FeOt"} and measurement["reported_fe_form"] != field:
+            reason = "incompatible_iron_form"
+        if reason:
+            excluded.append({**measurement, "reason": reason})
+            continue
+        if field in values:
+            raise ImportCommandError("FORMULA_AMBIGUOUS_COMPONENT", "В строке несколько измерений одного оксида.")
+        contexts.add((measurement["method"], measurement["measurement_set"]))
+        values[field] = value
+        inputs.append({**measurement, "effective_value": value})
+    if len(contexts) > 1:
+        raise ImportCommandError("FORMULA_MIXED_INPUT", "Для пересчёта нужен один аналитический метод и набор.")
+    return {"preview_id": record["preview_id"], "method_definition": method, "measurements": inputs,
+            "excluded_measurements": excluded, "preview": _calculate(values, method)}
+
+
 def _read_input(connection, analysis_id, measurement_ids, method):
     _selection([analysis_id])
     _, encoded = _selection(measurement_ids)

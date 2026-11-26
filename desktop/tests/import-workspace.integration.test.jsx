@@ -1491,6 +1491,16 @@ test("real Python mineral review separates conflicts and persists only explicit 
   await user.click(await enabledButton("Выбрать файл"));
   await user.click(await enabledButton("2 · Проверить минералы"));
   await screen.findByText("Расхождение с источником");
+  await user.click(await enabledButton("Рассчитать формулу"));
+  const formula = within(await screen.findByRole("form", { name: "Предпросмотр формулы" }));
+  await user.selectOptions(formula.getByRole("combobox"), "formula.zircon.4o");
+  await user.click(formula.getByRole("button", { name: "Рассчитать", exact: true }));
+  expect((await formula.findByRole("alert")).textContent).toContain("ZrO2");
+  await user.selectOptions(formula.getByRole("combobox"), "formula.olivine.4o");
+  await user.click(formula.getByRole("button", { name: "Рассчитать", exact: true }));
+  await formula.findByText("Предварительный расчёт");
+  expect(formula.getByText("Mg", { exact: true }).nextElementSibling.textContent).toMatch(/^1,8/);
+  await user.click(formula.getByRole("button", { name: "Закрыть формулу" }));
   await user.click(await enabledButton("Принять группу совпадений"));
   await user.click(await enabledButton("Принять предложение"));
   await user.click(screen.getByLabelText("Показать все результаты"));
@@ -1498,6 +1508,7 @@ test("real Python mineral review separates conflicts and persists only explicit 
   expect(screen.getAllByText("garnet").length).toBeGreaterThan(0);
   await user.click(await enabledButton(/^(Импортировать таблицу|Сохранить импорт в проект)$/));
   await screen.findByRole("heading", { name: "Анализы" });
+  expect((await invokePetrolab("formula.runs.list", { project_database_path: join(folder, "project.sqlite") })).result).toEqual([]);
   app.unmount();
   render(<App />);
   await user.click(await enabledButton("Анализы"));

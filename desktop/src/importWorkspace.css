@@ -342,6 +342,14 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .mineral-review-item dt, .mineral-review-item p { color: #65736a; }
 .mineral-review-item .mineral-origin { text-align: left; background: transparent; border: 0; padding: 0; text-decoration: underline; }
 .mineral-show-all { display: block; padding: 10px 12px; }
+.mineral-formula-preview { display: grid; gap: 8px; min-width: 0; padding: 8px; background: #f7faf7; border: 1px solid #dce6dd; }
+.mineral-formula-preview label { display: grid; gap: 4px; min-width: 0; }
+.mineral-formula-preview select { width: 100%; min-width: 0; }
+.mineral-formula-preview p { margin: 4px 0; overflow-wrap: anywhere; }
+.mineral-formula-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.mineral-formula-preview section { margin-top: 8px; }
+.mineral-formula-preview section dl { grid-template-columns: 1fr 1fr; }
+.mineral-formula-preview section dl div { display: flex; justify-content: space-between; gap: 4px; }
 
 @media (max-height: 850px) {
   .workspace:has(.import-live-page) > .global-message { margin: 4px 12px; padding: 6px 10px; }

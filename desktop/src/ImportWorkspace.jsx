@@ -226,6 +226,8 @@ export function ImportWorkspace({
   onSemanticDecision,
   onVerifyMinerals,
   onAcceptMineral,
+  onListFormulaMethods,
+  onPreviewFormula,
   onSelectSource,
   onToggleSource,
   sourceName,
@@ -468,7 +470,12 @@ export function ImportWorkspace({
 
         <aside className="import-inspector-pane">
           {onVerifyMinerals && <div className="import-stage-tabs"><button type="button" onClick={() => setMineralReview(false)} disabled={busy}>1 · Структура</button><button type="button" disabled={busy || blockDraftDirty || mappingDraftDirty || plan.ready_to_commit === false} onClick={() => recipe.global_decisions.mineral_verification_enabled ? setMineralReview(true) : onVerifyMinerals()}>2 · Проверить минералы</button></div>}
-          {mineralReview ? <MineralVerificationPanel records={plan.planned_records || []} scopes={semanticTools.mineralScopes || []} busy={busy} onAccept={onAcceptMineral} onReveal={(record) => { setMineralFocus({ ...record, source_column_index: (record.source_column_number || 1) - 1 }); selectBlock(record.block_id); }} /> : <>
+          {mineralReview ? <MineralVerificationPanel
+            formulaScope={`${workspace?.workspace_id}:${workspace?.active_source_id}:${workspace?.draft_revision}`}
+            records={plan.planned_records || []} scopes={semanticTools.mineralScopes || []} busy={busy}
+            onAccept={onAcceptMineral} onListFormulaMethods={onListFormulaMethods} onPreviewFormula={onPreviewFormula}
+            onReveal={(record) => { setMineralFocus({ ...record, source_column_index: (record.source_column_number || 1) - 1 }); selectBlock(record.block_id); }}
+          /> : <>
           <div className="import-pane-label">Вопросы · {issueGroups.length} типов · {issues.length} мест</div>
           {issueGroups.length > 0 ? (
             <div className="import-issue-list">

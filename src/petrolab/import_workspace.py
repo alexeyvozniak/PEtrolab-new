@@ -14,6 +14,7 @@ from tempfile import NamedTemporaryFile
 from .clean_table import classify_clean_table
 from .desktop_workflow import (suggest_import_recipe, bulk_unit_scopes, bulk_ignore_scopes,
                                apply_bulk_unit_scope, apply_bulk_ignore_scope)
+from .formula_service import review_import_formula
 from .import_apply import (apply_import_batch, open_project, workspace_commit_exists,
                            _require_duplicate_review, _require_non_empty_plan)
 from .import_preview import (ImportCommandError, inspect_source, create_import_plan, validate_recipe,
@@ -183,6 +184,13 @@ class ImportWorkspaceStore:
                         'staged_paths': [s['staged_path'] for s in session['sources']]}
             if operation == 'commit':
                 return self._commit(session)
+            if operation == 'preview_formula':
+                source = self._source(session, params.get('source_id'))
+                plan = create_import_plan(self._check(source), source['recipe'])
+                record = next((row for row in plan['planned_records'] if row['preview_id'] == params.get('preview_id')), None)
+                if record is None or not source['included']:
+                    raise ImportCommandError('FORMULA_INPUT_UNAVAILABLE', 'Выбранный анализ больше недоступен в импорте.')
+                return review_import_formula(record, params.get('method_id'))
             if operation == 'preview_window':
                 source = self._source(session, params.get('source_id'))
                 self._check(source)
