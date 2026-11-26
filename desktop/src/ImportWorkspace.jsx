@@ -177,6 +177,16 @@ function CleanReadyPreview({ classification, plan, onDetailed, busy }) {
 
 function ResultPreview({ plan, sourceName, onClose }) {
   const [query, setQuery] = useState("");
+  useEffect(() => {
+    const closeOnEscape = event => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
   const records = plan.planned_records || [];
   const needle = query.trim().toLowerCase();
   const searching = needle.length > 0;

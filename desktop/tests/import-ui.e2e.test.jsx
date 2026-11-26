@@ -451,7 +451,8 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
   expect(within(preview).queryByText("UI-2")).toBeNull();
   await user.type(search, "-not-found");
   expect(within(preview).getByText("По этому запросу записей нет.")).toBeTruthy();
-  await user.click(within(preview).getByRole("button", { name: "Закрыть предпросмотр" }));
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "Что попадёт в проект" })).toBeNull();
 
   await user.click(importButton);
   await screen.findByRole("heading", { name: "Анализы" });
@@ -459,6 +460,17 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
   expect(screen.getAllByText("UI-1").length).toBeGreaterThan(0);
   expect(screen.getAllByText("Trace-15").length).toBeGreaterThan(0);
 
+  const analysisTable = screen.getByLabelText(/Таблица анализов: Ctrl\+A/);
+  analysisTable.focus();
+  await user.keyboard("{Control>}a{/Control}");
+  expect(screen.getByText("2 выбрано")).toBeTruthy();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByText("2 выбрано")).toBeNull();
+  await user.keyboard("{Control>}f{/Control}");
+  expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Поиск анализов" }));
+  await user.type(document.activeElement, "UI-2");
+  expect(screen.queryByRole("checkbox", { name: "Выбрать UI-1" })).toBeNull();
+  await user.keyboard("{Escape}");
   await user.click(screen.getByRole("checkbox", { name: "Выбрать UI-1" }));
   expect(screen.getByText("1 выбрано")).toBeTruthy();
   const nav = within(screen.getByRole("navigation"));

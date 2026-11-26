@@ -298,6 +298,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
   const [tableViews, setTableViews] = useState([]);
   const [viewBusy, setViewBusy] = useState(false);
   const [viewMessage, setViewMessage] = useState(null);
+  const searchInput = useRef(null);
   const selectionAnchor = useRef(null);
   const selectionDrag = useRef(null);
   const [focusedId, setFocusedId] = useState(initialFocusedId || "");
@@ -375,27 +376,32 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
   }), [availableColumns, columnFilters, measurementUnits]);
   const invalidFilters = new Set(activeColumnFilters.filter((condition) => condition.invalid).map(({ column }) => column.id));
 
+  const needle = query.trim().toLowerCase();
+  const searching = needle.length > 0;
+  const searchIndex = useMemo(() => searching
+    ? analyses.map(analysis => JSON.stringify(analysis).toLowerCase())
+    : null, [analyses, searching]);
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return analyses.filter((analysis) => {
+    return analyses.filter((analysis, index) => {
       if (sourceFilter !== "all" && analysis.source_id !== sourceFilter) return false;
       if (sheetFilter !== "all" && analysis.sheet_name !== sheetFilter) return false;
       if (mineralStatusFilter.length && !mineralStatusFilter.includes(mineralStatus(analysis))) return false;
       if (sampleLinkFilter !== "all" && Boolean(analysis.sample_association?.sample_id) !== (sampleLinkFilter === "linked")) return false;
-      if (needle && !JSON.stringify(analysis).toLowerCase().includes(needle)) return false;
+      if (needle && !searchIndex[index].includes(needle)) return false;
       return activeColumnFilters.every(({ column, expression, testMeasurement, invalid }) =>
         invalid || (testMeasurement
           ? testMeasurement(analysis.measurements?.[column.field])
           : String(valueFor(analysis, column)).toLowerCase().includes(expression.toLowerCase())));
     });
-  }, [analyses, activeColumnFilters, mineralStatusFilter, sampleLinkFilter, query, sheetFilter, sourceFilter]);
+  }, [analyses, activeColumnFilters, mineralStatusFilter, sampleLinkFilter, needle, searchIndex, sheetFilter, sourceFilter]);
 
-  const ordered = useMemo(() => {
-    const selected = new Set(selectedIds);
+  const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const dragged = useMemo(() => new Set(dragIds), [dragIds]);
+  const sorted = useMemo(() => {
     const column = availableColumns.find((item) => item.id === sort.id) || availableColumns[0];
+    const collator = new Intl.Collator("ru", { numeric: true });
+    const values = new Map(filtered.map(analysis => [analysis, column ? String(valueFor(analysis, column)) : ""]));
     return [...filtered].sort((left, right) => {
-      const selectedDifference = Number(selected.has(right.analysis_id)) - Number(selected.has(left.analysis_id));
-      if (selectedDifference) return selectedDifference;
       if (column?.kind === "measurement") {
         const leftMeasurement = left.measurements?.[column.field];
         const rightMeasurement = right.measurements?.[column.field];
@@ -409,17 +415,22 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
           return sort.direction === "asc" ? comparison : -comparison;
         }
       }
-      const comparison = column
-        ? String(valueFor(left, column)).localeCompare(String(valueFor(right, column)), "ru", { numeric: true })
-        : 0;
+      const comparison = collator.compare(values.get(left), values.get(right));
       return sort.direction === "asc" ? comparison : -comparison;
     });
-  }, [availableColumns, filtered, selectedIds, sort]);
-
-  const focused = analyses.find((analysis) => analysis.analysis_id === focusedId) || ordered[0] || null;
-  const filteredIds = ordered.map((analysis) => analysis.analysis_id);
-  const hiddenSelectionCount = selectedIds.filter((id) => !filteredIds.includes(id)).length;
-  const allVisibleSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedIds.includes(id));
+  }, [availableColumns, filtered, sort]);
+  // Stable partition preserves the original sort order within both groups.
+  const ordered = useMemo(() => {
+    const marked = [], remaining = [];
+    for (const analysis of sorted) (selected.has(analysis.analysis_id) ? marked : remaining).push(analysis);
+    return marked.concat(remaining);
+  }, [sorted, selected]);
+  const byId = useMemo(() => new Map(analyses.map(analysis => [analysis.analysis_id, analysis])), [analyses]);
+  const focused = byId.get(focusedId) || ordered[0] || null;
+  const filteredIds = useMemo(() => ordered.map(analysis => analysis.analysis_id), [ordered]);
+  const filteredSet = useMemo(() => new Set(filteredIds), [filteredIds]);
+  const hiddenSelectionCount = selectedIds.filter(id => !filteredSet.has(id)).length;
+  const allVisibleSelected = filteredIds.length > 0 && filteredIds.every(id => selected.has(id));
 
   const toggleSelection = (id, extend = false) => {
     const anchor = selectionAnchor.current;
@@ -430,7 +441,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
         return;
       }
     }
-    const checked = selectedIds.includes(id);
+    const checked = selected.has(id);
     selectionAnchor.current = checked ? null : { id, order: filteredIds, base: selectedIds, filtered, sort };
     setSelectedIds(checked ? selectedIds.filter((item) => item !== id) : [...selectedIds, id]);
   };
@@ -447,7 +458,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
   const toggleAllVisible = () => {
     selectionAnchor.current = null;
     setSelectedIds((current) => {
-      if (allVisibleSelected) return current.filter((id) => !filteredIds.includes(id));
+      if (allVisibleSelected) return current.filter(id => !filteredSet.has(id));
       return [...new Set([...current, ...filteredIds])];
     });
   };
@@ -591,10 +602,52 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
     }
   };
 
+  const handleKeys = (event) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+    const typing = event.target.closest?.("input, textarea, select, [contenteditable=true]");
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      searchInput.current?.focus();
+      searchInput.current?.select();
+      return;
+    }
+    if (typing) {
+      if (event.key === "Escape" && event.target === searchInput.current) {
+        event.preventDefault();
+        setQuery("");
+      }
+      return;
+    }
+    if (!event.target.closest?.(".analyses-table-pane")) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      selectionAnchor.current = null;
+      selectionDrag.current = null;
+      setDragIds([]);
+      setSelectedIds([]);
+    } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      selectionAnchor.current = null;
+      setSelectedIds(current => [...new Set([...current, ...filteredIds])]);
+    } else if (event.target.closest?.(".analyses-table-scroll") && ["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+      if (event.target.closest?.("button, [role=button]")) return;
+      event.preventDefault();
+      const index = ordered.findIndex(analysis => analysis.analysis_id === focused?.analysis_id);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? ordered.length - 1 :
+        Math.max(0, Math.min(ordered.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+      if (ordered[next]) {
+        const id = ordered[next].analysis_id;
+        setFocusedId(id);
+        if (event.shiftKey) toggleSelection(id, true);
+        event.currentTarget.querySelectorAll("tbody tr")[next]?.scrollIntoView?.({ block: "nearest" });
+      }
+    }
+  };
+
   if (project.total === 0 && !project.has_work_groups && !project.has_table_views) return <EmptyAnalyses onAddData={onAddData} />;
 
   return (
-    <div className="analyses-workspace">
+    <div className="analyses-workspace" onKeyDown={handleKeys}>
       <aside className="analyses-sources">
         <div className="analyses-pane-title"><span>Источники</span><b>{project.source_count}</b></div>
         <button className={`analysis-source-row${sourceFilter === "all" ? " active" : ""}`} type="button" onClick={() => { setSourceFilter("all"); setSheetFilter("all"); }}><span>Все источники</span><b>{analyses.length}</b></button>
@@ -662,7 +715,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
       <main className="analyses-table-pane">
         <div>
         <div className="analyses-toolbar">
-          <div className="analysis-search"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sample, Mineral, Generation, значение…" aria-label="Поиск анализов" /></div>
+          <div className="analysis-search"><MagnifyingGlass size={18} /><input ref={searchInput} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sample, Mineral, Generation, значение…" aria-label="Поиск анализов" title="Ctrl+F — поиск, Esc — очистить поиск" /></div>
           <span className="analyses-result-count">{project.has_more ? `${ordered.length} из ${analyses.length} загруженных` : `${ordered.length} из ${project.total}`}</span>
           <span className={`analysis-mineral-health ${mineralReviewedCount === 0 || mineralAttentionCount ? "attention" : "ok"}`} title={`Проверено для ${mineralReviewedCount} загруженных анализов`}>
             {mineralReviewedCount === 0
@@ -696,7 +749,12 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
         </div>}
         </div>
 
-        <div className="analyses-table-scroll">
+        <div className="analyses-table-scroll" tabIndex={0} aria-label="Таблица анализов: Ctrl+A — выбрать показанные, Esc — снять выбор, стрелки — перейти к анализу" onClick={event => {
+          if (event.target === event.currentTarget) {
+            selectionAnchor.current = null;
+            setSelectedIds([]);
+          }
+        }}>
           <table className={`analyses-data-table${dragIds.length ? " selecting-range" : ""}`}>
             <thead>
               <tr>
@@ -718,10 +776,10 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
             </thead>
             <tbody>
               {ordered.map((analysis) => {
-                const selected = selectedIds.includes(analysis.analysis_id);
+                const checked = selected.has(analysis.analysis_id);
                 const focusedRow = focused?.analysis_id === analysis.analysis_id;
                 return (
-                  <tr className={`${selected || dragIds.includes(analysis.analysis_id) ? "selected " : ""}${focusedRow ? "focused" : ""}`} key={analysis.analysis_id}
+                  <tr className={`${checked || dragged.has(analysis.analysis_id) ? "selected " : ""}${focusedRow ? "focused" : ""}`} key={analysis.analysis_id}
                     onPointerEnter={(event) => extendSelectionDrag(event, analysis.analysis_id)}
                     onClick={(event) => {
                       if (event.shiftKey || event.ctrlKey || event.metaKey) {
@@ -730,7 +788,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
                       setFocusedId(analysis.analysis_id);
                     }}>
                     <td className="analysis-select-cell" onPointerDown={(event) => startSelectionDrag(event, analysis.analysis_id)}>
-                      <input type="checkbox" checked={selected} onChange={(event) => toggleSelection(analysis.analysis_id, event.nativeEvent.shiftKey)} onClick={(event) => event.stopPropagation()} aria-label={`Выбрать ${mainIdentity(analysis)}`} />
+                      <input type="checkbox" checked={checked} onChange={(event) => toggleSelection(analysis.analysis_id, event.nativeEvent.shiftKey)} onClick={(event) => event.stopPropagation()} aria-label={`Выбрать ${mainIdentity(analysis)}`} />
                     </td>
                     {visibleColumns.map((column) => {
                       const measurement = column.kind === "measurement" ? analysis.measurements?.[column.field] : null;
@@ -760,7 +818,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
           <div><CheckSquare size={20} weight="fill" /><b>{selectedIds.length} выбрано</b><span>{hiddenSelectionCount ? `Скрыто фильтром: ${hiddenSelectionCount}` : "Выбранные строки закреплены сверху."}</span></div>
           <div className="analysis-selection-chips">
             {selectedIds.slice(0, 5).map((id) => {
-              const analysis = analyses.find((item) => item.analysis_id === id);
+              const analysis = byId.get(id);
               return <button type="button" key={id} onClick={() => toggleSelection(id)}>{analysis ? mainIdentity(analysis) : "Анализ вне загруженных страниц"} <X size={13} /></button>;
             })}
             {selectedIds.length > 5 && <span>+{selectedIds.length - 5}</span>}
