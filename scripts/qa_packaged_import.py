@@ -169,7 +169,7 @@ def check_workspace_archive(executable: Path, directory: Path) -> None:
         raise AssertionError("Analysis template retained concrete IDs")
     total = {**features[0], 'field': 'Oxides sum', 'calculation': {'version': 1, 'operation': 'sum', 'operands': features}}
     calculated_layout = run(executable, [request('plot_spec.save', {
-        **project, 'name': 'QA calculated layout', 'analysis_ids': ids,
+        **project, 'name': 'QA calculated layout', 'analysis_ids': ids, 'colors': {},
         'panels': [{'id': str(uuid.uuid4()), 'kind': 'binary', 'axes': [total, features[0]]}],
     })])[0]['result']
     calculated_template = run(executable, [request('workspace.template.save', {
