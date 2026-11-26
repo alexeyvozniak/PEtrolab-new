@@ -173,7 +173,7 @@ def save_analysis_template(database_path, name, plot_id=None, table_view_id=None
     def fields(axes):
         names = []
         for axis in axes:
-            if 'calculation' in axis:
+            if 'calculation' in axis or 'formula' in axis:
                 raise ImportCommandError('TEMPLATE_CALCULATED_AXIS_UNAVAILABLE',
                                          'Расчётная ось сохраняется в раскладке. Для её переноса в шаблоне нужна проверка исходных компонентов.')
             key = axis["field"]

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 from zipfile import ZipFile
 
@@ -13,14 +14,107 @@ from pypdf import PdfWriter
 from pypdf.generic import DictionaryObject, NameObject
 
 from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe
+from petrolab.formula_service import review_formula, run_formula
 from petrolab.import_apply import apply_import_plan
 from petrolab.import_preview import ImportCommandError
+from petrolab.mineral_formulae import PYROXENE
+from petrolab.ndjson_service import handle_request
 from petrolab.plot_data import open_plot_specification, plot_catalog, query_plot_data, save_plot_specification
 from petrolab.publication import capture_publication_plot, export_publication, prepare_publication
 from petrolab.work_groups import create_work_group
 
 
 class PublicationPackageTests(unittest.TestCase):
+    def test_ternary_apfu_reopens_exact_formulae_and_reports_stale_runs(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'pyroxene.csv'
+            database = root / 'project.sqlite'
+            source.write_text('Analysis,SiO2 [wt.%],TiO2 [wt.%],Al2O3 [wt.%],Cr2O3 [wt.%],FeO [wt.%],MgO [wt.%],CaO [wt.%],Na2O [wt.%],K2O [wt.%]\n'
+                              'Opx,52.43,0.21,9.10,0.65,6.73,30.39,1.19,0.06,0\n'
+                              'Cpx,50.00,0.48,8.39,0.62,5.78,19.00,14.79,0.20,0.02\n'
+                              'Uncalculated,50,0,0,0,10,24,10,0,0\n', encoding='utf-8')
+            original = source.read_bytes()
+            apply_import_plan(database, source, suggest_import_recipe(source)['recipe'])
+            analyses = {row['identity']['Analysis']: row for row in list_project_analyses(database)['analyses']}
+
+            def calculate(label):
+                row = analyses[label]
+                inputs = (database, PYROXENE['method_id'], row['analysis_id'], [m['measurement_id'] for m in row['measurement_list']])
+                review = review_formula(*inputs)
+                return run_formula(*inputs, review['input_fingerprint'], review['method_definition_fingerprint'])
+
+            opx, cpx = calculate('Opx'), calculate('Cpx')
+            newer_opx = calculate('Opx')
+            binding = {'version': 1, 'method_id': opx['method_id'], 'method_version': opx['method_version'],
+                       'method_definition_fingerprint': opx['method_definition_fingerprint'], 'run_ids': [opx['id'], cpx['id']]}
+            axes = [{'field': f'apfu.{element}', 'unit': 'APFU', 'method': None, 'measurement_set': None, 'formula': binding}
+                    for element in ('Mg', 'Fe2+', 'Ca')]
+
+            def call(command, **parameters):
+                return handle_request({'request_id': str(uuid4()), 'protocol_version': '1.0', 'command': command,
+                                       'payload': {'project_database_path': str(database), **parameters}})
+
+            catalog = call('plot_data.catalog', include_formula=True)['result']
+            group, = catalog['formula_series']
+            self.assertEqual(group['oxygen_basis'], 6)
+            self.assertCountEqual([run['run_id'] for run in group['runs']], [opx['id'], cpx['id'], newer_opx['id']])
+            scoped = call('plot_data.catalog', include_formula=True, analysis_ids=[cpx['analysis_id']])['result']
+            self.assertEqual([run['run_id'] for run in scoped['formula_series'][0]['runs']], [cpx['id']])
+            projection = call('plot_data.query', kind='ternary', axes=axes)['result']
+            self.assertEqual([item['reason'] for item in projection['exclusions']], ['formula_run_missing'])
+            points = {point['label']: point for point in projection['points']}
+            for label, run, wo, fs in [('Opx', opx, 2.45, 10.79), ('Cpx', cpx, 32.34, 9.87)]:
+                point = points[label]
+                self.assertAlmostEqual(point['u'], (fs + wo / 2) / 100, delta=.002)
+                self.assertAlmostEqual(point['v'], wo / 100, delta=.002)
+                self.assertEqual({item['run_id'] for item in point['axis_inputs']}, {run['id']})
+                self.assertEqual(point['axis_inputs'][0]['input_measurement_ids'], run['input_measurement_ids'])
+                self.assertEqual(point['axis_inputs'][0]['oxygen_basis'], 6)
+            measured_mg = next(axis for axis in catalog['axes'] if axis['field'] == 'MgO')
+            binary = query_plot_data(database, 'binary', [axes[0], measured_mg], [cpx['analysis_id']])
+            binary_point, = binary['points']
+            self.assertAlmostEqual(binary_point['values'][0], 1.03, delta=.01)
+            self.assertEqual(binary_point['values'][1], 19)
+            missing = query_plot_data(database, 'binary', [{**axes[0], 'field': 'apfu.Zr'}, measured_mg], [cpx['analysis_id']])
+            self.assertEqual(missing['exclusions'][0]['reason'], 'formula_component_missing')
+            altered = {**axes[2], 'formula': {**binding, 'run_ids': [newer_opx['id'], cpx['id']]}}
+            with self.assertRaises(ImportCommandError) as incompatible:
+                query_plot_data(database, 'ternary', [*axes[:2], altered])
+            self.assertEqual(incompatible.exception.code, 'PLOT_TERNARY_INCOMPATIBLE_AXES')
+            duplicates = [{**axis, 'formula': {**binding, 'run_ids': [*binding['run_ids'], newer_opx['id']]}} for axis in axes]
+            with self.assertRaises(ImportCommandError) as ambiguous:
+                query_plot_data(database, 'ternary', duplicates)
+            self.assertEqual(ambiguous.exception.code, 'PLOT_FORMULA_AMBIGUOUS')
+            panel = {'id': str(uuid4()), 'kind': 'ternary', 'axes': axes}
+            spec = save_plot_specification(database, 'Пироксены APFU', None, [panel], {}, [], [])
+            self.assertEqual(open_plot_specification(database, spec['id']), spec)
+            capture = {'name': 'APFU', 'format': 'svg', 'width_mm': 90, 'dpi': 600, 'include_csv': True,
+                       'svg': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><g><text x="1" y="2">APFU</text></g></svg>',
+                       'analysis_ids': None, 'hidden_analysis_ids': [], 'hidden_source_ids': [], 'layers': [], 'colors': {},
+                       'panels': [{**panel, 'projection_sha256': projection['projection_sha256']}]}
+            item = capture_publication_plot(database, capture, 'APFU')
+            prepared = prepare_publication(database, 'Пироксены', [item])
+            destination = root / 'pyroxene.zip'
+            export_publication(database, 'Пироксены', [item], prepared['fingerprint'], str(destination))
+            with ZipFile(destination) as archive:
+                saved, = json.loads(archive.read('materials/01-plot_capture.json'))['panels']
+                self.assertEqual(saved['axes'], axes)
+                self.assertEqual(saved['points'], projection['points'])
+                self.assertEqual(saved['exclusions'], projection['exclusions'])
+            with patch.dict(PYROXENE, version='changed'):
+                stale = query_plot_data(database, 'ternary', axes)
+                self.assertEqual(stale['points'], [])
+                self.assertCountEqual([row['reason'] for row in stale['exclusions']],
+                                      ['formula_run_stale', 'formula_run_stale', 'formula_run_missing'])
+                failed_run = next(row for row in stale['exclusions'] if row['reason'] == 'formula_run_stale')
+                self.assertEqual(failed_run['axes'][0]['stale_reasons'], ['method_changed'])
+                self.assertEqual(open_plot_specification(database, spec['id']), spec)
+                with self.assertRaises(ImportCommandError) as changed:
+                    prepare_publication(database, 'Пироксены', [item])
+                self.assertEqual(changed.exception.code, 'PUBLICATION_PLOT_CHANGED')
+            self.assertEqual(source.read_bytes(), original)
+
     def test_calculated_ternary_keeps_afm_arithmetic_inputs_and_exclusions(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)

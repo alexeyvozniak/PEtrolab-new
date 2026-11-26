@@ -224,26 +224,30 @@ def open_formula_run(database_path, run_id):
     _selection([run_id])
     with closing(open_project(database_path)) as connection:
         connection.execute("BEGIN")
-        row = connection.execute("""SELECT definition_json FROM calculation_run
-            WHERE id = ? AND json_extract(definition_json, '$.method_id') LIKE 'formula.%'""", (run_id,)).fetchone()
-        if not row:
-            raise ImportCommandError("FORMULA_RUN_UNAVAILABLE", "Сохранённый расчёт формулы недоступен.")
-        run = json.loads(row[0])
-        reasons = []
-        try:
-            method = _method(run["method_id"])
-        except ImportCommandError:
-            reasons.append("method_unavailable")
-            method = run["method_definition"]
-        if _fingerprint(method) != run["method_definition_fingerprint"]:
-            reasons.append("method_changed")
-        try:
-            review, _ = _read_input(connection, run["analysis_id"], run["input_measurement_ids"], run["method_definition"])
-            if review["input_fingerprint"] != run["input_fingerprint"]:
-                reasons.append("inputs_changed")
-        except ImportCommandError:
-            reasons.append("inputs_unavailable")
-        return {**run, "status": "stale" if reasons else "current", "stale_reasons": reasons}
+        return _open_formula_run(connection, run_id)
+
+
+def _open_formula_run(connection, run_id):
+    row = connection.execute("""SELECT definition_json FROM calculation_run
+        WHERE id = ? AND json_extract(definition_json, '$.method_id') LIKE 'formula.%'""", (run_id,)).fetchone()
+    if not row:
+        raise ImportCommandError("FORMULA_RUN_UNAVAILABLE", "Сохранённый расчёт формулы недоступен.")
+    run = json.loads(row[0])
+    reasons = []
+    try:
+        method = _method(run["method_id"])
+    except ImportCommandError:
+        reasons.append("method_unavailable")
+        method = run["method_definition"]
+    if _fingerprint(method) != run["method_definition_fingerprint"]:
+        reasons.append("method_changed")
+    try:
+        review, _ = _read_input(connection, run["analysis_id"], run["input_measurement_ids"], run["method_definition"])
+        if review["input_fingerprint"] != run["input_fingerprint"]:
+            reasons.append("inputs_changed")
+    except ImportCommandError:
+        reasons.append("inputs_unavailable")
+    return {**run, "status": "stale" if reasons else "current", "stale_reasons": reasons}
 
 
 def list_formula_runs(database_path, analysis_id=None):

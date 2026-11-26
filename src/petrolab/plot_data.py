@@ -31,6 +31,7 @@ _HISTOGRAM_BINNING = "sturges_v1"
 _AXIS_PROJECTION = "m.canonical_field AS field, m.unit, m.measurement_set, m.method"
 _ACTIVE_ANALYSES = """
     FROM analysis a JOIN import_batch b USING (import_batch_id)
+    JOIN source_file s ON s.source_id = a.source_id
     LEFT JOIN import_batch_retraction r USING (import_batch_id)
     WHERE b.status = 'applied' AND r.import_batch_id IS NULL
       AND (? IS NULL OR a.analysis_id IN (SELECT value FROM json_each(?)))
@@ -47,8 +48,11 @@ def _selection(ids):
     return 1, json.dumps(ids)
 
 
-def plot_catalog(database_path, analysis_ids=None):
+def plot_catalog(database_path, analysis_ids=None, *, include_formula=False):
+    if type(include_formula) is not bool:
+        raise ValueError('include_formula')
     with closing(open_project(database_path)) as connection:
+        connection.execute('BEGIN')
         parameters = _selection(analysis_ids)
         rows = connection.execute(
             f"SELECT DISTINCT {_AXIS_PROJECTION} {_ACTIVE_MEASUREMENTS} ORDER BY field, unit, measurement_set, method",
@@ -58,8 +62,39 @@ def plot_catalog(database_path, analysis_ids=None):
             f"SELECT DISTINCT s.source_id, s.display_name AS source_name {_ACTIVE_MEASUREMENTS} ORDER BY source_name, s.source_id",
             parameters,
         ).fetchall()
-        return {"axes": [dict(row) for row in rows], "sources": [dict(row) for row in sources],
-                "patterns": pattern_catalog()}
+        result = {"axes": [dict(row) for row in rows], "sources": [dict(row) for row in sources],
+                  "patterns": pattern_catalog()}
+        if include_formula:
+            result['formula_series'] = _plot_formula_series(connection, parameters)
+        return result
+
+
+def _plot_formula_series(connection, selection):
+    series = {}
+    rows = connection.execute(f"""
+        WITH active AS (SELECT a.analysis_id {_ACTIVE_ANALYSES})
+        SELECT r.id, r.created_at, active.analysis_id,
+               json_extract(r.definition_json, '$.method_id') AS method_id,
+               json_extract(r.definition_json, '$.method_version') AS method_version,
+               json_extract(r.definition_json, '$.method_definition_fingerprint') AS method_fingerprint,
+               json_extract(r.definition_json, '$.method_definition') AS method_definition,
+               json_extract(r.definition_json, '$.result_manifest.apfu') AS apfu
+        FROM calculation_run r JOIN active ON active.analysis_id = json_extract(r.definition_json, '$.analysis_id')
+        WHERE json_extract(r.definition_json, '$.method_id') LIKE 'formula.%'
+          AND json_type(r.definition_json, '$.result_manifest.apfu') = 'object'
+        ORDER BY method_id, method_version, method_fingerprint, r.created_at DESC, r.id
+    """, selection)
+    for row in rows:
+        definition = json.loads(row['method_definition'])
+        key = row['method_id'], row['method_version'], row['method_fingerprint']
+        group = series.setdefault(key, {
+            'method_id': key[0], 'method_version': key[1], 'method_definition_fingerprint': key[2],
+            'name': definition['name'], 'oxygen_basis': definition.get('oxygen_basis'),
+            'cation_basis': definition.get('cation_basis'), 'runs': [],
+        })
+        group['runs'].append({'run_id': row['id'], 'analysis_id': row['analysis_id'], 'created_at': row['created_at'],
+                              'fields': sorted(f'apfu.{item}' for item in json.loads(row['apfu']))})
+    return list(series.values())
 
 
 def _axis_key(axis):
@@ -73,6 +108,21 @@ def _axis_key(axis):
 
 
 def _coordinate_axis(axis):
+    if isinstance(axis, dict) and 'formula' in axis:
+        key = _axis_key({field: value for field, value in axis.items() if field != 'formula'})
+        binding = axis['formula']
+        if (not key[0].startswith('apfu.') or key[0] == 'apfu.' or key[1:] != ('APFU', None, None)
+                or not isinstance(binding, dict) or set(binding) != {'version', 'method_id', 'method_version', 'method_definition_fingerprint', 'run_ids'}
+                or type(binding['version']) is not int or binding['version'] != 1
+                or not isinstance(binding['method_id'], str) or not binding['method_id'].startswith('formula.')
+                or not isinstance(binding['method_version'], str) or not binding['method_version']
+                or not isinstance(binding['method_definition_fingerprint'], str)
+                or not re.fullmatch(r'[0-9a-f]{64}', binding['method_definition_fingerprint'])
+                or binding['run_ids'] is None):
+            raise ValueError('axis_formula')
+        _selection(binding['run_ids'])
+        return key, 'apfu', (binding['method_id'], binding['method_version'],
+                             binding['method_definition_fingerprint'], tuple(sorted(binding['run_ids'])))
     if not isinstance(axis, dict) or 'calculation' not in axis:
         return _axis_key(axis), None, ()
     key = _axis_key({field: value for field, value in axis.items() if field != 'calculation'})
@@ -110,10 +160,12 @@ def _plot_keys(kind, axes):
         raise ValueError("axes")
     if calculated and kind not in {"binary", "ternary"}:
         raise ImportCommandError('PLOT_CALCULATION_UNSUPPORTED', 'Расчётные оси доступны на бинарных и тройных диаграммах.')
-    if kind == "ternary" and (len({key[1:] for key in keys}) != 1 or keys[0][1] not in ({"wt.%", "ppm", "ppb", "ratio"} if calculated else {"wt.%", "ppm", "ppb"})):
+    if kind == "ternary" and (len({key[1:] for key in keys}) != 1 or keys[0][1] not in ({"wt.%", "ppm", "ppb", "ratio", "APFU"} if calculated else {"wt.%", "ppm", "ppb"})):
         raise ImportCommandError("PLOT_TERNARY_INCOMPATIBLE_AXES", "Для тройной диаграммы выберите компоненты в одной единице и одном аналитическом наборе.")
     if kind == 'ternary' and calculated:
-        if keys[0][1] == 'ratio':
+        if keys[0][1] == 'APFU':
+            compatible = all(operation == 'apfu' for _, operation, _ in definitions) and len({binding for _, _, binding in definitions}) == 1
+        elif keys[0][1] == 'ratio':
             ratio_inputs = [inputs for _, operation, inputs in definitions if operation == 'ratio']
             combined = [dict(zip(_AXIS_FIELDS, item)) for inputs in ratio_inputs for item in inputs]
             compatible = (len(ratio_inputs) == 3 and len({inputs[1] for inputs in ratio_inputs}) == 1
@@ -126,7 +178,7 @@ def _plot_keys(kind, axes):
                           and len({feature_domain(feature) for feature in features}) == 1
                           and not review_feature_domains(features)['overlapping_iron'])
         if not compatible:
-            raise ImportCommandError('PLOT_TERNARY_INCOMPATIBLE_AXES', 'Для тройной диаграммы нужны неперекрывающиеся компоненты одного домена или отношения с общим знаменателем.')
+            raise ImportCommandError('PLOT_TERNARY_INCOMPATIBLE_AXES', 'Для тройной диаграммы выберите одну основу APFU, неперекрывающиеся компоненты одного домена или отношения с общим знаменателем.')
     if kind in PATTERN_ORDERS and (len({key[2:] for key in keys}) != 1 or any(key[1] not in {"ppm", "ppb"} for key in keys)):
         raise ImportCommandError("PLOT_PATTERN_INCOMPATIBLE_AXES", "Для спектра выберите концентрации в ppm или ppb из одного аналитического набора и метода.")
     return keys
@@ -135,9 +187,47 @@ def _plot_keys(kind, axes):
 def _required_axis_keys(axes):
     required = set()
     for axis in axes:
-        key, _, operands = _coordinate_axis(axis)
-        required.update(operands or (key,))
+        key, operation, operands = _coordinate_axis(axis)
+        if operation != 'apfu':
+            required.update(operands or (key,))
     return required
+
+
+def _formula_axis_runs(connection, bindings):
+    from .formula_service import _open_formula_run
+
+    runs, results = {}, {}
+    for binding in dict.fromkeys(bindings):
+        method, version, fingerprint, ids = binding
+        by_analysis = {}
+        for run_id in ids:
+            if run_id not in runs:
+                runs[run_id] = _open_formula_run(connection, run_id)
+            run = runs[run_id]
+            if (run['method_id'], run['method_version'], run['method_definition_fingerprint']) != (method, version, fingerprint):
+                raise ImportCommandError('PLOT_FORMULA_METHOD_MISMATCH', 'Выбранный расчёт APFU имеет другое определение метода.')
+            analysis_id = run['analysis_id']
+            if analysis_id in by_analysis:
+                raise ImportCommandError('PLOT_FORMULA_AMBIGUOUS', 'Выберите один сохранённый расчёт APFU для каждого анализа.')
+            by_analysis[analysis_id] = run
+        results[binding] = by_analysis
+    return results
+
+
+def _formula_axis_value(field, run):
+    if run is None:
+        return None, {'field': field, 'reason': 'formula_run_missing'}
+    evidence = {'field': field, 'reason': None, 'run_id': run['id'], 'method_id': run['method_id'],
+                'method_version': run['method_version'], 'method_definition_fingerprint': run['method_definition_fingerprint'],
+                'input_fingerprint': run['input_fingerprint'], 'input_measurement_ids': run['input_measurement_ids']}
+    evidence['oxygen_basis'] = run['method_definition'].get('oxygen_basis')
+    evidence['cation_basis'] = run['method_definition'].get('cation_basis')
+    if run['status'] != 'current':
+        return None, {**evidence, 'reason': 'formula_run_stale', 'stale_reasons': run['stale_reasons']}
+    derived = next((item for item in run['result_manifest']['derived_values'] if item['field'] == field and item['unit'] == 'APFU'), None)
+    if derived is None:
+        return None, {**evidence, 'reason': 'formula_component_missing'}
+    return derived['value'], {**evidence, 'derived_value_id': derived['id']}
 
 
 def _coordinate_value(record, definition):
@@ -266,8 +356,9 @@ def _pattern_vertices(record, keys, concentrations):
 def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysis_ids=None, hidden_source_ids=None,
                     layers=None, *, normalization=None):
     keys = _plot_keys(kind, axes)
-    calculated = any('calculation' in axis for axis in axes)
+    calculated = any('calculation' in axis or 'formula' in axis for axis in axes)
     definitions = [_coordinate_axis(axis) for axis in axes] if calculated else []
+    formula_bindings = [binding for _, operation, binding in definitions if operation == 'apfu']
     reference = pattern_reference(kind, [key[0] for key in keys], normalization) if kind in PATTERN_ORDERS else None
     layers = _validated_layers(layers)
     parameter, selection = _selection(analysis_ids)
@@ -284,7 +375,7 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
     with closing(open_project(database_path)) as connection:
         connection.execute("BEGIN")
         active_analyses = connection.execute(
-            f"SELECT a.analysis_id, a.source_id {_ACTIVE_ANALYSES}", (parameter, selection),
+            f"SELECT a.analysis_id, a.source_id, a.identity_json, s.display_name AS source_name {_ACTIVE_ANALYSES}", (parameter, selection),
         ).fetchall()
         visible = {row["analysis_id"] for row in active_analyses
                    if row["analysis_id"] not in hidden_analyses and row["source_id"] not in hidden_sources}
@@ -294,8 +385,8 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
             {_ACTIVE_MEASUREMENTS} AND m.canonical_field IN (SELECT value FROM json_each(?))
             ORDER BY a.analysis_id, m.rowid
         """, (parameter, selection, fields))
-        observed = {}
-        metadata = {}
+        metadata = {row['analysis_id']: row for row in active_analyses if row['analysis_id'] in visible} if formula_bindings else {}
+        observed = {analysis_id: defaultdict(list) for analysis_id in sorted(metadata)}
         for row in rows:
             key = tuple(row[field] for field in _AXIS_FIELDS)
             if key not in key_set:
@@ -306,6 +397,7 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
             value = row if reference is not None or calculated else _measurement_numeric_value(row)
             observed.setdefault(analysis_id, defaultdict(list))[key].append(value)
             metadata[analysis_id] = row
+        formula_runs = _formula_axis_runs(connection, formula_bindings) if formula_bindings else {}
 
     points = []
     pattern_exclusions = []
@@ -323,10 +415,16 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
                 pattern_exclusions.append({"analysis_id": analysis_id, "reason": "no_positive_ratio", "vertices": vertices})
             continue
         if calculated:
-            results = [_coordinate_value(record, definition) for definition in definitions]
-            values = [item[0] for item in results]
-            evidence = [{'field': key[0], 'reason': status, 'measurements': measurements}
-                        for key, (_, status, measurements) in zip(keys, results)]
+            values, evidence = [], []
+            for definition in definitions:
+                key, operation, binding = definition
+                if operation == 'apfu':
+                    value, provenance = _formula_axis_value(key[0], formula_runs[binding].get(analysis_id))
+                else:
+                    value, status, measurements = _coordinate_value(record, definition)
+                    provenance = {'field': key[0], 'reason': status, 'measurements': measurements}
+                values.append(value)
+                evidence.append(provenance)
             failure = next((item['reason'] for item in evidence if item['reason'] is not None), None)
             if failure:
                 coordinate_exclusions.append({'analysis_id': analysis_id, 'reason': failure, 'axes': evidence})
@@ -578,6 +676,12 @@ def _insert_plot_specification(connection, name, analysis_ids, saved_panels, pan
     if connection.execute("SELECT 1 FROM plot_specification WHERE name = ?", (name,)).fetchone():
         raise ImportCommandError("PLOT_LAYOUT_NAME_EXISTS", "Раскладка с таким названием уже есть.")
     scope = {row["analysis_id"] for row in rows}
+    bindings = [_coordinate_axis({key: value for key, value in axis.items() if key not in {'scale', 'manual_range'}})[2]
+                for panel in saved_panels for axis in panel['axes'] if 'formula' in axis]
+    if bindings:
+        for bound_runs in _formula_axis_runs(connection, bindings).values():
+            if not bound_runs.keys() <= scope:
+                raise ImportCommandError('PLOT_FORMULA_SCOPE', 'Формулы раскладки должны относиться к выбранным анализам.')
     if any(not set(layer["analysis_ids"]) <= scope for layer in layers):
         raise ImportCommandError("PLOT_LAYER_INPUT_UNAVAILABLE", "Часть анализов слоя находится вне входного набора раскладки.")
     sources = {row["source_id"] for row in rows}

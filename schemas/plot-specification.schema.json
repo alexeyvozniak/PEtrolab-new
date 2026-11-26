@@ -28,6 +28,18 @@
         "method": {"type": ["string", "null"]},
         "measurement_set": {"type": ["string", "null"]},
         "scale": {"type": "string", "enum": ["linear", "log"]},
+        "formula": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "method_id", "method_version", "method_definition_fingerprint", "run_ids"],
+          "properties": {
+            "version": {"const": 1},
+            "method_id": {"type": "string", "pattern": "^formula\\."},
+            "method_version": {"type": "string", "minLength": 1},
+            "method_definition_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "minItems": 1, "uniqueItems": true}
+          }
+        },
         "calculation": {
           "type": "object",
           "additionalProperties": false,
@@ -46,6 +58,12 @@
             {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "items": false}
           ]
         }
+      },
+      "if": {"required": ["formula"]},
+      "then": {
+        "required": ["unit", "method", "measurement_set"],
+        "not": {"required": ["calculation"]},
+        "properties": {"field": {"pattern": "^apfu\\..+$"}, "unit": {"const": "APFU"}, "method": {"const": null}, "measurement_set": {"const": null}}
       }
     },
     "panel": {
