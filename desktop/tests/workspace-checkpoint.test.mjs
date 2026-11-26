@@ -22,3 +22,8 @@ test("plot checkpoint retains category colors, layers and exact axes but not sta
   assert.equal(state.colorMode,"mineral");assert.equal(state.schemeColors.length,2);assert.equal(state.panels[0].axes[0].scale,undefined);
   assert.equal(state.panels[0].point_style.opacity,.35);assert.equal(state.layers[0].id,"cloud");assert.equal(state.views.size,0);
 });
+
+test("trace-pattern normalization is restored without substituting a reference",()=>{
+ const state=plotMemoryFromLayout({legend:{entries:[]},panels:[{id:"r",kind:"ree_pattern",axes:[],normalization:"sun_mcdonough_1989_c1"}]});
+ assert.equal(state.panels[0].normalization,"sun_mcdonough_1989_c1");
+});

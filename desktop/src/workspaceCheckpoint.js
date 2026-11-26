@@ -32,7 +32,7 @@ export function plotMemoryFromLayout(layout) {
   if(category)for(const entry of category.entries)if(entry.key!==null)colors.push({mode:category.mode,key:entry.key,color:entry.color});
   return {opened:true,panels:layout.panels.map(({id,kind,axes,normalization,point_style})=>({
     id,kind,axes:axes.map(({scale,manual_range,...axis})=>axis),
-    ...(["ree","spider"].includes(kind)?{normalization}:{}),...(point_style?{point_style}:{})
+    ...(["ree_pattern","spider"].includes(kind)?{normalization}:{}),...(point_style?{point_style}:{})
   })),layers:layout.layers||[],views:new Map(),scrollTop:0,scrollLeft:0,
     savedColors:Object.fromEntries(layout.legend.entries.map(({value,color})=>[value,color])),
     colorMode:category?.mode||"source",schemeColors:colors,schemeLoaded:true,schemeRevision:null};

@@ -5,6 +5,11 @@ export function WorkspaceCheckpoints({load,save,restore,selection,close}) {
   const [surface,setSurface]=useState("overview"),[includeSelection,setIncludeSelection]=useState(true);
   const [pending,setPending]=useState(false),[notice,setNotice]=useState(""),[error,setError]=useState("");
   useEffect(()=>{let active=true;load().then(value=>{if(active)setCatalog(value);},caught=>{if(active)setError(caught.message);});return()=>{active=false;};},[]);
+  useEffect(()=>{
+    const dismiss=event=>{if(event.key==="Escape"&&!pending){event.preventDefault();event.stopImmediatePropagation();close();}};
+    window.addEventListener("keydown",dismiss,true);
+    return()=>window.removeEventListener("keydown",dismiss,true);
+  },[pending,close]);
   const submit=async event=>{
     event.preventDefault();setPending(true);setError("");setNotice("");
     try{
