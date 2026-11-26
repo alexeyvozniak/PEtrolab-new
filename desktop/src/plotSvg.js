@@ -53,7 +53,7 @@ export function buildPlotSvg(canvases, { showLabel = true, alphabet, uppercase, 
         element.textContent = source.textContent;
       } else {
         const fill = source.getAttribute("fill") || "";
-        element.setAttribute("fill", /^#[0-9a-f]{6}$/i.test(fill) ? fill : "#527eac");
+        element.setAttribute("fill", source.classList.contains("plot-field") && fill==="none" ? "none" : /^#[0-9a-f]{6}$/i.test(fill) ? fill : "#527eac");
       }
       group.append(element);
     }

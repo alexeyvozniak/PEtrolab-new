@@ -88,3 +88,7 @@
 .plot-point-style label { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .plot-point-style input[type=range] { width:55%; min-width:60px; }
 .plot-style-actions { display:flex; gap:4px; flex-wrap:wrap; }
+
+.plot-cloud-style { display:grid; gap:4px; margin:5px 0; }
+.plot-cloud-style label { display:flex;align-items:center;gap:5px;justify-content:space-between; }
+.plot-cloud-style input[type=range] { min-width:50px;width:45%; }

@@ -361,6 +361,14 @@ class PublicationPackageTests(unittest.TestCase):
             self.assertEqual(open_plot_specification(database,styled["id"])["panels"][0]["point_style"],styled_panel["point_style"])
             with self.assertRaises(ValueError):
                 save_plot_specification(database,"Недопустимый стиль",None,[{**panel,"point_style":{"opacity":0,"size_scale":1}}],{},[],[])
+            layer={"id":str(uuid4()),"name":"Облако","analysis_ids":list(assignments),"show_points":False,"opacity":1,
+                   "field":{"method":"convex_hull","visible":True,"probability":None,
+                            "style":{"mode":"outline","color":"#112233","fill_opacity":0.3,"stroke_width":2}}}
+            cloud=save_plot_specification(database,"Облако",None,[panel],{},[],[],[layer])
+            self.assertEqual(cloud["schema_version"],4)
+            self.assertEqual(open_plot_specification(database,cloud["id"])["layers"],[layer])
+            with self.assertRaises(ValueError):
+                save_plot_specification(database,"Ошибка облака",None,[panel],{},[],[],[{**layer,"field":{**layer["field"],"style":{**layer["field"]["style"],"stroke_width":0}}}])
             svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g id="panel-a"><text x="1" y="2">a</text></g><g id="category-legend"><rect x="1" y="10" width="10" height="10" fill="#112233"/><rect x="1" y="25" width="10" height="10" fill="#445566"/></g></svg>'
             capture = {"name":"Categories","format":"svg","width_mm":90,"dpi":600,"include_csv":True,"svg":svg,
                        "analysis_ids":None,"hidden_analysis_ids":[],"hidden_source_ids":[],"layers":[],"colors":{},

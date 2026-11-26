@@ -7,6 +7,7 @@ import "./plotWorkspace.css";
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
 const EMPTY_BINS = [];
 const DEFAULT_POINT_STYLE = Object.freeze({opacity:1, size_scale:1});
+const DEFAULT_FIELD_STYLE = Object.freeze({mode:"both",color:"#5c7d66",fill_opacity:0.26,stroke_width:1});
 const COLOR_MODES = { source: "Источник", sample: "Физический образец", mineral: "Минерал (исходное название)", generation: "Generation" };
 const CATEGORY_COLORS = ["#356ca2","#ae5431","#39856b","#8c56a1","#bf8a28","#be456e","#367f91","#75643c","#647a2c","#485496","#ad675c","#7a7294","#248277","#a43d91","#66533f","#b67513"];
 const MISSING_COLOR = "#8c9590";
@@ -137,7 +138,7 @@ function initialPanels(axes) {
     : make("binary", [axes[1], axes[0]])];
 }
 
-function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, shape, colorFor, categoryColor, points, pointStyle = DEFAULT_POINT_STYLE, rememberedView, rememberView }) {
+function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, shape, colorFor, categoryColor, points, fieldStyles, pointStyle = DEFAULT_POINT_STYLE, rememberedView, rememberView }) {
   const drag = useRef(null);
   const canvas = useRef(null);
   const hovered = useRef(false);
@@ -380,9 +381,14 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
       <text transform={`translate(12 ${py(0.5)}) rotate(-90)`} textAnchor="middle">{isPattern ? "Отношение к эталону"
         : isHistogram ? "Число анализов" : `${data.axes[1].field} (${data.axes[1].unit})`}</text>
     </>}
-    {(data.fields || []).filter((field) => field.vertices.length >= 3).map((field) =>
-      <polygon key={field.layer_id} className="plot-field" fill="#99b9a0" fillOpacity={0.26}
-        stroke="#5c7d66" strokeWidth={1} points={field.vertices.map(([u, v]) => `${px(u)},${py(v)}`).join(" ")} />)}
+    {(data.fields || []).filter(field=>field.vertices.length>=3).map(field=>{
+      const style=fieldStyles?.get(field.layer_id);
+      return <polygon key={field.layer_id} className="plot-field"
+        fill={style?.mode==="outline" ? "none" : style?.color || "#99b9a0"}
+        fillOpacity={style?.fill_opacity ?? 0.26}
+        stroke={style?.mode==="fill" ? "none" : style?.color || "#5c7d66"}
+        strokeWidth={style?.stroke_width ?? 1} points={field.vertices.map(([u,v])=>`${px(u)},${py(v)}`).join(" ")} />;
+    })}
     {paths.map(({ point, path }) => <path key={point.analysis_id} className="plot-series" data-analysis-id={point.analysis_id}
       d={path} fill="none" stroke={categoryColor ? categoryColor(point.analysis_id) : colorFor(point.source_id)} strokeWidth={1.25} opacity={point.opacity * pointStyle.opacity} />)}
     {bars.map((bar, index) => {
@@ -443,11 +449,14 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
   }
   const styles = useMemo(() => {
     const result = new Map();
-    layers.forEach(({ analysis_ids, opacity, show_points }, order) => {
-      for (const id of analysis_ids) result.set(id, { order, opacity: show_points ? opacity : 0 });
+    const available = new Set((data?.fields || []).filter(field=>field.vertices.length>=3).map(field=>field.layer_id));
+    layers.forEach(({ id:layerId, analysis_ids, opacity, show_points, field }, order) => {
+      const fallback = field?.visible && !available.has(layerId);
+      for (const id of analysis_ids) result.set(id, { order, opacity: show_points || fallback ? (fallback && !show_points ? 1 : opacity) : 0 });
     });
     return result;
-  }, [layers]);
+  }, [layers,data]);
+  const fieldStyles = useMemo(()=>new Map(layers.filter(layer=>layer.field?.style).map(layer=>[layer.id,layer.field.style])),[layers]);
   const points = useMemo(() => panel.kind === "histogram" ? data?.points || [] : (data?.points || []).map((point) => ({ ...point, ...(styles.get(point.analysis_id) || { opacity: 1, order: -1 }) }))
     .filter((point) => point.opacity > 0).sort((a, b) => a.order - b.order), [panel.kind, data, styles]);
   const status = current ? current.error : "Загружаю диаграмму…";
@@ -540,7 +549,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
     </details>}
     {status && <p role="status">{status}</p>}
     {data && <>
-      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} categoryColor={categoryColor} points={points} pointStyle={pointStyle}
+      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} categoryColor={categoryColor} points={points} fieldStyles={fieldStyles} pointStyle={pointStyle}
         rememberedView={viewMemory?.views.get(panel.id)?.fingerprint === data.projection_sha256 ? viewMemory.views.get(panel.id).view : undefined}
         rememberView={view => viewMemory?.views.set(panel.id, { fingerprint: data.projection_sha256, view })} />
       <small>{pattern ? "Спектров" : panel.kind === "histogram" ? "Анализов" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
@@ -550,7 +559,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
       {Object.keys(exclusions).length > 0 && <small className="plot-exclusion-summary">{Object.entries(exclusions)
         .map(([reason, count]) => `${reason} (${count})`).join(" · ")}</small>}
       {(data.fields || []).filter((field) => field.message).map((field) =>
-        <p key={field.layer_id}><small>{layers.find((layer) => layer.id === field.layer_id)?.name}: {field.message}</small></p>)}
+        <p key={field.layer_id}><small>{layers.find((layer) => layer.id === field.layer_id)?.name}: {field.message}{layers.some(layer=>layer.id===field.layer_id && !layer.show_points) ? " Маркеры показаны вместо поля." : ""}</small></p>)}
     </>}
   </article>;
 }
@@ -806,6 +815,8 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
   // Cache only within this mounted workspace and exact data/visibility/layer
   // scope. Deduplicate in-flight requests; rejected or oversized entries are
   // never retained. No persistent cache across project changes or edits.
+  const geometrySignature=JSON.stringify(layers.map(layer=>({...layer,field:layer.field ? {method:layer.field.method,visible:layer.field.visible,probability:layer.field.probability} : null})));
+  const geometryLayers=useMemo(()=>JSON.parse(geometrySignature),[geometrySignature]);
   const loadWithLayers = useMemo(() => {
     const cache = new Map();
     return (kind, axes, normalization) => {
@@ -816,7 +827,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         cache.set(key, entry);
         return entry;
       }
-      const entry = Promise.resolve().then(() => loadData(kind, axes, layers, normalization));
+      const entry = Promise.resolve().then(() => loadData(kind, axes, geometryLayers, normalization));
       cache.set(key, entry);
       while (cache.size > 4) cache.delete(cache.keys().next().value);
       entry.then(data => {
@@ -825,7 +836,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
       }, () => { if (cache.get(key) === entry) cache.delete(key); });
       return entry;
     };
-  }, [loadData, layers]);
+  }, [loadData, geometryLayers]);
   const [exportStatus, setExportStatus] = useState(null);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportOptions, setExportOptions] = useState(null);
@@ -959,6 +970,13 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     event.preventDefault();
     setLayers((current) => [...current, { id: crypto.randomUUID(), name: layerName.trim(), analysis_ids: layerInput,
       show_points: true, opacity: 1, field: null }]);
+    setLayerName("");
+  };
+  const addCloud = () => {
+    if (!layerInput.length || layers.length>=32) return;
+    const name=layerName.trim() || "Облако "+(layers.length+1);
+    setLayers(current=>[...current,{id:crypto.randomUUID(),name,analysis_ids:[...layerInput],
+      show_points:false,opacity:1,field:{method:"convex_hull",visible:true,probability:null,style:{...DEFAULT_FIELD_STYLE}}}]);
     setLayerName("");
   };
   const updateLayer = (id, changes) => setLayers((current) => current.map((layer) => layer.id === id ? { ...layer, ...changes } : layer));
@@ -1162,13 +1180,25 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
             onChange={(event) => updateLayer(layer.id, { opacity: Number(event.target.value) })} /></label>
           <label>Метод поля <select value={layer.field?.method || ""} onChange={(event) => {
             const method = event.target.value;
-            updateLayer(layer.id, { field: method ? { method, visible: true, probability: method === "convex_hull" ? null : 0.95 } : null });
+            updateLayer(layer.id, { field: method ? { method, visible: true, probability: method === "convex_hull" ? null : 0.95, ...(layer.field?.style ? {style:layer.field.style} : {}) } : null });
           }}>
             <option value="">Без поля</option><option value="convex_hull">Выпуклая оболочка</option>
             <option value="normal_probability_ellipse">Эллипс вероятности</option>
           </select></label>
           {layer.field && <label><input type="checkbox" checked={layer.field.visible}
             onChange={(event) => updateLayer(layer.id, { field: { ...layer.field, visible: event.target.checked } })} /> Поле</label>}
+          {layer.field && <div className="plot-cloud-style">
+            <label>Оформление облака <select value={(layer.field.style || DEFAULT_FIELD_STYLE).mode}
+              onChange={event=>updateLayer(layer.id,{field:{...layer.field,style:{...(layer.field.style || DEFAULT_FIELD_STYLE),mode:event.target.value}}})}>
+              <option value="outline">Только контур</option><option value="fill">Только заливка</option><option value="both">Контур и заливка</option>
+            </select></label>
+            <label>Цвет облака <input type="color" value={(layer.field.style || DEFAULT_FIELD_STYLE).color}
+              onChange={event=>updateLayer(layer.id,{field:{...layer.field,style:{...(layer.field.style || DEFAULT_FIELD_STYLE),color:event.target.value}}})}/></label>
+            <label>Непрозрачность заливки <input type="range" min="0.05" max="1" step="0.05" value={(layer.field.style || DEFAULT_FIELD_STYLE).fill_opacity}
+              disabled={layer.field.style?.mode==="outline"} onChange={event=>updateLayer(layer.id,{field:{...layer.field,style:{...(layer.field.style || DEFAULT_FIELD_STYLE),fill_opacity:Number(event.target.value)}}})}/></label>
+            <label>Толщина контура <input type="range" min="0.5" max="4" step="0.5" value={(layer.field.style || DEFAULT_FIELD_STYLE).stroke_width}
+              disabled={layer.field.style?.mode==="fill"} onChange={event=>updateLayer(layer.id,{field:{...layer.field,style:{...(layer.field.style || DEFAULT_FIELD_STYLE),stroke_width:Number(event.target.value)}}})}/></label>
+          </div>}
           {layer.field?.method === "normal_probability_ellipse" && <label>Вероятность <select value={layer.field.probability}
             onChange={(event) => updateLayer(layer.id, { field: { ...layer.field, probability: Number(event.target.value) } })}>
             <option value={0.90}>90%</option><option value={0.95}>95%</option><option value={0.99}>99%</option>
@@ -1180,6 +1210,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         <form onSubmit={addLayer}>
           <label>Название слоя<input value={layerName} maxLength={120} onChange={(event) => setLayerName(event.target.value)} /></label>
           <button className="outline-button" type="submit" disabled={!layerName.trim() || !layerInput.length || layers.length >= 32}>Добавить слой из отбора</button>
+          <button className="outline-button" type="button" disabled={!layerInput.length || layers.length>=32} onClick={addCloud}>Только облако выделения · {layerInput.length}</button>
         </form>
       </details>
       {loadLayouts && <details className="plot-saved-layouts">

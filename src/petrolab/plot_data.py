@@ -662,6 +662,15 @@ def _layout_input(connection, analysis_ids):
     return rows, {tuple(row) for row in axes}
 
 
+def _validate_field_style(style):
+    if (not isinstance(style, dict) or set(style) != {"mode", "color", "fill_opacity", "stroke_width"}
+            or style["mode"] not in ("outline", "fill", "both")
+            or not isinstance(style["color"], str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", style["color"])
+            or type(style["fill_opacity"]) not in (int, float) or not 0.05 <= style["fill_opacity"] <= 1
+            or type(style["stroke_width"]) not in (int, float) or not 0.5 <= style["stroke_width"] <= 4):
+        raise ValueError("plot_field_style")
+
+
 def _validated_layers(layers):
     if layers is None:
         return []
@@ -680,9 +689,11 @@ def _validated_layers(layers):
         field = layer["field"]
         if field is None:
             continue
-        if (not isinstance(field, dict) or set(field) != {"method", "visible", "probability"}
+        if (not isinstance(field, dict) or set(field) - {"style"} != {"method", "visible", "probability"}
                 or type(field["visible"]) is not bool):
             raise ValueError("field")
+        if "style" in field:
+            _validate_field_style(field["style"])
         if field["method"] == "convex_hull" and field["probability"] is None:
             continue
         if (field["method"] != "normal_probability_ellipse" or type(field["probability"]) not in (int, float)
@@ -788,6 +799,8 @@ def _insert_plot_specification(connection, name, analysis_ids, saved_panels, pan
         spec["schema_version"] = 2
     if any("point_style" in panel for panel in saved_panels):
         spec["schema_version"] = 3
+    if any("style" in (layer["field"] or {}) for layer in layers):
+        spec["schema_version"] = 4
     connection.execute("INSERT INTO plot_specification (id, name, definition_json) VALUES (?, ?, ?)",
                        (spec["id"], name, json.dumps(spec, ensure_ascii=False)))
     return spec
@@ -806,7 +819,9 @@ def open_plot_specification(database_path, spec_id):
         if not row:
             raise ImportCommandError("PLOT_LAYOUT_UNAVAILABLE", "Раскладка недоступна.")
         spec = json.loads(row[0])
-        expected_version = (3 if any("point_style" in panel for panel in spec["panels"])
+        _validated_layers(spec.get("layers"))
+        expected_version = (4 if any("style" in (layer["field"] or {}) for layer in spec.get("layers", []))
+                            else 3 if any("point_style" in panel for panel in spec["panels"])
                             else 2 if "category_style" in spec else 1)
         if spec.get("schema_version") != expected_version:
             raise ImportCommandError("PLOT_LAYOUT_VERSION_UNSUPPORTED", "Версия раскладки несовместима с этой версией PetroLab.")

@@ -876,15 +876,22 @@ test("visible plot fields survive marker hiding and SVG includes their geometry"
   }
   await user.click(screen.getByText("Слои и поля", { exact: true }));
   await user.type(screen.getByLabelText("Название слоя"), "Серия");
-  await user.click(await enabledButton("Добавить слой из отбора"));
+  await user.click(await enabledButton("Только облако выделения · 3"));
   const layer = within(screen.getByRole("group", { name: "Серия · 3" }));
-  await user.selectOptions(layer.getByLabelText("Метод поля"), "convex_hull");
-  await user.click(layer.getByRole("checkbox", { name: "Точки" }));
+  expect(layer.getByLabelText("Метод поля").value).toBe("convex_hull");
+  expect(layer.getByRole("checkbox", { name: "Точки" }).checked).toBe(false);
   await waitFor(() => expect(container.querySelectorAll(".plot-field")).toHaveLength(2));
   expect(screen.queryByRole("button", { name: "Выбрать точку P1" })).toBeNull();
   expect(screen.getByText("Выбранные анализы · 3")).toBeTruthy();
+  await user.selectOptions(layer.getByLabelText("Оформление облака"),"outline");
+  fireEvent.change(layer.getByLabelText("Цвет облака"),{target:{value:"#123456"}});
+  fireEvent.change(layer.getByLabelText("Толщина контура"),{target:{value:"2"}});
   const svg = new DOMParser().parseFromString(await readFile(await savePlot(user), "utf8"), "image/svg+xml");
   expect(svg.querySelectorAll("polygon")).toHaveLength(2);
+  expect([...svg.querySelectorAll("polygon")].every(p=>p.getAttribute("fill")==="none" && p.getAttribute("stroke")==="#123456" && p.getAttribute("stroke-width")==="2")).toBe(true);
+  await user.selectOptions(layer.getByLabelText("Оформление облака"),"fill");
+  expect([...container.querySelectorAll(".plot-field")].every(p=>p.getAttribute("stroke")==="none")).toBe(true);
+  await user.selectOptions(layer.getByLabelText("Оформление облака"),"both");
   expect(svg.querySelector("circle, clipPath, mask")).toBeNull();
   const pdf = await readFile(await savePlot(user, 1, "PDF · векторный"));
   expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
