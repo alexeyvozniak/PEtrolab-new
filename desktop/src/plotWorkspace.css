@@ -97,3 +97,6 @@
 
 .plot-category-legend .category-symbol { min-width:48px;max-width:85px;font-size:10px; }
 .plot-category-legend > div { flex-wrap:wrap; }
+
+/* Outline symbols must stay selectable even inside their unpainted interior. */
+.plot-point { pointer-events: all; }

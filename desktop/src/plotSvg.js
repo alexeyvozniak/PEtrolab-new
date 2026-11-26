@@ -1,4 +1,4 @@
-import {symbolGeometry} from "./plotSymbols";
+import {symbolGeometry,symbolPaint} from "./plotSymbols";
 const SVG = "http://www.w3.org/2000/svg";
 export const PLOT_SIZE = { width: 460, height: 280 };
 const COPY_ATTRIBUTES = ["x", "y", "width", "height", "x1", "x2", "y1", "y2", "cx", "cy", "r", "d", "text-anchor", "transform",
@@ -54,7 +54,7 @@ export function buildPlotSvg(canvases, { showLabel = true, alphabet, uppercase, 
         element.textContent = source.textContent;
       } else {
         const fill = source.getAttribute("fill") || "";
-        element.setAttribute("fill", source.classList.contains("plot-field") && fill==="none" ? "none" : /^#[0-9a-f]{6}$/i.test(fill) ? fill : "#527eac");
+        element.setAttribute("fill", (source.classList.contains("plot-field") || source.classList.contains("plot-point")) && fill==="none" ? "none" : /^#[0-9a-f]{6}$/i.test(fill) ? fill : "#527eac");
       }
       group.append(element);
     }
@@ -72,7 +72,7 @@ export function buildPlotSvg(canvases, { showLabel = true, alphabet, uppercase, 
       const y = 30 + index * 16;
       if(entry.symbol){
         const {tag,attrs}=symbolGeometry(entry.symbol,17,y+5,5);
-        group.append(create(tag,{...attrs,fill:entry.color}));
+        group.append(create(tag,{...attrs,...symbolPaint(entry.symbol,entry.color)}));
       }else group.append(create("rect",{x:12,y,width:10,height:10,fill:entry.color}));
       const label = entry.label.length > 54 ? entry.label.slice(0,51) + "…" : entry.label;
       addText(28,y+9,label + " · " + entry.count);

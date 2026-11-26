@@ -287,7 +287,23 @@
                 "circle",
                 "square",
                 "triangle",
-                "diamond"
+                "diamond",
+                "triangle_down",
+                "pentagon",
+                "hexagon",
+                "star",
+                "plus",
+                "cross",
+                "circle_open",
+                "square_open",
+                "triangle_open",
+                "diamond_open",
+                "triangle_down_open",
+                "pentagon_open",
+                "hexagon_open",
+                "star_open",
+                "plus_open",
+                "cross_open"
               ]
             }
           }
@@ -652,7 +668,23 @@
                   "circle",
                   "square",
                   "triangle",
-                  "diamond"
+                  "diamond",
+                  "triangle_down",
+                  "pentagon",
+                  "hexagon",
+                  "star",
+                  "plus",
+                  "cross",
+                  "circle_open",
+                  "square_open",
+                  "triangle_open",
+                  "diamond_open",
+                  "triangle_down_open",
+                  "pentagon_open",
+                  "hexagon_open",
+                  "star_open",
+                  "plus_open",
+                  "cross_open"
                 ]
               }
             }

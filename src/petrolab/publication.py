@@ -20,6 +20,7 @@ from .formula_service import list_formula_runs, open_formula_run
 from .import_preview import ImportCommandError
 from .media_display import _annotations, _asset_source, _publish_new_file, export_media_original, export_media_rendered
 from .plot_data import list_plot_specifications, open_plot_specification, query_plot_data, validate_category_style, validate_point_style
+from .plot_symbols import marker_legend_signature
 from .plot_export import SVG_LIMIT, checked_svg, render_plot
 from .selection_export import selection_xlsx_bytes
 from .statistics_service import list_calculation_runs, open_calculation_run
@@ -129,8 +130,8 @@ def _plot_capture(database_path, capture):
             raise ValueError("plot_capture_category_legend")
         legend = nodes.pop()
         markers = [node for node in legend if node.tag.rsplit("}",1)[-1] in ("rect","circle","polygon")]
-        expected = [(entry["color"], "circle" if entry.get("symbol") == "circle" else "polygon" if entry.get("symbol") else "rect") for entry in category_style["entries"]]
-        if [(node.get("fill"),node.tag.rsplit("}",1)[-1]) for node in markers] != expected:
+        expected = [marker_legend_signature(entry.get("symbol"), entry["color"]) for entry in category_style["entries"]]
+        if [(node.tag.rsplit("}",1)[-1],node.get("fill"),node.get("stroke")) for node in markers] != expected:
             raise ValueError("plot_capture_category_colors")
     if len(nodes) != len(capture["panels"]) or any(not node.tag.endswith("}g") for node in root):
         raise ValueError("plot_capture_panels")

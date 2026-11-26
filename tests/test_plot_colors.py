@@ -17,6 +17,11 @@ class PlotColorTests(unittest.TestCase):
             self.assertEqual(saved["scheme"]["colors"][0]["color"],"#aabbcc")
             self.assertEqual(get_project_plot_colors(a),saved)
             self.assertEqual(saved["scheme"]["colors"][0]["symbol"],"diamond")
+            from petrolab.plot_symbols import PLOT_SYMBOLS, marker_legend_signature
+            self.assertEqual(len(PLOT_SYMBOLS),20)
+            self.assertEqual(marker_legend_signature("star_open","#112233"),("polygon","none","#112233"))
+            for symbol in sorted(PLOT_SYMBOLS):
+                self.assertEqual(marker_legend_signature(symbol,"#112233")[1],"none" if symbol.endswith("_open") else "#112233")
             with self.assertRaises(ValueError):
                 save_project_plot_colors(a,{"mode":"mineral","colors":[{"mode":"mineral","key":"mica","color":"#112233","symbol":"unknown"}]},1)
             self.assertEqual(get_project_plot_colors(b)["revision"],0)

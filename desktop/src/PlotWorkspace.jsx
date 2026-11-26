@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import { ContextActions } from "./ContextActions";
-import { SYMBOL_LABELS,symbolGeometry } from "./plotSymbols";
-function PointMarker({symbol,x,y,r,children,...props}) {
+import { SYMBOL_LABELS,symbolGeometry,symbolPaint } from "./plotSymbols";
+function PointMarker({symbol,x,y,r,children,fill,...props}) {
   const {tag:Tag,attrs}=symbolGeometry(symbol,x,y,r);
-  return <Tag {...attrs} {...props}>{children}</Tag>;
+  const paint=symbolPaint(symbol,fill);
+  return <Tag {...attrs} {...props} fill={paint.fill} stroke={paint.stroke} strokeWidth={paint["stroke-width"]}>{children}</Tag>;
 }
 import { makePreset, presetKey, rememberPreset, resolvePreset, templateGroups, MINERAL_TEMPLATES } from "./plotPresets";
 import "./plotWorkspace.css";

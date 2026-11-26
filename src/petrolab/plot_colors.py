@@ -5,6 +5,7 @@ import re
 from uuid import UUID
 from .import_apply import open_project
 from .import_preview import ImportCommandError
+from .plot_symbols import PLOT_SYMBOLS
 
 _MODES = {"source", "sample", "mineral", "generation"}
 
@@ -25,7 +26,7 @@ def _validate(scheme):
             raise ValueError("plot_color_id")
         if not isinstance(color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", color) or (mode,key) in seen:
             raise ValueError("plot_color_value")
-        if "symbol" in entry and entry["symbol"] not in ("circle","square","triangle","diamond"):
+        if "symbol" in entry and entry["symbol"] not in PLOT_SYMBOLS:
             raise ValueError("plot_symbol")
         seen.add((mode,key))
     return {"mode": scheme["mode"], "colors": [{**entry,"color":entry["color"].lower()} for entry in colors]}

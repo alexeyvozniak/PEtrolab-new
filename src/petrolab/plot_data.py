@@ -13,6 +13,7 @@ from .desktop_workflow import _measurement_numeric_value
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
 from .plot_fields import clip_to_plot_rectangle, convex_hull, normal_probability_ellipse
+from .plot_symbols import PLOT_SYMBOLS
 from .statistics_core import feature_domain, review_feature_domains
 from .trace_patterns import PATTERN_ORDERS, normalized_pattern_value, pattern_catalog, pattern_coordinates, pattern_reference
 
@@ -127,7 +128,7 @@ def validate_category_style(connection, analysis_ids, style):
             raise ValueError("category_style_key")
         if key in seen or key not in groups or type(entry["count"]) is not int or not isinstance(entry["color"], str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", entry["color"]):
             raise ValueError("category_style_entry")
-        if "symbol" in entry and (key is None or entry["symbol"] not in ("circle","square","triangle","diamond")):
+        if "symbol" in entry and (key is None or entry["symbol"] not in PLOT_SYMBOLS):
             raise ValueError("plot_symbol")
         if key is None and entry["color"].lower() != "#8c9590":
             raise ValueError("category_missing_color")
@@ -711,7 +712,7 @@ def validate_point_style(panel):
     style = panel["point_style"]
     if (panel["kind"] == "histogram" or not isinstance(style, dict)
             or set(style) - {"symbol"} != {"opacity", "size_scale"}
-            or ("symbol" in style and style["symbol"] not in ("circle","square","triangle","diamond"))
+            or ("symbol" in style and style["symbol"] not in PLOT_SYMBOLS)
             or type(style["opacity"]) not in (int, float)
             or type(style["size_scale"]) not in (int, float)
             or not 0.05 <= style["opacity"] <= 1
