@@ -12,13 +12,13 @@ from contextlib import closing
 from tempfile import NamedTemporaryFile
 
 from .clean_table import classify_clean_table
-from .desktop_workflow import (suggest_import_recipe, bulk_unit_scopes, bulk_ignore_scopes,
+from .desktop_workflow import (suggest_import_recipe, bulk_unit_scopes_for_inspection, bulk_ignore_scopes_for_inspection,
                                apply_bulk_unit_scope, apply_bulk_ignore_scope)
 from .formula_service import check_import_formula_acceptance, persist_import_formulae, review_import_formula
 from .import_apply import (apply_import_batch, open_project, workspace_commit_exists,
                            _require_duplicate_review, _require_non_empty_plan)
 from .import_preview import (ImportCommandError, inspect_source, create_import_plan, validate_recipe,
-                             preview_source_window, semantic_fingerprint)
+                             preview_inspection_window, semantic_fingerprint)
 from .manual_mapping import revise_import_mappings, revise_import_sections, review_duplicate_candidates
 from .semantic_import import apply_semantic_decision, SEMANTIC_ACTIONS
 from .analyte_dictionary import CANONICAL, confirmed_alias
@@ -193,10 +193,10 @@ class ImportWorkspaceStore:
                 return review_import_formula(record, params.get('method_id'))
             if operation == 'preview_window':
                 source = self._source(session, params.get('source_id'))
-                self._check(source)
+                inspection = self._check(source)
                 if params.get('semantic_extension'):
                     return apply_semantic_decision(source['staged_path'], source['recipe'], params['semantic_extension'], preview=True)
-                result = preview_source_window(source['staged_path'], params['sheet_name'], params.get('start_row', 1),
+                result = preview_inspection_window(inspection, params['sheet_name'], params.get('start_row', 1),
                                                params.get('row_count', 30), params.get('start_column', 0), params.get('column_count', 24))
                 return {**result, 'source_path': source['staged_path']}
             if operation == 'add_sources':
@@ -492,8 +492,8 @@ class ImportWorkspaceStore:
                     check(*args)
                 except ImportCommandError as error:
                     issues.append({'code': error.code, 'message': error.message, 'severity': 'error', 'blocking': True})
-            units = bulk_unit_scopes(source['staged_path'], source['recipe'])['scopes']
-            ignores = bulk_ignore_scopes(source['staged_path'], source['recipe'])['scopes']
+            units = bulk_unit_scopes_for_inspection(inspection, source['recipe'])['scopes']
+            ignores = bulk_ignore_scopes_for_inspection(inspection, source['recipe'])['scopes']
         except ImportCommandError as error:
             issues.append({'code': error.code, 'message': error.message, 'severity': 'error', 'blocking': True})
         formula_acceptances = []

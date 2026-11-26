@@ -8,6 +8,7 @@ import uuid
 from contextlib import closing
 from unittest.mock import patch
 
+from petrolab import import_preview
 from petrolab.import_preview import ImportCommandError
 from petrolab.import_apply import retract_latest_import
 from petrolab.desktop_workflow import list_project_analyses
@@ -34,6 +35,26 @@ class ImportWorkspaceTests(unittest.TestCase):
         self.current = self.store.command(operation, {'workspace_id': session['workspace_id'],
             'expected_revision': session['draft_revision'], 'source_id': session['active_source_id'], **params})
         return self.current
+
+    def test_review_and_preview_reuse_one_verified_inspection(self):
+        session = self.current['session']
+        params = {'workspace_id': session['workspace_id'],
+                  'source_id': session['active_source_id']}
+        original = self.source.read_bytes()
+        with patch.object(import_preview, '_read_delimited', wraps=import_preview._read_delimited) as reader:
+            reviewed = self.store.command('get', params)
+            self.assertEqual(reader.call_count, 1)
+            self.assertEqual(reviewed, self.current)
+            reader.reset_mock()
+            preview = self.store.command('preview_window', {**params, 'sheet_name': 'first',
+                                                          'start_row': 2, 'row_count': 1})
+            self.assertEqual(reader.call_count, 1)
+            self.assertEqual(preview['rows'][0]['values'], ['A1', '10', '<DL'])
+        self.assertEqual(self.source.read_bytes(), original)
+        self.source.write_bytes(original + b'A3,12,0\n')
+        with self.assertRaises(ImportCommandError) as caught:
+            self.store.command('preview_window', {**params, 'sheet_name': 'first'})
+        self.assertEqual(caught.exception.code, 'SOURCE_FINGERPRINT_MISMATCH')
 
     def test_two_sources_keep_mapping_identity_issue_and_raw_coordinates(self):
         first = self.current['session']['active_source_id']

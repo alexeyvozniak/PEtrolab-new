@@ -460,7 +460,12 @@ def _sheet(inspection: SourceInspection, name: str) -> SheetInspection:
 
 
 def preview_source_window(source_path: str | Path, sheet_name: str, start_row: int, row_count: int = 12, start_column: int = 0, column_count: int = 24) -> dict[str, Any]:
-    sheet = _sheet(inspect_source(source_path), sheet_name)
+    return preview_inspection_window(inspect_source(source_path), sheet_name, start_row, row_count, start_column, column_count)
+
+
+def preview_inspection_window(inspection: SourceInspection, sheet_name: str, start_row: int, row_count: int = 12, start_column: int = 0, column_count: int = 24) -> dict[str, Any]:
+    """Project a small window from an already inspected source."""
+    sheet = _sheet(inspection, sheet_name)
     start_row = max(1, int(start_row))
     row_count = max(1, min(int(row_count), 60))
     start_column = max(0, int(start_column))
