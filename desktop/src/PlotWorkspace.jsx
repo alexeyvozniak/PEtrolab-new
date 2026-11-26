@@ -8,7 +8,18 @@ const px = (value) => VIEW.left + value * (VIEW.right - VIEW.left);
 const py = (value) => VIEW.bottom - value * (VIEW.bottom - VIEW.top);
 const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
 const axisKey = (axis) => JSON.stringify([axis.field, axis.unit, axis.measurement_set, axis.method]);
-const axisLabel = (axis) => [axis.field, axis.unit, axis.measurement_set, axis.method].filter(Boolean).join(" · ");
+const isCalculatedAxis = (axis) => Boolean(axis?.calculation || axis?.formula);
+const axisLabel = (axis) => [axis.field, axis.unit, axis.measurement_set, axis.method,
+  axis.formula && `версия ${axis.formula.method_version}`].filter(Boolean).join(" · ");
+const exclusionLabels = {
+  missing: "отсутствует измерение", no_matching_axes: "отсутствуют поля осей",
+  duplicate_measurements: "несколько измерений", incompatible_iron_form: "другая форма железа",
+  below_detection_limit: "ниже предела обнаружения", not_determined: "значение не определено",
+  zero_denominator: "нулевой знаменатель", negative_operand: "отрицательный операнд",
+  negative_component: "отрицательная компонента", zero_component_sum: "нулевая сумма компонент",
+  formula_run_missing: "нет выбранной формулы", formula_run_stale: "формула устарела",
+  formula_component_missing: "компонента нет в формуле", calculation_out_of_range: "значение вне диапазона",
+};
 const SERIES_COLORS = ["#3b70a0", "#a75d32", "#7654a3", "#34796d", "#ae4563", "#755b36", "#4a6584", "#84506d"];
 const PATTERN_LABELS = { ree_pattern: "Диаграмма РЗЭ", spider: "Спайдер-диаграмма" };
 const REFERENCE_LABELS = { "C1 chondrite": "Хондрит C1", "Primitive mantle (diagram values)": "Примитивная мантия" };
@@ -286,6 +297,14 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
   const [projection, setProjection] = useState(null);
   const current = projection?.load === load && projection.panel === panel ? projection : null;
   const data = current?.data;
+  const calculated = panel.axes.some(isCalculatedAxis);
+  const exclusions = {};
+  if (calculated) {
+    for (const { reason } of data?.exclusions || []) {
+      const label = exclusionLabels[reason] || "непригодное измерение";
+      exclusions[label] = (exclusions[label] || 0) + 1;
+    }
+  }
   const styles = new Map();
   layers.forEach(({ analysis_ids, opacity, show_points }, order) => {
     for (const id of analysis_ids) styles.set(id, { order, opacity: show_points ? opacity : 0 });
@@ -304,7 +323,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
   }, [load, panel]);
   const updateKind = (kind) => {
     if (kind === "histogram") {
-      update({ id: panel.id, kind, axes: [panel.axes[0]] });
+      update({ id: panel.id, kind, axes: [isCalculatedAxis(panel.axes[0]) ? axes[0] : panel.axes[0]] });
       return;
     }
     if (patterns[kind]) {
@@ -328,7 +347,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
       <select aria-label="Тип диаграммы" value={panel.kind} onChange={(event) => updateKind(event.target.value)}>
         <option value="binary" disabled={axes.length < 2}>Бинарная</option>
         <option value="ternary" disabled={axes.length < 3}>Тройная</option>
-        <option value="histogram">Гистограмма</option>
+        <option value="histogram" disabled={isCalculatedAxis(panel.axes[0]) && !axes.length}>Гистограмма</option>
         {Object.entries(PATTERN_LABELS).map(([kind, label]) =>
           <option key={kind} value={kind} disabled={!patterns[kind]?.groups.length}>{label}</option>)}
       </select>
@@ -341,9 +360,11 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
         {pattern.groups.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}
       </select>}
       {panel.axes.map((axis, index) => {
-        const candidates = pattern ? group?.fields.get(axis.field) || [] : axes;
+        const locked = isCalculatedAxis(axis);
+        const candidates = locked ? [axis] : pattern ? group?.fields.get(axis.field) || [] : axes;
         if (pattern && candidates.length < 2) return null;
-        return <select key={index} aria-label={pattern ? `Предпочтительная единица ${axis.field}` : `Ось ${index + 1}`} value={axisKey(axis)}
+        return <select key={index} aria-label={pattern ? `Предпочтительная единица ${axis.field}` : `Ось ${index + 1}`} value={axisKey(axis)} disabled={locked}
+          title={locked ? axisLabel(axis) : undefined}
           onChange={(event) => updateAxis(index, candidates.find((item) => axisKey(item) === event.target.value))}>
           {candidates.map((item) => <option key={axisKey(item)} value={axisKey(item)}>{axisLabel(item)}</option>)}
         </select>;
@@ -356,6 +377,8 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
         {data.hidden_count ? ` · скрыто: ${data.hidden_count}` : ""}
         {data.points.length > points.length ? ` · скрыто стилем слоя: ${data.points.length - points.length}` : ""}
         {data.kind === "ternary" ? " · доли от суммы трёх компонентов" : ""}</small>
+      {Object.keys(exclusions).length > 0 && <small className="plot-exclusion-summary">{Object.entries(exclusions)
+        .map(([reason, count]) => `${reason} (${count})`).join(" · ")}</small>}
       {(data.fields || []).filter((field) => field.message).map((field) =>
         <p key={field.layer_id}><small>{layers.find((layer) => layer.id === field.layer_id)?.name}: {field.message}</small></p>)}
     </>}
@@ -548,7 +571,7 @@ export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedId
     try {
       const saved = await openLayout(id);
       setPanels(saved.panels.map(({ id: panelId, kind, axes: savedAxes, normalization }) => ({
-        id: panelId, kind, axes: savedAxes.map(({ field, unit, method, measurement_set }) => ({ field, unit, method, measurement_set })),
+        id: panelId, kind, axes: savedAxes.map(({ scale, manual_range, ...axis }) => axis),
         ...(PATTERN_LABELS[kind] ? { normalization } : {}),
       })));
       setSavedColors(Object.fromEntries(saved.legend.entries.map(({ value, color }) => [value, color])));

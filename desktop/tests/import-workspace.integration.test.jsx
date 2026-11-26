@@ -342,6 +342,54 @@ test("histogram with one measurement field restores its layout and exports the v
   expect(await readFile(second, "utf8")).toBe(content);
 }, 25000);
 
+test("restoring a calculated layout retains sums, pinned APFU and exclusion reasons", async () => {
+  const source = "Analysis,Na2O [wt.%],K2O [wt.%],FeOt [wt.%],MgO [wt.%],SiO2 [wt.%],CaO [wt.%],FeO [wt.%]\nP1,2,3,15,30,50,10,8\nP2,<DL,3,15,30,50,11,8\n";
+  await writeFile(second, source);
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  const { result: { recipe } } = await invokePetrolab("import.recipe.suggest", { source_path: second });
+  expect((await invokePetrolab("import.plan.apply", { ...database, source_path: second, recipe })).error).toBeUndefined();
+  const rows = (await invokePetrolab("project.analyses.list", database)).result.analyses;
+  const analysis = rows.find((row) => row.identity.Analysis === "P1");
+  const input = { ...database, method_id: "formula.pyroxene.6o", analysis_id: analysis.analysis_id,
+    measurement_ids: analysis.measurement_list.filter(({ field }) => ["SiO2", "MgO", "FeO", "CaO"].includes(field)).map(({ measurement_id }) => measurement_id) };
+  const reviewed = (await invokePetrolab("formula.review", input)).result;
+  const run = (await invokePetrolab("formula.run", { ...input, input_fingerprint: reviewed.input_fingerprint,
+    method_definition_fingerprint: reviewed.method_definition_fingerprint })).result;
+  const { axes: catalog } = (await invokePetrolab("plot_data.catalog", database)).result;
+  const measured = Object.fromEntries(catalog.map((axis) => [axis.field, axis]));
+  const sum = { ...measured.Na2O, field: "Na2O + K2O", calculation: { operation: "sum", version: 1, operands: [measured.Na2O, measured.K2O] } };
+  const formula = { version: 1, method_id: run.method_id, method_version: run.method_version,
+    method_definition_fingerprint: run.method_definition_fingerprint, run_ids: [run.id] };
+  const apfu = ["Mg", "Fe2+", "Ca"].map((element) => ({ field: `apfu.${element}`, unit: "APFU", measurement_set: null, method: null, formula }));
+  const panels = [[sum, measured.FeOt, measured.MgO], apfu].map((axes) => ({ id: crypto.randomUUID(), kind: "ternary", axes }));
+  const initial = await invokePetrolab("plot_spec.save", { ...database, name: "Расчётные оси", panels, colors: {} });
+  expect(initial.result?.panels).toHaveLength(2);
+
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Построение"));
+  await user.click(await screen.findByText("Сохранённые раскладки", { exact: true }));
+  await user.click(await enabledButton("Открыть «Расчётные оси»"));
+  await screen.findByText("Открыта раскладка «Расчётные оси».");
+  const afm = within((await screen.findByText("Na2O + K2O / FeOt / MgO", { selector: ".plot-panel header b" })).closest("article"));
+  const pyroxene = within((await screen.findByText("apfu.Mg / apfu.Fe2+ / apfu.Ca", { selector: ".plot-panel header b" })).closest("article"));
+  await afm.findByRole("button", { name: "Выбрать точку P1" });
+  await pyroxene.findByRole("button", { name: "Выбрать точку P1" });
+  expect(afm.getByText("ниже предела обнаружения (1)")).toBeTruthy();
+  expect(pyroxene.getByText("нет выбранной формулы (1)")).toBeTruthy();
+  expect(pyroxene.getByRole("option", { name: /apfu.Mg · APFU · версия/ })).toBeTruthy();
+
+  await user.type(screen.getByLabelText("Название раскладки"), "Копия расчётных осей");
+  await user.click(await enabledButton("Сохранить раскладку"));
+  await screen.findByText("Сохранена раскладка «Копия расчётных осей».");
+  const stored = requests.findLast(({ command }) => command === "plot_spec.save");
+  expect(stored.payload.panels.map(({ axes }) => axes)).toEqual(panels.map(({ axes }) => axes));
+  const svg = await readFile(await savePlot(user), "utf8");
+  expect(svg).toContain("Na2O + K2O");
+  expect(svg).toContain("apfu.Fe2+");
+  expect(await readFile(second, "utf8")).toBe(source);
+}, 25000);
+
 test("AT-08 excludes only the focused source from both plots and restores it from search", async () => {
   const alternate = join(folder, "alternate");
   await mkdir(alternate);
