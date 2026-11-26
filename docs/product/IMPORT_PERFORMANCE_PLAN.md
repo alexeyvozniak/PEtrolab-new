@@ -64,3 +64,7 @@ The approved Import workspace displays one active table. Instead of fetching all
 ### Import polish — 1/6
 
 Reuse the successful clean-table classification plan and parsed source when adding a source. Rehash the staged bytes before retaining the inspection; seed only if the exact recipe digest matches (including project aliases). Both caches retain existing bounds. Final validation is unchanged. Test verifies one parse and one plan construction for clean input.
+
+### Import polish — 2/6
+
+Prepare immutable measurement mapping evidence once per field in row-oriented and transposed blocks, instead of resolving Fe header and mapping metadata for every measurement. Keep the exact measurement shape, coordinate construction, token handling, and independent mutable measurement objects. Regression checks mapping resolution count and coordinates; existing transposed and provenance fixtures remain in the full suite.

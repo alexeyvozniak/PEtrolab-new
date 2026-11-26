@@ -29,6 +29,26 @@ FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
 
 
 class HeaderRecognitionPerformanceTests(unittest.TestCase):
+    def test_measurement_template_preserves_exact_values_and_coordinates(self):
+        from petrolab import import_preview as preview
+        from unittest.mock import patch
+        recipe = fixture_recipe()
+        inspection = preview.inspect_source(FIXTURE)
+        section = recipe["sections"][0]
+        sheet = next(item for item in inspection.sheets if item.name == section["sheet_name"])
+        fields = [field for field in section["mappings"] if field["target_role"] == "measurement"]
+        with patch.object(preview, "reported_fe_form", wraps=preview.reported_fe_form) as fe:
+            records = preview._plan_rows(inspection, sheet, section, {})
+            self.assertGreater(len(records), 1)
+            self.assertEqual(fe.call_count, len(fields))
+        for record in records:
+            for field, measurement in zip(fields, record["measurements"], strict=True):
+                index = field["source_column_index"]
+                raw = preview._row_value(sheet.rows[record["row_number"] - 1], index)
+                self.assertEqual(measurement, preview._measurement(field, raw, record["row_number"], index))
+                self.assertEqual(measurement["raw_token"], raw)
+                self.assertEqual(measurement["physical_source_column_index"], index)
+
     def test_header_vocabulary_fast_path_matches_original_predicate(self):
         from petrolab import import_preview as preview
         from unittest.mock import patch
