@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSelectionHistory } from "./selectionHistory";
 import { SelectionSummary } from "./SelectionSummary";
+import { sessionKey, readSession, writeSession, memoryFromSession } from "./sessionPreferences";
 import {
   CheckCircle,
   Columns,
@@ -112,8 +113,14 @@ export function App() {
   const desktopRuntimeAvailable = isPetrolabDesktop();
   const [screen, setScreen] = useState("Обзор");
   const [databasePath, setDatabasePath] = useState("");
-  // View state only, scoped to this project and this application session.
-  const viewMemory = useMemo(() => ({ table: {}, plot: { views: new Map() }, samples: {} }), [databasePath]);
+  const [presentationKey,setPresentationKey] = useState("");
+  const [presentationReady,setPresentationReady] = useState(false);
+  // Read only non-scientific preferences; data-bound state remains session scoped.
+  const viewMemory = useMemo(() => {
+    let saved=null;
+    try {saved=readSession(window.localStorage,presentationKey);} catch {}
+    return memoryFromSession(saved);
+  }, [databasePath,presentationKey]);
   const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
   const [selectedAnalysisIds, setSelectedAnalysisIds, undoSelection, redoSelection] = useSelectionHistory();
   const [shortcutHelp, setShortcutHelp] = useState(false);
@@ -184,6 +191,17 @@ export function App() {
   const [activity, setActivity] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  useEffect(()=>{
+    if(!presentationReady || !presentationKey || busy || blockDraftDirty || mappingDraftDirty)return;
+    const persist=()=>{
+      try {writeSession(window.localStorage,presentationKey,{screen,...viewMemory});} catch {}
+    };
+    // Coalesce scroll, resize and navigation changes; synchronous flush on close.
+    const interval=window.setInterval(persist,1000);
+    window.addEventListener("pagehide",persist);
+    return ()=>{window.clearInterval(interval);window.removeEventListener("pagehide",persist);persist();};
+  },[presentationReady,presentationKey,screen,viewMemory,busy,blockDraftDirty,mappingDraftDirty]);
 
   const refreshAnalyses = useCallback(async (path = databasePath) => {
     if (!path) return;
@@ -276,13 +294,25 @@ export function App() {
         if (cancelled) return;
         const enriched = await attachMineralIdentifications(path, result);
         if (cancelled) return;
+        // The database's identity, not its path, isolates local presentation state.
+        let key="", saved=null;
+        try {
+          const overview=unwrap(await getProjectOverview(path));
+          key=sessionKey(overview?.project_id);
+          saved=readSession(window.localStorage,key);
+        } catch {}
+        if(cancelled)return;
+        setPresentationKey(key);
         setProject(enriched);
         const restored = unwrap(await restoreImportWorkspace(path));
         if (!cancelled && restored.workspace) {
           setScreen("Импорт");
           await receiveWorkspace(restored.workspace);
           if (!cancelled) setSuccess("Черновик импорта восстановлен.");
+        } else if (!cancelled && saved && (saved.screen!=="Анализы" || enriched.total>0)) {
+          setScreen(saved.screen);
         }
+        if(!cancelled)setPresentationReady(true);
       } catch (caught) {
         if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
       } finally {
