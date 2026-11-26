@@ -11,13 +11,13 @@ function recordSummary(record) {
   const identity = (record.identity || []).filter(Boolean).join(" · ") || "без распознанного идентификатора";
   const fields = (record.measurements || []).map((item) => {
     const context = item.method || item.measurement_set;
-    const field = record.source_name ? `${item.field}: ${item.raw_token ?? "—"} ${item.unit || ""}` : item.field;
+    const field = `${item.field}: ${item.raw_token ?? "—"}${item.unit ? ` ${item.unit}` : ""}`;
     return context ? `${field} (${context})` : field;
   }).join(", ") || "без Measurement";
   return { identity, fields };
 }
 
-export function ImportDuplicateReview({ plan, recipe, comparison, busy, onKeepAll }) {
+export function ImportDuplicateReview({ plan, recipe, comparison, sourceName, busy, onKeepAll }) {
   const warning = plan?.warnings?.find((item) => item.code === "DUPLICATE_CANDIDATES");
   const groups = comparison?.groups.map((group) => group.map((record) => record.preview_id)) || warning?.preview_ids || [];
   if (!groups.length) return null;
@@ -34,7 +34,7 @@ export function ImportDuplicateReview({ plan, recipe, comparison, busy, onKeepAl
         <div>
           <b>{comparison ? "Совпадения между источниками" : reviewed ? "Совпадения проверены" : "Нужно проверить возможные совпадения"}</b>
           <span>
-            PetroLab ничего не объединяет автоматически. Одинаковая идентичность может означать повтор, а может — дополнительные данные другого блока или метода.
+            Сравните исходные значения и положение записей в файле. PetroLab ничего не объединяет автоматически.
           </span>
         </div>
         <span className="duplicate-review-status">
@@ -53,7 +53,7 @@ export function ImportDuplicateReview({ plan, recipe, comparison, busy, onKeepAl
                 const summary = recordSummary(record);
                 return (
                   <div className="duplicate-record" key={previewId}>
-                    <span>{[record.source_name, recordOrigin(record)].filter(Boolean).join(" · ")}</span>
+                    <span>{[record.source_name || sourceName, recordOrigin(record)].filter(Boolean).join(" · ")}</span>
                     <b>{summary.identity}</b>
                     <small>{summary.fields}</small>
                   </div>
@@ -66,10 +66,6 @@ export function ImportDuplicateReview({ plan, recipe, comparison, busy, onKeepAl
 
       {!reviewed && (
         <div className="duplicate-review-action">
-          <div>
-            <b>В этой версии безопасное решение — только оставить все записи.</b>
-            <span>Удаление отдельных повторов появится позже с отдельной provenance. Сейчас PetroLab не будет молча выбрасывать строки.</span>
-          </div>
           <button className="primary-button" onClick={onKeepAll} disabled={busy}>
             {comparison ? "Проверено: оставить записи из всех источников" : "Проверено: оставить все записи"}
           </button>

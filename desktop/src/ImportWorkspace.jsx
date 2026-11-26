@@ -562,6 +562,7 @@ export function ImportWorkspace({
             <ImportDuplicateReview
               plan={plan}
               recipe={recipe}
+              sourceName={sourceName}
               busy={busy || blockDraftDirty || mappingDraftDirty}
               onKeepAll={onKeepAllDuplicates}
             />

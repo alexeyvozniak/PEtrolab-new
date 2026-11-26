@@ -624,9 +624,11 @@ from openpyxl import Workbook
 book = Workbook()
 book.active.title = "FirstSheet"
 second = book.create_sheet("SecondSheet")
-for sheet, label, value in ((book.active, "A1", 0), (second, "B1", "<DL")):
-    sheet.append(["Analysis", "F (wt.%)"])
-    sheet.append([label, value])
+for sheet in (book.active, second):
+    sheet.append(["Analysis", "F (wt.%)", "Fe (wt.%)"])
+book.active.append(["A1", 0, 8.125])
+second.append(["A1", "<DL", 9.25])
+second.append(["B1", None, 10.5])
 book.save(sys.argv[1])
 book.close()
 `, importBook);
@@ -634,7 +636,8 @@ const importedBytes = await readFile(importBook);
 const importDraft = serviceRequest("import.workspace.create", {
   ...importProject, sources: [{ staged_path: importBook }],
 });
-assert.equal(importDraft.session.readiness.planned_analysis_count, 2);
+assert.equal(importDraft.session.readiness.planned_analysis_count, 3);
+assert.ok(importDraft.session.readiness.blocking_reason_codes.includes("DUPLICATE_REVIEW_REQUIRED"));
 await withWindow(async (evaluate, screenshot) => {
   const expectSheet = (sheet, cells) => until(`physical preview ${sheet}`, () => evaluate(({ sheet, cells }) => {
     const preview = document.querySelector(`.raw-preview-wrap[aria-label="Исходная таблица ${sheet}"]`);
@@ -649,28 +652,54 @@ await withWindow(async (evaluate, screenshot) => {
     button.click();
     return true;
   }));
-  await expectSheet("SecondSheet", ["B1", "<DL"]);
+  await expectSheet("SecondSheet", ["A1", "<DL", "B1"]);
+  await until("ambiguous iron warning is displayed", () => evaluate(() =>
+    [...document.querySelectorAll(".import-issue-row")]
+      .some((row) => row.textContent.includes("Форма Fe не определена"))));
   await screenshot("AT-02-second-sheet");
+  await until("duplicate comparison shows original values and requires confirmation", () => evaluate(() => {
+    const review = document.querySelector(".duplicate-review");
+    const blocked = document.querySelector(".import-footer-actions .primary-button")?.disabled;
+    if (!blocked || !review?.textContent.includes("Fe: 8.125 wt.%") || !review.textContent.includes("Fe: 9.25 wt.%")) return false;
+    if ([...review.querySelectorAll(".duplicate-record")].some((record) => record.scrollWidth > record.clientWidth + 1)) return false;
+    const confirm = review.querySelector("button");
+    if (!confirm || confirm.disabled) return false;
+    confirm.scrollIntoView({ block: "nearest" });
+    const bounds = confirm.getBoundingClientRect();
+    return confirm.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+  }));
+  await screenshot("AT-02-duplicate-comparison");
+  await click(evaluate, "Проверено: оставить все записи");
   await click(evaluate, "Сохранить импорт в проект");
-  await until("both imported analyses in the table", () => evaluate(() =>
-    ["A1", "B1"].every((label) => document.querySelector(`tbody input[aria-label="Выбрать ${label}"]`))));
+  await until("all three imported analyses in the table", () => evaluate(() =>
+    document.querySelectorAll('tbody input[aria-label="Выбрать A1"]').length === 2
+    && Boolean(document.querySelector('tbody input[aria-label="Выбрать B1"]'))));
   await screenshot("AT-02-imported-analyses");
 }, { projectPath: importDatabase });
 const imported = serviceRequest("project.analyses.list", importProject).analyses;
-const importMeasurements = imported.map(({ identity, sheet_name, source_row_number, measurement_list }) => {
-  assert.equal(measurement_list.length, 1);
-  const { raw_token, unit, source_cell, numeric_value } = measurement_list[0];
-  return { label: identity.Analysis, sheet_name, source_row_number, raw_token, unit, source_cell, numeric_value };
-}).sort((a, b) => a.label.localeCompare(b.label));
-assert.deepEqual(importMeasurements, [
-  { label: "A1", sheet_name: "FirstSheet", source_row_number: 2, raw_token: "0", unit: "wt.%", source_cell: "B2", numeric_value: 0 },
-  { label: "B1", sheet_name: "SecondSheet", source_row_number: 2, raw_token: "<DL", unit: "wt.%", source_cell: "B2", numeric_value: null },
+assert.equal(new Set(imported.map(({ analysis_id }) => analysis_id)).size, 3);
+const importMeasurements = imported.map(({ identity, sheet_name, source_row_number, measurement_list }) => ({
+  label: identity.Analysis, sheet_name, source_row_number,
+  measurements: Object.fromEntries(measurement_list.map(({ field, raw_token, unit, source_cell, numeric_value, reported_fe_form, fe_handling }) => {
+    assert.equal(unit, "wt.%");
+    return [field, { raw_token, source_cell, numeric_value, reported_fe_form, fe_handling }];
+  })),
+})).sort((a, b) => a.sheet_name.localeCompare(b.sheet_name) || a.source_row_number - b.source_row_number);
+assert.deepEqual(importMeasurements.map(({ label, sheet_name, source_row_number }) => [label, sheet_name, source_row_number]), [
+  ["A1", "FirstSheet", 2], ["A1", "SecondSheet", 2], ["B1", "SecondSheet", 3],
 ]);
+assert.deepEqual(importMeasurements.map(({ measurements: { F } }) => [F.raw_token, F.source_cell, F.numeric_value]), [
+  ["0", "B2", 0], ["<DL", "B2", null], [null, "B3", null],
+]);
+assert.deepEqual(importMeasurements.map(({ measurements }) => measurements.Fe), [
+  ["8.125", "C2", 8.125], ["9.25", "C2", 9.25], ["10.5", "C3", 10.5],
+].map(([raw_token, source_cell, numeric_value]) => ({ raw_token, source_cell, numeric_value,
+  reported_fe_form: "unresolved", fe_handling: "strictly_as_reported_no_conversion" })));
 assert.deepEqual(await readFile(importBook), importedBytes);
 assert.equal(serviceRequest("import.workspace.restore", importProject).workspace, null);
 
 await writeFile(join(evidence, "acceptance.json"), JSON.stringify({
-  scenarios: ["AT-01", "AT-02 (two sheets, zero and <DL)", "AT-03", "AT-06", "AT-07", "AT-09",
+  scenarios: ["AT-01", "AT-02 (two sheets, ambiguous Fe, censoring, blank and duplicates)", "AT-03", "AT-06", "AT-07", "AT-09",
     "AT-17 (zoom, pan and reset)", "AT-32", "AT-37 (domain and visibility actions)"],
   selected: chosenLabels.map((label, index) => ({ label, analysisId: expectedIds[index] })),
   workPlanTask, workGroup: before, plotSpecification: layout, plotZoom, journal, editDraft,

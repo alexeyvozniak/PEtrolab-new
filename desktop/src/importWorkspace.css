@@ -261,10 +261,11 @@ button.import-sheet-row:hover { background: #f4f7f4; }
 .import-inspector-pane .mapping-sheet { overflow: visible; }
 .import-inspector-pane .mapping-review-list { max-height: none; overflow: visible; }
 .import-inspector-pane .duplicate-review {
+  min-height: 0;
   margin: 10px;
   border: 1px solid #ead6ae;
   border-radius: 8px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .workspace-ready { min-height: 100%; background: #fff; }

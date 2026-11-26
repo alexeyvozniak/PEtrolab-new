@@ -524,6 +524,10 @@ test("user resolves a repeated complex workbook with sheet-level and grouped dec
   await user.click(applyUnit);
   await waitFor(() => expect(uiState.unitApplied).toBe(true));
 
+  expect(await screen.findByText("SiO2: 40.1 wt.%")).toBeTruthy();
+  expect(screen.getByText("SiO2: 39.8 wt.%")).toBeTruthy();
+  expect(screen.getByText(/Summary · строка 3/)).toBeTruthy();
+  expect(screen.getByText(/Summary · строка 4/)).toBeTruthy();
   await user.click(await screen.findByRole("button", { name: "Проверено: оставить все записи" }));
   await waitFor(() => expect(uiState.duplicatesReviewed).toBe(true));
 
