@@ -325,6 +325,8 @@ vi.mock("../src/desktopApi", () => {
   const api = {
     isPetrolabDesktop: () => true,
     getProjectDatabasePath: vi.fn().mockResolvedValue("C:/PetroLab/project.sqlite"),
+    getProjectPlotPresets: vi.fn().mockResolvedValue({result:{preferences:{favorites:[],recent:[]},revision:0}}),
+    saveProjectPlotPresets: vi.fn().mockImplementation(async (_path,preferences,revision)=>({result:{preferences,revision:revision+1}})),
     getProjectPlotColors: vi.fn().mockResolvedValue({result:{scheme:{mode:"source",colors:[]},revision:0}}),
     saveProjectPlotColors: vi.fn().mockImplementation(async (_path,scheme,revision)=>({result:{scheme,revision:revision+1}})),
     getSelectionSummary: vi.fn().mockResolvedValue({result:{analysis_count:0,pair:null,rows:[]}}),

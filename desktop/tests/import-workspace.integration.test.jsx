@@ -601,9 +601,15 @@ test("axis catalog drops an exact catalog key and rejects an unknown key", async
   fireEvent.drop(axis, { dataTransfer });
   expect(axis.value).toBe(target.value);
   expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
-  await user.click(within(panel).getByRole("button", {name:"Добавить диаграмму в избранное"}));
+  await user.click(await within(panel).findByRole("button", {name:"Добавить диаграмму в избранное"}));
   await user.click(screen.getByText("Избранное и недавние оси"));
   const presets = screen.getByText("Избранные комбинации").closest("details");
+  await user.click(await enabledButton("Сохранить комбинации в проекте"));
+  await screen.findByText("Избранное и недавние оси сохранены в проекте.");
+  await user.click(within(presets).getByRole("button",{name:"Удалить избранную комбинацию"}));
+  expect(within(presets).queryByRole("button",{name:"Удалить избранную комбинацию"})).toBeNull();
+  await user.click(await enabledButton("Загрузить сохранённые комбинации"));
+  await screen.findByText("Загружены сохранённые комбинации.");
   const favorite = within(presets).getByRole("button",{name:"Удалить избранную комбинацию"}).parentElement.firstElementChild;
   await user.click(favorite);
   await waitFor(() => expect(screen.getAllByRole("combobox", {name:"Тип диаграммы"})).toHaveLength(3));

@@ -22,7 +22,8 @@ from .manual_analysis import create_manual_analysis
 from .media_links import change_media_link, create_media_region, import_linked_photo, list_media_links
 from .plot_data import list_plot_specifications, open_plot_specification, plot_catalog, query_plot_data, record_plot_visibility, save_plot_specification, undo_plot_visibility
 from .plot_export import export_plot
-from .plot_colors import get_project_plot_colors, save_project_plot_colors
+from .plot_colors import (get_project_plot_colors, save_project_plot_colors,
+                          get_project_plot_presets, save_project_plot_presets)
 from .selection_summary import selection_summary
 from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe
 from .import_apply import (
@@ -404,6 +405,9 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
         params.get("hidden_analysis_ids"),
     )},
     "project.selection.summary": lambda params: {"result": selection_summary(_project_database_path(params),params.get("analysis_ids"))},
+    "project.plot_presets.get": lambda params: {"result": get_project_plot_presets(_project_database_path(params))},
+    "project.plot_presets.save": lambda params: {"result": save_project_plot_presets(
+        _project_database_path(params), params.get("preferences"), params.get("expected_revision"))},
     "project.plot_colors.get": lambda params: {"result": get_project_plot_colors(_project_database_path(params))},
     "project.plot_colors.save": lambda params: {"result": save_project_plot_colors(
         _project_database_path(params), params.get("scheme"), params.get("expected_revision"))},

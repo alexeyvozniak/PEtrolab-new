@@ -239,6 +239,8 @@ export const queryProjectAnalysisIds = (projectDatabasePath, query) =>
 export const getProjectAnalysis = (projectDatabasePath, analysisId) =>
   invokePetrolab("project.analysis.get", { project_database_path: projectDatabasePath, analysis_id: analysisId });
 export const getSelectionSummary = (path,analysisIds) => invokePetrolab("project.selection.summary",{project_database_path:path,analysis_ids:analysisIds});
+export const getProjectPlotPresets = path => invokePetrolab("project.plot_presets.get", {project_database_path:path});
+export const saveProjectPlotPresets = (path,preferences,revision) => invokePetrolab("project.plot_presets.save", {project_database_path:path,preferences,expected_revision:revision});
 export const getProjectPlotColors = path => invokePetrolab("project.plot_colors.get", {project_database_path:path});
 export const saveProjectPlotColors = (path,scheme,revision) => invokePetrolab("project.plot_colors.save", {project_database_path:path,scheme,expected_revision:revision});
 export const getPlotCatalog = (projectDatabasePath, analysisIds, includeCategories = false) =>

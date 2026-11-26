@@ -649,19 +649,51 @@ function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
 
 export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
   hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
-  onExport, onAddPublication, loadColorScheme, saveColorScheme, onSummary }) {
+  onExport, onAddPublication, loadColorScheme, saveColorScheme, onSummary, loadPresets, savePresets }) {
   const [axes, setAxes] = useState([]);
   const [axisQuery, setAxisQuery] = useState("");
   const [axisCatalogOpen, setAxisCatalogOpen] = useState(false);
   const [recentPresets, setRecentPresets] = useState(() => viewMemory?.recentPresets || []);
   const [favoritePresets, setFavoritePresets] = useState(() => viewMemory?.favoritePresets || []);
+  const [presetRevision,setPresetRevision] = useState(() => viewMemory?.presetRevision ?? null);
+  const [presetBusy,setPresetBusy] = useState(false);
+  const [presetStatus,setPresetStatus] = useState("");
+  const applyPreferences = result => {
+    setRecentPresets(result.preferences.recent);
+    setFavoritePresets(result.preferences.favorites);
+    setPresetRevision(result.revision);
+  };
+  useEffect(()=>{
+    if (!loadPresets || viewMemory?.presetRevision != null) return;
+    let active=true;
+    loadPresets().then(result=>{if(active)applyPreferences(result);},
+      error=>{if(active)setPresetStatus(error.message || String(error));});
+    return ()=>{active=false;};
+  },[loadPresets,viewMemory]);
+  const persistPresets = async () => {
+    setPresetBusy(true);setPresetStatus("");
+    try {
+      // Recipes must remain exact. The Python validator rejects invalid
+      // combinations; unavailable but previously saved recipes are retained.
+      const result=await savePresets({favorites:favoritePresets,recent:recentPresets},presetRevision);
+      applyPreferences(result);
+      setPresetStatus("Избранное и недавние оси сохранены в проекте.");
+    } catch(error){setPresetStatus(error.message || String(error));}
+    finally{setPresetBusy(false);}
+  };
+  const reloadPresets = async () => {
+    setPresetBusy(true);setPresetStatus("");
+    try{applyPreferences(await loadPresets());setPresetStatus("Загружены сохранённые комбинации.");}
+    catch(error){setPresetStatus(error.message || String(error));}
+    finally{setPresetBusy(false);}
+  };
   const [templateName, setTemplateName] = useState(MINERAL_TEMPLATES[0].name);
   const [templateGroupKey, setTemplateGroupKey] = useState("");
   const mineralGroups = useMemo(() => templateGroups(MINERAL_TEMPLATES.find(item => item.name === templateName), axes), [templateName, axes]);
   const mineralGroup = mineralGroups.find(item => item.key === templateGroupKey) || mineralGroups[0];
   useLayoutEffect(() => {
-    if (viewMemory) Object.assign(viewMemory, { recentPresets, favoritePresets });
-  }, [viewMemory, recentPresets, favoritePresets]);
+    if (viewMemory) Object.assign(viewMemory, { recentPresets, favoritePresets, presetRevision });
+  }, [viewMemory, recentPresets, favoritePresets, presetRevision]);
   const cachedAnalysis = useMemo(() => {
     if (!loadAnalysis) return undefined;
     const cache = new Map();
@@ -884,7 +916,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
   };
   const toggleFavorite = panel => {
     const preset = makePreset(panel);
-    if (!preset) return;
+    if (!preset || !resolvePreset(preset,axes,patterns) || presetBusy || (loadPresets && presetRevision===null)) return;
     setFavoritePresets(current => current.some(item => presetKey(item) === presetKey(preset))
       ? current.filter(item => presetKey(item) !== presetKey(preset)) : rememberPreset(current,preset,24));
   };
@@ -1012,13 +1044,18 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
       </details>
       <details className="plot-presets">
         <summary>Избранное и недавние оси</summary>
-        <small>Сохраняются в текущем сеансе проекта; для постоянного хранения используйте сохранённые раскладки.</small>
+        <small>Сохраните комбинации осей, чтобы использовать их при следующем открытии проекта. Недоступные поля не заменяются.</small>
+        {loadPresets && savePresets && <>
+          <button type="button" className="outline-button" disabled={presetBusy || presetRevision===null} onClick={persistPresets}>Сохранить комбинации в проекте</button>
+          <button type="button" className="outline-button" disabled={presetBusy} onClick={reloadPresets}>Загрузить сохранённые комбинации</button>
+          {presetStatus && <small role="status">{presetStatus}</small>}
+        </>}
         <b>Избранные комбинации</b>
         {!favoritePresets.length && <small>Нажмите ☆ на панели.</small>}
         {favoritePresets.map(preset => <div key={presetKey(preset)} className="plot-preset-row">
           <button type="button" className="outline-button" disabled={loading || panels.length >= 32 || !resolvePreset(preset,axes,patterns)}
             onClick={() => addPresets([preset])}>{presetTitle(preset)}</button>
-          <button type="button" aria-label="Удалить избранную комбинацию" onClick={() => setFavoritePresets(current => current.filter(item => presetKey(item) !== presetKey(preset)))}>×</button>
+          <button type="button" aria-label="Удалить избранную комбинацию" disabled={presetBusy || (loadPresets && presetRevision===null)} onClick={() => setFavoritePresets(current => current.filter(item => presetKey(item) !== presetKey(preset)))}>×</button>
         </div>)}
         <b>Недавние комбинации</b>
         {!recentPresets.length && <small>Появятся после изменения осей.</small>}
@@ -1160,11 +1197,12 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
           {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} layers={layers} viewMemory={viewMemory}
             openExport={onExport && !exportBusy && colorReady ? () => openExport(panel.id) : undefined}
             favorite={Boolean(makePreset(panel) && favoritePresets.some(item => presetKey(item) === presetKey(makePreset(panel))))}
-            onFavorite={() => toggleFavorite(panel)}
+            onFavorite={!presetBusy && (!loadPresets || presetRevision!==null) ? () => toggleFavorite(panel) : undefined}
             update={(next) => {
               setPanels(current => current.map(item => item.id === panel.id ? next : item));
               const preset = makePreset(next);
-              if (preset) setRecentPresets(current => rememberPreset(current,preset));
+              if (preset && resolvePreset(preset,axes,patterns) && !presetBusy && (!loadPresets || presetRevision!==null))
+                setRecentPresets(current => rememberPreset(current,preset));
             }}
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}
         </div>
