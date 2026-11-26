@@ -120,13 +120,15 @@ def validate_category_style(connection, analysis_ids, style):
         raise ImportCommandError("PLOT_CATEGORY_CHANGED", "Назначения категорий изменились. Обновите окрашивание перед сохранением или публикацией.")
     seen = set()
     for entry in style["entries"]:
-        if not isinstance(entry, dict) or set(entry) != {"key", "label", "count", "color"}:
+        if not isinstance(entry, dict) or set(entry) - {"symbol"} != {"key", "label", "count", "color"}:
             raise ValueError("category_style_entry")
         key = entry["key"]
         if key is not None and not isinstance(key, str):
             raise ValueError("category_style_key")
         if key in seen or key not in groups or type(entry["count"]) is not int or not isinstance(entry["color"], str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", entry["color"]):
             raise ValueError("category_style_entry")
+        if "symbol" in entry and (key is None or entry["symbol"] not in ("circle","square","triangle","diamond")):
+            raise ValueError("plot_symbol")
         if key is None and entry["color"].lower() != "#8c9590":
             raise ValueError("category_missing_color")
         if groups[key] != {"label": entry["label"], "count": entry["count"]}:
@@ -708,7 +710,8 @@ def validate_point_style(panel):
         return
     style = panel["point_style"]
     if (panel["kind"] == "histogram" or not isinstance(style, dict)
-            or set(style) != {"opacity", "size_scale"}
+            or set(style) - {"symbol"} != {"opacity", "size_scale"}
+            or ("symbol" in style and style["symbol"] not in ("circle","square","triangle","diamond"))
             or type(style["opacity"]) not in (int, float)
             or type(style["size_scale"]) not in (int, float)
             or not 0.05 <= style["opacity"] <= 1
@@ -801,6 +804,8 @@ def _insert_plot_specification(connection, name, analysis_ids, saved_panels, pan
         spec["schema_version"] = 3
     if any("style" in (layer["field"] or {}) for layer in layers):
         spec["schema_version"] = 4
+    if any("symbol" in panel.get("point_style", {}) for panel in saved_panels) or any("symbol" in entry for entry in (category_style or {}).get("entries", [])):
+        spec["schema_version"] = 5
     connection.execute("INSERT INTO plot_specification (id, name, definition_json) VALUES (?, ?, ?)",
                        (spec["id"], name, json.dumps(spec, ensure_ascii=False)))
     return spec
@@ -820,7 +825,8 @@ def open_plot_specification(database_path, spec_id):
             raise ImportCommandError("PLOT_LAYOUT_UNAVAILABLE", "Раскладка недоступна.")
         spec = json.loads(row[0])
         _validated_layers(spec.get("layers"))
-        expected_version = (4 if any("style" in (layer["field"] or {}) for layer in spec.get("layers", []))
+        has_symbols = any("symbol" in panel.get("point_style", {}) for panel in spec["panels"]) or any("symbol" in entry for entry in spec.get("category_style", {}).get("entries", []))
+        expected_version = (5 if has_symbols else 4 if any("style" in (layer["field"] or {}) for layer in spec.get("layers", []))
                             else 3 if any("point_style" in panel for panel in spec["panels"])
                             else 2 if "category_style" in spec else 1)
         if spec.get("schema_version") != expected_version:

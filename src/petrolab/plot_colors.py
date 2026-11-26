@@ -16,7 +16,7 @@ def _validate(scheme):
         raise ValueError("plot_colors")
     seen = set()
     for entry in colors:
-        if not isinstance(entry, dict) or set(entry) != {"mode", "key", "color"}:
+        if not isinstance(entry, dict) or set(entry) - {"symbol"} != {"mode", "key", "color"}:
             raise ValueError("plot_color_entry")
         mode, key, color = entry["mode"], entry["key"], entry["color"]
         if mode not in _MODES or not isinstance(key, str) or not 1 <= len(key) <= 512:
@@ -25,6 +25,8 @@ def _validate(scheme):
             raise ValueError("plot_color_id")
         if not isinstance(color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", color) or (mode,key) in seen:
             raise ValueError("plot_color_value")
+        if "symbol" in entry and entry["symbol"] not in ("circle","square","triangle","diamond"):
+            raise ValueError("plot_symbol")
         seen.add((mode,key))
     return {"mode": scheme["mode"], "colors": [{**entry,"color":entry["color"].lower()} for entry in colors]}
 

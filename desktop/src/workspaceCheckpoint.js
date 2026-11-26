@@ -29,7 +29,7 @@ export function tableMemoryFromView(view,project) {
 export function plotMemoryFromLayout(layout) {
   const colors=layout.legend.entries.map(({value,color})=>({mode:"source",key:value,color}));
   const category=layout.category_style;
-  if(category)for(const entry of category.entries)if(entry.key!==null)colors.push({mode:category.mode,key:entry.key,color:entry.color});
+  if(category)for(const entry of category.entries)if(entry.key!==null)colors.push({mode:category.mode,key:entry.key,color:entry.color,...(entry.symbol?{symbol:entry.symbol}:{})});
   return {opened:true,panels:layout.panels.map(({id,kind,axes,normalization,point_style})=>({
     id,kind,axes:axes.map(({scale,manual_range,...axis})=>axis),
     ...(["ree_pattern","spider"].includes(kind)?{normalization}:{}),...(point_style?{point_style}:{})

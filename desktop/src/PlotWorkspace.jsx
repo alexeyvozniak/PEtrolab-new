@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import { ContextActions } from "./ContextActions";
+import { SYMBOL_LABELS,symbolGeometry } from "./plotSymbols";
+function PointMarker({symbol,x,y,r,children,...props}) {
+  const {tag:Tag,attrs}=symbolGeometry(symbol,x,y,r);
+  return <Tag {...attrs} {...props}>{children}</Tag>;
+}
 import { makePreset, presetKey, rememberPreset, resolvePreset, templateGroups, MINERAL_TEMPLATES } from "./plotPresets";
 import "./plotWorkspace.css";
 
@@ -11,7 +16,7 @@ const DEFAULT_FIELD_STYLE = Object.freeze({mode:"both",color:"#5c7d66",fill_opac
 const COLOR_MODES = { source: "Источник", sample: "Физический образец", mineral: "Минерал (исходное название)", generation: "Generation" };
 const CATEGORY_COLORS = ["#356ca2","#ae5431","#39856b","#8c56a1","#bf8a28","#be456e","#367f91","#75643c","#647a2c","#485496","#ad675c","#7a7294","#248277","#a43d91","#66533f","#b67513"];
 const MISSING_COLOR = "#8c9590";
-function categoryStyle(rows, mode, overrides) {
+function categoryStyle(rows, mode, overrides, symbols) {
   if (mode === "source" || !rows) return null;
   const byId = new Map(), groups = new Map();
   for (const row of rows) {
@@ -28,9 +33,13 @@ function categoryStyle(rows, mode, overrides) {
   entries.forEach((entry,index) => {
     if (entry.key !== null && names.get(entry.label)>1) entry.label += " · " + entry.key.slice(0,8);
     entry.color = entry.key === null ? MISSING_COLOR : overrides.get(JSON.stringify([mode,entry.key])) || CATEGORY_COLORS[index % CATEGORY_COLORS.length];
+    const symbol=entry.key===null ? undefined : symbols.get(JSON.stringify([mode,entry.key]));
+    if(symbol)entry.symbol=symbol;
   });
   const colors = new Map(entries.map(entry => [entry.key,entry.color]));
-  return {entries, snapshot: {mode,entries,assignments:Object.fromEntries(byId)}, colorFor: id => colors.get(byId.get(id) ?? null) || MISSING_COLOR};
+  const shapes=new Map(entries.map(entry=>[entry.key,entry.symbol||"circle"]));
+  return {entries, snapshot: {mode,entries,assignments:Object.fromEntries(byId)}, colorFor: id => colors.get(byId.get(id) ?? null) || MISSING_COLOR,
+    symbolFor:id=>shapes.get(byId.get(id)??null)||"circle"};
 }
 const AXIS_DRAG_TYPE = "application/x-petrolab-axis";
 function PointTooltip({ hover, detail, shift, loadAnalysis }) {
@@ -138,7 +147,7 @@ function initialPanels(axes) {
     : make("binary", [axes[1], axes[0]])];
 }
 
-function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, shape, colorFor, categoryColor, points, fieldStyles, pointStyle = DEFAULT_POINT_STYLE, rememberedView, rememberView }) {
+function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, shape, colorFor, categoryColor, categorySymbol, points, fieldStyles, pointStyle = DEFAULT_POINT_STYLE, rememberedView, rememberView }) {
   const drag = useRef(null);
   const canvas = useRef(null);
   const hovered = useRef(false);
@@ -408,8 +417,8 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
     })}
     {selectedOutline && <path className="plot-halo" d={selectedOutline} />}
     {!isHistogram && markers.map((point) => <g key={`${point.analysis_id}:${point.element || ""}`}>
-      <circle className="plot-point" data-analysis-id={point.analysis_id} fill={categoryColor ? categoryColor(point.analysis_id) : colorFor(point.source_id)}
-        cx={px(point.u)} cy={py(point.v)} r={(isPattern ? 2.5 : 3.5) * pointStyle.size_scale} role="button"
+      <PointMarker className="plot-point" data-analysis-id={point.analysis_id} fill={categoryColor ? categoryColor(point.analysis_id) : colorFor(point.source_id)}
+        symbol={categorySymbol ? categorySymbol(point.analysis_id) : pointStyle.symbol || "circle"} x={px(point.u)} y={py(point.v)} r={(isPattern ? 2.5 : 3.5) * pointStyle.size_scale} role="button"
         tabIndex={!zoomed || contains(px(point.u), py(point.v)) ? point.tabIndex ?? 0 : -1}
         aria-hidden={zoomed && !contains(px(point.u), py(point.v)) ? true : undefined}
         opacity={point.opacity * pointStyle.opacity}
@@ -418,7 +427,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
         onFocus={event => showPoint(event, point)} onBlur={() => setHover(null)}
         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect([point.analysis_id], selectionModifier(event)); } }}>
         <title>{point.title}</title>
-      </circle>
+      </PointMarker>
     </g>)}
     {!isHistogram && markers.filter((point) => selected.has(point.analysis_id)).map((point) =>
       <circle key={`${point.analysis_id}:${point.element || ""}`} className="plot-halo" cx={px(point.u)} cy={py(point.v)} r={(isPattern ? 2.5 : 3.5) * pointStyle.size_scale + 2.5} />)}
@@ -432,7 +441,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
   ] : []} /></>;
 }
 
-function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor, onApplyStyle }) {
+function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor, categorySymbol, onApplyStyle }) {
   const [projection, setProjection] = useState(null);
   const projectionPanel = useMemo(() => ({kind:panel.kind, axes:panel.axes, normalization:panel.normalization}), [panel.kind, panel.axes, panel.normalization]);
   const current = projection?.load === load && projection.panel === projectionPanel ? projection : null;
@@ -541,15 +550,20 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
       <label>Размер · {Math.round(pointStyle.size_scale*100)}%
         <input type="range" aria-label="Размер точек панели" min="0.5" max="2" step="0.1" value={pointStyle.size_scale}
           onChange={event=>setPointStyle({size_scale:Number(event.target.value)})}/></label>
+      <label>Форма точек <select aria-label="Форма точек панели" disabled={Boolean(categorySymbol)} value={pointStyle.symbol || "circle"}
+        onChange={event=>setPointStyle({symbol:event.target.value})}>
+        {Object.entries(SYMBOL_LABELS).map(([key,label])=><option key={key} value={key}>{label}</option>)}
+      </select></label>
+      {categorySymbol && <small>Форма определяется категориями в легенде.</small>}
       <div className="plot-style-actions">
-        <button type="button" className="outline-button" onClick={()=>setPointStyle(DEFAULT_POINT_STYLE)}>Сбросить оформление точек</button>
+        <button type="button" className="outline-button" onClick={()=>update({...panel,point_style:{...DEFAULT_POINT_STYLE}})}>Сбросить оформление точек</button>
         {onApplyStyle && <button type="button" className="outline-button" onClick={()=>onApplyStyle(pointStyle)}>Применить оформление ко всем диаграммам</button>}
       </div>
       <small>Прозрачность умножается на непрозрачность слоя. Выделение остаётся контуром; гистограммы не изменяются.</small>
     </details>}
     {status && <p role="status">{status}</p>}
     {data && <>
-      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} categoryColor={categoryColor} points={points} fieldStyles={fieldStyles} pointStyle={pointStyle}
+      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} categoryColor={categoryColor} categorySymbol={categorySymbol} points={points} fieldStyles={fieldStyles} pointStyle={pointStyle}
         rememberedView={viewMemory?.views.get(panel.id)?.fingerprint === data.projection_sha256 ? viewMemory.views.get(panel.id).view : undefined}
         rememberView={view => viewMemory?.views.set(panel.id, { fingerprint: data.projection_sha256, view })} />
       <small>{pattern ? "Спектров" : panel.kind === "histogram" ? "Анализов" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
@@ -778,13 +792,16 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     return ()=>{active=false;};
   },[loadColorScheme,viewMemory]);
   useLayoutEffect(()=>{if(viewMemory)Object.assign(viewMemory,{schemeColors,schemeRevision});},[viewMemory,schemeColors,schemeRevision]);
-  const changeColor = (mode,key,color) => setSchemeColors(current=>[...current.filter(entry=>entry.mode!==mode||entry.key!==key),{mode,key,color}]);
+  const symbols=useMemo(()=>new Map(schemeColors.filter(entry=>entry.symbol).map(entry=>[JSON.stringify([entry.mode,entry.key]),entry.symbol])),[schemeColors]);
+  const changeColor = (mode,key,color) => setSchemeColors(current=>[...current.filter(entry=>entry.mode!==mode||entry.key!==key),{...current.find(entry=>entry.mode===mode&&entry.key===key),mode,key,color}]);
+  const changeSymbol=(entry,symbol)=>setSchemeColors(current=>[...current.filter(item=>item.mode!==colorMode||item.key!==entry.key),
+    {mode:colorMode,key:entry.key,color:entry.color,symbol}]);
   const storeScheme = async () => {
     setSchemeBusy(true);setSchemeStatus("");
     try {
       const colors = new Map(schemeColors.map(entry=>[JSON.stringify([entry.mode,entry.key]),entry]));
       for(const source of sources) colors.set(JSON.stringify(["source",source.source_id]),{mode:"source",key:source.source_id,color:colorFor(source.source_id)});
-      for(const entry of category?.entries||[]) if(entry.key!==null) colors.set(JSON.stringify([colorMode,entry.key]),{mode:colorMode,key:entry.key,color:entry.color});
+      for(const entry of category?.entries||[]) if(entry.key!==null) colors.set(JSON.stringify([colorMode,entry.key]),{mode:colorMode,key:entry.key,color:entry.color,...(entry.symbol?{symbol:entry.symbol}:{})});
       const result=await saveColorScheme({mode:colorMode,colors:[...colors.values()]},schemeRevision);
       applyScheme(result);
       setSchemeStatus("Цветовая схема сохранена в проекте.");
@@ -806,7 +823,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     return () => { active = false; };
   }, [colorMode, loadCatalog, categoryResult]);
   const categoryData = categoryResult?.load === loadCatalog ? categoryResult : null;
-  const category = useMemo(() => categoryStyle(categoryData?.rows, colorMode, overrides), [categoryData, colorMode, overrides]);
+  const category = useMemo(() => categoryStyle(categoryData?.rows, colorMode, overrides,symbols), [categoryData, colorMode, overrides,symbols]);
   const colorReady = (!loadColorScheme || schemeRevision !== null) && (colorMode === "source" || Boolean(category && !categoryData?.error));
   useLayoutEffect(() => { if (viewMemory) viewMemory.colorMode = colorMode; }, [viewMemory, colorMode]);
   const [layers, setLayers] = useState(() => viewMemory?.layers ?? []);
@@ -917,7 +934,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
       setSchemeColors(current=>[...current.filter(entry=>!(entry.mode==="source"&&savedIds.has(entry.key)) &&
         !(entry.mode===saved.category_style?.mode&&categoryIds.has(entry.key))),
         ...saved.legend.entries.map(({value,color})=>({mode:"source",key:value,color})),
-        ...categoryEntries.map(({key,color})=>({mode:saved.category_style.mode,key,color}))]);
+        ...categoryEntries.map(({key,color,symbol})=>({mode:saved.category_style.mode,key,color,...(symbol?{symbol}:{})}))]);
       setLayers(saved.layers || []);
       setLayoutStatus({ notice: `Открыта раскладка «${saved.name}».` });
     } catch (caught) {
@@ -1132,6 +1149,10 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
             {category.entries.map(entry => <div key={entry.key === null ? "missing" : "value:" + entry.key}>
               {entry.key === null ? <i style={{backgroundColor:entry.color}} aria-hidden="true"/> : <input type="color" aria-label={"Цвет: "+entry.label} value={entry.color} disabled={schemeBusy} onChange={event=>changeColor(colorMode,entry.key,event.target.value)}/>}
               <span>{entry.label}</span><small>{entry.count}</small>
+              {entry.key!==null&&<select className="category-symbol" aria-label={"Символ: "+entry.label} value={entry.symbol||"circle"} disabled={schemeBusy}
+                onChange={event=>changeSymbol(entry,event.target.value)}>
+                {Object.entries(SYMBOL_LABELS).map(([key,label])=><option key={key} value={key}>{label}</option>)}
+              </select>}
               <button type="button" className="outline-button category-cloud-button" disabled={layers.length>=32 || loading || busy}
                 aria-label={"Создать облако: "+entry.label+" · "+entry.count+" анализов"} title="Только облако этой категории" onClick={()=>addCategoryCloud(entry)}>Облако</button></div>)}
           </div>}
@@ -1253,7 +1274,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
       }}>
         <div className="plot-grid" ref={grid}>
-          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} layers={layers} viewMemory={viewMemory}
+          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} categorySymbol={category?.symbolFor} layers={layers} viewMemory={viewMemory}
             openExport={onExport && !exportBusy && colorReady ? () => openExport(panel.id) : undefined}
             favorite={Boolean(makePreset(panel) && favoritePresets.some(item => presetKey(item) === presetKey(makePreset(panel))))}
             onFavorite={!presetBusy && (!loadPresets || presetRevision!==null) ? () => toggleFavorite(panel) : undefined}

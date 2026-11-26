@@ -128,7 +128,9 @@ def _plot_capture(database_path, capture):
         if not nodes or nodes[-1].get("id") != "category-legend" or not any(panel["kind"] != "histogram" for panel in capture["panels"]):
             raise ValueError("plot_capture_category_legend")
         legend = nodes.pop()
-        if [node.get("fill") for node in legend if node.tag.endswith("}rect")] != [entry["color"] for entry in category_style["entries"]]:
+        markers = [node for node in legend if node.tag.rsplit("}",1)[-1] in ("rect","circle","polygon")]
+        expected = [(entry["color"], "circle" if entry.get("symbol") == "circle" else "polygon" if entry.get("symbol") else "rect") for entry in category_style["entries"]]
+        if [(node.get("fill"),node.tag.rsplit("}",1)[-1]) for node in markers] != expected:
             raise ValueError("plot_capture_category_colors")
     if len(nodes) != len(capture["panels"]) or any(not node.tag.endswith("}g") for node in root):
         raise ValueError("plot_capture_panels")
@@ -165,7 +167,8 @@ def _plot_capture(database_path, capture):
         with closing(open_project(database_path)) as connection:
             connection.execute("BEGIN")
             validate_category_style(connection, scope, category_style)
-    result["schema_version"] = (4 if any("style" in (layer["field"] or {}) for layer in capture["layers"])
+    has_symbols = any("symbol" in panel.get("point_style", {}) for panel in snapshots) or any("symbol" in entry for entry in (category_style or {}).get("entries", []))
+    result["schema_version"] = (5 if has_symbols else 4 if any("style" in (layer["field"] or {}) for layer in capture["layers"])
                                 else 3 if any("point_style" in panel for panel in snapshots)
                                 else 2 if category_style is not None else 1)
     return result, list(contributors)

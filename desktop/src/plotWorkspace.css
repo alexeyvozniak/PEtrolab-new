@@ -94,3 +94,6 @@
 .plot-cloud-style input[type=range] { min-width:50px;width:45%; }
 
 .plot-category-legend .category-cloud-button { flex:none; padding:2px 4px; font-size:10px; }
+
+.plot-category-legend .category-symbol { min-width:48px;max-width:85px;font-size:10px; }
+.plot-category-legend > div { flex-wrap:wrap; }

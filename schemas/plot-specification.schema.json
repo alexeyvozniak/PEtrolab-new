@@ -281,6 +281,14 @@
               "type": "number",
               "minimum": 0.5,
               "maximum": 2
+            },
+            "symbol": {
+              "enum": [
+                "circle",
+                "square",
+                "triangle",
+                "diamond"
+              ]
             }
           }
         }
@@ -638,6 +646,14 @@
               "color": {
                 "type": "string",
                 "pattern": "^#[0-9A-Fa-f]{6}$"
+              },
+              "symbol": {
+                "enum": [
+                  "circle",
+                  "square",
+                  "triangle",
+                  "diamond"
+                ]
               }
             }
           }

@@ -568,6 +568,16 @@ test("categorical mineral colors use reported labels and preserve selection and 
   expect(svg).toContain(first.getAttribute("fill"));
   expect(svg).toContain('opacity="0.35"');
   expect(svg).toContain('r="5.25"');
+  await user.selectOptions(within(legend).getByLabelText("Символ: olivine"),"diamond");
+  const diamond=screen.getAllByRole("button",{name:/^Выбрать точку C1/})[0];
+  expect(diamond.localName).toBe("polygon");
+  expect(diamond.getAttribute("fill")).toBe("#112233");
+  const shapedSvg=new DOMParser().parseFromString(await readFile(await savePlot(user),"utf8"),"image/svg+xml");
+  expect([...shapedSvg.querySelectorAll("polygon")].some(node=>node.getAttribute("fill")==="#112233")).toBe(true);
+  await user.click(await enabledButton("Сохранить цветовую схему проекта"));
+  await screen.findByText("Цветовая схема сохранена в проекте.");
+  const shaped=(await invokePetrolab("project.plot_colors.get",{project_database_path:join(folder,"project.sqlite")})).result;
+  expect(shaped.scheme.colors).toContainEqual({mode:"mineral",key:"olivine",color:"#112233",symbol:"diamond"});
   await user.selectOptions(mode,"generation");
   expect(within(await screen.findByLabelText("Легенда категорий")).getByText("Не указано")).toBeTruthy();
   await user.selectOptions(mode,"source");
@@ -577,7 +587,8 @@ test("categorical mineral colors use reported labels and preserve selection and 
   await user.click(await enabledButton("Загрузить сохранённую схему"));
   await screen.findByText("Загружена сохранённая цветовая схема.");
   expect(mode.value).toBe("mineral");
-  expect(first.getAttribute("fill")).toBe("#112233");
+  expect(screen.getAllByRole("button",{name:/^Выбрать точку C1/})[0].localName).toBe("polygon");
+  expect(screen.getAllByRole("button",{name:/^Выбрать точку C1/})[0].getAttribute("fill")).toBe("#112233");
 }, 20000);
 
 test("axis catalog drops an exact catalog key and rejects an unknown key", async () => {
