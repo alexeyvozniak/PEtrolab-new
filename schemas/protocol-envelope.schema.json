@@ -34,6 +34,7 @@
         "publication.prepare",
         "publication.export",
         "project.archive.export",
+        "project.archive.check_export",
         "project.archive.inspect",
         "project.archive.restore",
         "workspace.snapshot.save",

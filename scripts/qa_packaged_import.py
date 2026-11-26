@@ -357,6 +357,14 @@ def check_portable_archive(executable: Path, directory: Path) -> None:
     expected_hashes = {"project": set(), "project_sources": {source_hash}, "full": {source_hash, image_hash, photo_hash}}
     archives = {level: directory / f"portable-{level}.petrolab" for level in levels}
     destinations = {level: directory / f"relocated-{level}" for level in levels}
+    readiness = run(executable, [request("project.archive.check_export", {**project, "level": level})
+                                 for level in levels])
+    for (level, count), checked in zip(levels.items(), readiness, strict=True):
+        report = checked["result"]
+        if not report["ready"] or report["level"] != level or len(report["assets"]) != count - 1:
+            raise AssertionError(f"Incorrect export readiness for archive level {level}")
+    if any(path.exists() for path in archives.values()):
+        raise AssertionError("Checking export readiness created an archive")
     exported = run(executable, [request("project.archive.export", {**project, "output_path": str(path), "level": level})
                                 for level, path in archives.items()])
     inspections = run(executable, [request("project.archive.inspect", {"archive_path": str(path)})

@@ -57,6 +57,12 @@ python -m unittest discover -s tests
 
 ```powershell
 $project = Join-Path $env:APPDATA 'org.petrolab.desktop\petrolab-v2.sqlite'
+$check = .\binaries\petrolab-service.exe archive check-export $project --level full | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Не удалось проверить состав проекта' }
+if (-not $check.ready) {
+    $check.assets | Where-Object { $_.status -ne 'ready' } | Format-Table name, path, status
+    throw 'Проверьте доступность файлов и размер проекта'
+}
 .\binaries\petrolab-service.exe archive export $project 'D:\PetroLab.petrolab' --level full
 ```
 

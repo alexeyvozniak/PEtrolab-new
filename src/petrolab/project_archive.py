@@ -12,7 +12,7 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 from uuid import uuid4
 from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
 
-from .import_apply import _source_path_for_revision, open_project
+from .import_apply import open_project
 from .import_preview import ImportCommandError
 from .media_display import _publish_new_file
 
@@ -66,32 +66,90 @@ def _managed_path(database_path, relative, directory):
     return source
 
 
-def _bundle_inputs(connection, database_path, archive, level):
-    entries = []
+def _archive_assets(connection, level):
     if level in {"project_sources", "full"}:
         for row in connection.execute("SELECT * FROM source_file ORDER BY source_id").fetchall():
-            identifier = row["source_id"]
-            source = _source_path_for_revision(database_path, row)
-            if row["source_kind"] == "managed_copy":
-                source = _managed_path(database_path, row["managed_relative_path"], "sources")
-            relative = _portable_asset_path("sources", identifier, source)
-            entries.append(_record_file(archive, source, relative, row["source_fingerprint_sha256"]))
+            yield "sources", row["source_id"], row
+    if level == "full":
+        for row in connection.execute("SELECT * FROM media_asset ORDER BY media_asset_id").fetchall():
+            yield "media", row["media_asset_id"], row
+
+
+def _archive_asset_location(database_path, directory, identifier, row):
+    if row["source_kind"] == "managed_copy":
+        if not row["managed_relative_path"]:
+            _archive_error("В проекте отсутствует путь к сохранённому файлу.", "PROJECT_ARCHIVE_SOURCE_UNAVAILABLE")
+        source = _managed_path(database_path, row["managed_relative_path"], directory)
+    else:
+        if not row["linked_path"]:
+            _archive_error("В проекте отсутствует путь к связанному файлу.", "PROJECT_ARCHIVE_SOURCE_UNAVAILABLE")
+        source = Path(row["linked_path"])
+    return source, _portable_asset_path(directory, identifier, source)
+
+
+def _bundle_inputs(connection, database_path, archive, level):
+    entries = []
+    for directory, identifier, row in _archive_assets(connection, level):
+        source, relative = _archive_asset_location(database_path, directory, identifier, row)
+        entries.append(_record_file(archive, source, relative, row["source_fingerprint_sha256"]))
+        if directory == "sources":
             connection.execute("""
                 UPDATE source_file SET source_kind = 'managed_copy', linked_path = NULL, managed_relative_path = ?, state = 'current'
                 WHERE source_id = ?
             """, (relative, identifier))
-    if level == "full":
-        for row in connection.execute("SELECT * FROM media_asset ORDER BY media_asset_id").fetchall():
-            identifier = row["media_asset_id"]
-            source = (_managed_path(database_path, row["managed_relative_path"], "media")
-                      if row["source_kind"] == "managed_copy" else Path(row["linked_path"]))
-            relative = _portable_asset_path("media", identifier, source)
-            entries.append(_record_file(archive, source, relative, row["source_fingerprint_sha256"]))
+        else:
             connection.execute("""
                 UPDATE media_asset SET source_kind = 'managed_copy', linked_path = NULL, managed_relative_path = ?
                 WHERE media_asset_id = ?
             """, (relative, identifier))
     return entries
+
+
+def _snapshot_for_archive(database_path, snapshot):
+    source_uri = database_path.resolve().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(source_uri, uri=True)) as original, closing(sqlite3.connect(snapshot)) as copy:
+        original.backup(copy)
+    with closing(open_project(snapshot)):
+        pass
+
+
+def check_project_archive_export(database_path, level):
+    if not isinstance(level, str) or level not in _LEVELS:
+        raise ValueError("project_archive_level")
+    database_path = Path(database_path)
+    if not database_path.is_file():
+        _archive_error("База проекта не найдена.", "PROJECT_ARCHIVE_SOURCE_UNAVAILABLE")
+    assets = []
+    try:
+        with TemporaryDirectory(prefix="petrolab-archive-export-check-") as scratch:
+            snapshot = Path(scratch) / _DB
+            _snapshot_for_archive(database_path, snapshot)
+            with closing(sqlite3.connect(snapshot)) as connection:
+                connection.row_factory = sqlite3.Row
+                project_id = connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0]
+                for directory, identifier, row in _archive_assets(connection, level):
+                    asset = {"kind": directory, "id": identifier, "name": row["display_name"],
+                             "expected_sha256": row["source_fingerprint_sha256"]}
+                    try:
+                        source, relative = _archive_asset_location(database_path, directory, identifier, row)
+                        asset["path"] = str(source)
+                        if not source.is_file():
+                            _archive_error("Файл недоступен.", "PROJECT_ARCHIVE_SOURCE_UNAVAILABLE")
+                        with source.open("rb") as stream:
+                            fingerprint, size = _copy_and_hash(stream)
+                        asset.update(archive_path=relative, size=size, observed_sha256=fingerprint)
+                        asset["status"] = "ready" if fingerprint == asset["expected_sha256"] else "changed"
+                    except OSError:
+                        asset["status"] = "unavailable"
+                    except ImportCommandError as error:
+                        asset.update(status="unavailable", reason=error.code, message=error.message)
+                    assets.append(asset)
+            known_size = snapshot.stat().st_size + sum(asset.get("size", 0) for asset in assets)
+    except (OSError, sqlite3.Error) as error:
+        raise ImportCommandError("PROJECT_ARCHIVE_FAILED", "Не удалось проверить состав проекта для переноса.") from error
+    ready = known_size <= _SIZE_LIMIT and all(asset["status"] == "ready" for asset in assets)
+    return {"project_id": project_id, "level": level, "ready": ready,
+            "known_unpacked_size": known_size, "size_limit": _SIZE_LIMIT, "assets": assets}
 
 
 def export_project_archive(database_path, output_path, level):
@@ -105,11 +163,7 @@ def export_project_archive(database_path, output_path, level):
     try:
         with TemporaryDirectory(dir=destination.parent, prefix="petrolab-archive-") as staging:
             snapshot = Path(staging) / _DB
-            source_uri = database_path.resolve().as_uri() + "?mode=ro"
-            with closing(sqlite3.connect(source_uri, uri=True)) as original, closing(sqlite3.connect(snapshot)) as copy:
-                original.backup(copy)
-            with closing(open_project(snapshot)):
-                pass
+            _snapshot_for_archive(database_path, snapshot)
             with NamedTemporaryFile(dir=destination.parent, suffix=".petrolab.tmp", delete=False) as stream:
                 temporary = Path(stream.name)
             with ZipFile(temporary, "w", ZIP_DEFLATED) as archive:

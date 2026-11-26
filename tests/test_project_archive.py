@@ -60,6 +60,10 @@ class ProjectArchiveTests(unittest.TestCase):
             request = {"protocol_version": "1.0", "request_id": str(uuid4()), "command": "project.analyses.list",
                        "payload": {"project_database_path": str(database)}}
             self.assertIn("result", handle_request(request))
+            readiness = cli("check-export", database, "--level", "full")
+            self.assertEqual(readiness.returncode, 0, readiness.stderr)
+            self.assertTrue(json.loads(readiness.stdout)["ready"])
+            self.assertFalse(archive.exists())
             exported = cli("export", database, archive, "--level", "project")
             self.assertEqual(exported.returncode, 0, exported.stderr)
             inspected = cli("inspect", archive)
@@ -148,6 +152,10 @@ class ProjectArchiveTests(unittest.TestCase):
             expected = scientific_rows(database)
             for level, file_count in (("project", 1), ("project_sources", 2), ("full", 3)):
                 artifact = root / f"{level}.petrolab"
+                report = call("project.archive.check_export", level=level)["result"]
+                self.assertTrue(report["ready"])
+                self.assertEqual(len(report["assets"]), file_count - 1)
+                self.assertFalse(artifact.exists())
                 exported = call("project.archive.export", output_path=str(artifact), level=level)
                 self.assertIn("result", exported)
                 manifest = exported["result"]["manifest"]
@@ -197,5 +205,30 @@ class ProjectArchiveTests(unittest.TestCase):
                 self.assertEqual(bad.read_bytes(), before)
                 self.assertFalse(destination.exists())
                 self.assertFalse((root / "escaped.png").exists())
+
+            with closing(sqlite3.connect(database)) as connection:
+                relative, = connection.execute("SELECT managed_relative_path FROM source_file").fetchone()
+            managed = root / relative
+            missing = managed.with_suffix(".moved")
+            managed.rename(missing)
+            image.write_bytes(b"changed linked photo")
+            database_bytes = database.read_bytes()
+            report = call("project.archive.check_export", level="full")["result"]
+            self.assertFalse(report["ready"])
+            self.assertEqual({(item["kind"], item["name"], item["status"]) for item in report["assets"]}, {
+                ("sources", source.name, "unavailable"), ("media", image.name, "changed"),
+            })
+            sources_report = call("project.archive.check_export", level="project_sources")["result"]
+            self.assertEqual([item["status"] for item in sources_report["assets"]], ["unavailable"])
+            self.assertTrue(call("project.archive.check_export", level="project")["result"]["ready"])
+            refused = root / "unavailable-full.petrolab"
+            export = call("project.archive.export", level="full", output_path=str(refused))
+            self.assertEqual(export["error"]["code"], "PROJECT_ARCHIVE_SOURCE_UNAVAILABLE")
+            self.assertFalse(refused.exists())
+            self.assertEqual(database.read_bytes(), database_bytes)
+            self.assertFalse(managed.exists())
+            self.assertEqual(image.read_bytes(), b"changed linked photo")
+            missing.rename(managed)
+            image.write_bytes(originals[image])
             self.assertEqual(scientific_rows(database), expected)
             self.assertEqual({path: path.read_bytes() for path in originals}, originals)
