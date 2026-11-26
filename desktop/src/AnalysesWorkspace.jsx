@@ -298,6 +298,8 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const [sampleLinkFilter, setSampleLinkFilter] = useState(() => viewMemory?.sampleLinkFilter ?? "all");
   const [columnFilters, setColumnFilters] = useState(() => viewMemory?.columnFilters ?? {});
   const [visibleColumnIds, setVisibleColumnIds] = useState(() => viewMemory?.visibleColumnIds ?? []);
+  const [columnWidths, setColumnWidths] = useState(() => viewMemory?.columnWidths ?? {});
+  const columnResize = useRef(null);
   const [dragIds, setDragIds] = useState([]);
   const [contextMenu, setContextMenu] = useState(null);
   const [workGroups, setWorkGroups] = useState(null);
@@ -318,9 +320,9 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   useLayoutEffect(() => {
     if (!viewMemory) return;
     Object.assign(viewMemory, { query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery,
-      sampleLinkFilter, columnFilters, visibleColumnIds, focusedId, sort });
+      sampleLinkFilter, columnFilters, visibleColumnIds, columnWidths, focusedId, sort });
   }, [viewMemory, query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery, sampleLinkFilter,
-    columnFilters, visibleColumnIds, focusedId, sort]);
+    columnFilters, visibleColumnIds, columnWidths, focusedId, sort]);
   useLayoutEffect(() => {
     const element = tableScroll.current;
     if (!element || !viewMemory) return;
@@ -683,6 +685,27 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
     }
   };
 
+  const resizeColumn = (id, width) => setColumnWidths(current => ({ ...current, [id]: Math.max(104, Math.min(600, Math.round(width))) }));
+  const columnStyle = id => columnWidths[id] ? { width: columnWidths[id], minWidth: columnWidths[id], maxWidth: columnWidths[id] } : undefined;
+  const autoWidth = column => {
+    // Measure displayed text (including raw tokens and units), not a numerical conversion.
+    const canvas = document.createElement("canvas");
+    let context = null;
+    if (!navigator.userAgent.includes("jsdom")) context = canvas.getContext("2d");
+    if (context) context.font = "10px " + getComputedStyle(tableScroll.current).fontFamily;
+    const measure = text => context ? context.measureText(String(text)).width : String(text).length * 7;
+    let max = measure(column.label) + 38;
+    for (const analysis of ordered) {
+      max = Math.max(max, measure(valueFor(analysis, column)) + 26);
+      if (column.kind === "measurement") {
+        const m = analysis.measurements?.[column.field];
+        if (m) max = Math.max(max, measure([m.unit, measurementContext(m)].filter(Boolean).join(" · ")) + 26);
+      }
+      if (max >= 600) break;
+    }
+    resizeColumn(column.id, max);
+  };
+
   const copyVisibleSelection = (event) => {
     if (event.target.closest?.("input, textarea, select, [contenteditable=true]") || window.getSelection()?.toString()) return;
     const rows = ordered.filter(analysis => selected.has(analysis.analysis_id));
@@ -814,7 +837,29 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
               <tr>
                 <th className="analysis-select-cell"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} aria-label="Выбрать показанные анализы" /></th>
                 {visibleColumns.map((column) => (
-                  <th key={column.id}><button type="button" onClick={() => changeSort(column.id)}>{column.label}{sort.id === column.id ? (sort.direction === "asc" ? <CaretUp size={12} /> : <CaretDown size={12} />) : null}</button></th>
+                  <th key={column.id} style={columnStyle(column.id)}><button type="button" onClick={() => changeSort(column.id)}
+                    onDoubleClick={event => { event.preventDefault(); autoWidth(column); }}>{column.label}{sort.id === column.id ? (sort.direction === "asc" ? <CaretUp size={12} /> : <CaretDown size={12} />) : null}</button>
+                    <span className="analysis-column-resizer" role="separator" aria-orientation="vertical" tabIndex={0}
+                      aria-label={`Ширина колонки ${column.label}`} aria-valuemin={104} aria-valuemax={600} aria-valuenow={columnWidths[column.id] || 104}
+                      title="Перетащить для изменения ширины; двойной клик — по содержимому"
+                      onPointerDown={event => {
+                        if (event.button !== 0) return;
+                        event.preventDefault(); event.stopPropagation();
+                        columnResize.current = { id: column.id, x: event.clientX, width: event.currentTarget.parentElement.getBoundingClientRect().width };
+                        event.currentTarget.setPointerCapture?.(event.pointerId);
+                      }}
+                      onPointerMove={event => { const drag = columnResize.current; if (drag?.id === column.id) resizeColumn(column.id, drag.width + event.clientX - drag.x); }}
+                      onPointerUp={() => { columnResize.current = null; }}
+                      onPointerCancel={() => { columnResize.current = null; }}
+                      onLostPointerCapture={() => { columnResize.current = null; }}
+                      onDoubleClick={event => { event.preventDefault(); event.stopPropagation(); autoWidth(column); }}
+                      onKeyDown={event => {
+                        if (!["ArrowLeft", "ArrowRight", "Enter"].includes(event.key)) return;
+                        event.preventDefault(); event.stopPropagation();
+                        if (event.key === "Enter") autoWidth(column);
+                        else resizeColumn(column.id, (columnWidths[column.id] || event.currentTarget.parentElement.getBoundingClientRect().width || 104) + (event.key === "ArrowRight" ? 16 : -16));
+                      }} />
+                  </th>
                 ))}
               </tr>
               <tr className="analysis-filter-row">
@@ -824,7 +869,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                   const hint = column.kind === "measurement"
                     ? `Число, >10, 5..20, пусто, ниже предела${units.length > 1 ? `. Укажите единицу: ${units.join(", ")}` : ""}`
                     : "Поиск по фрагменту";
-                  return <th key={column.id}><input value={columnFilters[column.id] || ""} onChange={(event) => setColumnFilters((current) => ({ ...current, [column.id]: event.target.value }))} placeholder={column.kind === "measurement" ? ">10, 5..20" : "Фильтр"} title={hint} aria-invalid={invalidFilters.has(column.id)} aria-label={`Фильтр ${column.label}`} /></th>;
+                  return <th key={column.id} style={columnStyle(column.id)}><input value={columnFilters[column.id] || ""} onChange={(event) => setColumnFilters((current) => ({ ...current, [column.id]: event.target.value }))} placeholder={column.kind === "measurement" ? ">10, 5..20" : "Фильтр"} title={hint} aria-invalid={invalidFilters.has(column.id)} aria-label={`Фильтр ${column.label}`} /></th>;
                 })}
               </tr>
             </thead>
@@ -853,7 +898,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                     {visibleColumns.map((column) => {
                       const measurement = column.kind === "measurement" ? analysis.measurements?.[column.field] : null;
                       return (
-                        <td key={column.id} title={String(valueFor(analysis, column))}>
+                        <td key={column.id} style={columnStyle(column.id)} title={String(valueFor(analysis, column))}>
                           <span>{valueFor(analysis, column)}</span>
                           {measurement ? <small>{measurement.unit}{measurementContext(measurement) ? ` · ${measurementContext(measurement)}` : ""}</small> : null}
                         </td>

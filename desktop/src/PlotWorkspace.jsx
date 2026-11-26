@@ -676,6 +676,17 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     return [...new Set([...current, ...incoming])];
   });
   const add = () => setPanels((current) => [...current, initialPanels(axes)[0]]);
+  const movePanel = (fromId, toId) => {
+    if (fromId === toId) return;
+    setPanels(current => {
+      const from = current.findIndex(panel => panel.id === fromId);
+      const to = current.findIndex(panel => panel.id === toId);
+      if (from < 0 || to < 0) return current;
+      const next = [...current];
+      next.splice(to, 0, next.splice(from, 1)[0]);
+      return next;
+    });
+  };
   const addLayer = (event) => {
     event.preventDefault();
     setLayers((current) => [...current, { id: crypto.randomUUID(), name: layerName.trim(), analysis_ids: layerInput,
@@ -746,7 +757,22 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     <aside>
       <button className="outline-button" type="button" onClick={onBack}>Назад к анализам</button>
       <h3>Раскладка</h3>
-      {panels.map((panel, index) => <a href={`#plot-${panel.id}`} key={panel.id}>{index + 1}. {panelTitle(panel)}</a>)}
+      {panels.map((panel, index) => <div className="plot-panel-order" key={panel.id}
+        onDragOver={event => { if (event.dataTransfer.types.includes("application/x-petrolab-panel")) event.preventDefault(); }}
+        onDrop={event => { const id = event.dataTransfer.getData("application/x-petrolab-panel"); if (id) { event.preventDefault(); movePanel(id, panel.id); } }}>
+        <a href={`#plot-${panel.id}`} draggable title="Перетащить для изменения порядка"
+          onDragStart={event => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("application/x-petrolab-panel", panel.id); }}
+          onKeyDown={event => {
+            if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+            event.preventDefault();
+            const target = panels[index + (event.key === "ArrowUp" ? -1 : 1)];
+            if (target) movePanel(panel.id, target.id);
+          }}>{index + 1}. {panelTitle(panel)}</a>
+        <button type="button" disabled={!index} aria-label={`Переместить панель ${index + 1} выше`} title="Выше · Alt+↑"
+          onClick={() => movePanel(panel.id, panels[index - 1].id)}>↑</button>
+        <button type="button" disabled={index === panels.length - 1} aria-label={`Переместить панель ${index + 1} ниже`} title="Ниже · Alt+↓"
+          onClick={() => movePanel(panel.id, panels[index + 1].id)}>↓</button>
+      </div>)}
       <p>{inputIds ? `Входной набор: ${inputIds.length} анализов` : "Входной набор: проект"}</p>
       <section className="plot-source-legend" aria-label="Легенда источников">
         <h3>Источники</h3>

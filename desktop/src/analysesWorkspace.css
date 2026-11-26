@@ -169,3 +169,6 @@
 .analysis-composition-grid small { margin-top: 2px; color: #78847c; font-size: 8px; }
 .analysis-composition-summary > p { margin: 8px 0 0; color: #758078; font-size: 9px; line-height: 1.4; }
 .analysis-composition-summary > p b { color: #40584a; }
+
+.analyses-data-table th .analysis-column-resizer { position:absolute; top:0; bottom:0; right:0; width:7px; cursor:col-resize; touch-action:none; z-index:1; }
+.analyses-data-table th .analysis-column-resizer:hover,.analyses-data-table th .analysis-column-resizer:focus-visible { background:#56816666; outline:1px solid #568166; }

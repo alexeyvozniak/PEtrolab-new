@@ -606,6 +606,17 @@ test("one common selection highlights the same analysis on binary and ternary pl
   await screen.findAllByRole("button", { name: "Выбрать точку P1" });
   await waitFor(() => expect(screen.getAllByRole("button", { name: "Выбрать точку P1" })).toHaveLength(8));
   expect(screen.getByRole("combobox", { name: "Область" }).value).toBe("lasso");
+  // Layout now persists, explicitly reduce it before saving the three-panel fixture.
+  while (screen.getAllByRole("combobox", { name: "Тип диаграммы" }).length > 2) {
+    const buttons = screen.getAllByRole("button", { name: "Убрать панель" });
+    await user.click(buttons.at(-1));
+  }
+  const panelOrder = () => [...document.querySelectorAll(".plot-grid .plot-panel")].map(node => node.id);
+  const beforeOrder = panelOrder();
+  await user.click(await enabledButton("Переместить панель 1 ниже"));
+  expect(panelOrder()).toEqual([beforeOrder[1], beforeOrder[0]]);
+  await user.click(await enabledButton("Переместить панель 2 выше"));
+  expect(panelOrder()).toEqual(beforeOrder);
   await user.click(await enabledButton("Добавить диаграмму"));
   await user.click(await enabledButton("Скрыть отбор на графиках"));
   await screen.findByRole("button", { name: "Вернуть скрытые точки · 1" });

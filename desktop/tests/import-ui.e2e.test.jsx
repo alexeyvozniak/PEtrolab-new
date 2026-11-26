@@ -503,11 +503,19 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
   expect(screen.getByRole("checkbox", { name: "Выбрать UI-1" }).checked).toBe(true);
 
   const search = screen.getByRole("textbox", { name: "Поиск анализов" });
+  const resizer = screen.getByRole("separator", { name: "Ширина колонки SiO2" });
+  resizer.focus();
+  await user.keyboard("{ArrowRight}");
+  expect(resizer.getAttribute("aria-valuenow")).toBe("120");
   await user.type(search, "KIV-3");
+  await user.click(nav.getByRole("button", { name: "Импорт" }));
+  await user.click(nav.getByRole("button", { name: "Анализы" }));
+  expect(screen.getByRole("textbox", { name: "Поиск анализов" }).value).toBe("KIV-3");
+  expect(screen.getByRole("separator", { name: "Ширина колонки SiO2" }).getAttribute("aria-valuenow")).toBe("120");
   const table = screen.getByRole("table");
   expect(within(table).getByText("UI-2")).toBeTruthy();
   expect(within(table).queryByText("UI-1")).toBeNull();
-  await user.clear(search);
+  await user.clear(screen.getByRole("textbox", { name: "Поиск анализов" }));
   expect(commitImportWorkspace).toHaveBeenCalledWith("workspace-1", expect.any(Number));
   await waitFor(() => expect(uiState.imported).toBe(true));
 });

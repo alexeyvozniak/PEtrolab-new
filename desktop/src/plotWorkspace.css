@@ -50,3 +50,8 @@
 .plot-layers fieldset { display: grid; min-width: 0; gap: 4px; margin: 6px 0; padding: 5px; }
 .plot-field { pointer-events: none; }
 @media (max-width: 1250px) { .plot-workspace { grid-template-columns: 135px minmax(0, 1fr); } }
+
+.plot-panel-order { display:flex; align-items:center; gap:3px; min-width:0; }
+.plot-panel-order a { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.plot-panel-order button { border:1px solid #dce5dd; border-radius:4px; background:#fff; color:#315d45; padding:2px 5px; }
+.plot-panel-order button:disabled { opacity:.35; }
