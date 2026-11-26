@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSelectionHistory } from "./selectionHistory";
 import { SelectionSummary } from "./SelectionSummary";
+import { WorkspaceCheckpoints } from "./WorkspaceCheckpoints";
+import { tableMemoryFromView, plotMemoryFromLayout } from "./workspaceCheckpoint";
 import { sessionKey, readSession, writeSession, memoryFromSession } from "./sessionPreferences";
 import {
   CheckCircle,
@@ -20,7 +22,7 @@ import {
   createImportWorkspace, restoreImportWorkspace, addWorkspaceSources, applyWorkspaceDecision, discardImportWorkspace, previewWorkspaceWindow,
   commitImportWorkspace, listFormulaMethods, previewImportFormula,
   createWorkGroup, listWorkGroups, listGenerations, assignGeneration, undoGeneration,
-  listTableViews, saveTableView,
+  listTableViews, saveTableView, listWorkspaceSnapshots, saveWorkspaceSnapshot, openWorkspaceSnapshot,
   listEditDrafts, saveEditDraft, checkEditDraft, commitEditDraft,
   pickAnalysisExportPath, exportAnalysisSelection,
   clearImportStaging,
@@ -125,6 +127,8 @@ export function App() {
   const [selectedAnalysisIds, setSelectedAnalysisIds, undoSelection, redoSelection] = useSelectionHistory();
   const [shortcutHelp, setShortcutHelp] = useState(false);
   const [summaryRequest,setSummaryRequest] = useState(null);
+  const [checkpointOpen,setCheckpointOpen]=useState(false);
+  const [checkpointEpoch,setCheckpointEpoch]=useState(0);
   const openSummary = () => setSummaryRequest([...selectedAnalysisIds]);
   const [commandPalette, setCommandPalette] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
@@ -524,6 +528,46 @@ export function App() {
   const loadPlotSelection = useCallback(async (analysisIds, offset, limit) =>
     unwrap(await queryProjectAnalyses(databasePath, { analysis_ids: analysisIds, offset, limit })), [databasePath]);
   const loadPlotLayouts = useCallback(async () => unwrap(await listPlotSpecifications(databasePath)), [databasePath]);
+  const loadCheckpoints=async()=>{
+    const [snapshots,tables,plots]=await Promise.all([listWorkspaceSnapshots(databasePath),listTableViews(databasePath),listPlotSpecifications(databasePath)]);
+    const tableCatalog=unwrap(tables);
+    return {snapshots:unwrap(snapshots),tables:tableCatalog.views.filter(view=>view.data_universe_fingerprint===tableCatalog.data_universe_fingerprint),plots:unwrap(plots)};
+  };
+  const restoreCheckpoint=async id=>{
+    const result=unwrap(await openWorkspaceSnapshot(databasePath,id));
+    if(!result.snapshot)throw new Error((result.migration_report||[]).map(item=>item.reason).join(" · ")||"Состояние несовместимо с проектом.");
+    const state=result.snapshot;
+    if(state.plot_specification_ids.length>1||!["overview","analyses","plotting"].includes(state.active_surface)||state.active_calculation_run_id||state.source_visibility.length||
+       state.data_universe.dataset_ids.length||state.data_universe.work_group_ids.length||state.data_universe.analysis_ids.length)
+      throw new Error("Это состояние содержит компоненты, пока недоступные в интерфейсе восстановления.");
+    if(state.active_surface==="plotting"&&!state.plot_specification_ids.length)throw new Error("Не сохранена раскладка диаграмм.");
+    if(state.active_surface==="analyses"&&!state.table_view_id)throw new Error("Не сохранено представление таблицы.");
+    let table=null,layout=null,plot=null;
+    if(state.table_view_id){
+      const catalog=unwrap(await listTableViews(databasePath));
+      const view=catalog.views.find(item=>item.id===state.table_view_id&&item.data_universe_fingerprint===catalog.data_universe_fingerprint);
+      if(!view)throw new Error("Представление таблицы изменилось.");
+      table=tableMemoryFromView(view,project);
+    }
+    if(state.plot_specification_ids.length){
+      layout=unwrap(await openPlotSpecification(databasePath,state.plot_specification_ids[0]));
+      plot=plotMemoryFromLayout(layout);
+    }
+    // No view mutation before every referenced component was successfully read.
+    if(table)Object.assign(viewMemory.table,table);
+    if(plot){
+      Object.assign(viewMemory.plot,plot);
+      setPlotInputIds(layout.input.analysis_ids);
+      setHiddenAnalysisIds(layout.hidden_analysis_ids||[]);
+      setHiddenSourceIds(layout.hidden_source_ids||[]);
+      setVisibilityOperation(null);setVisibilitySessionId(crypto.randomUUID());
+    }
+    setNavigationAnalysis(null);setNavigationDraftId("");
+    setSelectedAnalysisIds(state.selection_restore_policy==="clear"?[]:state.selection_analysis_ids);
+    setCheckpointEpoch(value=>value+1);
+    setScreen({overview:"Обзор",analyses:"Анализы",plotting:"Построение"}[state.active_surface]);
+    setSuccess("Рабочее состояние «"+state.name+"» восстановлено.");
+  };
   const restorePlotLayout = async (id) => {
     const layout = unwrap(await openPlotSpecification(databasePath, id));
     setPlotInputIds(layout.input.analysis_ids);
@@ -758,6 +802,7 @@ export function App() {
           </div>
           <div className="top-actions">
             <button className="outline-button" onClick={startNewImport} disabled={busy || !desktopRuntimeAvailable} title={desktopRuntimeAvailable ? undefined : "Полный импорт доступен в установленном PetroLab Desktop"}><Plus size={18} /> Добавить данные</button>
+            <button className="outline-button" type="button" disabled={blockedNavigation||!databasePath||!desktopRuntimeAvailable} onClick={()=>setCheckpointOpen(true)}>Рабочие состояния</button>
             <button className="icon-button" disabled title="Настройки будут подключены позже"><GearSix size={21} /></button>
           </div>
         </header>
@@ -864,7 +909,7 @@ export function App() {
             const destination = await pickPublicationExportPath();
             return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination, settings)) : null;
           }} />}
-        {screen === "Построение" && <PlotWorkspace viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
+        {screen === "Построение" && <PlotWorkspace key={checkpointEpoch} viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
           loadSelection={loadPlotSelection} loadAnalysis={loadPlotAnalysis} loadColorScheme={loadColorScheme} saveColorScheme={saveColorScheme} loadPresets={loadPresets} savePresets={savePresets} onSummary={openSummary}
           loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}
           openLayout={restorePlotLayout} onExport={async (svg, options) => {
@@ -948,7 +993,7 @@ export function App() {
         )}
 
         {screen === "Анализы" && (
-          <AnalysesWorkspace
+          <AnalysesWorkspace key={checkpointEpoch}
             viewMemory={viewMemory.table}
             project={navigationAnalysis && !project.analyses.some((item) => item.analysis_id === navigationAnalysis.analysis_id)
               ? { ...project, analyses: [...project.analyses, navigationAnalysis] } : project}
@@ -982,6 +1027,8 @@ export function App() {
           />
         )}
       </section>
+      {checkpointOpen && <WorkspaceCheckpoints load={loadCheckpoints} selection={selectedAnalysisIds}
+        save={async(name,state)=>unwrap(await saveWorkspaceSnapshot(databasePath,name,state))} restore={restoreCheckpoint} close={()=>setCheckpointOpen(false)}/>}
       {summaryRequest && <SelectionSummary ids={summaryRequest} load={ids=>getSelectionSummary(databasePath,ids).then(unwrap)} close={()=>setSummaryRequest(null)} />}
       {commandPalette && <div className="import-result-overlay" role="presentation" onMouseDown={event => {
         if (event.target === event.currentTarget) setCommandPalette(false);

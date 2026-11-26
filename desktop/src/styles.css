@@ -126,3 +126,8 @@ button:disabled { cursor: default; opacity: .48; }
 .selection-summary-dialog { width:min(1120px,calc(100vw - 32px)); }
 .selection-summary-note { font-size:11px; color:#51655b; padding:4px 12px; }
 .selection-summary-dialog td { font-variant-numeric:tabular-nums; }
+
+.workspace-checkpoints { width:min(580px,calc(100vw - 32px));max-height:85vh;overflow:auto; }
+.checkpoint-form,.checkpoint-list { display:grid;gap:8px;padding:12px; }
+.checkpoint-form label:not(:has(input[type=checkbox])) { display:grid;gap:4px; }
+.checkpoint-form input:not([type=checkbox]),.checkpoint-form select { min-width:0;width:100%; }
