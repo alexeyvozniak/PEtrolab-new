@@ -175,7 +175,16 @@ test("multisheet review requests only the currently visible physical table", asy
   await enabledButton("Добавить файл");
   expect(previews()).toHaveLength(2);
   expect(previews()[1].payload.sheet_name).toBe("SecondSheet");
+  expect(requests.find(r => r.command === "import.workspace.apply_decision").payload.known_active_plan?.plan_fingerprint).toMatch(/^[a-f0-9]{64}$/);
   expect(within(await screen.findByRole("table")).getByText("B1")).toBeTruthy();
+  await user.click(await enabledButton(/FirstSheet.*Готов/));
+  await enabledButton("Добавить файл");
+  expect(previews()).toHaveLength(3);
+  expect(within(await screen.findByRole("table")).getByText("A1")).toBeTruthy();
+  await user.click(await enabledButton("Предпросмотр результата"));
+  const preview = screen.getByRole("dialog", { name: "Что попадёт в проект" });
+  expect(within(preview).getByText("A1")).toBeTruthy();
+  expect(within(preview).getByText("B1")).toBeTruthy();
 }, 20000);
 
 test("import stage indicator follows real awaited operations and clears after completion", async () => {

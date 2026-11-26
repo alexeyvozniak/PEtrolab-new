@@ -201,6 +201,7 @@ class ImportWorkspaceStore:
         return {'workspace': restored}
 
     def command(self, operation, params):
+        known_active_plan = None
         if operation == 'restore':
             database_path = params.get('project_database_path')
             if not isinstance(database_path, str) or not database_path:
@@ -279,6 +280,9 @@ class ImportWorkspaceStore:
                         raise ValueError('block_id')
                     session['active_source_id'] = source['source_id']
                     source['active_block_id'] = block_id
+                    candidate = params.get('known_active_plan')
+                    if isinstance(candidate, dict) and candidate.get('source_id') == source['source_id']:
+                        known_active_plan = candidate
                 elif kind in {'mappings', 'sections'}:
                     fn = revise_import_mappings if kind == 'mappings' else revise_import_sections
                     source['recipe'] = fn(source['staged_path'], source['recipe'], decision['decisions'])['recipe']
@@ -375,7 +379,7 @@ class ImportWorkspaceStore:
             if operation != 'get':
                 session['draft_revision'] += 1
                 session['updated_at'] = now()
-        result = self._project(session)
+        result = self._project(session, known_active_plan=known_active_plan)
         if operation != 'get':
             self._save_draft(session)
             self.sessions[session['workspace_id']] = session
@@ -636,7 +640,7 @@ class ImportWorkspaceStore:
         reviewed = (state.get('duplicate_review') or {}).get('fingerprint') == fingerprint
         return {'groups': groups, 'fingerprint': fingerprint, 'reviewed': reviewed}
 
-    def _project(self, state, *, readiness_only=False):
+    def _project(self, state, *, readiness_only=False, known_active_plan=None):
         """Build the same readiness gates without UI-only work during commit."""
         sources, issues, plans, reviews, scopes = [], [], [], {}, []
         for source in state['sources']:
@@ -717,7 +721,16 @@ class ImportWorkspaceStore:
                                       'blocking_reason_codes': reasons}})
         if readiness_only:
             return session['readiness']
-        active_review = deepcopy(reviews[active['source_id']])
+        review = reviews[active['source_id']]
+        current_plan = next(item for item in plans if item['source_id'] == active['source_id'])
+        reference = {'source_id': active['source_id'], 'plan_fingerprint': current_plan['plan_fingerprint']}
+        # Navigation never changes scientific decisions. Reuse a client plan
+        # only after recomputing authoritative readiness and matching its hash.
+        if known_active_plan == reference and current_plan['status'] == 'ready':
+            active_review = deepcopy({key: value for key, value in review.items() if key != 'plan'})
+            active_review['plan_reference'] = reference
+        else:
+            active_review = deepcopy(review)
         active_review['semantic_actions'] = SEMANTIC_ACTIONS
         active_review['canonical_analytes'] = CANONICAL
         if state['database_path']:
@@ -730,5 +743,5 @@ class ImportWorkspaceStore:
             )
         if active['recipe']['global_decisions'].get('mineral_verification_enabled'):
             from .mineral_verification import acceptance_scopes
-            active_review['mineral_acceptance_scopes'] = acceptance_scopes(active_review['plan'], active['recipe'])
+            active_review['mineral_acceptance_scopes'] = acceptance_scopes(review['plan'], active['recipe'])
         return {'session': session, 'active': active_review, 'duplicate_comparison': comparison}

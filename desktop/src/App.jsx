@@ -309,7 +309,10 @@ export function App() {
     setError("");
     setSuccess("");
     try {
-      const result = unwrap(await applyWorkspaceDecision(workspace.workspace_id, workspace.draft_revision, sourceId, decision, bulk));
+      const activeFingerprint = workspace.plans?.find(item => item.source_id === sourceId)?.plan_fingerprint;
+      const knownPlan = decision.kind === "activate" && sourceId === workspace.active_source_id && plan && activeFingerprint
+        ? { reference: { source_id: sourceId, plan_fingerprint: activeFingerprint }, plan } : null;
+      const result = unwrap(await applyWorkspaceDecision(workspace.workspace_id, workspace.draft_revision, sourceId, decision, bulk, knownPlan));
       setActivity("2/2 · Загружаю предпросмотр таблицы…");
       await receiveWorkspace(result, true);
       if (decision.kind !== "activate") setSuccess("Решение сохранено в этой очереди. Исходный файл не изменён.");

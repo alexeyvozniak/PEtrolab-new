@@ -80,3 +80,7 @@ Memoize the existing case-insensitive full-record JSON search index on the first
 ### Import polish — 5/6
 
 Use the existing activity message and spinner as an accessible stage indicator: 1–4 select/stage/recognize/preview; 1–2 review decision/preview; 1–3 atomic validation and persistence/staging cleanup/project refresh. Update only at actual awaited boundaries; no fabricated percentage or promise of progress within the synchronous service. Success/error and guards are unchanged. Real-service integration pauses the staging request and checks the status before release and after completion.
+
+### Import polish — 6/6
+
+Switching blocks of the same ready workbook now sends an exact plan reference rather than re-copying, serializing and re-parsing all measurements. Python recomputes current authoritative readiness and plan hash, so changed files or recipes return a full projection. Client checks source/workspace/fingerprint and falls back to full get if necessary. Existing physical preview and full search remain available across all sheets. Regression covers mutated input and two-way sheet navigation, and the comparative benchmark reports activation response bytes and time. Native UI acceptance still required.

@@ -75,7 +75,19 @@ def benchmark(source, count):
             packed, pack_s = timed(lambda: compact_workspace_review(current))
             compact_payload_bytes = len(json.dumps(packed, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
             del packed
-        del current
+        reference = {"source_id": session["active_source_id"], "plan_fingerprint": session["plans"][0]["plan_fingerprint"]}
+        activated, activate = timed(lambda: store.command("apply_decision", {**params,
+            "decision": {"kind": "activate", "block_id": session["active_block_id"]},
+            "known_active_plan": reference}))
+        activation_payload = len(json.dumps(activated, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        if "plan_reference" in activated["active"]:
+            assert activated["active"]["plan_reference"] == reference
+            assert "plan" not in activated["active"]
+        else:
+            assert activated["active"]["plan"] == current["active"]["plan"]
+        assert activated["session"]["readiness"] == readiness
+        params["expected_revision"] = activated["session"]["draft_revision"]
+        del current, activated
         saved, commit = timed(lambda: store.command("commit", params))
         assert saved["analysis_count"] == count, saved["analysis_count"]
         assert saved["measurement_count"] == count * len(OXIDES), saved["measurement_count"]
@@ -116,7 +128,7 @@ def benchmark(source, count):
                 "provenance_sha256": provenance.hexdigest(),
                 "measurement_sha256": observed.hexdigest(), "measurements": saved["measurement_count"],
                 "create_s": create, "get_s": get, "preview_samples_s": times,
-                "preview_median_s": statistics.median(times), "commit_s": commit,
+                "preview_median_s": statistics.median(times), "activate_s": activate, "activate_payload_bytes": activation_payload, "commit_s": commit,
                 "review_payload_bytes": payload_bytes, "compact_review_payload_bytes": compact_payload_bytes}
 
 

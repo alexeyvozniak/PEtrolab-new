@@ -36,10 +36,27 @@ export const previewImportFormula = (workspace, selection, methodId) =>
   invokePetrolab("import.workspace.preview_formula", { workspace_id: workspace.workspace_id,
     expected_revision: workspace.draft_revision, source_id: workspace.active_source_id,
     ...(Array.isArray(selection) ? { preview_ids: selection } : { preview_id: selection }), method_id: methodId });
-export const applyWorkspaceDecision = (workspaceId, revision, sourceId, decision, bulk = false) =>
-  invokePetrolab(bulk ? "import.workspace.apply_bulk_decision" : "import.workspace.apply_decision", {
+export const applyWorkspaceDecision = async (workspaceId, revision, sourceId, decision, bulk = false, knownPlan = null) => {
+  const response = await invokePetrolab(bulk ? "import.workspace.apply_bulk_decision" : "import.workspace.apply_decision", {
     workspace_id: workspaceId, expected_revision: revision, source_id: sourceId, decision,
+    ...(knownPlan ? { known_active_plan: knownPlan.reference } : {}),
   });
+  const projection = response?.result;
+  const reference = projection?.active?.plan_reference;
+  if (!reference) return response;
+  if (knownPlan?.plan && projection.session.workspace_id === workspaceId
+      && projection.session.active_source_id === sourceId
+      && reference.source_id === sourceId
+      && reference.source_id === knownPlan.reference.source_id
+      && reference.plan_fingerprint === knownPlan.reference.plan_fingerprint
+      && projection.session.plans.some(item => item.source_id === sourceId && item.plan_fingerprint === reference.plan_fingerprint)) {
+    const { plan_reference, ...active } = projection.active;
+    return { ...response, result: { ...projection, active: { ...active, plan: knownPlan.plan } } };
+  }
+  // The revision was already accepted by Python. Retrieve its full projection
+  // rather than attempting another mutation with the previous revision.
+  return getImportWorkspace(workspaceId);
+};
 export const discardImportWorkspace = (workspaceId, revision) =>
   invokePetrolab("import.workspace.discard", { workspace_id: workspaceId, expected_revision: revision });
 export const commitImportWorkspace = (workspaceId, revision) =>
