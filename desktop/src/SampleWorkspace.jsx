@@ -18,6 +18,16 @@ export function SampleWorkspace({ viewMemory, loadSamples, loadSample, saveConte
   const [samples, setSamples] = useState(null);
   const [sampleId, setSampleId] = useState(initialSampleId || viewMemory?.sampleId || "");
   const [sample, setSample] = useState(null);
+  // A cached card is only a loading aid; actions remain unavailable until
+  // the live project read finishes. No cached scientific counts are applied.
+  const [cachedCard, setCachedCard] = useState(null);
+  const rememberCard = (item) => {
+    if (!viewMemory || !item) return;
+    const cards = viewMemory.cards || (viewMemory.cards = new Map());
+    cards.delete(item.sample_id);
+    cards.set(item.sample_id, {sample_id:item.sample_id, sample_name:item.sample_name});
+    while (cards.size > 12) cards.delete(cards.keys().next().value);
+  };
   const [tab, setTab] = useState(() => initialSampleId || initialTab !== "Обзор" ? initialTab : viewMemory?.tab || initialTab);
   useEffect(() => {
     if (viewMemory) Object.assign(viewMemory, { sampleId, tab });
@@ -39,8 +49,10 @@ export function SampleWorkspace({ viewMemory, loadSamples, loadSample, saveConte
   useEffect(() => {
     if (!sampleId) return;
     let active = true;
-    loadSample(sampleId).then((item) => { if (active) setSample(item); })
-      .catch((caught) => { if (active) setError(caught.message); });
+    setCachedCard(viewMemory?.cards?.get(sampleId) || null);
+    loadSample(sampleId).then((item) => {
+      if (active) { setSample(item); rememberCard(item); setCachedCard(null); }
+    }).catch((caught) => { if (active) { setError(caught.message); setCachedCard(null); } });
     return () => { active = false; };
   }, [loadSample, sampleId]);
   const current = sample?.sample_id === sampleId ? sample : null;
@@ -122,7 +134,7 @@ export function SampleWorkspace({ viewMemory, loadSamples, loadSample, saveConte
   return <section className="sample-workspace">
     <div className="sample-header">
       <div>
-        <h2>{current ? `Образец ${current.sample_name}` : "Образцы"}</h2>
+        <h2>{current ? `Образец ${current.sample_name}` : cachedCard?.sample_id === sampleId ? `Образец ${cachedCard.sample_name} · загрузка` : "Образцы"}</h2>
         {current && <p>Минералы: {current.minerals.length ? current.minerals.join(", ") : "не указаны"}</p>}
       </div>
       {samples?.length > 0 && <label>Образец <select value={sampleId} disabled={saving} onChange={choose}>

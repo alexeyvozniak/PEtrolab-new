@@ -2,6 +2,8 @@
 
 from base64 import b64encode
 from contextlib import closing
+from collections import OrderedDict
+from threading import RLock
 from io import BytesIO
 import json
 import math
@@ -36,10 +38,47 @@ def _asset_source(database_path, media_id):
     return asset, source
 
 
+# Process-local cache of derived pixel data only. Never cache annotations,
+# original exports, or a successful integrity check.
+_PREVIEW_CACHE = OrderedDict()
+_PREVIEW_CACHE_LOCK = RLock()
+_PREVIEW_CACHE_BYTES = 32 * 1024 * 1024
+_PREVIEW_CACHE_COUNT = 24
+
+
+def _preview_cache_get(key):
+    with _PREVIEW_CACHE_LOCK:
+        value = _PREVIEW_CACHE.get(key)
+        if value is not None:
+            _PREVIEW_CACHE.move_to_end(key)
+        return value
+
+
+def _preview_cache_put(key, value):
+    if len(value) > _PREVIEW_CACHE_BYTES:
+        return
+    with _PREVIEW_CACHE_LOCK:
+        _PREVIEW_CACHE[key] = value
+        _PREVIEW_CACHE.move_to_end(key)
+        while len(_PREVIEW_CACHE) > _PREVIEW_CACHE_COUNT or sum(map(len, _PREVIEW_CACHE.values())) > _PREVIEW_CACHE_BYTES:
+            _PREVIEW_CACHE.popitem(last=False)
+
+
 def _preview_image(source, expected_fingerprint, region=None):
     try:
         if _sha256(source) != expected_fingerprint:
             _fail("SOURCE_FINGERPRINT_MISMATCH", "Изображение изменилось. Предпросмотр остановлен.")
+        # Validate region shape before making a hashable cache key; the
+        # exact bounds are validated during the first successful decode.
+        keys = ("left", "top", "width", "height")
+        if region is not None and (not isinstance(region, dict) or set(region) != set(keys)
+                                   or any(type(region[key]) is not int for key in keys)):
+            raise ValueError("Недопустимая область предпросмотра.")
+        cache_key = (str(source.resolve()), expected_fingerprint,
+                     None if region is None else tuple(region[key] for key in keys))
+        cached = _preview_cache_get(cache_key)
+        if cached is not None:
+            return cached
         with Image.open(source) as image:
             buffer = BytesIO()
             if region is None:
@@ -56,7 +95,9 @@ def _preview_image(source, expected_fingerprint, region=None):
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
         _fail("MEDIA_PREVIEW_FAILED", "Создать предпросмотр изображения не удалось.")
     content_type = "jpeg" if region is None else "png"
-    return f"data:image/{content_type};base64," + b64encode(buffer.getvalue()).decode("ascii")
+    preview = f"data:image/{content_type};base64," + b64encode(buffer.getvalue()).decode("ascii")
+    _preview_cache_put(cache_key, preview)
+    return preview
 
 
 def _preview_region(region, image_width, image_height):
