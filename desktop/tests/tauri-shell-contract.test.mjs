@@ -288,6 +288,16 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(uiSmoke, /commitImportWorkspace/);
 });
 
+test("Windows release steps stop after a failed tool command", async () => {
+  const workflow = await read("../.github/workflows/windows-test-build.yml");
+  const steps = workflow.split(/^      - name: /m);
+  for (const name of ["Enable Rust stable", "Validate Python contracts and import core", "Build Windows scientific service",
+    "Build and test frontend", "Prepare baseline build dependencies", "Build baseline MSI for upgrade rehearsal"]) {
+    const step = steps.find((item) => item.startsWith(`${name}\n`) || item.startsWith(`${name}\r\n`));
+    assert.match(step, /run: \|\r?\n\s*\$PSNativeCommandUseErrorActionPreference = \$true/, name);
+  }
+});
+
 test("Tauri config keeps the approved desktop minimum window size and version alignment", async () => {
   const config = JSON.parse(await read("src-tauri/tauri.conf.json"));
   const cargo = await read("src-tauri/Cargo.toml");

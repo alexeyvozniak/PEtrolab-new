@@ -24,15 +24,18 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - name: Enable Rust stable
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           rustup toolchain install stable --profile minimal
           rustup default stable
       - name: Validate Python contracts and import core
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           python -m pip install --disable-pip-version-check .
           python scripts/validate_contracts.py
           python -m unittest discover -s tests
       - name: Build Windows scientific service
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           python -m pip install --disable-pip-version-check pyinstaller
           python scripts/build_windows_service.py
           python scripts/qa_packaged_import.py
@@ -74,6 +77,7 @@ jobs:
       - name: Build and test frontend
         working-directory: desktop
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           npm ci
           npm run build
           npm run test:sites
@@ -158,6 +162,7 @@ jobs:
           Copy-Item -LiteralPath $service[0].FullName -Destination $binaries.FullName
       - name: Prepare baseline build dependencies
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           rustup toolchain install stable --profile minimal
           rustup default stable
           python -m pip install --disable-pip-version-check .
@@ -166,6 +171,7 @@ jobs:
         working-directory: desktop
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           $baselineVersion = "0.1.6"
           $currentVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           if ([version]$currentVersion -le [version]$baselineVersion) { throw "The upgrade baseline must be older than the candidate." }

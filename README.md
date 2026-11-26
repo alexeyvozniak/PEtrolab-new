@@ -45,6 +45,12 @@ python -m unittest discover -s tests
 
 Явный `PYTHONPATH` нужен, чтобы тесты использовали этот checkout, а не установленную ранее копию пакета. Задача VS Code `PetroLab: Python tests` задаёт его автоматически.
 
+## Установка на Windows x64
+
+1. Откройте успешный прогон [Windows test build](https://github.com/alexeyvozniak/PEtrolab-new/actions/workflows/windows-test-build.yml?query=branch%3Acodex%2Fpetrolab-2-release+is%3Asuccess) для нужного коммита. В разделе **Artifacts** скачайте `PetroLab-Windows-verified-MSI-<коммит>`. Для скачивания войдите в GitHub.
+2. Распакуйте архив. Сверьте SHA-256 установщика с `build-info.json` по командам ниже и запустите указанный там `PetroLab_…_x64_en-US.msi`.
+3. Откройте PetroLab из меню «Пуск». При переезде на другой компьютер восстановите проект отдельно по инструкции ниже.
+
 ## Перенос проекта на другой компьютер
 
 Закройте PetroLab. В PowerShell из каталога приложения укажите путь к своей базе и создайте архив. Уровень `full` включает базу, исходные таблицы и изображения. Для переноса только базы используйте `project`, для базы с таблицами — `project_sources`.
@@ -54,15 +60,16 @@ $project = Join-Path $env:APPDATA 'org.petrolab.desktop\petrolab-v2.sqlite'
 .\binaries\petrolab-service.exe archive export $project 'D:\PetroLab.petrolab' --level full
 ```
 
-Скопируйте архив на другой компьютер. Восстановление создаёт новый каталог. Затем откройте его в отдельном запуске PetroLab:
+Скопируйте архив на другой компьютер. В PowerShell из каталога установленного PetroLab укажите новый каталог проекта и запустите приложение с базой, которую вернуло восстановление:
 
 ```powershell
-.\binaries\petrolab-service.exe archive restore 'D:\PetroLab.petrolab' 'D:\PetroLab-Project'
-$env:PETROLAB_PROJECT_DATABASE = 'D:\PetroLab-Project\project.sqlite'
+$result = .\binaries\petrolab-service.exe archive restore 'D:\PetroLab.petrolab' 'D:\PetroLab-Project'
+if ($LASTEXITCODE -ne 0) { throw 'Восстановление проекта завершилось ошибкой' }
+$env:PETROLAB_PROJECT_DATABASE = ($result | ConvertFrom-Json).project_database_path
 .\petrolab-desktop.exe
 ```
 
-Обычный запуск из меню «Пуск» открывает базу в каталоге приложения.
+Обычный запуск из меню «Пуск» открывает текущую базу по умолчанию в `%APPDATA%\org.petrolab.desktop\petrolab-v2.sqlite`. Для восстановленного проекта повторно запускайте PetroLab с путём к его базе, как в примере выше.
 
 ## Проверочная сборка Windows
 
