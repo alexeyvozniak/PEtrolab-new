@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import "./plotWorkspace.css";
 
@@ -87,13 +87,14 @@ function initialPanels(axes) {
     : make("binary", [axes[1], axes[0]])];
 }
 
-function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor, points }) {
+function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor, points, rememberedView, rememberView }) {
   const drag = useRef(null);
   const canvas = useRef(null);
   const hovered = useRef(false);
   const space = useRef(false);
   const [rubber, setRubber] = useState(null);
-  const [view, setView] = useState(FULL_VIEW);
+  const [view, setView] = useState(rememberedView || FULL_VIEW);
+  useLayoutEffect(() => { rememberView?.(view); }, [view, rememberView]);
   const zoomed = view.width < FULL_VIEW.width;
   useEffect(() => {
     const svg = canvas.current;
@@ -320,7 +321,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor,
   </svg></>;
 }
 
-function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, canRemove, shape, colorFor, openExport, layers }) {
+function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory }) {
   const [projection, setProjection] = useState(null);
   const current = projection?.load === load && projection.panel === panel ? projection : null;
   const data = current?.data;
@@ -402,7 +403,9 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
     </div>
     {status && <p role="status">{status}</p>}
     {data && <>
-      <PlotCanvas data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} shape={shape} colorFor={colorFor} points={points} />
+      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} shape={shape} colorFor={colorFor} points={points}
+        rememberedView={viewMemory?.views.get(panel.id)?.fingerprint === data.projection_sha256 ? viewMemory.views.get(panel.id).view : undefined}
+        rememberView={view => viewMemory?.views.set(panel.id, { fingerprint: data.projection_sha256, view })} />
       <small>{pattern ? "Спектров" : panel.kind === "histogram" ? "Анализов" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
         {data.hidden_count ? ` · скрыто: ${data.hidden_count}` : ""}
         {data.points.length > points.length ? ` · скрыто стилем слоя: ${data.points.length - points.length}` : ""}
@@ -525,24 +528,24 @@ function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
   </>;
 }
 
-export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedIds, setSelectedIds, inputIds, onBack,
+export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection, selectedIds, setSelectedIds, inputIds, onBack,
   hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
   onExport, onAddPublication }) {
   const [axes, setAxes] = useState([]);
   const [patterns, setPatterns] = useState({});
-  const [panels, setPanels] = useState([]);
+  const [panels, setPanels] = useState(() => viewMemory?.panels ?? []);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState("union");
-  const [shape, setShape] = useState("rectangle");
-  const [selectionExpanded, setSelectionExpanded] = useState(false);
+  const [mode, setMode] = useState(() => viewMemory?.mode ?? "union");
+  const [shape, setShape] = useState(() => viewMemory?.shape ?? "rectangle");
+  const [selectionExpanded, setSelectionExpanded] = useState(() => viewMemory?.selectionExpanded ?? false);
   const [sources, setSources] = useState([]);
   const [layouts, setLayouts] = useState([]);
   const [layoutName, setLayoutName] = useState("");
   const [layoutStatus, setLayoutStatus] = useState(null);
   const [layoutBusy, setLayoutBusy] = useState(false);
-  const [savedColors, setSavedColors] = useState({});
-  const [layers, setLayers] = useState([]);
+  const [savedColors, setSavedColors] = useState(() => viewMemory?.savedColors ?? {});
+  const [layers, setLayers] = useState(() => viewMemory?.layers ?? []);
   const [layerName, setLayerName] = useState("");
   const layerInput = inputIds ? selectedIds.filter((id) => inputIds.includes(id)) : selectedIds;
   // Cache only within this mounted workspace and exact data/visibility/layer
@@ -572,6 +575,18 @@ export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedId
   const [exportBusy, setExportBusy] = useState(false);
   const [exportOptions, setExportOptions] = useState(null);
   const grid = useRef(null);
+  const content = useRef(null);
+  useLayoutEffect(() => {
+    if (!viewMemory) return;
+    Object.assign(viewMemory, { opened: true, panels, mode, shape, selectionExpanded, savedColors, layers });
+    const ids = new Set(panels.map(panel => panel.id));
+    for (const id of viewMemory.views.keys()) if (!ids.has(id)) viewMemory.views.delete(id);
+  }, [viewMemory, panels, mode, shape, selectionExpanded, savedColors, layers]);
+  useLayoutEffect(() => {
+    if (!content.current || !viewMemory || loading) return;
+    content.current.scrollTop = viewMemory.scrollTop || 0;
+    content.current.scrollLeft = viewMemory.scrollLeft || 0;
+  }, [viewMemory, loading]);
   const colorFor = (sourceId) => savedColors[sourceId] || sourceColor(sourceId);
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
   useEffect(() => {
@@ -807,9 +822,11 @@ export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedId
       {loading && <p role="status">Загружаю поля проекта…</p>}
       {error && <p role="alert">{error}</p>}
       {!loading && !error && !panels.length && <p>Для построения нужно хотя бы одно поле измерений.</p>}
-      <div className={exportOptions ? "plot-content plot-content-export" : "plot-content"}>
+      <div ref={content} className={exportOptions ? "plot-content plot-content-export" : "plot-content"} onScroll={event => {
+        if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
+      }}>
         <div className="plot-grid" ref={grid}>
-          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} shape={shape} colorFor={colorFor} layers={layers}
+          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} shape={shape} colorFor={colorFor} layers={layers} viewMemory={viewMemory}
             openExport={onExport && !exportBusy ? () => openExport(panel.id) : undefined}
             update={(next) => setPanels((current) => current.map((item) => item.id === panel.id ? next : item))}
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}

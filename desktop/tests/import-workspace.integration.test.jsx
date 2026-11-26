@@ -604,6 +604,8 @@ test("one common selection highlights the same analysis on binary and ternary pl
   expect(table.getByRole("checkbox", { name: "Выбрать P2" }).checked).toBe(false);
   await user.click(await enabledButton("Построение"));
   await screen.findAllByRole("button", { name: "Выбрать точку P1" });
+  await waitFor(() => expect(screen.getAllByRole("button", { name: "Выбрать точку P1" })).toHaveLength(8));
+  expect(screen.getByRole("combobox", { name: "Область" }).value).toBe("lasso");
   await user.click(await enabledButton("Добавить диаграмму"));
   await user.click(await enabledButton("Скрыть отбор на графиках"));
   await screen.findByRole("button", { name: "Вернуть скрытые точки · 1" });

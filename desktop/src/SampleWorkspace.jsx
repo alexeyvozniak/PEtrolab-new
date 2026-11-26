@@ -12,13 +12,16 @@ const FIELDS = {
   collection_date: "Дата отбора",
 };
 
-export function SampleWorkspace({ loadSamples, loadSample, saveContext, addNote, onOpenAnalyses, busy, pointLinks,
+export function SampleWorkspace({ viewMemory, loadSamples, loadSample, saveContext, addNote, onOpenAnalyses, busy, pointLinks,
   initialTab = "Обзор", onImportMedia, previewMedia, exportOriginal, exportRendered, exportBatch, addPublication, mediaLinks,
   pointLinkScope, onClearPointLinkScope, initialSampleId = "" }) {
   const [samples, setSamples] = useState(null);
-  const [sampleId, setSampleId] = useState(initialSampleId);
+  const [sampleId, setSampleId] = useState(initialSampleId || viewMemory?.sampleId || "");
   const [sample, setSample] = useState(null);
-  const [tab, setTab] = useState(initialTab);
+  const [tab, setTab] = useState(() => initialSampleId || initialTab !== "Обзор" ? initialTab : viewMemory?.tab || initialTab);
+  useEffect(() => {
+    if (viewMemory) Object.assign(viewMemory, { sampleId, tab });
+  }, [viewMemory, sampleId, tab]);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState(null);
   const [name, setName] = useState("");

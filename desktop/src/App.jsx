@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSelectionHistory } from "./selectionHistory";
 import {
   CheckCircle,
@@ -111,6 +111,8 @@ export function App() {
   const desktopRuntimeAvailable = isPetrolabDesktop();
   const [screen, setScreen] = useState("Обзор");
   const [databasePath, setDatabasePath] = useState("");
+  // View state only, scoped to this project and this application session.
+  const viewMemory = useMemo(() => ({ table: {}, plot: { views: new Map() }, samples: {} }), [databasePath]);
   const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
   const [selectedAnalysisIds, setSelectedAnalysisIds, undoSelection, redoSelection] = useSelectionHistory();
   const [shortcutHelp, setShortcutHelp] = useState(false);
@@ -436,7 +438,8 @@ export function App() {
     if (!enabled || busy || blockDraftDirty || mappingDraftDirty) return;
     setError("");
     if (label === "Построение") {
-      openPlots();
+      if (viewMemory.plot.opened) setScreen("Построение");
+      else openPlots();
       return;
     }
     if (label === "Поиск") setSearchSeed(null);
@@ -445,7 +448,13 @@ export function App() {
   };
   const openPlots = (ids = selectedAnalysisIds) => {
     if (busy || !databasePath) return;
-    setPlotInputIds(ids.length ? [...ids] : null);
+    const next = ids.length ? [...ids] : null;
+    if (JSON.stringify(next) !== JSON.stringify(plotInputIds)) {
+      // A deliberately new input does not inherit layers or zoom from the old input.
+      Object.assign(viewMemory.plot, { panels: [], layers: [], views: new Map(), scrollTop: 0, scrollLeft: 0 });
+      setPlotInputIds(next);
+    }
+    viewMemory.plot.opened = true;
     setScreen("Построение");
   };
   const togglePlotSource = (id) => {
@@ -712,7 +721,7 @@ export function App() {
           onBeginPointLink={beginSearchPointLink}
           onPlot={openPlots}
           onAddSelection={(ids) => setSelectedAnalysisIds((current) => [...new Set([...current, ...ids])])} />}
-        {["Образцы", "Связи", "Изображения"].includes(screen) && <SampleWorkspace key={screen} loadSamples={loadSamples} loadSample={loadSample}
+        {["Образцы", "Связи", "Изображения"].includes(screen) && <SampleWorkspace key={screen} viewMemory={viewMemory.samples} loadSamples={loadSamples} loadSample={loadSample}
           initialTab={screen === "Связи" ? "Точки" : screen === "Изображения" ? "Изображения" : "Обзор"}
           initialSampleId={screen === "Образцы" ? navigationSampleId : pointLinkScope?.sampleId}
           pointLinkScope={pointLinkScope} onClearPointLinkScope={() => setPointLinkScope(null)}
@@ -793,7 +802,7 @@ export function App() {
             const destination = await pickPublicationExportPath();
             return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination, settings)) : null;
           }} />}
-        {screen === "Построение" && <PlotWorkspace loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
+        {screen === "Построение" && <PlotWorkspace viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
           loadSelection={loadPlotSelection}
           loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}
           openLayout={restorePlotLayout} onExport={async (svg, options) => {
@@ -878,6 +887,7 @@ export function App() {
 
         {screen === "Анализы" && (
           <AnalysesWorkspace
+            viewMemory={viewMemory.table}
             project={navigationAnalysis && !project.analyses.some((item) => item.analysis_id === navigationAnalysis.analysis_id)
               ? { ...project, analyses: [...project.analyses, navigationAnalysis] } : project}
             initialFocusedId={navigationAnalysis?.analysis_id}

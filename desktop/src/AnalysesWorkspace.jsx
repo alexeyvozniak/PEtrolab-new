@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CaretDown,
   CaretUp,
@@ -256,7 +256,7 @@ function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlot
   );
 }
 
-export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, generationActions, onExportSelection, onPublishSelection, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, onUndoPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
+export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initialDraftId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, generationActions, onExportSelection, onPublishSelection, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, onUndoPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
   const analyses = project.analyses || [];
   const mineralStatusCounts = project.mineral_status_counts || {};
   const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
@@ -289,14 +289,14 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
     ...measurementFields.slice(0, 8).map((field) => columnId("measurement", field)),
   ]), [identityFields, metadataFields, measurementFields]);
 
-  const [query, setQuery] = useState("");
-  const [sourceFilter, setSourceFilter] = useState("all");
-  const [sheetFilter, setSheetFilter] = useState("all");
-  const [mineralStatusFilter, setMineralStatusFilter] = useState([]);
-  const [statusQuery, setStatusQuery] = useState("");
-  const [sampleLinkFilter, setSampleLinkFilter] = useState("all");
-  const [columnFilters, setColumnFilters] = useState({});
-  const [visibleColumnIds, setVisibleColumnIds] = useState([]);
+  const [query, setQuery] = useState(() => viewMemory?.query ?? "");
+  const [sourceFilter, setSourceFilter] = useState(() => viewMemory?.sourceFilter ?? "all");
+  const [sheetFilter, setSheetFilter] = useState(() => viewMemory?.sheetFilter ?? "all");
+  const [mineralStatusFilter, setMineralStatusFilter] = useState(() => viewMemory?.mineralStatusFilter ?? []);
+  const [statusQuery, setStatusQuery] = useState(() => viewMemory?.statusQuery ?? "");
+  const [sampleLinkFilter, setSampleLinkFilter] = useState(() => viewMemory?.sampleLinkFilter ?? "all");
+  const [columnFilters, setColumnFilters] = useState(() => viewMemory?.columnFilters ?? {});
+  const [visibleColumnIds, setVisibleColumnIds] = useState(() => viewMemory?.visibleColumnIds ?? []);
   const [dragIds, setDragIds] = useState([]);
   const [workGroups, setWorkGroups] = useState(null);
   const [groupForm, setGroupForm] = useState(false);
@@ -309,9 +309,22 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
   const searchInput = useRef(null);
   const selectionAnchor = useRef(null);
   const selectionDrag = useRef(null);
-  const [focusedId, setFocusedId] = useState(initialFocusedId || "");
-  const [sort, setSort] = useState({ id: "source", direction: "asc" });
+  const [focusedId, setFocusedId] = useState(initialFocusedId || viewMemory?.focusedId || "");
+  const tableScroll = useRef(null);
+  const [sort, setSort] = useState(() => viewMemory?.sort ?? { id: "source", direction: "asc" });
 
+  useLayoutEffect(() => {
+    if (!viewMemory) return;
+    Object.assign(viewMemory, { query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery,
+      sampleLinkFilter, columnFilters, visibleColumnIds, focusedId, sort });
+  }, [viewMemory, query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery, sampleLinkFilter,
+    columnFilters, visibleColumnIds, focusedId, sort]);
+  useLayoutEffect(() => {
+    const element = tableScroll.current;
+    if (!element || !viewMemory) return;
+    element.scrollTop = viewMemory.scrollTop || 0;
+    element.scrollLeft = viewMemory.scrollLeft || 0;
+  }, [viewMemory, visibleColumnIds.length > 0]);
   useEffect(() => {
     const finish = (event) => {
       const drag = selectionDrag.current;
@@ -786,7 +799,9 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
         </div>}
         </div>
 
-        <div className="analyses-table-scroll" tabIndex={0} aria-label="Таблица анализов: Ctrl+A — выбрать показанные, Esc — снять выбор, стрелки — перейти к анализу, Ctrl+C — копировать показанные выбранные строки" onCopy={copyVisibleSelection} onClick={event => {
+        <div className="analyses-table-scroll" ref={tableScroll} onScroll={event => {
+          if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
+        }} tabIndex={0} aria-label="Таблица анализов: Ctrl+A — выбрать показанные, Esc — снять выбор, стрелки — перейти к анализу, Ctrl+C — копировать показанные выбранные строки" onCopy={copyVisibleSelection} onClick={event => {
           if (event.target === event.currentTarget) {
             selectionAnchor.current = null;
             setSelectedIds([]);
