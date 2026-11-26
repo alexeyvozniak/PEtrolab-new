@@ -11,7 +11,23 @@ import { join, resolve } from "node:path";
 const bridge = vi.hoisted(() => ({ invoke: null }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args) => bridge.invoke(...args) }));
 import { App } from "../src/App";
-import { invokePetrolab } from "../src/desktopApi";
+import { invokePetrolab, expandWorkspaceReview } from "../src/desktopApi";
+
+test("compact measurement transport restores every value and rejects incomplete rows", () => {
+  const plan = { summary: { planned_analysis_count: 1 }, measurement_columns_v1: ["raw_token", "qualifier", "reported_fe_form"],
+    planned_records: [{ preview_id: "A1", measurements: [["<DL", "below_detection_limit", null], ["0", null, "FeO"]] }] };
+  const input = { workspace: { session: { draft_revision: 3 }, active: { plan } } };
+  const restored = expandWorkspaceReview(input);
+  expect(restored.workspace.active.plan.planned_records[0].measurements).toEqual([
+    { raw_token: "<DL", qualifier: "below_detection_limit", reported_fe_form: null },
+    { raw_token: "0", qualifier: null, reported_fe_form: "FeO" },
+  ]);
+  expect(restored.workspace.active.plan.measurement_columns_v1).toBeUndefined();
+  expect(input.workspace.active.plan.measurement_columns_v1).toHaveLength(3);
+  expect(expandWorkspaceReview(restored)).toBe(restored);
+  expect(() => expandWorkspaceReview({ active: { plan: { ...plan, planned_records: [{ measurements: [["<DL"]] }] } } })).toThrow();
+});
+
 configure({ asyncUtilTimeout: 5000 });
 
 let child, folder, first, second, queue, mediaQueue, mediaFolder, original, pending, requests, plotExports, externalUrls;

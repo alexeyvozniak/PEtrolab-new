@@ -23,6 +23,36 @@ from test_media_import import write_png  # noqa: E402
 
 
 class NdjsonServiceTests(unittest.TestCase):
+    def test_opt_in_measurement_wire_format_is_lossless(self):
+        from petrolab.ndjson_service import compact_workspace_review
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "wire.csv"
+            source.write_text("Analysis,SiO2 (wt.%),FeO (wt.%),F (wt.%)\nA1,40,10,<DL\nA2,41,0,n.d.\n", encoding="utf-8")
+            before = source.read_bytes()
+
+            def call(operation, **payload):
+                response = handle_request({"protocol_version": PROTOCOL_VERSION, "request_id": str(uuid.uuid4()),
+                                           "command": f"import.workspace.{operation}", "payload": payload})
+                self.assertIn("result", response, response)
+                return json.loads(json.dumps(response["result"]))
+
+            original = call("create", sources=[{"staged_path": str(source)}])
+            session = original["session"]
+            params = {"workspace_id": session["workspace_id"]}
+            packed = call("get", **params, measurement_wire_format="columns_v1")
+            plan = packed["active"]["plan"]
+            columns = plan.pop("measurement_columns_v1")
+            self.assertIn("raw_token", columns)
+            self.assertIn("reported_fe_form", columns)
+            for record in plan["planned_records"]:
+                record["measurements"] = [dict(zip(columns, row, strict=True)) for row in record["measurements"]]
+            self.assertEqual(packed, original)
+            self.assertEqual(call("get", **params), original)
+            compact = compact_workspace_review({"workspace": original})
+            self.assertIn("measurement_columns_v1", compact["workspace"]["active"]["plan"])
+            self.assertNotIn("measurement_columns_v1", original["active"]["plan"])
+            self.assertEqual(source.read_bytes(), before)
+
     def test_generation_assignment_undo_keeps_exact_scope_and_import_evidence(self):
         import sqlite3
 

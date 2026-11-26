@@ -67,6 +67,14 @@ def benchmark(source, count):
             assert window["rows"], window
             times.append(duration)
         payload_bytes = len(json.dumps(current, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        try:
+            from petrolab.ndjson_service import compact_workspace_review
+        except ImportError:
+            compact_payload_bytes = payload_bytes
+        else:
+            packed, pack_s = timed(lambda: compact_workspace_review(current))
+            compact_payload_bytes = len(json.dumps(packed, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+            del packed
         del current
         saved, commit = timed(lambda: store.command("commit", params))
         assert saved["analysis_count"] == count, saved["analysis_count"]
@@ -109,7 +117,7 @@ def benchmark(source, count):
                 "measurement_sha256": observed.hexdigest(), "measurements": saved["measurement_count"],
                 "create_s": create, "get_s": get, "preview_samples_s": times,
                 "preview_median_s": statistics.median(times), "commit_s": commit,
-                "review_payload_bytes": payload_bytes}
+                "review_payload_bytes": payload_bytes, "compact_review_payload_bytes": compact_payload_bytes}
 
 
 def main():

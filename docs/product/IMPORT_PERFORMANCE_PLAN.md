@@ -52,3 +52,7 @@ Architecture CI на 5cfb96d: контракты прошли, 214 тестов,
 ### 2026-11-26 — incremental review and recognition
 
 Vocabulary recognition normalizes each candidate cell once, preserving exact short-token/prefix matching and missing markers; repeated header signatures computed once per block; block counts accumulated in one pass. Bounded per-source review plan cache (2 entries, total 10k records/150k measurements) keyed by exact recipe digest and freshly verified staged SHA-256; bypassed for mineral verification, annotations, sample assignments, accepted formulae and commit readiness. Explicit replan, discard and successful commit clear affected entries. Regression covers original predicate equivalence, unchanged get, changed mapping, client mutation isolation. Final commit still rebuilds and verifies the plan. No quantitative speed claim before CI.
+
+### Compact review transport
+
+NDJSON opt-in `columns_v1` avoids repeating 15+ measurement field names for every cell. The desktop API restores the full original objects before React (no pagination, layout change or search limitation). Test compares the entire decoded response with legacy projection including `<DL`, zero, null, Fe and source coordinates; malformed shape is rejected. Benchmark reports raw and compact serialized payload bytes where supported. Full UI and Windows latency measurement still required.
