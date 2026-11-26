@@ -692,6 +692,19 @@ def _validated_layers(layers):
     return layers
 
 
+def validate_point_style(panel):
+    if "point_style" not in panel:
+        return
+    style = panel["point_style"]
+    if (panel["kind"] == "histogram" or not isinstance(style, dict)
+            or set(style) != {"opacity", "size_scale"}
+            or type(style["opacity"]) not in (int, float)
+            or type(style["size_scale"]) not in (int, float)
+            or not 0.05 <= style["opacity"] <= 1
+            or not 0.5 <= style["size_scale"] <= 2):
+        raise ValueError("plot_point_style")
+
+
 def save_plot_specification(database_path, name, analysis_ids, panels, colors, hidden_analyses, hidden_sources, layers=None, *, transaction=None, category_style=None):
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
         raise ImportCommandError("PLOT_LAYOUT_NAME_INVALID", "Введите название раскладки до 120 символов.")
@@ -709,8 +722,9 @@ def save_plot_specification(database_path, name, analysis_ids, panels, colors, h
     panel_keys = set()
     saved_panels = []
     for panel in panels:
-        if not isinstance(panel, dict) or set(panel) - {"normalization", "binning"} != {"id", "kind", "axes"}:
+        if not isinstance(panel, dict) or set(panel) - {"normalization", "binning", "point_style"} != {"id", "kind", "axes"}:
             raise ValueError("panels")
+        validate_point_style(panel)
         panel_ids.append(panel["id"])
         kind = panel["kind"]
         keys = _plot_keys(kind, panel["axes"])
@@ -772,6 +786,8 @@ def _insert_plot_specification(connection, name, analysis_ids, saved_panels, pan
     if category_style is not None:
         spec["category_style"] = validate_category_style(connection, spec["input"]["analysis_ids"], category_style)
         spec["schema_version"] = 2
+    if any("point_style" in panel for panel in saved_panels):
+        spec["schema_version"] = 3
     connection.execute("INSERT INTO plot_specification (id, name, definition_json) VALUES (?, ?, ?)",
                        (spec["id"], name, json.dumps(spec, ensure_ascii=False)))
     return spec
@@ -790,18 +806,21 @@ def open_plot_specification(database_path, spec_id):
         if not row:
             raise ImportCommandError("PLOT_LAYOUT_UNAVAILABLE", "Раскладка недоступна.")
         spec = json.loads(row[0])
-        if spec.get("schema_version") not in (1, 2) or (spec.get("schema_version") == 2) != ("category_style" in spec):
+        expected_version = (3 if any("point_style" in panel for panel in spec["panels"])
+                            else 2 if "category_style" in spec else 1)
+        if spec.get("schema_version") != expected_version:
             raise ImportCommandError("PLOT_LAYOUT_VERSION_UNSUPPORTED", "Версия раскладки несовместима с этой версией PetroLab.")
         if any(panel["kind"] == "histogram" and panel.get("binning") != _HISTOGRAM_BINNING for panel in spec["panels"]):
             raise ImportCommandError("PLOT_HISTOGRAM_BINNING_UNSUPPORTED", "Версия интервалов гистограммы не поддерживается.")
         _, available = _layout_input(connection, spec["input"]["analysis_ids"])
         keys = set()
         for panel in spec['panels']:
+            validate_point_style(panel)
             axes = [{key: value for key, value in axis.items() if key not in {'scale', 'manual_range'}} for axis in panel['axes']]
             _plot_keys(panel['kind'], axes)
             keys.update(_required_axis_keys(axes))
         if not keys <= available:
             raise ImportCommandError("PLOT_LAYOUT_AXES_UNAVAILABLE", "Часть сохранённых полей недоступна. Раскладка не изменилась.")
-        if spec.get("schema_version") == 2:
+        if "category_style" in spec:
             validate_category_style(connection, spec["input"]["analysis_ids"], spec["category_style"])
         return spec

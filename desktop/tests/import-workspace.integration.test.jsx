@@ -536,6 +536,16 @@ test("categorical mineral colors use reported labels and preserve selection and 
   const secondMarker = screen.getAllByRole("button", {name:/^Выбрать точку C2/})[0];
   expect(first.getAttribute("fill")).toBe("#112233");
   expect(first.getAttribute("fill")).not.toBe(secondMarker.getAttribute("fill"));
+  const firstPanel = first.closest(".plot-panel");
+  await user.click(within(firstPanel).getByText("Оформление точек · 100%"));
+  const beforeStyle = requests.filter(request=>request.command==="plot_data.query").length;
+  fireEvent.change(within(firstPanel).getByRole("slider",{name:"Непрозрачность точек панели"}),{target:{value:"0.35"}});
+  fireEvent.change(within(firstPanel).getByRole("slider",{name:"Размер точек панели"}),{target:{value:"1.5"}});
+  expect(first.getAttribute("opacity")).toBe("0.35");
+  expect(Number(first.getAttribute("r"))).toBe(5.25);
+  await user.click(within(firstPanel).getByRole("button",{name:"Применить оформление ко всем диаграммам"}));
+  expect(screen.getAllByRole("button",{name:/^Выбрать точку C1/}).every(node=>node.getAttribute("opacity")==="0.35")).toBe(true);
+  expect(requests.filter(request=>request.command==="plot_data.query").length).toBe(beforeStyle);
   fireEvent.keyDown(first,{key:"Enter"});
   expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
   fireEvent.keyDown(secondMarker,{key:"Enter"});
@@ -556,6 +566,8 @@ test("categorical mineral colors use reported labels and preserve selection and 
   expect(svg).toContain("olivine");
   expect(svg).toContain("pyroxene");
   expect(svg).toContain(first.getAttribute("fill"));
+  expect(svg).toContain('opacity="0.35"');
+  expect(svg).toContain('r="5.25"');
   await user.selectOptions(mode,"generation");
   expect(within(await screen.findByLabelText("Легенда категорий")).getByText("Не указано")).toBeTruthy();
   await user.selectOptions(mode,"source");

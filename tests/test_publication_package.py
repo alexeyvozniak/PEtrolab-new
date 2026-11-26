@@ -355,10 +355,19 @@ class PublicationPackageTests(unittest.TestCase):
             saved = save_plot_specification(database,"Категории",None,[panel],{},[],[],category_style=style)
             self.assertEqual(saved["schema_version"],2)
             self.assertEqual(open_plot_specification(database,saved["id"])["category_style"],style)
+            styled_panel = {**panel,"point_style":{"opacity":0.35,"size_scale":1.5}}
+            styled = save_plot_specification(database,"Прозрачные точки",None,[styled_panel],{},[],[],category_style=style)
+            self.assertEqual(styled["schema_version"],3)
+            self.assertEqual(open_plot_specification(database,styled["id"])["panels"][0]["point_style"],styled_panel["point_style"])
+            with self.assertRaises(ValueError):
+                save_plot_specification(database,"Недопустимый стиль",None,[{**panel,"point_style":{"opacity":0,"size_scale":1}}],{},[],[])
             svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g id="panel-a"><text x="1" y="2">a</text></g><g id="category-legend"><rect x="1" y="10" width="10" height="10" fill="#112233"/><rect x="1" y="25" width="10" height="10" fill="#445566"/></g></svg>'
             capture = {"name":"Categories","format":"svg","width_mm":90,"dpi":600,"include_csv":True,"svg":svg,
                        "analysis_ids":None,"hidden_analysis_ids":[],"hidden_source_ids":[],"layers":[],"colors":{},
                        "category_style":style,"panels":[{**panel,"projection_sha256":projection["projection_sha256"]}]}
+            styled_capture = {**capture,"panels":[{**capture["panels"][0],"point_style":styled_panel["point_style"]}]}
+            styled_item = capture_publication_plot(database,styled_capture,"Прозрачные точки")
+            self.assertEqual(styled_item["capture"]["panels"][0]["point_style"],styled_panel["point_style"])
             item = capture_publication_plot(database,capture,"Категории")
             ready = prepare_publication(database,"Пакет", [item])
             destination = root / "category.zip"

@@ -263,6 +263,26 @@
             "string",
             "null"
           ]
+        },
+        "point_style": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "opacity",
+            "size_scale"
+          ],
+          "properties": {
+            "opacity": {
+              "type": "number",
+              "minimum": 0.05,
+              "maximum": 1
+            },
+            "size_scale": {
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 2
+            }
+          }
         }
       },
       "if": {

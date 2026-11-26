@@ -6,6 +6,7 @@ import "./plotWorkspace.css";
 
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
 const EMPTY_BINS = [];
+const DEFAULT_POINT_STYLE = Object.freeze({opacity:1, size_scale:1});
 const COLOR_MODES = { source: "Источник", sample: "Физический образец", mineral: "Минерал (исходное название)", generation: "Generation" };
 const CATEGORY_COLORS = ["#356ca2","#ae5431","#39856b","#8c56a1","#bf8a28","#be456e","#367f91","#75643c","#647a2c","#485496","#ad675c","#7a7294","#248277","#a43d91","#66533f","#b67513"];
 const MISSING_COLOR = "#8c9590";
@@ -136,7 +137,7 @@ function initialPanels(axes) {
     : make("binary", [axes[1], axes[0]])];
 }
 
-function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, shape, colorFor, categoryColor, points, rememberedView, rememberView }) {
+function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, shape, colorFor, categoryColor, points, pointStyle = DEFAULT_POINT_STYLE, rememberedView, rememberView }) {
   const drag = useRef(null);
   const canvas = useRef(null);
   const hovered = useRef(false);
@@ -309,7 +310,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
         else if (!modifier) onSelect([], "replace");
         return;
       }
-      const hit = visibleMarkers.findLast((point) => Math.hypot(px(point.u) - last.x, py(point.v) - last.y) <= 7 * view.width / VIEW.width);
+      const hit = visibleMarkers.findLast((point) => Math.hypot(px(point.u) - last.x, py(point.v) - last.y) <= Math.max(7 * view.width / VIEW.width, (isPattern ? 2.5 : 3.5) * pointStyle.size_scale));
       const id = hit?.analysis_id || pressedAnalysisId;
       if (id) onSelect([id], modifier);
       else if (!modifier) onSelect([], "replace");
@@ -352,7 +353,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
     onDoubleClick={(event) => {
       if (isHistogram || selectionModifier(event)) return;
       const last = position(event);
-      const hit = visibleMarkers.findLast(point => Math.hypot(px(point.u) - last.x, py(point.v) - last.y) <= 7 * view.width / VIEW.width);
+      const hit = visibleMarkers.findLast(point => Math.hypot(px(point.u) - last.x, py(point.v) - last.y) <= Math.max(7 * view.width / VIEW.width, (isPattern ? 2.5 : 3.5) * pointStyle.size_scale));
       const id = hit?.analysis_id || event.target.closest?.("[data-analysis-id]")?.dataset.analysisId;
       if (id) onOpenAnalysis?.(id);
       else setView(FULL_VIEW);
@@ -383,7 +384,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
       <polygon key={field.layer_id} className="plot-field" fill="#99b9a0" fillOpacity={0.26}
         stroke="#5c7d66" strokeWidth={1} points={field.vertices.map(([u, v]) => `${px(u)},${py(v)}`).join(" ")} />)}
     {paths.map(({ point, path }) => <path key={point.analysis_id} className="plot-series" data-analysis-id={point.analysis_id}
-      d={path} fill="none" stroke={categoryColor ? categoryColor(point.analysis_id) : colorFor(point.source_id)} strokeWidth={1.25} opacity={point.opacity} />)}
+      d={path} fill="none" stroke={categoryColor ? categoryColor(point.analysis_id) : colorFor(point.source_id)} strokeWidth={1.25} opacity={point.opacity * pointStyle.opacity} />)}
     {bars.map((bar, index) => {
       const highlighted = bar.analysis_ids.some((id) => selected.has(id));
       const rect = { x: px(bar.left), y: py(bar.base + bar.height), width: px(bar.right) - px(bar.left),
@@ -402,10 +403,10 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
     {selectedOutline && <path className="plot-halo" d={selectedOutline} />}
     {!isHistogram && markers.map((point) => <g key={`${point.analysis_id}:${point.element || ""}`}>
       <circle className="plot-point" data-analysis-id={point.analysis_id} fill={categoryColor ? categoryColor(point.analysis_id) : colorFor(point.source_id)}
-        cx={px(point.u)} cy={py(point.v)} r={isPattern ? 2.5 : 3.5} role="button"
+        cx={px(point.u)} cy={py(point.v)} r={(isPattern ? 2.5 : 3.5) * pointStyle.size_scale} role="button"
         tabIndex={!zoomed || contains(px(point.u), py(point.v)) ? point.tabIndex ?? 0 : -1}
         aria-hidden={zoomed && !contains(px(point.u), py(point.v)) ? true : undefined}
-        opacity={point.opacity}
+        opacity={point.opacity * pointStyle.opacity}
         aria-label={`Выбрать точку ${point.label}`} aria-pressed={selected.has(point.analysis_id)}
         onMouseEnter={event => showPoint(event, point)} onMouseLeave={() => setHover(null)}
         onFocus={event => showPoint(event, point)} onBlur={() => setHover(null)}
@@ -414,7 +415,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
       </circle>
     </g>)}
     {!isHistogram && markers.filter((point) => selected.has(point.analysis_id)).map((point) =>
-      <circle key={`${point.analysis_id}:${point.element || ""}`} className="plot-halo" cx={px(point.u)} cy={py(point.v)} r={isPattern ? 4.5 : 6} />)}
+      <circle key={`${point.analysis_id}:${point.element || ""}`} className="plot-halo" cx={px(point.u)} cy={py(point.v)} r={(isPattern ? 2.5 : 3.5) * pointStyle.size_scale + 2.5} />)}
     {rubber && (rubber.path ? <polygon className="plot-rubber" points={rubber.path} /> : <rect className="plot-rubber" {...rubber} />)}
   </svg>
   <PointTooltip hover={hover} shift={shift} detail={detail?.id === hoveredId ? detail : null} loadAnalysis={loadAnalysis} />
@@ -425,9 +426,12 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
   ] : []} /></>;
 }
 
-function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor }) {
+function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor, onApplyStyle }) {
   const [projection, setProjection] = useState(null);
-  const current = projection?.load === load && projection.panel === panel ? projection : null;
+  const projectionPanel = useMemo(() => ({kind:panel.kind, axes:panel.axes, normalization:panel.normalization}), [panel.kind, panel.axes, panel.normalization]);
+  const current = projection?.load === load && projection.panel === projectionPanel ? projection : null;
+  const pointStyle = panel.point_style || DEFAULT_POINT_STYLE;
+  const setPointStyle = values => update({...panel,point_style:{...pointStyle,...values}});
   const data = current?.data;
   const calculated = panel.axes.some(isCalculatedAxis);
   const exclusions = {};
@@ -451,11 +455,11 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
   const group = pattern?.groups.find(({ key }) => key === measurementGroup(panel.axes[0]));
   useEffect(() => {
     let active = true;
-    load(panel.kind, panel.axes, panel.normalization).then((result) => {
-      if (active) setProjection({ load, panel, data: result });
-    }).catch((error) => { if (active) setProjection({ load, panel, error: error.message }); });
+    load(projectionPanel.kind, projectionPanel.axes, projectionPanel.normalization).then((result) => {
+      if (active) setProjection({ load, panel:projectionPanel, data: result });
+    }).catch((error) => { if (active) setProjection({ load, panel:projectionPanel, error: error.message }); });
     return () => { active = false; };
-  }, [load, panel]);
+  }, [load, projectionPanel]);
   const updateKind = (kind) => {
     if (kind === "histogram") {
       update({ id: panel.id, kind, axes: [isCalculatedAxis(panel.axes[0]) ? axes[0] : panel.axes[0]] });
@@ -463,11 +467,11 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
     }
     if (patterns[kind]) {
       const { groups, default_normalization } = patterns[kind];
-      update({ id: panel.id, kind, axes: groups[0].axes, normalization: default_normalization });
+      update({ id: panel.id, kind, axes: groups[0].axes, normalization: default_normalization, ...(panel.point_style ? {point_style:panel.point_style} : {}) });
       return;
     }
     const next = initialPanels(axes).find((item) => item.kind === kind);
-    update({ id: panel.id, kind, axes: next ? next.axes : axes.slice(0, 3) });
+    update({ id: panel.id, kind, axes: next ? next.axes : axes.slice(0, 3), ...(panel.point_style ? {point_style:panel.point_style} : {}) });
   };
   const updateAxis = (index, axis) => {
     if (!axis) return;
@@ -520,9 +524,23 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
         </select>;
       })}
     </div>
+    {panel.kind !== "histogram" && <details className="plot-point-style">
+      <summary>Оформление точек · {Math.round(pointStyle.opacity*100)}%</summary>
+      <label>Непрозрачность · {Math.round(pointStyle.opacity*100)}%
+        <input type="range" aria-label="Непрозрачность точек панели" min="0.05" max="1" step="0.05" value={pointStyle.opacity}
+          onChange={event=>setPointStyle({opacity:Number(event.target.value)})}/></label>
+      <label>Размер · {Math.round(pointStyle.size_scale*100)}%
+        <input type="range" aria-label="Размер точек панели" min="0.5" max="2" step="0.1" value={pointStyle.size_scale}
+          onChange={event=>setPointStyle({size_scale:Number(event.target.value)})}/></label>
+      <div className="plot-style-actions">
+        <button type="button" className="outline-button" onClick={()=>setPointStyle(DEFAULT_POINT_STYLE)}>Сбросить оформление точек</button>
+        {onApplyStyle && <button type="button" className="outline-button" onClick={()=>onApplyStyle(pointStyle)}>Применить оформление ко всем диаграммам</button>}
+      </div>
+      <small>Прозрачность умножается на непрозрачность слоя. Выделение остаётся контуром; гистограммы не изменяются.</small>
+    </details>}
     {status && <p role="status">{status}</p>}
     {data && <>
-      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} categoryColor={categoryColor} points={points}
+      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} categoryColor={categoryColor} points={points} pointStyle={pointStyle}
         rememberedView={viewMemory?.views.get(panel.id)?.fingerprint === data.projection_sha256 ? viewMemory.views.get(panel.id).view : undefined}
         rememberView={view => viewMemory?.views.set(panel.id, { fingerprint: data.projection_sha256, view })} />
       <small>{pattern ? "Спектров" : panel.kind === "histogram" ? "Анализов" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
@@ -876,9 +894,10 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     try {
       const saved = await openLayout(id);
       setColorMode(saved.category_style?.mode || "source");
-      setPanels(saved.panels.map(({ id: panelId, kind, axes: savedAxes, normalization }) => ({
+      setPanels(saved.panels.map(({ id: panelId, kind, axes: savedAxes, normalization, point_style }) => ({
         id: panelId, kind, axes: savedAxes.map(({ scale, manual_range, ...axis }) => axis),
         ...(PATTERN_LABELS[kind] ? { normalization } : {}),
+        ...(point_style ? {point_style} : {}),
       })));
       setSavedColors(Object.fromEntries(saved.legend.entries.map(({ value, color }) => [value, color])));
       const savedIds=new Set(saved.legend.entries.map(entry=>entry.value));
@@ -1201,10 +1220,11 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
             openExport={onExport && !exportBusy && colorReady ? () => openExport(panel.id) : undefined}
             favorite={Boolean(makePreset(panel) && favoritePresets.some(item => presetKey(item) === presetKey(makePreset(panel))))}
             onFavorite={!presetBusy && (!loadPresets || presetRevision!==null) ? () => toggleFavorite(panel) : undefined}
+            onApplyStyle={style=>setPanels(current=>current.map(item=>item.kind==="histogram" ? item : {...item,point_style:{...style}}))}
             update={(next) => {
               setPanels(current => current.map(item => item.id === panel.id ? next : item));
               const preset = makePreset(next);
-              if (preset && resolvePreset(preset,axes,patterns) && !presetBusy && (!loadPresets || presetRevision!==null))
+              if ((next.kind!==panel.kind || next.axes!==panel.axes || next.normalization!==panel.normalization) && preset && resolvePreset(preset,axes,patterns) && !presetBusy && (!loadPresets || presetRevision!==null))
                 setRecentPresets(current => rememberPreset(current,preset));
             }}
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}

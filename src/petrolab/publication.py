@@ -19,7 +19,7 @@ from .import_apply import open_project
 from .formula_service import list_formula_runs, open_formula_run
 from .import_preview import ImportCommandError
 from .media_display import _annotations, _asset_source, _publish_new_file, export_media_original, export_media_rendered
-from .plot_data import list_plot_specifications, open_plot_specification, query_plot_data, validate_category_style
+from .plot_data import list_plot_specifications, open_plot_specification, query_plot_data, validate_category_style, validate_point_style
 from .plot_export import SVG_LIMIT, checked_svg, render_plot
 from .selection_export import selection_xlsx_bytes
 from .statistics_service import list_calculation_runs, open_calculation_run
@@ -136,8 +136,9 @@ def _plot_capture(database_path, capture):
     contributors = {}
     scope = capture["analysis_ids"]
     for panel, node in zip(capture["panels"], nodes):
-        if not isinstance(panel, dict) or set(panel) - {"normalization"} != {"id", "kind", "axes", "projection_sha256"}:
+        if not isinstance(panel, dict) or set(panel) - {"normalization", "point_style"} != {"id", "kind", "axes", "projection_sha256"}:
             raise ValueError("plot_capture_panel")
+        validate_point_style(panel)
         projection = query_plot_data(database_path, panel["kind"], panel["axes"], scope,
                                      capture["hidden_analysis_ids"], capture["hidden_source_ids"], capture["layers"],
                                      normalization=panel.get("normalization"))
@@ -164,7 +165,8 @@ def _plot_capture(database_path, capture):
         with closing(open_project(database_path)) as connection:
             connection.execute("BEGIN")
             validate_category_style(connection, scope, category_style)
-    result["schema_version"] = 2 if category_style is not None else 1
+    result["schema_version"] = (3 if any("point_style" in panel for panel in snapshots)
+                                else 2 if category_style is not None else 1)
     return result, list(contributors)
 
 
