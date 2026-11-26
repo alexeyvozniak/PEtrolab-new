@@ -1,6 +1,6 @@
 """Portable project archives with verified, isolated restore."""
 
-from contextlib import closing
+from contextlib import closing, nullcontext
 from hashlib import sha256
 import json
 from pathlib import Path, PurePosixPath
@@ -37,11 +37,12 @@ def _portable_asset_path(directory, identifier, source):
     return name
 
 
-def _copy_and_hash(source, destination):
+def _copy_and_hash(source, destination=None):
     fingerprint = sha256()
     size = 0
     while block := source.read(_CHUNK):
-        destination.write(block)
+        if destination is not None:
+            destination.write(block)
         fingerprint.update(block)
         size += len(block)
     return fingerprint.hexdigest(), size
@@ -201,6 +202,36 @@ def _verify_database(database, manifest):
         raise ImportCommandError("PROJECT_ARCHIVE_INVALID", "База SQLite в архиве повреждена.") from error
 
 
+def _unpack_verified(archive, manifest, directory, *, include_assets):
+    for entry in manifest["files"]:
+        target = nullcontext()
+        if include_assets or entry["path"] == _DB:
+            path = directory.joinpath(*PurePosixPath(entry["path"]).parts)
+            path.parent.mkdir(exist_ok=True, parents=True)
+            target = path.open("xb")
+        with target as output, archive.open(entry["path"]) as source:
+            fingerprint, size = _copy_and_hash(source, output)
+        if fingerprint != entry["sha256"] or size != entry["size"]:
+            _archive_error("Контрольная сумма одного из файлов не совпадает.")
+    _verify_database(directory / _DB, manifest)
+
+
+def inspect_project_archive(archive_path):
+    """Verify every member using a temporary database, without restoring a project."""
+    if not isinstance(archive_path, str) or not archive_path:
+        raise ValueError("project_archive_inspect")
+    try:
+        with ZipFile(archive_path) as archive:
+            manifest, size = _archive_manifest(archive)
+            with TemporaryDirectory(prefix="petrolab-archive-check-") as scratch:
+                _unpack_verified(archive, manifest, Path(scratch), include_assets=False)
+    except (BadZipFile, RuntimeError, NotImplementedError) as error:
+        raise ImportCommandError("PROJECT_ARCHIVE_INVALID", "Архив повреждён или использует неподдерживаемое сжатие.") from error
+    except OSError as error:
+        raise ImportCommandError("PROJECT_ARCHIVE_FAILED", "Не удалось проверить переносимый архив.") from error
+    return {"manifest": manifest, "unpacked_size": size}
+
+
 def restore_project_archive(archive_path, destination_path):
     if not isinstance(archive_path, str) or not isinstance(destination_path, str) or not archive_path or not destination_path:
         raise ValueError("project_archive_restore")
@@ -215,14 +246,7 @@ def restore_project_archive(archive_path, destination_path):
             with TemporaryDirectory(dir=destination.parent, prefix="petrolab-restore-") as scratch:
                 extracted = Path(scratch) / "restored"
                 extracted.mkdir()
-                for entry in manifest["files"]:
-                    path = extracted.joinpath(*PurePosixPath(entry["path"]).parts)
-                    path.parent.mkdir(exist_ok=True, parents=True)
-                    with archive.open(entry["path"]) as source, path.open("xb") as target:
-                        fingerprint, recorded_size = _copy_and_hash(source, target)
-                    if fingerprint != entry["sha256"] or recorded_size != entry["size"]:
-                        _archive_error("Контрольная сумма одного из файлов не совпадает.")
-                _verify_database(extracted / _DB, manifest)
+                _unpack_verified(archive, manifest, extracted, include_assets=True)
                 if destination.exists() or destination.is_symlink():
                     _archive_error("Каталог назначения уже существует.", "PROJECT_ARCHIVE_DESTINATION_EXISTS")
                 extracted.rename(destination)

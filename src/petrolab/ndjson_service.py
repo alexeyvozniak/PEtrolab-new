@@ -49,7 +49,7 @@ from .publication import (
     capture_publication_media, capture_publication_plot, capture_publication_table, export_publication,
     prepare_publication, publication_catalog,
 )
-from .project_archive import export_project_archive, restore_project_archive
+from .project_archive import export_project_archive, inspect_project_archive, restore_project_archive
 from .workspace_snapshots import (
     apply_analysis_template, list_analysis_templates, list_workspace_snapshots, open_workspace_snapshot,
     save_analysis_template, save_workspace_snapshot,
@@ -340,6 +340,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "project.archive.export": lambda params: {"result": export_project_archive(
         _project_database_path(params), params.get("output_path"), params.get("level"),
     )},
+    "project.archive.inspect": lambda params: {"result": inspect_project_archive(params.get("archive_path"))},
     "project.archive.restore": lambda params: {"result": restore_project_archive(
         params.get("archive_path"), params.get("destination_path"),
     )},

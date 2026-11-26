@@ -62,6 +62,10 @@ class ProjectArchiveTests(unittest.TestCase):
             self.assertIn("result", handle_request(request))
             exported = cli("export", database, archive, "--level", "project")
             self.assertEqual(exported.returncode, 0, exported.stderr)
+            inspected = cli("inspect", archive)
+            self.assertEqual(inspected.returncode, 0, inspected.stderr)
+            self.assertEqual(json.loads(inspected.stdout)["manifest"], json.loads(exported.stdout)["manifest"])
+            self.assertFalse(restored.exists())
             unpacked = cli("restore", archive, restored)
             self.assertEqual(unpacked.returncode, 0, unpacked.stderr)
             self.assertEqual(json.loads(exported.stdout)["manifest"], json.loads(unpacked.stdout)["manifest"])
@@ -152,6 +156,12 @@ class ProjectArchiveTests(unittest.TestCase):
                     for entry in manifest["files"]:
                         self.assertEqual(sha256(archive.read(entry["path"])).hexdigest(), entry["sha256"])
                 destination = root / f"restored-{level}"
+                original_archive = artifact.read_bytes()
+                inspected = call("project.archive.inspect", archive_path=str(artifact))
+                self.assertEqual(inspected.get("result"), {"manifest": manifest,
+                    "unpacked_size": sum(entry["size"] for entry in manifest["files"])})
+                self.assertEqual(artifact.read_bytes(), original_archive)
+                self.assertFalse(destination.exists())
                 restored = call("project.archive.restore", archive_path=str(artifact), destination_path=str(destination))
                 self.assertIn("result", restored)
                 self.assertEqual(scientific_rows(destination / "project.sqlite"), expected)
@@ -163,7 +173,7 @@ class ProjectArchiveTests(unittest.TestCase):
                 self.assertEqual(scientific_rows(destination / "project.sqlite"), expected)
 
             good = root / "full.petrolab"
-            for invalid in ("damaged", "traversal"):
+            for invalid in ("damaged", "damaged-media", "traversal"):
                 bad = root / f"{invalid}.petrolab"
                 with ZipFile(good) as archive, ZipFile(bad, "w") as out:
                     manifest = json.loads(archive.read("manifest.json"))
@@ -172,13 +182,19 @@ class ProjectArchiveTests(unittest.TestCase):
                         data = archive.read(path)
                         if invalid == "damaged" and path == "project.sqlite":
                             data = b"!" + data[1:]
+                        if invalid == "damaged-media" and path.startswith("media/"):
+                            data = b"!" + data[1:]
                         if invalid == "traversal" and path.startswith("media/"):
                             path = entry["path"] = "../escaped.png"
                         out.writestr(path, data)
                     out.writestr("manifest.json", json.dumps(manifest))
                 destination = root / f"restored-{invalid}"
+                before = bad.read_bytes()
+                self.assertEqual(call("project.archive.inspect", archive_path=str(bad))["error"]["code"],
+                                 "PROJECT_ARCHIVE_INVALID")
                 self.assertEqual(call("project.archive.restore", archive_path=str(bad),
                     destination_path=str(destination))["error"]["code"], "PROJECT_ARCHIVE_INVALID")
+                self.assertEqual(bad.read_bytes(), before)
                 self.assertFalse(destination.exists())
                 self.assertFalse((root / "escaped.png").exists())
             self.assertEqual(scientific_rows(database), expected)

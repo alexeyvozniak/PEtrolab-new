@@ -359,6 +359,14 @@ def check_portable_archive(executable: Path, directory: Path) -> None:
     destinations = {level: directory / f"relocated-{level}" for level in levels}
     exported = run(executable, [request("project.archive.export", {**project, "output_path": str(path), "level": level})
                                 for level, path in archives.items()])
+    inspections = run(executable, [request("project.archive.inspect", {"archive_path": str(path)})
+                                   for path in archives.values()])
+    for (level, output, inspected) in zip(levels, exported, inspections, strict=True):
+        manifest = output["result"]["manifest"]
+        if inspected["result"] != {"manifest": manifest, "unpacked_size": sum(entry["size"] for entry in manifest["files"])}:
+            raise AssertionError(f"Inspection differs from the archive manifest at level {level}")
+    if any(destination.exists() for destination in destinations.values()):
+        raise AssertionError("Archive inspection created a restored workspace")
     restored = run(executable, [request("project.archive.restore", {"archive_path": str(archives[level]),
                               "destination_path": str(destination)}) for level, destination in destinations.items()])
     for (level, count), output, opened in zip(levels.items(), exported, restored, strict=True):
@@ -395,6 +403,7 @@ def check_portable_archive(executable: Path, directory: Path) -> None:
         for name in original.namelist():
             payload = original.read(name)
             altered.writestr(name, b"!" + payload[1:] if name == "project.sqlite" else payload)
+    archive_command(executable, "inspect", corrupted, expected_error="PROJECT_ARCHIVE_INVALID")
     archive_command(executable, "restore", corrupted, destination, "--replace", expected_error="PROJECT_ARCHIVE_INVALID")
     invalid_path = directory / "invalid-path.petrolab"
     with ZipFile(full) as original, ZipFile(invalid_path, "w") as altered:

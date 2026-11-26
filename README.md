@@ -63,6 +63,8 @@ $project = Join-Path $env:APPDATA 'org.petrolab.desktop\petrolab-v2.sqlite'
 Скопируйте архив на другой компьютер. В PowerShell из каталога установленного PetroLab укажите новый каталог проекта и запустите приложение с базой, которую вернуло восстановление:
 
 ```powershell
+.\binaries\petrolab-service.exe archive inspect 'D:\PetroLab.petrolab'
+if ($LASTEXITCODE -ne 0) { throw 'Проверка архива завершилась ошибкой' }
 $result = .\binaries\petrolab-service.exe archive restore 'D:\PetroLab.petrolab' 'D:\PetroLab-Project'
 if ($LASTEXITCODE -ne 0) { throw 'Восстановление проекта завершилось ошибкой' }
 $env:PETROLAB_PROJECT_DATABASE = ($result | ConvertFrom-Json).project_database_path

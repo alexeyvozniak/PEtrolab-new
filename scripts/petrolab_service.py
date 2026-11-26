@@ -15,7 +15,9 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
 
 from petrolab.ndjson_service import serve  # noqa: E402
 from petrolab.import_preview import ImportCommandError  # noqa: E402
-from petrolab.project_archive import export_project_archive, replace_project_from_archive, restore_project_archive  # noqa: E402
+from petrolab.project_archive import (  # noqa: E402
+    export_project_archive, inspect_project_archive, replace_project_from_archive, restore_project_archive,
+)
 
 
 def _force_utf8_stdio() -> None:
@@ -46,6 +48,8 @@ def main() -> int:
     export.add_argument("database", type=Path, help="Существующая база SQLite PetroLab")
     export.add_argument("output", type=Path, help="Новый файл .petrolab")
     export.add_argument("--level", choices=("project", "project_sources", "full"), required=True)
+    inspect = actions.add_parser("inspect", help="Проверить состав и целостность архива")
+    inspect.add_argument("archive", type=Path)
     restore = actions.add_parser("restore", help="Восстановить в новый каталог")
     restore.add_argument("archive", type=Path)
     restore.add_argument("destination", type=Path)
@@ -57,6 +61,8 @@ def main() -> int:
             if not args.database.is_file():
                 parser.error("Указанная база проекта не найдена.")
             result = export_project_archive(str(args.database), str(args.output), args.level)
+        elif args.action == "inspect":
+            result = inspect_project_archive(str(args.archive))
         elif args.replace:
             result = replace_project_from_archive(str(args.archive), str(args.destination))
         else:
