@@ -212,12 +212,16 @@ export function App() {
     setDetailedReview(detailed || session.sources.length > 1 || active.classification.mode !== "clean_table_fast");
     setBlockDraftDirty(false);
     setMappingDraftDirty(false);
-    const pairs = await Promise.all(active.recipe.sections.map(async (section) => {
+    // Only one physical table is visible at a time. Load its rows now;
+    // selecting any other block requests that block from the same workspace.
+    const section = active.recipe.sections.find(item => item.block_id === session.active_block_id)
+      || active.recipe.sections.find(item => item.enabled !== false) || active.recipe.sections[0];
+    if (section) {
       const preview = unwrap(await previewWorkspaceWindow(session.workspace_id, source.source_id,
         section.sheet_name, Math.max(1, section.header_row), 12, 0, 18));
-      return [section.block_id, { ...preview, workspace_id: session.workspace_id, source_id: source.source_id, source_path: source.staged_path }];
-    }));
-    setBlockPreviews(Object.fromEntries(pairs));
+      setBlockPreviews({ [section.block_id]: { ...preview, workspace_id: session.workspace_id,
+        source_id: source.source_id, source_path: source.staged_path } });
+    }
   }, []);
 
   useEffect(() => {

@@ -160,6 +160,24 @@ test("real Python workspace retains two sources and mapping, identity repair and
   expect(within(screen.getByRole("table")).getByText("n.d.")).toBeTruthy();
 }, 20000);
 
+test("multisheet review requests only the currently visible physical table", async () => {
+  const workbook = join(folder, "multiple.xlsx");
+  execFileSync("python", ["-c", "from openpyxl import Workbook; import sys; w=Workbook(); a=w.active; a.title='FirstSheet'; b=w.create_sheet('SecondSheet'); a.append(['Analysis','SiO2 [wt.%]']); a.append(['A1',40]); b.append(['Analysis','SiO2 [wt.%]']); b.append(['B1',41]); w.save(sys.argv[1])", workbook]);
+  queue = [workbook];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await enabledButton("Добавить файл");
+  const previews = () => requests.filter(r => r.command === "import.workspace.preview_window");
+  expect(previews()).toHaveLength(1);
+  expect(previews()[0].payload.sheet_name).toBe("FirstSheet");
+  await user.click(await enabledButton(/SecondSheet.*Готов/));
+  await enabledButton("Добавить файл");
+  expect(previews()).toHaveLength(2);
+  expect(previews()[1].payload.sheet_name).toBe("SecondSheet");
+  expect(within(await screen.findByRole("table")).getByText("B1")).toBeTruthy();
+}, 20000);
+
 test("real Python clean single-source still commits and displays persisted analyses", async () => {
   queue = [second];
   const user = userEvent.setup();

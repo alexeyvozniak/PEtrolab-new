@@ -56,3 +56,7 @@ Vocabulary recognition normalizes each candidate cell once, preserving exact sho
 ### Compact review transport
 
 NDJSON opt-in `columns_v1` avoids repeating 15+ measurement field names for every cell. The desktop API restores the full original objects before React (no pagination, layout change or search limitation). Test compares the entire decoded response with legacy projection including `<DL`, zero, null, Fe and source coordinates; malformed shape is rejected. Benchmark reports raw and compact serialized payload bytes where supported. Full UI and Windows latency measurement still required.
+
+### Lazy physical preview
+
+The approved Import workspace displays one active table. Instead of fetching all sheet/block previews on every decision, App requests only the current active block, including on source and sheet switching. Existing layout, draft guards and full scientific readiness remain unchanged. Real sidecar integration verifies one initial preview and one request when switching the sheet. User goal: immediate source navigation with the original table visible; primary action still review/commit; existing loading/error states and explicit exclusions remain. Native visual QA remains open.
