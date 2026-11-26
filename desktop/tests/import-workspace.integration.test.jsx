@@ -509,6 +509,41 @@ test("AT-08 excludes only the focused source from both plots and restores it fro
   for (const [path, content] of files) expect(await readFile(path, "utf8")).toBe(content);
 }, 20000);
 
+test("axis catalog drops an exact catalog key and rejects an unknown key", async () => {
+  await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\nP1,20,30,50\nP2,10,80,10\n");
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton(/^(Импортировать таблицу|Сохранить импорт в проект)$/));
+  await screen.findByRole("heading", { name: "Анализы" });
+  await user.click(await enabledButton("Построение"));
+  await screen.findAllByRole("button", { name: "Выбрать точку P1" });
+  const panel = document.querySelector(".plot-panel");
+  const axis = within(panel).getByRole("combobox", { name: "Ось 1" });
+  const original = axis.value;
+  const target = [...axis.options].find(option => option.value !== original && option.value !== within(panel).getByRole("combobox", { name: "Ось 2" }).value);
+  expect(target).toBeTruthy();
+  await user.click(screen.getByText(/Каталог осей ·/));
+  const search = await screen.findByRole("textbox", { name: "Поиск полей осей" });
+  const catalog = search.closest("details");
+  const field = [...catalog.querySelectorAll("[draggable=true]")].find(node => node.textContent === target.textContent);
+  expect(field).toBeTruthy();
+  const values = new Map();
+  const dataTransfer = { types: ["application/x-petrolab-axis"], setData: (type, value) => values.set(type, value),
+    getData: type => values.get(type) || "" };
+  fireEvent.dragStart(field, { dataTransfer });
+  expect(values.get("application/x-petrolab-axis")).toBe(target.value);
+  fireEvent.dragOver(axis, { dataTransfer });
+  fireEvent.drop(axis, { dataTransfer });
+  await waitFor(() => expect(axis.value).toBe(target.value));
+  await screen.findAllByRole("button", { name: "Выбрать точку P1" });
+  values.set("application/x-petrolab-axis", JSON.stringify(["not_a_field", "wt.%", null, null]));
+  fireEvent.drop(axis, { dataTransfer });
+  expect(axis.value).toBe(target.value);
+  expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
+}, 20000);
+
 test("one common selection highlights the same analysis on binary and ternary plots and in the table", async () => {
   await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\nP1,20,30,50\nP2,10,80,10\n");
   queue = [second];
@@ -529,6 +564,11 @@ test("one common selection highlights the same analysis on binary and ternary pl
   expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
   fireEvent.mouseLeave(point);
   expect(screen.queryByRole("tooltip")).toBeNull();
+  const detailRequests = requests.filter(request => request.command === "project.analysis.get").length;
+  fireEvent.mouseEnter(point, { shiftKey: true });
+  await within(await screen.findByRole("tooltip")).findByText("Исходные измерения (без пересчёта)");
+  expect(requests.filter(request => request.command === "project.analysis.get").length).toBe(detailRequests);
+  fireEvent.mouseLeave(point);
   const canvas = point.closest("svg");
   canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 460, height: 280 });
   canvas.setPointerCapture = () => {};
