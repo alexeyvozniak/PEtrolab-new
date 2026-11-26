@@ -178,7 +178,7 @@ def _unused_clean_header(sheet: Any) -> bool:
     return "Analysis" in identity_fields and bool(measurement_fields)
 
 
-def classify_clean_table(inspection: SourceInspection) -> dict[str, Any]:
+def classify_clean_table(inspection: SourceInspection, *, on_clean_plan=None) -> dict[str, Any]:
     """Return strict fast-path classification and, when valid, a complete recipe."""
     reasons: list[dict[str, Any]] = []
     sections: list[dict[str, Any]] = []
@@ -319,6 +319,9 @@ def classify_clean_table(inspection: SourceInspection) -> dict[str, Any]:
             "recipe": None,
         }
 
+    # Only the successful, fully validated clean recipe may reuse this plan.
+    if on_clean_plan is not None:
+        on_clean_plan(recipe, plan)
     return {
         "mode": "clean_table_fast",
         **common,

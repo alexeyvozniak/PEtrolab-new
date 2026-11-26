@@ -60,3 +60,7 @@ NDJSON opt-in `columns_v1` avoids repeating 15+ measurement field names for ever
 ### Lazy physical preview
 
 The approved Import workspace displays one active table. Instead of fetching all sheet/block previews on every decision, App requests only the current active block, including on source and sheet switching. Existing layout, draft guards and full scientific readiness remain unchanged. Real sidecar integration verifies one initial preview and one request when switching the sheet. User goal: immediate source navigation with the original table visible; primary action still review/commit; existing loading/error states and explicit exclusions remain. Native visual QA remains open.
+
+### Import polish — 1/6
+
+Reuse the successful clean-table classification plan and parsed source when adding a source. Rehash the staged bytes before retaining the inspection; seed only if the exact recipe digest matches (including project aliases). Both caches retain existing bounds. Final validation is unchanged. Test verifies one parse and one plan construction for clean input.

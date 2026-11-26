@@ -62,7 +62,7 @@ class ImportWorkspaceStore:
             raise ImportCommandError('WORKSPACE_SOURCE_NOT_FOUND', 'Источник не найден в этой очереди.')
         return source
 
-    def _check(self, source):
+    def _check(self, source, *, inspected=None):
         path = Path(source['staged_path'])
         expected = source['sha256']
         key = (str(path.resolve()), expected)
@@ -84,7 +84,7 @@ class ImportWorkspaceStore:
             verify()
             self._inspection_cache.move_to_end(key)
             return cached[0]
-        inspection = inspect_source(path)
+        inspection = inspected if inspected is not None else inspect_source(path)
         if inspection.fingerprint != expected:
             raise ImportCommandError('SOURCE_FINGERPRINT_MISMATCH', 'Файл изменился после добавления. Добавьте его заново.', {'source_id': source['source_id']})
         # Inspection hashes before parsing. Check again before retaining rows.
@@ -111,7 +111,8 @@ class ImportWorkspaceStore:
             if any(Path(s['staged_path']).resolve() == Path(path).resolve() for s in session['sources']):
                 raise ImportCommandError('WORKSPACE_SOURCE_EXISTS', 'Этот файл уже есть в очереди.')
             inspection = inspect_source(path)
-            classification = classify_clean_table(inspection)
+            clean_plans = []
+            classification = classify_clean_table(inspection, on_clean_plan=lambda recipe, plan: clean_plans.append((digest(recipe), plan)))
             suggestion = ({'recipe': classification['recipe'], 'warnings': []}
                           if classification['mode'] == 'clean_table_fast' else suggest_import_recipe(path))
             aliases = session.get('project_aliases', {})
@@ -137,6 +138,11 @@ class ImportWorkspaceStore:
                 'inspection': inspection.projection(), 'decisions': [],
                 'active_block_id': suggestion['recipe']['sections'][0]['block_id'],
             }
+            # Verify the bytes again before seeding either bounded cache.
+            # Aliases may have changed the recipe since classification.
+            self._check(source, inspected=inspection)
+            if clean_plans and clean_plans[0][0] == digest(source['recipe']):
+                self._remember_review_plan(source, inspection, clean_plans[0][1])
             session['sources'].append(source)
             session['active_source_id'] = source['source_id']
 
@@ -536,6 +542,11 @@ class ImportWorkspaceStore:
             # Readiness is written by _review; the shared plan is read-only.
             return dict(cached[0])
         plan = create_import_plan(inspection, recipe)
+        self._remember_review_plan(source, inspection, plan)
+        return plan
+
+    def _remember_review_plan(self, source, inspection, plan):
+        key = (source['source_id'], inspection.fingerprint, digest(source['recipe']))
         records = len(plan['planned_records'])
         measurements = plan['summary']['planned_measurement_count']
         if records <= MAX_REVIEW_CACHE_RECORDS and measurements <= MAX_REVIEW_CACHE_MEASUREMENTS:
@@ -550,7 +561,6 @@ class ImportWorkspaceStore:
             ):
                 self._review_plan_cache.popitem(last=False)
             self._review_plan_cache[key] = (dict(plan), records, measurements)
-        return plan
 
     def _review(self, source, *, use_cache=True):
         plan, issues, units, ignores = empty_plan(), [], [], []
