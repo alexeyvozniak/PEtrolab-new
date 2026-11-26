@@ -466,8 +466,7 @@ class ImportWorkspaceStore:
         database_path = session['database_path']
         if not database_path:
             raise ImportCommandError('PROJECT_REQUIRED', 'Выберите проект перед сохранением импорта.')
-        projection = self._project(session)['session']
-        readiness = projection['readiness']
+        readiness = self._project(session, readiness_only=True)
         if not readiness['ready_to_commit']:
             raise ImportCommandError('WORKSPACE_NOT_READY', 'Проверьте обязательные вопросы очереди.',
                                      {'blocking_reason_codes': readiness['blocking_reason_codes']})
@@ -579,7 +578,8 @@ class ImportWorkspaceStore:
         reviewed = (state.get('duplicate_review') or {}).get('fingerprint') == fingerprint
         return {'groups': groups, 'fingerprint': fingerprint, 'reviewed': reviewed}
 
-    def _project(self, state):
+    def _project(self, state, *, readiness_only=False):
+        """Build the same readiness gates without UI-only work during commit."""
         sources, issues, plans, reviews, scopes = [], [], [], {}, []
         for source in state['sources']:
             review = self._review(source)
@@ -634,7 +634,8 @@ class ImportWorkspaceStore:
             sources.append({k: source[k] for k in ('source_id', 'original_display_path', 'staged_path', 'sha256', 'size_bytes', 'modified_at', 'source_kind', 'adapter_version', 'inspection_status', 'included', 'exclusion_reason')} | {'sheets': sheets})
             summary = review['plan']['summary']
             plans.append({'source_id': source['source_id'], 'status': 'ready' if review['ready'] else 'invalid',
-                          'recipe_fingerprint': semantic_fingerprint(recipe), 'plan_fingerprint': digest(review['plan']),
+                          'recipe_fingerprint': semantic_fingerprint(recipe),
+                          'plan_fingerprint': None if readiness_only else digest(review['plan']),
                           'planned_analysis_count': summary['planned_analysis_count'] if source['included'] else 0,
                           'planned_measurement_count': summary['planned_measurement_count'] if source['included'] else 0})
         active = self._source(state, state['active_source_id'])
@@ -656,6 +657,8 @@ class ImportWorkspaceStore:
                                       'planned_analysis_count': sum(p['planned_analysis_count'] for p in plans),
                                       'planned_measurement_count': sum(p['planned_measurement_count'] for p in plans),
                                       'blocking_reason_codes': reasons}})
+        if readiness_only:
+            return session['readiness']
         active_review = deepcopy(reviews[active['source_id']])
         active_review['semantic_actions'] = SEMANTIC_ACTIONS
         active_review['canonical_analytes'] = CANONICAL

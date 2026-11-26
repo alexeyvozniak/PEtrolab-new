@@ -150,6 +150,25 @@ class ImportWorkspaceTests(unittest.TestCase):
         with closing(sqlite3.connect(database)) as connection:
             self.assertEqual(connection.execute('SELECT COUNT(*) FROM analysis').fetchone()[0], 3)
 
+    def test_commit_readiness_matches_full_projection_and_checks_changed_source(self):
+        database = self.source.parent / 'readiness.sqlite'
+        self.source.write_text('Analysis,SiO2 [wt.%]\nA1,40\n', encoding='utf-8')
+        self.current = self.store.command('create', {'project_database_path': str(database),
+            'sources': [{'staged_path': str(self.source)}]})
+        session = self.store.sessions[self.current['session']['workspace_id']]
+        self.assertEqual(self.store._project(deepcopy(session), readiness_only=True),
+                         self.current['session']['readiness'])
+        self.source.write_text('Analysis,SiO2 [wt.%]\nA1,99\n', encoding='utf-8')
+        full = self.store._project(deepcopy(session))['session']['readiness']
+        self.assertEqual(self.store._project(deepcopy(session), readiness_only=True), full)
+        self.assertFalse(full['ready_to_commit'])
+        self.assertIn('SOURCE_FINGERPRINT_MISMATCH', full['blocking_reason_codes'])
+        with self.assertRaises(ImportCommandError) as caught:
+            self.call('commit')
+        self.assertEqual(caught.exception.code, 'WORKSPACE_NOT_READY')
+        with closing(sqlite3.connect(database)) as connection:
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM analysis').fetchone()[0], 0)
+
     def test_batched_provenance_failure_rolls_back_earlier_flushes(self):
         from petrolab import import_apply
         database = self.source.parent / 'batched.sqlite'
