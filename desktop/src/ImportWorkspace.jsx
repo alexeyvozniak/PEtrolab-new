@@ -179,9 +179,15 @@ function ResultPreview({ plan, sourceName, onClose }) {
   const [query, setQuery] = useState("");
   const records = plan.planned_records || [];
   const needle = query.trim().toLowerCase();
-  const filtered = needle
-    ? records.filter((record) => JSON.stringify(record).toLowerCase().includes(needle))
-    : records;
+  const searching = needle.length > 0;
+  // Index the full plan only on first use, not for every typed character.
+  // A changed plan invalidates the index, and clearing the search frees it.
+  const searchIndex = useMemo(() => searching
+    ? records.map(record => JSON.stringify(record).toLowerCase())
+    : null, [records, searching]);
+  const filtered = useMemo(() => searchIndex
+    ? records.filter((_, index) => searchIndex[index].includes(needle))
+    : records, [records, searchIndex, needle]);
   const shown = filtered.slice(0, 120);
   return (
     <div className="import-result-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>

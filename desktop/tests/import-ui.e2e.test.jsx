@@ -443,6 +443,14 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
   await user.type(within(preview).getByRole("textbox", { name: "Поиск в результате импорта" }), "UI-2");
   expect(within(preview).getByText("UI-2")).toBeTruthy();
   expect(within(preview).queryByText("UI-1")).toBeNull();
+  const search = within(preview).getByRole("textbox", { name: "Поиск в результате импорта" });
+  await user.clear(search);
+  expect(within(preview).getByText("UI-1")).toBeTruthy();
+  await user.type(search, "uI-1");
+  expect(within(preview).getByText("UI-1")).toBeTruthy();
+  expect(within(preview).queryByText("UI-2")).toBeNull();
+  await user.type(search, "-not-found");
+  expect(within(preview).getByText("По этому запросу записей нет.")).toBeTruthy();
   await user.click(within(preview).getByRole("button", { name: "Закрыть предпросмотр" }));
 
   await user.click(importButton);

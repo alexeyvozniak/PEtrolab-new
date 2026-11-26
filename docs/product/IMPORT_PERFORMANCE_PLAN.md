@@ -72,3 +72,7 @@ Prepare immutable measurement mapping evidence once per field in row-oriented an
 ### Import polish — 3/6
 
 Reuse the already parsed qualifier when computing the measurement value status. Public value_status continues to use the same helper. Tests include numeric zero, decimal comma, censored limits including underflow/overflow, <DL, ND, non-finite and missing values; no change to token or status semantics.
+
+### Import polish — 4/6
+
+Memoize the existing case-insensitive full-record JSON search index on the first nonempty query, reuse it across keystrokes, clear it when the query is cleared and invalidate it when the plan changes. All fields and all records remain searchable; the existing 120-row rendering limit, result count and UI layout are unchanged. Interaction test covers clearing, case-insensitivity and no matches.
