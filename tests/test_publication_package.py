@@ -340,7 +340,7 @@ class PublicationPackageTests(unittest.TestCase):
         with TemporaryDirectory() as folder:
             root = Path(folder)
             source = root / "input.csv"
-            source.write_text("Analysis,Mineral,SiO2 [wt.%],MgO [wt.%]\\nP1,olivine,40,50\\nP2,pyroxene,50,20\\n", encoding="utf-8")
+            source.write_text("Analysis,Mineral,SiO2 [wt.%],MgO [wt.%]\nP1,olivine,40,50\nP2,pyroxene,50,20\n", encoding="utf-8")
             database = root / "project.sqlite"
             apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
             catalog = plot_catalog(database, include_categories=True)
