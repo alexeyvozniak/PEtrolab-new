@@ -194,20 +194,21 @@ def _looks_like_generic_header(rows: list[list[str | None]], index: int) -> bool
 
 def _header_candidates(rows: list[list[str | None]]) -> tuple[int, ...]:
     result: list[int] = []
+    short_tokens = {token for token in KNOWN_HEADER_TOKENS if len(token) <= 2}
+    long_tokens = tuple(token for token in KNOWN_HEADER_TOKENS if len(token) > 2)
+    missing_markers = {"n.d.", "n/d", "n.a.", "n/a", "#div/0!", "#value!"}
     for index, row in enumerate(rows):
-        matches = sum(
-            any(
-                # ``n.d.`` is a common analytical value.  Its normalized form
-                # is ``nd``, which must not be mistaken for the Nd header.
-                # Compare the original token first so chemical symbols remain
-                # valid short headers while missing-value markers never start
-                # a new logical block.
-                str(value).strip().lower() not in {"n.d.", "n/d", "n.a.", "n/a", "#div/0!", "#value!"}
-                and (_header_token(value) == token if len(token) <= 2 else _header_token(value).startswith(token))
-                for token in KNOWN_HEADER_TOKENS
-            )
-            for value in row if value
-        )
+        matches = 0
+        for value in row:
+            if not value or str(value).strip().lower() in missing_markers:
+                continue
+            normalized = _header_token(value)
+            # Exact match for short symbols, prefix for longer headers:
+            # identical evidence to the previous vocabulary loop.
+            if normalized in short_tokens or normalized.startswith(long_tokens):
+                matches += 1
+                if matches >= 2:
+                    break
         if matches >= 2 or _looks_like_generic_header(rows, index):
             result.append(index + 1)
     # Narrow fallback for an otherwise unrecognized two-column labelled table.
@@ -755,10 +756,11 @@ def _plan_rows(inspection: SourceInspection, sheet: SheetInspection, section: di
     mappings = section["mappings"]
     identities = [item for item in mappings if item["target_role"] == "identity"]
     result: list[dict[str, Any]] = []
+    header_signature = _header_signature(sheet.rows[int(section["header_row"]) - 1])
     for row_number in range(int(section["data_start_row"]), int(section["data_end_row"]) + 1):
-        if _is_repeated_header(sheet, section, row_number):
-            continue
         row = sheet.rows[row_number - 1]
+        if header_signature and _header_signature(row) == header_signature:
+            continue
         relevant = [_row_value(row, _mapping_index(item)) for item in mappings if item["target_role"] != "ignore"]
         if not any(value not in (None, "") for value in relevant):
             continue
@@ -845,10 +847,13 @@ def create_import_plan(inspection: SourceInspection, recipe: dict[str, Any]) -> 
         })
     from .semantic_import import interpret_records
     entries = interpret_records(inspection, recipe, entries)
+    counts_by_block: dict[str, list[int]] = {}
+    for record in entries:
+        counts = counts_by_block.setdefault(record['block_id'], [0, 0])
+        counts[0] += 1
+        counts[1] += len(record['measurements'])
     for block in block_summaries:
-        remaining = [record for record in entries if record['block_id'] == block['block_id']]
-        block['analysis_count'] = len(remaining)
-        block['measurement_count'] = sum(len(record['measurements']) for record in remaining)
+        block['analysis_count'], block['measurement_count'] = counts_by_block.get(block['block_id'], (0, 0))
     if recipe['global_decisions'].get('mineral_verification_enabled'):
         from .mineral_verification import add_verification
         add_verification(entries, recipe)

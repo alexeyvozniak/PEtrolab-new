@@ -30,6 +30,10 @@ DRAFT_VERSION = 1
 MAX_INSPECTION_CACHE_ENTRIES = 4
 MAX_INSPECTION_CACHE_CELLS = 250_000
 MAX_INSPECTION_CACHE_CHARS = 8_000_000
+# Review plans hold substantially more data than the parsed source.
+MAX_REVIEW_CACHE_ENTRIES = 2
+MAX_REVIEW_CACHE_RECORDS = 10_000
+MAX_REVIEW_CACHE_MEASUREMENTS = 150_000
 
 
 def now():
@@ -50,6 +54,7 @@ class ImportWorkspaceStore:
     def __init__(self):
         self.sessions: dict[str, dict[str, Any]] = {}
         self._inspection_cache = OrderedDict()
+        self._review_plan_cache = OrderedDict()
 
     def _source(self, session, source_id):
         source = next((s for s in session['sources'] if s['source_id'] == source_id), None)
@@ -219,6 +224,7 @@ class ImportWorkspaceStore:
             if operation == 'discard':
                 self._remove_draft(session)
                 del self.sessions[session['workspace_id']]
+                self._clear_review_plans(session)
                 return {'workspace_id': session['workspace_id'], 'status': 'discarded',
                         'staged_paths': [s['staged_path'] for s in session['sources']]}
             if operation == 'commit':
@@ -356,7 +362,9 @@ class ImportWorkspaceStore:
                     raise ValueError('decision.kind')
                 if kind != 'activate':
                     source['decisions'].append({'decision': deepcopy(decision), 'decided_at': now()})
-            elif operation not in {'get', 'replan'}:
+            elif operation == 'replan':
+                self._clear_review_plans(session)
+            elif operation != 'get':
                 raise ImportCommandError('WORKSPACE_COMMAND_UNAVAILABLE', 'Эта операция очереди пока недоступна.')
             if operation != 'get':
                 session['draft_revision'] += 1
@@ -483,6 +491,7 @@ class ImportWorkspaceStore:
                              'draft_revision': session['draft_revision'],
                              'duplicate_review': session.get('duplicate_review')}, finalize_source=finalize_source)
         del self.sessions[session['workspace_id']]
+        self._clear_review_plans(session)
         try:
             self._remove_draft(session)
         except OSError:
@@ -504,11 +513,50 @@ class ImportWorkspaceStore:
         source['recipe']['global_decisions'].setdefault('project_aliases', {})[key] = alias
         source['recipe']['semantic_fingerprint'] = semantic_fingerprint(source['recipe'])
 
-    def _review(self, source):
+    def _clear_review_plans(self, session):
+        source_ids = {source['source_id'] for source in session['sources']}
+        for key in list(self._review_plan_cache):
+            if key[0] in source_ids:
+                del self._review_plan_cache[key]
+
+    def _review_plan(self, source, inspection, *, use_cache=True):
+        recipe = source['recipe']
+        decisions = recipe['global_decisions']
+        # Scientific ruleset changes and mutable explicit assignments must
+        # never inherit a cached interpretation. The final commit also
+        # independently validates and rebuilds the authoritative plan.
+        if (not use_cache or decisions.get('mineral_verification_enabled')
+                or decisions.get('semantic_annotations') or decisions.get('sample_assignments')
+                or source.get('formula_acceptances')):
+            return create_import_plan(inspection, recipe)
+        key = (source['source_id'], inspection.fingerprint, digest(recipe))
+        cached = self._review_plan_cache.get(key)
+        if cached is not None:
+            self._review_plan_cache.move_to_end(key)
+            # Readiness is written by _review; the shared plan is read-only.
+            return dict(cached[0])
+        plan = create_import_plan(inspection, recipe)
+        records = len(plan['planned_records'])
+        measurements = plan['summary']['planned_measurement_count']
+        if records <= MAX_REVIEW_CACHE_RECORDS and measurements <= MAX_REVIEW_CACHE_MEASUREMENTS:
+            # At most one recipe revision per source; bounded across the queue.
+            for previous in list(self._review_plan_cache):
+                if previous[0] == source['source_id']:
+                    del self._review_plan_cache[previous]
+            while self._review_plan_cache and (
+                len(self._review_plan_cache) >= MAX_REVIEW_CACHE_ENTRIES
+                or sum(item[1] for item in self._review_plan_cache.values()) + records > MAX_REVIEW_CACHE_RECORDS
+                or sum(item[2] for item in self._review_plan_cache.values()) + measurements > MAX_REVIEW_CACHE_MEASUREMENTS
+            ):
+                self._review_plan_cache.popitem(last=False)
+            self._review_plan_cache[key] = (dict(plan), records, measurements)
+        return plan
+
+    def _review(self, source, *, use_cache=True):
         plan, issues, units, ignores = empty_plan(), [], [], []
         try:
             inspection = self._check(source)
-            plan = create_import_plan(inspection, source['recipe'])
+            plan = self._review_plan(source, inspection, use_cache=use_cache)
             issues = list(plan.get('issues', [])) + list(plan['warnings'])
             # Clean Table rejection used its own tentative header, not the user's
             # current block header. Reusing those blank-header warnings creates
@@ -582,7 +630,7 @@ class ImportWorkspaceStore:
         """Build the same readiness gates without UI-only work during commit."""
         sources, issues, plans, reviews, scopes = [], [], [], {}, []
         for source in state['sources']:
-            review = self._review(source)
+            review = self._review(source, use_cache=not readiness_only)
             for scope in review['bulk_unit_scopes'] + review['bulk_ignore_scopes']:
                 scope['bulk_scope_id'] = f"{state['draft_revision']}:{source['source_id']}:{scope['bulk_scope_id']}"
                 targets = []

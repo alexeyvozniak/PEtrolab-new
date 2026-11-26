@@ -150,6 +150,28 @@ class ImportWorkspaceTests(unittest.TestCase):
         with closing(sqlite3.connect(database)) as connection:
             self.assertEqual(connection.execute('SELECT COUNT(*) FROM analysis').fetchone()[0], 3)
 
+    def test_review_plan_cache_reuses_only_unchanged_recipe(self):
+        from petrolab import import_workspace
+        self.source.write_text('Analysis,SiO2 [wt.%]\nA1,40\nA2,41\n', encoding='utf-8')
+        self.current = self.store.command('create', {'sources': [{'staged_path': str(self.source)}]})
+        session = self.current['session']
+        params = {'workspace_id': session['workspace_id'], 'source_id': session['active_source_id']}
+        with patch.object(import_workspace, 'create_import_plan', wraps=import_workspace.create_import_plan) as build:
+            same = self.store.command('get', params)
+            self.assertEqual(build.call_count, 0)
+            self.assertEqual(same, self.current)
+            # The returned client projection must not mutate the retained plan.
+            same['active']['plan']['planned_records'][0]['measurements'][0]['raw_token'] = 'tampered'
+            self.assertEqual(self.store.command('get', params)['active']['plan']['planned_records'][0]['measurements'][0]['raw_token'], '40')
+            self.call('replan')
+            self.assertGreater(build.call_count, 0)
+            build.reset_mock()
+            block = self.current['active']['recipe']['sections'][0]['block_id']
+            self.call('apply_decision', decision={'kind': 'mappings', 'decisions': [
+                {'block_id': block, 'source_axis': 'column', 'source_index': 0, 'target': 'Ignore'}]})
+            self.assertGreater(build.call_count, 0)
+            self.assertFalse(self.current['session']['readiness']['ready_to_commit'])
+
     def test_commit_readiness_matches_full_projection_and_checks_changed_source(self):
         database = self.source.parent / 'readiness.sqlite'
         self.source.write_text('Analysis,SiO2 [wt.%]\nA1,40\n', encoding='utf-8')

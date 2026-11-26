@@ -48,3 +48,7 @@ Architecture CI на 5cfb96d: контракты прошли, 214 тестов,
 ### Commit readiness only
 
 Внутренний `_project(..., readiness_only=True)` использует те же проверки источников, формул, обязательных вопросов и дубликатов, но не вычисляет отпечаток полной UI-проекции плана и не копирует её для интерфейса при commit. Публичная проекция не меняется. Финальный apply_import_batch по-прежнему повторно проверяет источник, план и формулы и сохраняет отпечаток плана. Тест сравнивает readiness с полной проекцией до и после изменения файла и проверяет отсутствие записи. Отдельно остаётся большой NDJSON для обычной интерактивной проверки; для него потребуется контракт постраничной выдачи с сохранением полного поиска и пакетных действий.
+
+### 2026-11-26 — incremental review and recognition
+
+Vocabulary recognition normalizes each candidate cell once, preserving exact short-token/prefix matching and missing markers; repeated header signatures computed once per block; block counts accumulated in one pass. Bounded per-source review plan cache (2 entries, total 10k records/150k measurements) keyed by exact recipe digest and freshly verified staged SHA-256; bypassed for mineral verification, annotations, sample assignments, accepted formulae and commit readiness. Explicit replan, discard and successful commit clear affected entries. Regression covers original predicate equivalence, unchanged get, changed mapping, client mutation isolation. Final commit still rebuilds and verifies the plan. No quantitative speed claim before CI.
