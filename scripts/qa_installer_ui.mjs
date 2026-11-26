@@ -394,6 +394,26 @@ assert.equal(layout.name, layoutName);
 assert.deepEqual(layout.input.analysis_ids, expectedIds);
 assert.deepEqual(layout.panels.map(({ kind }) => kind), ["binary", "ternary"]);
 
+const calculatedName = "AT-07 расчётные оси";
+const measured = Object.fromEntries(serviceRequest("plot_data.catalog", { analysis_ids: expectedIds }).axes.map((axis) => [axis.field, axis]));
+const sum = { ...measured.SiO2, field: "SiO2 + Al2O3", calculation: {
+  version: 1, operation: "sum", operands: [measured.SiO2, measured.Al2O3],
+} };
+const boundAnalysis = analyses.find(({ analysis_id }) => analysis_id === expectedIds[0]);
+const formulaInput = { analysis_id: boundAnalysis.analysis_id, method_id: "formula.pyroxene.6o",
+  measurement_ids: boundAnalysis.measurement_list.map(({ measurement_id }) => measurement_id) };
+const reviewedFormula = serviceRequest("formula.review", formulaInput);
+const formulaRun = serviceRequest("formula.run", { ...formulaInput, input_fingerprint: reviewedFormula.input_fingerprint,
+  method_definition_fingerprint: reviewedFormula.method_definition_fingerprint });
+const formula = { version: 1, method_id: formulaRun.method_id, method_version: formulaRun.method_version,
+  method_definition_fingerprint: formulaRun.method_definition_fingerprint, run_ids: [formulaRun.id] };
+const apfu = ["Si", "Mg", "Al"].map((element) => ({ field: `apfu.${element}`, unit: "APFU", method: null, measurement_set: null, formula }));
+const calculatedPanels = [
+  { id: randomUUID(), kind: "binary", axes: [sum, measured.MgO] },
+  { id: randomUUID(), kind: "ternary", axes: apfu },
+];
+const calculatedLayout = serviceRequest("plot_spec.save", { name: calculatedName, panels: calculatedPanels, analysis_ids: expectedIds, colors: {} });
+
 await withWindow(async (evaluate, screenshot) => {
   await expectCompletedTask(evaluate);
   await screenshot("AT-01-restored-work-plan");
@@ -416,6 +436,21 @@ await withWindow(async (evaluate, screenshot) => {
   await until("the original point link was restored", () => evaluate(() => document.querySelectorAll(".point-analysis-items li").length === 2
     && document.body.innerText.includes("Связь восстановлена.")));
   await screenshot("AT-37-link-restored");
+  await click(evaluate, "Построение");
+  await until("the saved layouts are available", () => evaluate(() => {
+    const details = document.querySelector(".plot-saved-layouts");
+    if (!details) return false;
+    details.open = true;
+    return true;
+  }));
+  await click(evaluate, `Открыть «${calculatedName}»`);
+  const displayed = await until("the restored APFU and sum projections", () => evaluate((ids) => {
+    const panels = ids.map((id) => document.getElementById(`plot-${id}`));
+    if (!panels[1]?.textContent.includes("нет выбранной формулы (4)")) return null;
+    return panels.map((panel) => [...panel.querySelectorAll(".plot-point")].map((point) => point.dataset.analysisId).sort());
+  }, calculatedPanels.map(({ id }) => id)));
+  assert.deepEqual(displayed, [[...expectedIds].sort(), [boundAnalysis.analysis_id]]);
+  await screenshot("AT-07-calculated-layout");
 });
 assert.deepEqual(serviceRequest("project.overview").work_plan, [workPlanTask]);
 
@@ -433,6 +468,7 @@ assert.deepEqual(journal.unlink_analytical_point.parameters.analysis_ids, expect
 assert.equal(journal.unlink_analytical_point.parameters.analytical_point_id, point.analytical_point_id);
 assert.deepEqual(savedGroup(), before);
 assert.deepEqual(serviceRequest("plot_spec.open", { id: saved.id }), layout);
+assert.deepEqual(serviceRequest("plot_spec.open", { id: calculatedLayout.id }), calculatedLayout);
 assert.deepEqual(serviceRequest("project.analyses.list").analyses, analyses);
 const finalSource = await readFile(source);
 assert.equal(finalSource.toString("utf8"), original);
@@ -582,6 +618,7 @@ await writeFile(join(evidence, "acceptance.json"), JSON.stringify({
   scenarios: ["AT-01", "AT-06", "AT-07", "AT-09", "AT-17 (zoom, pan and reset)", "AT-32", "AT-37 (domain and visibility actions)"],
   selected: chosenLabels.map((label, index) => ({ label, analysisId: expectedIds[index] })),
   workPlanTask, workGroup: before, plotSpecification: layout, plotZoom, journal, editDraft,
+  calculatedLayout, formulaRunId: formulaRun.id,
   sourceSha256: sha256(finalSource),
 }, null, 2));
 console.log("Native project, selection, plots, restart, AT-17 zoom, AT-32 edit and AT-37 journal checks passed.");

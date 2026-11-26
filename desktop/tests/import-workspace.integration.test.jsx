@@ -371,13 +371,16 @@ test("restoring a calculated layout retains sums, pinned APFU and exclusion reas
   await user.click(await screen.findByText("Сохранённые раскладки", { exact: true }));
   await user.click(await enabledButton("Открыть «Расчётные оси»"));
   await screen.findByText("Открыта раскладка «Расчётные оси».");
-  const afm = within((await screen.findByText("Na2O + K2O / FeOt / MgO", { selector: ".plot-panel header b" })).closest("article"));
-  const pyroxene = within((await screen.findByText("apfu.Mg / apfu.Fe2+ / apfu.Ca", { selector: ".plot-panel header b" })).closest("article"));
-  await afm.findByRole("button", { name: "Выбрать точку P1" });
-  await pyroxene.findByRole("button", { name: "Выбрать точку P1" });
-  expect(afm.getByText("ниже предела обнаружения (1)")).toBeTruthy();
-  expect(pyroxene.getByText("нет выбранной формулы (1)")).toBeTruthy();
-  expect(pyroxene.getByRole("option", { name: /apfu.Mg · APFU · версия/ })).toBeTruthy();
+  const panel = (title) => within(screen.getByText(title, { selector: ".plot-panel header b" }).closest("article"));
+  await waitFor(() => {
+    const afm = panel("Na2O + K2O / FeOt / MgO");
+    const pyroxene = panel("apfu.Mg / apfu.Fe2+ / apfu.Ca");
+    expect(afm.getByRole("button", { name: "Выбрать точку P1" })).toBeTruthy();
+    expect(pyroxene.getByRole("button", { name: "Выбрать точку P1" })).toBeTruthy();
+    expect(afm.getByText("ниже предела обнаружения (1)")).toBeTruthy();
+    expect(pyroxene.getByText("нет выбранной формулы (1)")).toBeTruthy();
+    expect(pyroxene.getByRole("option", { name: /apfu.Mg · APFU · версия/ })).toBeTruthy();
+  });
 
   await user.type(screen.getByLabelText("Название раскладки"), "Копия расчётных осей");
   await user.click(await enabledButton("Сохранить раскладку"));
