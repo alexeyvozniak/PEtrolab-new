@@ -165,7 +165,8 @@ def _plot_capture(database_path, capture):
         with closing(open_project(database_path)) as connection:
             connection.execute("BEGIN")
             validate_category_style(connection, scope, category_style)
-    result["schema_version"] = (3 if any("point_style" in panel for panel in snapshots)
+    result["schema_version"] = (4 if any("style" in (layer["field"] or {}) for layer in capture["layers"])
+                                else 3 if any("point_style" in panel for panel in snapshots)
                                 else 2 if category_style is not None else 1)
     return result, list(contributors)
 

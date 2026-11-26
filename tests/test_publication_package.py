@@ -373,6 +373,16 @@ class PublicationPackageTests(unittest.TestCase):
             capture = {"name":"Categories","format":"svg","width_mm":90,"dpi":600,"include_csv":True,"svg":svg,
                        "analysis_ids":None,"hidden_analysis_ids":[],"hidden_source_ids":[],"layers":[],"colors":{},
                        "category_style":style,"panels":[{**panel,"projection_sha256":projection["projection_sha256"]}]}
+            cloud_projection = query_plot_data(database,"binary",axes,layers=[layer])
+            cloud_capture = {**capture,"layers":[layer],"panels":[{**capture["panels"][0],"projection_sha256":cloud_projection["projection_sha256"]}]}
+            cloud_item = capture_publication_plot(database,cloud_capture,"Облако")
+            cloud_ready = prepare_publication(database,"Облако",[cloud_item])
+            cloud_path = root / "cloud.zip"
+            export_publication(database,"Облако",[cloud_item],cloud_ready["fingerprint"],str(cloud_path))
+            with ZipFile(cloud_path) as archive:
+                material=json.loads(archive.read("materials/01-plot_capture.json"))
+                self.assertEqual(material["schema_version"],4)
+                self.assertEqual(material["layers"],[layer])
             styled_capture = {**capture,"panels":[{**capture["panels"][0],"point_style":styled_panel["point_style"]}]}
             styled_item = capture_publication_plot(database,styled_capture,"Прозрачные точки")
             self.assertEqual(styled_item["capture"]["panels"][0]["point_style"],styled_panel["point_style"])
