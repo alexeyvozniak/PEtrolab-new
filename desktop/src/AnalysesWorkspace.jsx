@@ -84,6 +84,14 @@ function valueFor(analysis, column) {
   return "";
 }
 
+// Quoted TSV is suitable for spreadsheet paste. Treat formula-like text as
+// literal; signed numeric tokens remain numbers. Never write back to the source.
+function clipboardCell(value) {
+  let text = String(value ?? "");
+  if (/^[\s]*[=+\-@]/.test(text) && !/^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][+-]?\d+)?$/.test(text.trim())) text = "'" + text;
+  return /[\t\r\n"]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
+}
+
 function mainIdentity(analysis) {
   const identity = analysis?.identity || {};
   return identity.Analysis || identity.Point || identity.Sample || Object.values(identity).find(Boolean) || "Analysis без имени";
@@ -638,10 +646,31 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
       if (ordered[next]) {
         const id = ordered[next].analysis_id;
         setFocusedId(id);
-        if (event.shiftKey) toggleSelection(id, true);
-        event.currentTarget.querySelectorAll("tbody tr")[next]?.scrollIntoView?.({ block: "nearest" });
+        if (event.shiftKey) {
+          const anchor = selectionAnchor.current;
+          if (!anchor || anchor.filtered !== filtered || anchor.sort !== sort) {
+            selectionAnchor.current = { id: focused?.analysis_id || id, order: filteredIds, base: selectedIds, filtered, sort };
+          }
+          toggleSelection(id, true);
+        } else {
+          selectionAnchor.current = null;
+        }
+        event.currentTarget.querySelectorAll(".analyses-data-table tbody tr")[next]?.scrollIntoView?.({ block: "nearest" });
       }
     }
+  };
+
+  const copyVisibleSelection = (event) => {
+    if (event.target.closest?.("input, textarea, select, [contenteditable=true]") || window.getSelection()?.toString()) return;
+    const rows = ordered.filter(analysis => selected.has(analysis.analysis_id));
+    if (!rows.length || !event.clipboardData) return;
+    const header = visibleColumns.flatMap(column => column.kind === "measurement"
+      ? [column.label, column.label + " · единица"] : [column.label]);
+    const lines = [header, ...rows.map(analysis => visibleColumns.flatMap(column => column.kind === "measurement"
+      ? [valueFor(analysis, column), analysis.measurements?.[column.field]?.unit ?? ""]
+      : [valueFor(analysis, column)]))];
+    event.clipboardData.setData("text/plain", lines.map(line => line.map(clipboardCell).join("\t")).join("\r\n"));
+    event.preventDefault();
   };
 
   if (project.total === 0 && !project.has_work_groups && !project.has_table_views) return <EmptyAnalyses onAddData={onAddData} />;
@@ -749,7 +778,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
         </div>}
         </div>
 
-        <div className="analyses-table-scroll" tabIndex={0} aria-label="Таблица анализов: Ctrl+A — выбрать показанные, Esc — снять выбор, стрелки — перейти к анализу" onClick={event => {
+        <div className="analyses-table-scroll" tabIndex={0} aria-label="Таблица анализов: Ctrl+A — выбрать показанные, Esc — снять выбор, стрелки — перейти к анализу, Ctrl+C — копировать показанные выбранные строки" onCopy={copyVisibleSelection} onClick={event => {
           if (event.target === event.currentTarget) {
             selectionAnchor.current = null;
             setSelectedIds([]);

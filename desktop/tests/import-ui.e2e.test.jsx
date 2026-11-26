@@ -464,6 +464,13 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
   analysisTable.focus();
   await user.keyboard("{Control>}a{/Control}");
   expect(screen.getByText("2 выбрано")).toBeTruthy();
+  const clipboard = { setData: vi.fn() };
+  fireEvent.copy(analysisTable, { clipboardData: clipboard });
+  expect(clipboard.setData).toHaveBeenCalledOnce();
+  const copied = clipboard.setData.mock.calls[0][1];
+  expect(copied).toContain("UI-1");
+  expect(copied).toContain("UI-2");
+  expect(copied).toContain("SiO2 · единица");
   await user.keyboard("{Escape}");
   expect(screen.queryByText("2 выбрано")).toBeNull();
   await user.keyboard("{Control>}f{/Control}");
