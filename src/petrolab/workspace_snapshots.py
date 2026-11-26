@@ -8,7 +8,8 @@ from uuid import UUID
 from .desktop_workflow import analysis_identity
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
-from .plot_data import _layout_input, open_plot_specification, plot_catalog, save_plot_specification
+from .plot_data import (_coordinate_axis, _formula_axis_runs, _formula_axis_value, _layout_input, _plot_keys,
+                        open_plot_specification, plot_catalog, save_plot_specification)
 from .trace_patterns import PATTERN_ORDERS
 from .statistics_core import feature_domain
 from .statistics_service import _METHOD, open_calculation_run, review_statistics
@@ -167,18 +168,16 @@ def save_analysis_template(database_path, name, plot_id=None, table_view_id=None
     if all(identifier is None for identifier in (plot_id, table_view_id, calculation_run_id)):
         raise ValueError("template_components")
     plot = open_plot_specification(database_path, plot_id) if plot_id is not None else None
-    version = 1 if table_view_id is None and calculation_run_id is None else 2
+    calculated = plot and any('calculation' in axis or 'formula' in axis for panel in plot['panels'] for axis in panel['axes'])
+    version = 3 if calculated else 1 if table_view_id is None and calculation_run_id is None else 2
     requirements = {}
 
     def fields(axes):
         names = []
         for axis in axes:
-            if 'calculation' in axis or 'formula' in axis:
-                raise ImportCommandError('TEMPLATE_CALCULATED_AXIS_UNAVAILABLE',
-                                         'Расчётная ось сохраняется в раскладке. Для её переноса в шаблоне нужна проверка исходных компонентов.')
             key = axis["field"]
             requirement = {"field": key, "semantic_domain": feature_domain(axis), "allowed_units": [axis["unit"]], "required": True}
-            if version == 2:
+            if version >= 2:
                 requirement.update(measurement_set=axis["measurement_set"], method=axis["method"])
             if requirement["semantic_domain"] == "other" or (key in requirements and requirements[key] != requirement):
                 raise ImportCommandError("TEMPLATE_FIELD_AMBIGUOUS", f"Домен или единица признака {key} неоднозначны.")
@@ -188,7 +187,18 @@ def save_analysis_template(database_path, name, plot_id=None, table_view_id=None
 
     panels = []
     for panel in (plot["panels"] if plot else []):
-        definition = {"kind": panel["kind"], "title": panel["title"], "axes": fields(panel["axes"])}
+        panel_axes = []
+        for axis in panel['axes']:
+            if 'calculation' in axis:
+                operands = fields(axis['calculation']['operands'])
+                panel_axes.append({**{key: axis[key] for key in ('field', 'unit', 'method', 'measurement_set')},
+                                   'calculation': {**axis['calculation'], 'operands': operands}})
+            elif 'formula' in axis:
+                panel_axes.append({**{key: axis[key] for key in ('field', 'unit', 'method', 'measurement_set')},
+                                   'formula': {key: value for key, value in axis['formula'].items() if key != 'run_ids'}})
+            else:
+                panel_axes.extend(fields([axis]))
+        definition = {"kind": panel["kind"], "title": panel["title"], "axes": panel_axes}
         if panel["kind"] in PATTERN_ORDERS:
             definition["normalization"] = panel["normalization"]
         if panel["kind"] == "histogram":
@@ -223,7 +233,7 @@ def save_analysis_template(database_path, name, plot_id=None, table_view_id=None
                 fields(matches)
     content = {"requirements": list(requirements.values()), "table_columns": columns,
                "panel_templates": panels, "method_templates": methods}
-    if version == 2:
+    if version >= 2:
         content["table_sort"] = sort
         content["table_filters_omitted"] = filters_omitted
     template = {**content, "id": _id(), "name": name.strip(), "schema_version": version,
@@ -260,22 +270,68 @@ def _template_table_columns(connection, analysis_ids, axes):
     return available
 
 
-def apply_analysis_template(database_path, template_id, analysis_ids, name=None):
+def _template_panels(connection, templates, compatible, analysis_ids, formula_run_ids):
+    panels, formula_fields = [], {}
+    used = set()
+    for template in templates:
+        axes = []
+        for axis in template['axes']:
+            if isinstance(axis, str):
+                axes.append(compatible[axis])
+            elif 'formula' in axis:
+                fingerprint = axis['formula']['method_definition_fingerprint']
+                ids = formula_run_ids.get(fingerprint)
+                if not ids:
+                    raise ImportCommandError('TEMPLATE_FORMULA_REQUIRED', f"Выберите расчёты для метода {axis['formula']['method_id']}.")
+                used.add(fingerprint)
+                rebound = {**axis, 'formula': {**axis['formula'], 'run_ids': ids}}
+                _, _, binding = _coordinate_axis(rebound)
+                formula_fields.setdefault(binding, set()).add(axis['field'])
+                axes.append(rebound)
+            else:
+                calculation = axis['calculation']
+                axes.append({**axis, 'calculation': {**calculation, 'operands': [compatible[field] for field in calculation['operands']]}})
+        _plot_keys(template['kind'], axes)
+        options = {key: template[key] for key in ('kind', 'normalization', 'binning') if key in template}
+        panels.append({**options, 'id': _id(), 'axes': axes})
+
+    if formula_run_ids.keys() - used:
+        raise ImportCommandError('TEMPLATE_FORMULA_SCOPE', 'Часть выбранных расчётов относится к методам вне шаблона.')
+    if formula_fields:
+        scope = set(analysis_ids)
+        for binding, by_analysis in _formula_axis_runs(connection, formula_fields).items():
+            if by_analysis.keys() != scope:
+                raise ImportCommandError('TEMPLATE_FORMULA_SCOPE', 'Укажите по одному расчёту выбранного метода для каждого анализа нового набора.')
+            for field in sorted(formula_fields[binding]):
+                for run in by_analysis.values():
+                    _, evidence = _formula_axis_value(field, run)
+                    if evidence['reason']:
+                        raise ImportCommandError('TEMPLATE_FORMULA_INPUT', f'Для {field} нужен актуальный и полный расчёт формулы.', evidence)
+    return panels
+
+
+def apply_analysis_template(database_path, template_id, analysis_ids, name=None, *, formula_run_ids=None):
     _uuid(template_id)
     _ids(analysis_ids)
     if not analysis_ids:
         raise ValueError("template_analysis_ids")
+    if formula_run_ids is None:
+        formula_run_ids = {}
+    if not isinstance(formula_run_ids, dict) or not all(isinstance(key, str) for key in formula_run_ids):
+        raise ValueError('formula_run_ids')
+    for ids in formula_run_ids.values():
+        _ids(ids)
     with closing(open_project(database_path)) as connection:
         row = connection.execute("SELECT definition_json FROM analysis_template WHERE id = ?", (template_id,)).fetchone()
     if not row:
         raise ImportCommandError("TEMPLATE_UNAVAILABLE", "Шаблон недоступен.")
     template = json.loads(row[0])
     version = template.get("schema_version")
-    if version not in (1, 2):
+    if version not in (1, 2, 3):
         return {"plot": None, "migration_report": [
             {"field": "schema_version", "action": "blocked", "reason": "Версия шаблона не поддерживается."}
         ]}
-    keys = _TEMPLATE_CONTENT + (("table_sort", "table_filters_omitted") if version == 2 else ())
+    keys = _TEMPLATE_CONTENT + (("table_sort", "table_filters_omitted") if version >= 2 else ())
     content = {key: template[key] for key in keys}
     if _payload(content) != template["semantic_fingerprint"]:
         raise ImportCommandError("TEMPLATE_DAMAGED", "Контрольная сумма шаблона не совпадает.")
@@ -306,7 +362,7 @@ def apply_analysis_template(database_path, template_id, analysis_ids, name=None)
     table = None
     methods = []
     plot = None
-    if version == 2:
+    if version >= 2:
         with closing(open_project(database_path)) as connection:
             try:
                 _layout_input(connection, analysis_ids)
@@ -326,33 +382,42 @@ def apply_analysis_template(database_path, template_id, analysis_ids, name=None)
                     report.append({"field": "method_templates", "action": "blocked", "reason": issue})
                 else:
                     methods.append(plan)
-    if name is not None and not any(item["action"] == "blocked" for item in report):
-        panels = []
-        for panel in template["panel_templates"]:
-            definition = {"id": _id(), "kind": panel["kind"], "axes": [compatible[field] for field in panel["axes"]]}
-            if "normalization" in panel:
-                definition["normalization"] = panel["normalization"]
-            if "binning" in panel:
-                definition["binning"] = panel["binning"]
-            panels.append(definition)
+    if (version == 3 or name is not None) and not any(item["action"] == "blocked" for item in report):
         try:
             with closing(open_project(database_path)) as connection, connection:
-                connection.execute("BEGIN IMMEDIATE")
-                if panels:
-                    plot = save_plot_specification(database_path, name, analysis_ids, panels, {}, [], [], transaction=connection)
-                elif version == 2:
-                    _layout_input(connection, analysis_ids)
-                if template["table_columns"]:
-                    columns = [{**column, "width_px": None} for column in template["table_columns"]]
-                    table = save_table_view(database_path, name, columns, template["table_sort"], [], transaction=connection)
+                connection.execute("BEGIN" if name is None else "BEGIN IMMEDIATE")
+                panels = _template_panels(connection, template['panel_templates'], compatible, analysis_ids, formula_run_ids)
+                if name is not None:
+                    if panels:
+                        plot = save_plot_specification(database_path, name, analysis_ids, panels, {}, [], [], transaction=connection)
+                    elif version >= 2:
+                        _layout_input(connection, analysis_ids)
+                    if template["table_columns"]:
+                        columns = [{**column, "width_px": None} for column in template["table_columns"]]
+                        table = save_table_view(database_path, name, columns, template["table_sort"], [], transaction=connection)
+            if version == 3:
+                for panel in panels:
+                    for axis in panel['axes']:
+                        if 'formula' in axis:
+                            report.append({'field': axis['field'], 'action': 'unchanged',
+                                           'reason': f"Для всех {len(analysis_ids)} анализов выбраны актуальные расчёты одного определения."})
+                        elif 'calculation' in axis:
+                            report.append({'field': axis['field'], 'action': 'unchanged',
+                                           'reason': 'Единицы и аналитический контекст операндов совместимы.'})
         except ImportCommandError as error:
             if error.code not in {"PLOT_TERNARY_INCOMPATIBLE_AXES", "PLOT_PATTERN_INCOMPATIBLE_AXES",
-                                  "PLOT_LAYOUT_AXES_UNAVAILABLE", "PLOT_LAYOUT_INPUT_UNAVAILABLE"}:
+                                  "PLOT_LAYOUT_AXES_UNAVAILABLE", "PLOT_LAYOUT_INPUT_UNAVAILABLE", 'PLOT_CALCULATION_INCOMPATIBLE_OPERANDS',
+                                  'TEMPLATE_FORMULA_REQUIRED', 'TEMPLATE_FORMULA_SCOPE', 'TEMPLATE_FORMULA_INPUT',
+                                  'PLOT_FORMULA_METHOD_MISMATCH', 'PLOT_FORMULA_AMBIGUOUS', 'FORMULA_RUN_UNAVAILABLE'}:
                 raise
             field = "analysis_ids" if error.code == "PLOT_LAYOUT_INPUT_UNAVAILABLE" else "panel_templates"
-            report.append({"field": field, "action": "blocked", "reason": error.message})
+            item = {"field": field, "action": "blocked", "reason": error.message}
+            if version == 3:
+                item.update(code=error.code, details=error.details)
+            report.append(item)
+            plot = table = None
     result = {"plot": plot, "migration_report": report}
-    if version == 2:
+    if version >= 2:
         result.update(table_view=table, method_plans=methods if not any(item["action"] == "blocked" for item in report) else [])
     return result
 

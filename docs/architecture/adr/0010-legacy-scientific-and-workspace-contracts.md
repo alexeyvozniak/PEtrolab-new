@@ -35,6 +35,8 @@ Scientific Method Definition становится единственным ко�
 
 Import Recipe, Edit Draft, Table View, Workspace Snapshot, Analysis Template and Operation Journal Entry are separate domain entities. Snapshot contains concrete research state; Template contains no concrete Analysis IDs. Portable archives have explicit inclusion levels and validated restore semantics.
 
+Analysis Template v3 сохраняет операцию, порядок операндов и требования к измеренному входу расчётной оси. Для APFU хранится поле с определением метода. `workspace.template.apply` принимает `formula_run_ids`, где ключ — отпечаток метода, а значение — список явно выбранных запусков нового набора. Для каждого анализа требуются ровно один актуальный запуск этого метода и все запрошенные APFU. Отказ возвращает причину до записи. При сохранении совместимость APFU повторно проверяется в транзакции, которая сохраняет раскладку и таблицу.
+
 Streamlit UI, wrappers, compatibility routes and session keys are not migrated. Legacy implementations are evidence and test input, not a code dependency.
 
 ## Consequences

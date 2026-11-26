@@ -89,6 +89,25 @@ class PublicationPackageTests(unittest.TestCase):
             panel = {'id': str(uuid4()), 'kind': 'ternary', 'axes': axes}
             spec = save_plot_specification(database, 'Пироксены APFU', None, [panel], {}, [], [])
             self.assertEqual(open_plot_specification(database, spec['id']), spec)
+            template = call('workspace.template.save', name='Шаблон пироксенов', plot_id=spec['id'])['result']
+            self.assertEqual(template['schema_version'], 3)
+            self.assertTrue(all(identifier not in json.dumps(template) for identifier in (opx['id'], cpx['id'], cpx['analysis_id'])))
+            destination_scope = [analyses['Uncalculated']['analysis_id']]
+            apply_to_new = {'id': template['id'], 'analysis_ids': destination_scope}
+            no_choice = call('workspace.template.apply', **apply_to_new)['result']
+            self.assertEqual(no_choice['migration_report'][0]['code'], 'TEMPLATE_FORMULA_REQUIRED')
+            fingerprint = opx['method_definition_fingerprint']
+            wrong_scope = call('workspace.template.apply', **apply_to_new, name='Недопустимая', formula_run_ids={fingerprint: [opx['id']]})['result']
+            self.assertIsNone(wrong_scope['plot'])
+            self.assertEqual(wrong_scope['migration_report'][0]['code'], 'TEMPLATE_FORMULA_SCOPE')
+            new_run = calculate('Uncalculated')
+            choices = {fingerprint: [new_run['id']]}
+            migrated = call('workspace.template.apply', **apply_to_new, name='Новый пироксен', formula_run_ids=choices)['result']
+            self.assertTrue(all(row['action'] == 'unchanged' for row in migrated['migration_report']))
+            migrated_axes = [{key: value for key, value in axis.items() if key not in {'scale', 'manual_range'}}
+                             for axis in migrated['plot']['panels'][0]['axes']]
+            migrated_point, = query_plot_data(database, 'ternary', migrated_axes, destination_scope)['points']
+            self.assertEqual({item['run_id'] for item in migrated_point['axis_inputs']}, {new_run['id']})
             capture = {'name': 'APFU', 'format': 'svg', 'width_mm': 90, 'dpi': 600, 'include_csv': True,
                        'svg': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><g><text x="1" y="2">APFU</text></g></svg>',
                        'analysis_ids': None, 'hidden_analysis_ids': [], 'hidden_source_ids': [], 'layers': [], 'colors': {},
@@ -103,6 +122,8 @@ class PublicationPackageTests(unittest.TestCase):
                 self.assertEqual(saved['points'], projection['points'])
                 self.assertEqual(saved['exclusions'], projection['exclusions'])
             with patch.dict(PYROXENE, version='changed'):
+                stale_preview = call('workspace.template.apply', **apply_to_new, formula_run_ids=choices)['result']
+                self.assertEqual(stale_preview['migration_report'][0]['code'], 'TEMPLATE_FORMULA_INPUT')
                 stale = query_plot_data(database, 'ternary', axes)
                 self.assertEqual(stale['points'], [])
                 self.assertCountEqual([row['reason'] for row in stale['exclusions']],
@@ -147,9 +168,35 @@ class PublicationPackageTests(unittest.TestCase):
             reopened_axes = [{key: value for key, value in axis.items() if key not in {'scale', 'manual_range'}}
                              for axis in reopened['panels'][0]['axes']]
             self.assertEqual(query_plot_data(database, 'ternary', reopened_axes, reopened['input']['analysis_ids']), projection)
+            request = {'request_id': str(uuid4()), 'protocol_version': '1.0'}
+            payload = {'project_database_path': str(database)}
+            template = handle_request({**request, 'command': 'workspace.template.save', 'payload': {
+                **payload, 'plot_id': spec['id'], 'name': 'АФМ для другого набора'}})['result']
+            self.assertEqual(template['panel_templates'][0]['axes'][0]['calculation']['operands'], ['Na2O', 'K2O'])
+            self.assertNotIn(point['analysis_id'], json.dumps(template))
+            target = root / 'new.csv'
+            target.write_text('Analysis,Na2O [wt.%],K2O [wt.%],FeOt [wt.%],MgO [wt.%]\nP5,6,4,20,20\n', encoding='utf-8')
+            apply_import_plan(database, target, suggest_import_recipe(target)['recipe'])
+            p5, = [row['analysis_id'] for row in list_project_analyses(database)['analyses'] if row['identity']['Analysis'] == 'P5']
+            applied = handle_request({**request, 'command': 'workspace.template.apply', 'payload': {
+                **payload, 'id': template['id'], 'analysis_ids': [p5], 'name': 'Раскладка P5'}})['result']
+            rebound = [{key: value for key, value in axis.items() if key not in {'scale', 'manual_range'}}
+                       for axis in applied['plot']['panels'][0]['axes']]
+            point, = query_plot_data(database, 'ternary', rebound, [p5])['points']
+            self.assertEqual(point['values'], [10, 20, 20])
+            incompatible = root / 'incompatible.csv'
+            incompatible.write_text('Analysis,Na2O [wt.%],FeOt [wt.%],MgO [wt.%]\nP6,6,20,20\n', encoding='utf-8')
+            apply_import_plan(database, incompatible, suggest_import_recipe(incompatible)['recipe'])
+            p6, = [row['analysis_id'] for row in list_project_analyses(database)['analyses'] if row['identity']['Analysis'] == 'P6']
+            before_rejection = database.read_bytes()
+            rejected = handle_request({**request, 'command': 'workspace.template.apply', 'payload': {
+                **payload, 'id': template['id'], 'analysis_ids': [p6], 'name': 'Несовместимая раскладка'}})['result']
+            self.assertEqual([item['field'] for item in rejected['migration_report'] if item['action'] == 'blocked'], ['K2O'])
+            self.assertIsNone(rejected['plot'])
+            self.assertEqual(database.read_bytes(), before_rejection)
             capture = {'name': 'AFM', 'format': 'svg', 'width_mm': 90, 'dpi': 600, 'include_csv': True,
                        'svg': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><g><text x="1" y="2">AFM</text></g></svg>',
-                       'analysis_ids': None, 'hidden_analysis_ids': [], 'hidden_source_ids': [], 'layers': [], 'colors': {},
+                       'analysis_ids': projection['input_analysis_ids'], 'hidden_analysis_ids': [], 'hidden_source_ids': [], 'layers': [], 'colors': {},
                        'panels': [{**panel, 'projection_sha256': projection['projection_sha256']}]}
             item = capture_publication_plot(database, capture, 'AFM')
             prepared = prepare_publication(database, 'AFM', [item])

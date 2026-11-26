@@ -89,9 +89,28 @@ def check_mineral_formulae(executable: Path, directory: Path) -> None:
     anorthite = reopened["result_manifest"]["end_member_mol_percent"]["An"]
     if reopened != saved or reopened["status"] != "current" or not math.isclose(anorthite, 93.66, abs_tol=0.2):
         raise AssertionError("Packaged feldspar method did not restore the verified An result")
+    fingerprint = reopened['method_definition_fingerprint']
+    formula = {key: reopened[key] for key in ('method_id', 'method_version', 'method_definition_fingerprint')}
+    formula.update(version=1, run_ids=[reopened['id']])
+    axes = [{'field': f'apfu.{field}', 'unit': 'APFU', 'method': None, 'measurement_set': None, 'formula': formula}
+            for field in ('Na', 'K', 'Ca')]
+    panel = {'id': str(uuid.uuid4()), 'kind': 'ternary', 'axes': axes}
+    layout = run(executable, [request('plot_spec.save', {**project, 'name': 'APFU original', 'panels': [panel], 'colors': {}})])[0]['result']
+    template = run(executable, [request('workspace.template.save', {**project, 'name': 'APFU template', 'plot_id': layout['id']})])[0]['result']
+    if reopened['id'] in json.dumps(template) or analysis['analysis_id'] in json.dumps(template):
+        raise AssertionError('The APFU template retained concrete inputs')
+    scope = {**project, 'id': template['id'], 'analysis_ids': [analysis['analysis_id']]}
+    blocked, applied, projection = [response['result'] for response in run(executable, [
+        request('workspace.template.apply', scope),
+        request('workspace.template.apply', {**scope, 'name': 'APFU applied', 'formula_run_ids': {fingerprint: [reopened['id']]}}),
+        request('plot_data.query', {**project, 'kind': panel['kind'], 'axes': axes}),
+    ])]
+    if (blocked['migration_report'][0].get('code') != 'TEMPLATE_FORMULA_REQUIRED' or applied['plot'] is None
+            or not math.isclose(projection['points'][0]['v'], .9366, abs_tol=.002)):
+        raise AssertionError('Packaged APFU template did not require exact binding and preserve the verified projection')
     if after != listed or source.read_bytes() != original:
         raise AssertionError("Packaged formula calculation changed source data")
-    print("Packaged AT-31 service: method catalog, feldspar review and immutable calculation round trip.")
+    print("Packaged AT-31/33 service: feldspar calculation, pinned APFU axes and explicit template binding.")
 
 
 def check_workspace_archive(executable: Path, directory: Path) -> None:
@@ -148,6 +167,14 @@ def check_workspace_archive(executable: Path, directory: Path) -> None:
     ])]
     if any(identifier in json.dumps(template) for identifier in [*ids, *source_ids, calculation["id"]]):
         raise AssertionError("Analysis template retained concrete IDs")
+    total = {**features[0], 'field': 'Oxides sum', 'calculation': {'version': 1, 'operation': 'sum', 'operands': features}}
+    calculated_layout = run(executable, [request('plot_spec.save', {
+        **project, 'name': 'QA calculated layout', 'analysis_ids': ids,
+        'panels': [{'id': str(uuid.uuid4()), 'kind': 'binary', 'axes': [total, features[0]]}],
+    })])[0]['result']
+    calculated_template = run(executable, [request('workspace.template.save', {
+        **project, 'name': 'QA calculated template', 'plot_id': calculated_layout['id'],
+    })])[0]['result']
     original_database = database.read_bytes()
     archive = directory / "workspace.petrolab"
     archive_command(executable, "export", database, archive, "--level", "full")
@@ -161,7 +188,7 @@ def check_workspace_archive(executable: Path, directory: Path) -> None:
     ])]
     if opened != {"snapshot": snapshot, "migration_report": []} or reopened_plot != plot or reopened_run != calculation:
         raise AssertionError("Restored workspace differs from the saved state")
-    if listed_templates != [{"id": template["id"], "name": template["name"]}]:
+    if listed_templates != [{"id": item["id"], "name": item["name"]} for item in (calculated_template, template)]:
         raise AssertionError("Template disappeared from the restored project")
     database_before_rejection = Path(destination["project_database_path"]).read_bytes()
     rejected = run(executable, [request("workspace.template.apply", {**destination, "id": template["id"],
@@ -182,6 +209,15 @@ def check_workspace_archive(executable: Path, directory: Path) -> None:
     rerun = run(executable, [request("statistics.cluster.run", {**destination, **applied["method_plans"][0]})])[0]["result"]
     if rerun["input"]["analysis_ids"] != target_ids or rerun["id"] == calculation["id"]:
         raise AssertionError("Template did not start a separate calculation on the new selection")
+    new_layout = run(executable, [request('workspace.template.apply', {**destination, 'id': calculated_template['id'],
+        'name': 'QA applied calculated', 'analysis_ids': target_ids})])[0]['result']['plot']
+    rebound = [{key: value for key, value in axis.items() if key not in {'scale', 'manual_range'}}
+               for axis in new_layout['panels'][0]['axes']]
+    sum_projection = run(executable, [request('plot_data.query', {
+        **destination, 'kind': 'binary', 'axes': rebound, 'analysis_ids': target_ids,
+    })])[0]['result']
+    if {point['label']: point['values'][0] for point in sum_projection['points']} != {'N1': 43, 'N2': 74}:
+        raise AssertionError('The restored calculated template produced unexpected values on the new input')
     if any(path.read_bytes() != data for path, data in originals.items()) or database.read_bytes() != original_database:
         raise AssertionError("Workspace archive operations changed the original files")
     print("Packaged AT-33 service: exact workspace restored, template applied to a different source, incompatible units rejected.")

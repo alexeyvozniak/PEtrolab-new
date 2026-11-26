@@ -6,6 +6,53 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["id", "name", "schema_version", "semantic_fingerprint", "requirements", "table_columns", "panel_templates", "method_templates", "created_at"],
+  "$defs": {
+    "calculated_axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "unit", "method", "measurement_set", "calculation"],
+      "properties": {
+        "field": {"type": "string", "minLength": 1},
+        "unit": {"enum": ["wt.%", "ppm", "ppb", "ratio"]},
+        "method": {"type": ["string", "null"]},
+        "measurement_set": {"type": ["string", "null"]},
+        "calculation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation", "version", "operands"],
+          "properties": {
+            "operation": {"enum": ["sum", "ratio"]},
+            "version": {"const": 1},
+            "operands": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 2, "maxItems": 16, "uniqueItems": true}
+          },
+          "if": {"properties": {"operation": {"const": "ratio"}}},
+          "then": {"properties": {"operands": {"maxItems": 2}}}
+        }
+      }
+    },
+    "formula_axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "unit", "method", "measurement_set", "formula"],
+      "properties": {
+        "field": {"type": "string", "pattern": "^apfu\\..+$"},
+        "unit": {"const": "APFU"},
+        "method": {"const": null},
+        "measurement_set": {"const": null},
+        "formula": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "method_id", "method_version", "method_definition_fingerprint"],
+          "properties": {
+            "version": {"const": 1},
+            "method_id": {"type": "string", "pattern": "^formula\\."},
+            "method_version": {"type": "string", "minLength": 1},
+            "method_definition_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      }
+    }
+  },
   "properties": {
     "id": {"type": "string", "format": "uuid"},
     "name": {"type": "string", "minLength": 1, "maxLength": 160},
@@ -49,7 +96,8 @@
         "properties": {
           "kind": {"type": "string", "enum": ["binary", "ternary", "spider", "ree_pattern", "histogram"]},
           "title": {"type": "string", "minLength": 1},
-          "axes": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+          "axes": {"type": "array", "items": {"oneOf": [{"type": "string", "minLength": 1}, {"$ref": "#/$defs/calculated_axis"}, {"$ref": "#/$defs/formula_axis"}]}, "minItems": 1},
+          "binning": {"const": "sturges_v1"},
           "normalization": {"enum": ["sun_mcdonough_1989_c1_v1", "sun_mcdonough_1989_mantle_diagram_v1"]}
         },
         "if": {"properties": {"kind": {"enum": ["ree_pattern", "spider"]}}},

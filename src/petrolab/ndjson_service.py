@@ -335,6 +335,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "workspace.template.list": lambda params: {"result": list_analysis_templates(_project_database_path(params))},
     "workspace.template.apply": lambda params: {"result": apply_analysis_template(
         _project_database_path(params), params.get("id"), params.get("analysis_ids"), params.get("name"),
+        formula_run_ids=params.get("formula_run_ids"),
     )},
     "project.archive.export": lambda params: {"result": export_project_archive(
         _project_database_path(params), params.get("output_path"), params.get("level"),
