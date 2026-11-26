@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export function SemanticRangeActions({ records, selection, setSelection, actions, analytes, annotations, onDecision, onPreview, samples, onAssignSample, busy, blockId, requestedRole }) {
+export function SemanticRangeActions({ records, selection, setSelection, actions, analytes, annotations, onDecision, onPreview, samples, onAssignSample, onReviewFormulaBatch, busy, blockId, requestedRole }) {
   const [role, setRole] = useState('sample');
   const [value, setValue] = useState('');
   const [unit, setUnit] = useState('');
@@ -29,6 +29,10 @@ export function SemanticRangeActions({ records, selection, setSelection, actions
     <div className="semantic-selection-head"><b>{selection ? `Строки ${selection.start_row}–${selection.end_row} · колонки ${selection.start_column + 1}–${selection.end_column + 1}` : 'Выделите ячейки, строку или колонку'}</b>
       <button type="button" disabled={busy || !annotations.length} onClick={() => onDecision({ action: 'undo' })}>Отменить последнее назначение</button></div>
     {selection && <>
+      {onReviewFormulaBatch && selectedRecords.length > 0 && <div className="semantic-assignment-controls">
+        <button type="button" disabled={busy || selectedRecords.length > 2000} onClick={() => onReviewFormulaBatch(selectedRecords.map((record) => record.preview_id))}>Рассчитать формулы · {selectedRecords.length}</button>
+        {selectedRecords.length > 2000 && <small>Сузьте диапазон до 2000 анализов.</small>}
+      </div>}
       {selectedRecords.length > 0 && <details className="semantic-sample-evidence"><summary>Образцы в выделении · {selectedRecords.length} анализов · физические связи не объединяются по имени</summary>{selectedRecords.slice(0, 8).map((record) => {
         const association = record.sample_association;
         return <div key={record.preview_id}><b>{record.identity.join(' · ')}</b>: {association?.reported ? `${association.reported.value} · ${association.reported.origin}` : 'Нет обозначения в файле'}<small> · {association?.assignment ? `Физический образец: ${association.assignment.sample_name}` : 'Связь с физическим образцом не назначена'}</small>{(association?.candidates || []).map((candidate, index) => <button type="button" key={index} disabled={busy} title={`Неподтверждённая подсказка: ${candidate.confidence}; ${candidate.sheet_name}, строка ${candidate.row}`} onClick={() => { setRole('sample'); setValue(candidate.value); }}>Предложить {candidate.value}</button>)}</div>;

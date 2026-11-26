@@ -1543,6 +1543,34 @@ test("real Python mineral review separates conflicts and persists only explicit 
   expect(await readFile(second, "utf8")).toBe(raw);
 }, 20000);
 
+test("mineral formula batch uses the highlighted range and leaves censored rows out", async () => {
+  const raw = "Analysis,Mineral,SiO2 (wt.%),MgO (wt.%),FeO (wt.%)\nA1,olivine,40,50,10\nA2,olivine,40,<DL,10\nA3,olivine,39,48,12\nA4,olivine,39,48,12\n";
+  await writeFile(second, raw);
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton("2 · Проверить минералы"));
+  await user.click(await enabledButton("Выделить строку 2"));
+  await user.keyboard("{Shift>}");
+  await user.click(await enabledButton("Выделить строку 4"));
+  await user.keyboard("{/Shift}");
+  await user.click(await enabledButton("Рассчитать формулы · 3"));
+  const form = within(await screen.findByRole("form", { name: "Предпросмотр формул для выделения" }));
+  await user.selectOptions(form.getByRole("combobox"), "formula.olivine.4o");
+  await user.click(form.getByRole("button", { name: "Рассчитать", exact: true }));
+  await form.findByText("Готово к подтверждению · 2 из 3 · Без расчёта 1");
+  expect(form.getByText(/A2 · .*строка 3/)).toBeTruthy();
+  expect(form.getByText(/MgO · <DL · ниже предела обнаружения/)).toBeTruthy();
+  await user.click(form.getByRole("button", { name: "Принять расчёты · 2" }));
+  await screen.findByText("Формулы к сохранению · 2");
+  await user.click(await enabledButton("Сохранить импорт в проект"));
+  await screen.findByRole("heading", { name: "Анализы" });
+  const runs = (await invokePetrolab("formula.runs.list", { project_database_path: join(folder, "project.sqlite") })).result;
+  expect(runs.map(({ analysis_label }) => analysis_label).sort()).toEqual(["A1", "A3"]);
+  expect(await readFile(second, "utf8")).toBe(raw);
+}, 20000);
+
 test("statistics reviews mixed domains before clustering and preserves saved cluster membership on a new run", async () => {
   await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],La [ppm],MgO [wt.%],FeO [wt.%]\nA,1,2,2,45,10\nB,2,3,4,45,10\nC,20,40,5,45,10\nD,21,41,6,45,10\nE,<1,2,5,45,10\nF,0,3,5,45,10\n");
   queue = [second];

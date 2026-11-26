@@ -186,6 +186,9 @@ class ImportWorkspaceStore:
                 return self._commit(session)
             if operation == 'preview_formula':
                 source = self._source(session, params.get('source_id'))
+                if 'preview_ids' in params:
+                    preview, _ = self._formula_batch(source, params, session['draft_revision'])
+                    return preview
                 record = self._formula_record(source, params.get('preview_id'))
                 return review_import_formula(record, params.get('method_id'))
             if operation == 'preview_window':
@@ -244,11 +247,12 @@ class ImportWorkspaceStore:
                     record = self._formula_record(source, decision.get('preview_id'))
                     acceptance = {key: decision.get(key) for key in ('method_id', 'confirmation_fingerprint')}
                     reviewed = check_import_formula_acceptance(record, acceptance)
-                    source.setdefault('formula_acceptances', {})[record['preview_id']] = {
-                        **acceptance, 'method_name': reviewed['method_definition']['name'],
-                        'method_version': reviewed['method_definition']['version'],
-                        'label': ' · '.join(value for value in record['identity'] if value),
-                    }
+                    source.setdefault('formula_acceptances', {})[record['preview_id']] = self._formula_acceptance(record, reviewed)
+                elif kind == 'accept_formula_batch':
+                    preview, accepted = self._formula_batch(source, decision, session['draft_revision'])
+                    if not accepted or decision.get('confirmation_fingerprint') != preview['confirmation_fingerprint']:
+                        raise ImportCommandError('FORMULA_REVIEW_STALE', 'Повторите проверку выделенных анализов.')
+                    source.setdefault('formula_acceptances', {}).update(accepted)
                 elif kind == 'clear_formula':
                     preview_id = decision.get('preview_id')
                     if not isinstance(preview_id, str) or preview_id not in source.get('formula_acceptances', {}):
@@ -382,6 +386,42 @@ class ImportWorkspaceStore:
         if record is None or not source['included']:
             raise ImportCommandError('FORMULA_INPUT_UNAVAILABLE', 'Выбранный анализ больше недоступен в импорте.')
         return record
+
+    @staticmethod
+    def _formula_acceptance(record, reviewed):
+        method = reviewed['method_definition']
+        return {'method_id': method['method_id'], 'method_name': method['name'], 'method_version': method['version'],
+                'confirmation_fingerprint': reviewed['confirmation_fingerprint'],
+                'label': ' · '.join(value for value in record['identity'] if value)}
+
+    def _formula_batch(self, source, request, revision):
+        ids = request.get('preview_ids')
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 2000
+                or not all(isinstance(item, str) and item for item in ids) or len(set(ids)) != len(ids)):
+            raise ImportCommandError('FORMULA_BATCH_SELECTION', 'Выберите от 1 до 2000 разных анализов.')
+        plan = create_import_plan(self._check(source), source['recipe'])
+        records = {row['preview_id']: row for row in plan['planned_records']}
+        if not source['included'] or not set(ids) <= records.keys():
+            raise ImportCommandError('FORMULA_INPUT_UNAVAILABLE', 'Выделение изменилось. Выберите анализы снова.')
+        accepted, rows = {}, []
+        for preview_id in ids:
+            record = records[preview_id]
+            location = {'preview_id': preview_id, 'label': ' · '.join(value for value in record['identity'] if value),
+                        'sheet_name': record['sheet_name'], 'row_number': record['row_number'],
+                        'source_column_number': record.get('source_column_number')}
+            try:
+                reviewed = review_import_formula(record, request.get('method_id'))
+            except ImportCommandError as error:
+                if error.code == 'FORMULA_METHOD_UNAVAILABLE':
+                    raise
+                rows.append({**location, 'error': error.message, 'error_code': error.code, **error.details})
+            else:
+                accepted[preview_id] = self._formula_acceptance(record, reviewed)
+                rows.append({**location, 'apfu': reviewed['preview']['apfu'], 'warnings': reviewed['preview']['warnings']})
+        fingerprint = digest({'source': source['source_id'], 'sha256': source['sha256'], 'revision': revision, 'method_id': request.get('method_id'),
+                              'rows': rows, 'accepted': accepted})
+        return {'rows': rows, 'eligible_count': len(accepted), 'confirmation_fingerprint': fingerprint,
+                'replacement_count': len(accepted.keys() & source.get('formula_acceptances', {}).keys())}, accepted
 
     def _commit(self, session):
         database_path = session['database_path']

@@ -164,6 +164,40 @@ class ImportWorkspaceTests(unittest.TestCase):
             self.assertEqual(connection.execute("SELECT count(*) FROM measurement WHERE raw_token = '<DL'").fetchone()[0], 1)
         self.assertEqual(self.source.read_bytes(), original)
 
+    def test_formula_batch_confirms_only_reviewed_eligible_rows(self):
+        database = self.source.parent / 'project.sqlite'
+        self.source.write_text('Analysis,SiO2 [wt.%],MgO [wt.%],FeO [wt.%]\nA1,40,50,10\nA2,40,<DL,10\nA3,39,48,12\nA4,39,48,12\n', encoding='utf-8')
+        original = self.source.read_bytes()
+        self.current = self.store.command('create', {'project_database_path': str(database),
+            'sources': [{'staged_path': str(self.source)}]})
+        ids = [row['preview_id'] for row in self.current['active']['plan']['planned_records']]
+        request = {'preview_ids': ids[:3], 'method_id': OLIVINE['method_id']}
+
+        def preview():
+            session = self.current['session']
+            return self.store.command('preview_formula', {'workspace_id': session['workspace_id'],
+                'expected_revision': session['draft_revision'], 'source_id': session['active_source_id'], **request})
+
+        ready = preview()
+        self.assertEqual(ready['eligible_count'], 2)
+        self.assertEqual(ready['rows'][1]['missing_components'], ['MgO'])
+        self.assertEqual(ready['rows'][1]['unusable_components'][0]['raw_token'], '<DL')
+        decision = {'kind': 'accept_formula_batch', **request, 'confirmation_fingerprint': ready['confirmation_fingerprint']}
+        with self.assertRaises(ImportCommandError) as changed:
+            self.call('apply_decision', decision={**decision, 'preview_ids': [ids[0], ids[2], ids[3]]})
+        self.assertEqual(changed.exception.code, 'FORMULA_REVIEW_STALE')
+        self.call('replan')
+        with self.assertRaises(ImportCommandError) as stale:
+            self.call('apply_decision', decision=decision)
+        self.assertEqual(stale.exception.code, 'FORMULA_REVIEW_STALE')
+        self.assertEqual(self.current['active']['formula_acceptances'], [])
+        self.call('apply_decision', decision={**decision, 'confirmation_fingerprint': preview()['confirmation_fingerprint']})
+        self.assertEqual([row['label'] for row in self.current['active']['formula_acceptances']], ['A1', 'A3'])
+        self.assertEqual(list_formula_runs(database), [])
+        self.assertEqual(self.call('commit')['analysis_count'], 4)
+        self.assertEqual({run['analysis_label'] for run in list_formula_runs(database)}, {'A1', 'A3'})
+        self.assertEqual(self.source.read_bytes(), original)
+
     def test_probe_header_warnings_are_not_reused_for_current_mapping(self):
         state = self.store.sessions[self.current['session']['workspace_id']]
         state['sources'][0]['classification']['reasons'] = [{'code': 'CLEAN_TABLE_BLANK_HEADER', 'sheet_name': 'first', 'source_column_index': 1}]

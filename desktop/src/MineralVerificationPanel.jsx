@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const statusLabels = { consistent: 'Совпадает на уровне химической группы', conflict: 'Расхождение с источником',
   missing_reported: 'Минерал не указан в источнике', low_confidence: 'Неоднозначное предложение',
@@ -18,12 +18,39 @@ const diagnosticLabels = {
 };
 const number = new Intl.NumberFormat('ru', { maximumSignificantDigits: 6 });
 
-function FormulaPreview({ record, methods, busy, onPreview, onAccept, onClose }) {
+function FormulaBatchResult({ result }) {
+  const [limit, setLimit] = useState(20);
+  const rejected = result.rows.length - result.eligible_count;
+  const rows = [...result.rows.filter((row) => row.error), ...result.rows.filter((row) => !row.error)];
+  return <>
+    <p role="status">Готово к подтверждению · {result.eligible_count} из {result.rows.length}{rejected > 0 && ` · Без расчёта ${rejected}`}</p>
+    {result.replacement_count > 0 && <p>Будут заменены подтверждения в черновике · {result.replacement_count}</p>}
+    <details open={rejected > 0 || undefined}>
+      <summary>Результаты по анализам</summary>
+      {rows.slice(0, limit).map((row) => <div key={row.preview_id}>
+        <b>{row.label} · {row.sheet_name}, {row.source_column_number ? `колонка ${row.source_column_number}` : `строка ${row.row_number}`}</b>
+        {row.error ? <>
+          <p>{row.missing_components?.length ? `Нет пригодного измерения · ${row.missing_components.join(', ')}` : row.error}</p>
+          {row.unusable_components?.map((item) => <p key={`${item.field}:${item.source_cell}`}>
+            {item.source_cell} · {item.field} · {item.raw_token || 'пусто'} · {item.value_status === 'below_detection_limit' ? 'ниже предела обнаружения' : excludedLabels[item.reason]}
+          </p>)}
+        </> : <>
+          <p>APFU · {Object.entries(row.apfu).map(([field, value]) => `${field} ${number.format(value)}`).join(' · ')}</p>
+          {row.warnings.map(({ kind, field, missing_species }) => <p key={`${kind}:${field}`}>{diagnosticLabels[field] || field}{missing_species?.length ? ` · ${missing_species.join(', ')}` : ''}</p>)}
+        </>}
+      </div>)}
+      {rows.length > limit && <button type="button" onClick={() => setLimit((count) => count + 20)}>Показать ещё · осталось {rows.length - limit}</button>}
+    </details>
+  </>;
+}
+
+function FormulaPreview({ selection, methods, busy, onPreview, onAccept, onClose }) {
   const [methodId, setMethodId] = useState('');
   const [result, setResult] = useState(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const method = methods.find((item) => item.method_id === methodId);
+  const batch = Array.isArray(selection);
   async function calculate(event) {
     event.preventDefault();
     if (!method || busy || pending) return;
@@ -31,20 +58,21 @@ function FormulaPreview({ record, methods, busy, onPreview, onAccept, onClose })
     setResult(null);
     setError('');
     try {
-      setResult(await onPreview(record.preview_id, methodId));
+      setResult(await onPreview(selection, methodId));
     } catch (failure) {
       setError(failure.message);
     } finally {
       setPending(false);
     }
   }
-  const series = result && [
+  const series = !batch && result && [
     ['APFU', result.preview.apfu],
     ['Молярные доли, %', result.preview.end_member_mol_percent ?? result.preview.divalent_component_mol_percent],
     ['Индексы', result.preview.indices],
     ['Оценка анионов, APFU', result.preview.estimated_anions_apfu],
   ].filter(([, values]) => values && Object.keys(values).length);
-  return <form aria-label="Предпросмотр формулы" className="mineral-formula-preview" onSubmit={calculate}>
+  return <form aria-label={batch ? 'Предпросмотр формул для выделения' : 'Предпросмотр формулы'} className="mineral-formula-preview" onSubmit={calculate}>
+    {batch && <b>Выбрано анализов · {selection.length}</b>}
     <label>Метод пересчёта<select value={methodId} disabled={busy || pending} onChange={(event) => {
       setMethodId(event.target.value);
       setResult(null);
@@ -54,12 +82,24 @@ function FormulaPreview({ record, methods, busy, onPreview, onAccept, onClose })
       {methods.map((item) => <option key={item.method_id} value={item.method_id}>{item.name}</option>)}
     </select></label>
     {method && <p>Версия {method.version} · {method.oxygen_basis ? `${method.oxygen_basis} O` : `${method.cation_basis} кат.`}</p>}
+    {batch && method && <details><summary>Входные компоненты и допущения</summary>
+      <p>{method.required_components.join(' · ')} · {method.input_unit}</p>
+      <p>{method.iron_policy}</p><p>{method.oh_basis}</p>
+    </details>}
     <div className="mineral-formula-actions">
       <button type="submit" disabled={!method || busy || pending}>{pending ? 'Вычисление…' : 'Рассчитать'}</button>
       <button type="button" onClick={onClose}>Закрыть формулу</button>
     </div>
     {error && <p role="alert">{error}</p>}
-    {result && <div>
+    {result && batch && <div>
+      <FormulaBatchResult result={result} />
+      {onAccept && result.eligible_count > 0 && <div className="mineral-formula-accept">
+        <button type="button" disabled={busy || pending} onClick={() => onAccept({ preview_ids: selection,
+          method_id: methodId, confirmation_fingerprint: result.confirmation_fingerprint })}>Принять расчёты · {result.eligible_count}</button>
+        <small>Сохранятся при добавлении анализов в проект.</small>
+      </div>}
+    </div>}
+    {result && !batch && <div>
       <b role="status">Предварительный расчёт</b>
       {series.map(([label, values]) => <section key={label}><b>{label}</b><dl>
         {Object.entries(values).map(([field, value]) => <div key={field}><dt>{field}</dt><dd>{number.format(value)}</dd></div>)}
@@ -82,15 +122,14 @@ function FormulaPreview({ record, methods, busy, onPreview, onAccept, onClose })
   </form>;
 }
 
-export function MineralVerificationPanel({ records, scopes, busy, onAccept, onReveal, formulaScope, onListFormulaMethods, onPreviewFormula, onAcceptFormula }) {
+export function MineralVerificationPanel({ records, scopes, busy, onAccept, onReveal, formulaScope, batch, onCloseBatch, onListFormulaMethods, onPreviewFormula, onAcceptFormula }) {
   const [showAll, setShowAll] = useState(false);
   const [visibleCount, setVisibleCount] = useState(100);
   const [formula, setFormula] = useState(null);
   const [methods, setMethods] = useState(null);
   const [methodsPending, setMethodsPending] = useState(false);
   const [methodsError, setMethodsError] = useState('');
-  async function openFormula(record) {
-    setFormula({ previewId: record.preview_id, scope: formulaScope });
+  async function loadMethods() {
     if (methods || methodsPending) return;
     setMethodsPending(true);
     setMethodsError('');
@@ -102,11 +141,28 @@ export function MineralVerificationPanel({ records, scopes, busy, onAccept, onRe
       setMethodsPending(false);
     }
   }
+  useEffect(() => {
+    if (batch) {
+      setFormula(null);
+      loadMethods();
+    }
+  }, [batch]);
+  function openFormula(record) {
+    onCloseBatch?.();
+    setFormula({ previewId: record.preview_id, scope: formulaScope });
+    loadMethods();
+  }
   const evaluated = records.filter((r) => r.mineral_verification);
   const attention = evaluated.filter((r) => !['consistent', 'verified'].includes(r.mineral_verification.status));
   const visible = showAll ? evaluated : attention;
   return <div className="mineral-verification-panel">
     <div className="import-inspector-title"><span>2 · Проверка минералов</span><b>{attention.length} требуют внимания из {evaluated.length}</b><small>Предложение классификатора не заменяет название из источника.</small></div>
+    {batch && <div className="mineral-review-item">
+      {methodsPending && <p role="status">Загрузка методов…</p>}
+      {methodsError && <p role="alert">{methodsError}</p>}
+      {methods && <FormulaPreview key={batch.ids.join(',')} selection={batch.ids} methods={methods} busy={busy}
+        onPreview={onPreviewFormula} onAccept={onAcceptFormula} onClose={onCloseBatch} />}
+    </div>}
     {scopes.map((scope) => <div className="mineral-review-item" key={scope.scope_id}><b>{scope.target} · {scope.count} совпадений</b><button type="button" disabled={busy} onClick={() => onAccept({ scope_id: scope.scope_id })}>Принять группу совпадений</button></div>)}
     <label className="mineral-show-all"><input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> Показать все результаты</label>
     {visible.slice(0, visibleCount).map((record) => {
@@ -123,7 +179,7 @@ export function MineralVerificationPanel({ records, scopes, busy, onAccept, onRe
         {formula && formula.scope === formulaScope && formula.previewId === record.preview_id && <>
           {methodsPending && <p role="status">Загрузка методов…</p>}
           {methodsError && <p role="alert">{methodsError}</p>}
-          {methods && <FormulaPreview key={formulaScope} record={record} methods={methods} busy={busy}
+          {methods && <FormulaPreview key={formulaScope} selection={record.preview_id} methods={methods} busy={busy}
             onPreview={onPreviewFormula} onAccept={onAcceptFormula} onClose={() => setFormula(null)} />}
         </>}
       </div>;

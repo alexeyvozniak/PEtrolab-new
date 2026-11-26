@@ -205,8 +205,8 @@ Implement the workspace through versioned scientific-service commands:
 - `import.workspace.add_sources`;
 - `import.workspace.get`;
 - `import.workspace.preview_window`;
-- `import.workspace.preview_formula` — пересчёт выбранной строки в текущей ревизии очереди. Сервис проверяет отпечаток источника, указывает использованные и исключённые измерения и возвращает только предварительный результат. Команда не сохраняет Calculation Run и не назначает минерал;
-- `import.workspace.apply_decision` — `accept_formula` связывает выбранный метод и отпечаток предпросмотра с одним `preview_id` в источнике. `clear_formula` снимает это подтверждение. Изменение состава или определения метода требует повторного подтверждения либо снятия решения;
+- `import.workspace.preview_formula` — пересчёт одного `preview_id` или явного списка `preview_ids` текущего источника в текущей ревизии очереди. Одиночный результат содержит использованные и исключённые измерения, пакетный — APFU, предупреждения и причины исключения по каждой строке. Команда проверяет отпечаток источника и не создаёт Calculation Run или назначение минерала;
+- `import.workspace.apply_decision` — `accept_formula` связывает метод и отпечаток предпросмотра с одним `preview_id`. `accept_formula_batch` проверяет отпечаток полного набора, метода и ревизии, а затем подтверждает только пригодные строки. `clear_formula` снимает отдельное подтверждение. Изменение состава или определения метода требует повторного подтверждения либо снятия решения;
 - `import.workspace.apply_bulk_decision`;
 - `import.workspace.replan`;
 - `import.workspace.commit`;

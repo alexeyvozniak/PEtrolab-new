@@ -791,7 +791,7 @@ export function App() {
                 onAcceptMineral={(decision) => decide({ ...decision, kind: 'accept_mineral' })}
                 onListFormulaMethods={async () => unwrap(await listFormulaMethods())}
                 onPreviewFormula={async (previewId, methodId) => unwrap(await previewImportFormula(workspace, previewId, methodId))}
-                onAcceptFormula={(decision) => decide({ ...decision, kind: 'accept_formula' })}
+                onAcceptFormula={(decision) => decide({ ...decision, kind: decision.preview_ids ? 'accept_formula_batch' : 'accept_formula' })}
                 onClearFormula={(previewId) => decide({ kind: 'clear_formula', preview_id: previewId })}
                 onSelectSource={selectWorkspaceSource}
                 onToggleSource={toggleWorkspaceSource}

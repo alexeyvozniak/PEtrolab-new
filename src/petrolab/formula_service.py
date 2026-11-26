@@ -77,8 +77,18 @@ def review_import_formula(record, method_id):
         raise ImportCommandError("FORMULA_MIXED_INPUT", "Для пересчёта нужен один аналитический метод и набор.")
     fingerprint = _fingerprint({"preview_id": record["preview_id"], "method": method,
                                 "measurements": record["measurements"]})
+    try:
+        result = _calculate(values, method)
+    except ImportCommandError as error:
+        missing = [field for field in method["required_components"] if field not in values]
+        if not missing:
+            raise
+        unusable = [{key: row[key] for key in ("field", "source_cell", "raw_token", "value_status", "reason")}
+                    for row in excluded if row["field"] in missing]
+        raise ImportCommandError(error.code, error.message, {**error.details, "missing_components": missing,
+                                                            "unusable_components": unusable}) from error
     return {"preview_id": record["preview_id"], "method_definition": method, "measurements": inputs,
-            "excluded_measurements": excluded, "preview": _calculate(values, method),
+            "excluded_measurements": excluded, "preview": result,
             "confirmation_fingerprint": fingerprint}
 
 

@@ -271,6 +271,11 @@ export function ImportWorkspace({
   const [bulkUnits, setBulkUnits] = useState({});
   const [showResultPreview, setShowResultPreview] = useState(false);
   const [mineralReview, setMineralReview] = useState(Boolean(recipe.global_decisions.mineral_verification_enabled));
+  const [formulaBatch, setFormulaBatch] = useState(null);
+  const [formulaAcceptanceLimit, setFormulaAcceptanceLimit] = useState(20);
+  const formulaScope = `${workspace?.workspace_id}:${workspace?.active_source_id}:${workspace?.draft_revision}`;
+  const acceptedFormulae = semanticTools.formulaAcceptances || [];
+  const staleFormulae = acceptedFormulae.filter((item) => item.stale);
   const [mineralFocus, setMineralFocus] = useState(null);
   useEffect(() => { setMineralReview(Boolean(recipe.global_decisions.mineral_verification_enabled)); setMineralFocus(null); }, [recipe.global_decisions.mineral_verification_enabled, workspace?.active_source_id]);
   useEffect(() => { setSelectedIssueKey(focusedIssueKey); }, [focusedIssueKey, workspace?.active_source_id]);
@@ -312,7 +317,7 @@ export function ImportWorkspace({
   const selectedGroup = issueGroups.find((entry) => entry.key === selectedIssueKey && (!workspace || entry.item.source_id === workspace.active_source_id)) || issueGroups.find((entry) => !workspace || entry.item.source_id === workspace.active_source_id) || null;
   const selectedIssue = selectedGroup?.item || null;
   const activeSection = sections.find((item) => item.block_id === activeBlockId) || sections[0];
-  const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview;
+  const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview && !mineralReview;
   const blockingCount = workspace ? workspace.issues.filter((item) => item.blocking).length + Number(blockDraftDirty) + Number(mappingDraftDirty) : (blockDraftDirty ? 1 : 0)
     + (plan.issues || []).filter((item) => item.blocking).length
     + (mappingDraftDirty ? 1 : 0)
@@ -457,7 +462,8 @@ export function ImportWorkspace({
             <CleanReadyPreview classification={cleanClassification} plan={plan} onDetailed={onOpenDetailed} busy={busy} />
           ) : (
             <ImportBlockReview
-              semanticTools={semanticTools}
+              semanticTools={{ ...semanticTools, onReviewFormulaBatch: mineralReview && onPreviewFormula && !blockDraftDirty
+                ? (ids) => setFormulaBatch({ ids, scope: formulaScope }) : undefined }}
               onSemanticDecision={onSemanticDecision}
               recipe={recipe}
               previews={blockPreviews}
@@ -472,18 +478,20 @@ export function ImportWorkspace({
 
         <aside className="import-inspector-pane">
           {onVerifyMinerals && <div className="import-stage-tabs"><button type="button" onClick={() => setMineralReview(false)} disabled={busy}>1 · Структура</button><button type="button" disabled={busy || blockDraftDirty || mappingDraftDirty || plan.ready_to_commit === false} onClick={() => recipe.global_decisions.mineral_verification_enabled ? setMineralReview(true) : onVerifyMinerals()}>2 · Проверить минералы</button></div>}
-          {!!semanticTools.formulaAcceptances?.length && <details className="mineral-review-item" open={semanticTools.formulaAcceptances.some((item) => item.stale) || undefined}>
-            <summary>Формулы к сохранению · {semanticTools.formulaAcceptances.length}</summary>
-            {semanticTools.formulaAcceptances.map((item) => <div key={item.preview_id}>
+          {acceptedFormulae.length > 0 && <details className="mineral-review-item" open={staleFormulae.length > 0 || undefined}>
+            <summary>Формулы к сохранению · {acceptedFormulae.length}</summary>
+            {[...staleFormulae, ...acceptedFormulae.filter((item) => !item.stale)].slice(0, formulaAcceptanceLimit).map((item) => <div key={item.preview_id}>
               <b>{item.label || item.preview_id}</b>
               <p>{item.method_name} · версия {item.method_version}</p>
               {item.stale && <p role="status">Входные данные или метод изменились. Снимите подтверждение и пересчитайте формулу.</p>}
               <button type="button" disabled={busy} onClick={() => onClearFormula(item.preview_id)}>Снять подтверждение</button>
             </div>)}
+            {acceptedFormulae.length > formulaAcceptanceLimit && <button type="button" onClick={() => setFormulaAcceptanceLimit((count) => count + 20)}>Ещё формулы · {acceptedFormulae.length - formulaAcceptanceLimit}</button>}
           </details>}
           {mineralReview ? <MineralVerificationPanel
-            formulaScope={`${workspace?.workspace_id}:${workspace?.active_source_id}:${workspace?.draft_revision}`}
-            records={plan.planned_records || []} scopes={semanticTools.mineralScopes || []} busy={busy}
+            formulaScope={formulaScope} batch={formulaBatch?.scope === formulaScope ? formulaBatch : null}
+            onCloseBatch={() => setFormulaBatch(null)}
+            records={plan.planned_records || []} scopes={semanticTools.mineralScopes || []} busy={busy || blockDraftDirty || mappingDraftDirty}
             onAccept={onAcceptMineral} onListFormulaMethods={onListFormulaMethods} onPreviewFormula={onPreviewFormula} onAcceptFormula={onAcceptFormula}
             onReveal={(record) => { setMineralFocus({ ...record, source_column_index: (record.source_column_number || 1) - 1 }); selectBlock(record.block_id); }}
           /> : <>
