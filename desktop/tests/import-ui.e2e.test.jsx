@@ -473,6 +473,15 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
   expect(copied).toContain("SiO2 · единица");
   await user.keyboard("{Escape}");
   expect(screen.queryByText("2 выбрано")).toBeNull();
+  await user.keyboard("{Control>}z{/Control}");
+  expect(screen.getByText("2 выбрано")).toBeTruthy();
+  await user.keyboard("{Control>}{Shift>}z{/Shift}{/Control}");
+  expect(screen.queryByText("2 выбрано")).toBeNull();
+  await user.keyboard("{F1}");
+  expect(screen.getByRole("dialog", { name: "Горячие клавиши PetroLab" })).toBeTruthy();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "Горячие клавиши PetroLab" })).toBeNull();
+  analysisTable.focus();
   await user.keyboard("{Control>}f{/Control}");
   expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Поиск анализов" }));
   await user.type(document.activeElement, "UI-2");

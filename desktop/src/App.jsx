@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSelectionHistory } from "./selectionHistory";
 import {
   CheckCircle,
   Columns,
@@ -111,7 +112,29 @@ export function App() {
   const [screen, setScreen] = useState("Обзор");
   const [databasePath, setDatabasePath] = useState("");
   const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
-  const [selectedAnalysisIds, setSelectedAnalysisIds] = useState([]);
+  const [selectedAnalysisIds, setSelectedAnalysisIds, undoSelection, redoSelection] = useSelectionHistory();
+  const [shortcutHelp, setShortcutHelp] = useState(false);
+  useEffect(() => {
+    const handle = event => {
+      if (event.key === "F1") {
+        event.preventDefault();
+        setShortcutHelp(current => !current);
+      } else if (shortcutHelp && event.key === "Escape") {
+        event.preventDefault();
+        setShortcutHelp(false);
+      } else if (!shortcutHelp && !event.defaultPrevented && !event.isComposing
+          && (event.ctrlKey || event.metaKey) && !event.altKey
+          && ["Анализы", "Построение"].includes(screen)
+          && !event.target.closest?.("input, textarea, select, [contenteditable], [role=dialog], form")) {
+        if (event.key.toLowerCase() === "z") {
+          event.preventDefault();
+          if (event.shiftKey) redoSelection(); else undoSelection();
+        }
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, [screen, shortcutHelp, undoSelection, redoSelection]);
   const [navigationAnalysis, setNavigationAnalysis] = useState(null);
   const [navigationDraftId, setNavigationDraftId] = useState("");
   const [navigationSampleId, setNavigationSampleId] = useState("");
@@ -429,6 +452,15 @@ export function App() {
     setHiddenSourceIds((current) => current.includes(id)
       ? current.filter((value) => value !== id)
       : [...current, id]);
+  };
+  const isolatePlotSource = (id, sourceIds) => {
+    const scope = new Set(sourceIds);
+    setHiddenSourceIds(current => {
+      const hidden = new Set(current);
+      const alreadyIsolated = !hidden.has(id) && sourceIds.every(value => value === id || hidden.has(value));
+      return [...current.filter(value => !scope.has(value)),
+        ...(alreadyIsolated ? [] : sourceIds.filter(value => value !== id))];
+    });
   };
   const loadPlotCatalog = useCallback(async () => unwrap(await getPlotCatalog(databasePath, plotInputIds)), [databasePath, plotInputIds]);
   const loadPlotSelection = useCallback(async (analysisIds, offset, limit) =>
@@ -775,7 +807,8 @@ export function App() {
           hiddenAnalysisIds={hiddenAnalysisIds} hiddenSourceIds={hiddenSourceIds} busy={busy}
           onSetVisibility={setPlotVisibility}
           onUndoVisibility={visibilityOperation ? undoVisibility : null}
-          onToggleSource={togglePlotSource} />}
+          onToggleSource={togglePlotSource} onIsolateSource={isolatePlotSource}
+          onOpenAnalysis={id => openSearchAnalysis(id)} />}
         {screen === "Импорт" && (
           <section className={`live-page${sourcePath ? " import-live-page" : ""}`}>
             {!sourcePath && (
@@ -876,6 +909,32 @@ export function App() {
           />
         )}
       </section>
+      {shortcutHelp && <div className="import-result-overlay" role="presentation" onMouseDown={event => {
+        if (event.target === event.currentTarget) setShortcutHelp(false);
+      }}>
+        <section className="import-result-dialog" role="dialog" aria-modal="true" aria-label="Горячие клавиши PetroLab">
+          <header><div><h2>Горячие клавиши PetroLab</h2><p>Отбор и навигация не изменяют исходные данные.</p></div>
+            <button type="button" autoFocus onClick={() => setShortcutHelp(false)} aria-label="Закрыть памятку">×</button></header>
+          <div className="import-result-tools"><b>Таблица</b></div>
+          <div className="import-result-table-wrap"><table className="import-result-table"><tbody>
+            <tr><td>Ctrl+F</td><td>Поиск анализов</td></tr>
+            <tr><td>Ctrl+A / Ctrl+C</td><td>Выбрать показанные / копировать выбранные показанные строки</td></tr>
+            <tr><td>Стрелки / Shift+стрелки</td><td>Фокус / отбор диапазона</td></tr>
+            <tr><td>F2</td><td>Открыть черновик правки текущего анализа</td></tr>
+            <tr><td>Esc</td><td>Очистить поиск или снять отбор</td></tr>
+          </tbody></table></div>
+          <div className="import-result-tools"><b>Диаграммы</b></div>
+          <div className="import-result-table-wrap"><table className="import-result-table"><tbody>
+            <tr><td>Клик по пустому полю</td><td>Снять отбор</td></tr>
+            <tr><td>Shift / Ctrl / Alt + отбор</td><td>Добавить / переключить / исключить</td></tr>
+            <tr><td>Двойной клик по точке</td><td>Открыть анализ</td></tr>
+            <tr><td>Ctrl+клик по источнику</td><td>Изолировать источник; повторить — показать все</td></tr>
+            <tr><td>Ctrl+колесо / пробел+мышь / Home</td><td>Масштаб / панорама / автомасштаб</td></tr>
+            <tr><td>Ctrl+Z / Ctrl+Shift+Z</td><td>Отменить / вернуть отбор (таблица и графики)</td></tr>
+            <tr><td>F1 / Esc</td><td>Открыть / закрыть памятку</td></tr>
+          </tbody></table></div>
+        </section>
+      </div>}
     </main>
   );
 }

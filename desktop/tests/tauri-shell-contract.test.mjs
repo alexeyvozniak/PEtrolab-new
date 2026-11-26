@@ -66,7 +66,7 @@ test("adding import is transactional and keeps the existing queue on failure", a
   const chooseFile = app.match(/const chooseFile = async \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
   assert.doesNotMatch(chooseFile, /catch[\s\S]*resetImportState\(\)/);
   assert.match(app, /Копирую файл в рабочую область PetroLab/);
-  assert.match(app, /Проверяю, соответствует ли файл PetroLab Clean Table/);
+  assert.match(app, /3\/4 · Распознаю таблицу и проверяю план импорта/);
 });
 
 test("Clean Table fast path is classified by Python and skips raw review by default", async () => {

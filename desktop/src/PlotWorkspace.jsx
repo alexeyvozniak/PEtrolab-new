@@ -87,7 +87,7 @@ function initialPanels(axes) {
     : make("binary", [axes[1], axes[0]])];
 }
 
-function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
+function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, shape, colorFor, points }) {
   const drag = useRef(null);
   const canvas = useRef(null);
   const hovered = useRef(false);
@@ -252,7 +252,14 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
         setView(FULL_VIEW);
       }
     }}
-    onDoubleClick={(event) => { if (!event.target.closest?.("[data-analysis-id], [data-plot-bar]")) setView(FULL_VIEW); }}
+    onDoubleClick={(event) => {
+      if (isHistogram || selectionModifier(event)) return;
+      const last = position(event);
+      const hit = visibleMarkers.findLast(point => Math.hypot(px(point.u) - last.x, py(point.v) - last.y) <= 7 * view.width / VIEW.width);
+      const id = hit?.analysis_id || event.target.closest?.("[data-analysis-id]")?.dataset.analysisId;
+      if (id) onOpenAnalysis?.(id);
+      else setView(FULL_VIEW);
+    }}
     data-plot-projection={data.projection_sha256}
     onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={clear} onLostPointerCapture={clear}>
     {data.kind === "ternary" ? <>
@@ -313,7 +320,7 @@ function PlotCanvas({ data, selected, onSelect, shape, colorFor, points }) {
   </svg></>;
 }
 
-function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, canRemove, shape, colorFor, openExport, layers }) {
+function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, canRemove, shape, colorFor, openExport, layers }) {
   const [projection, setProjection] = useState(null);
   const current = projection?.load === load && projection.panel === panel ? projection : null;
   const data = current?.data;
@@ -395,7 +402,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
     </div>
     {status && <p role="status">{status}</p>}
     {data && <>
-      <PlotCanvas data={data} selected={selected} onSelect={onSelect} shape={shape} colorFor={colorFor} points={points} />
+      <PlotCanvas data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} shape={shape} colorFor={colorFor} points={points} />
       <small>{pattern ? "Спектров" : panel.kind === "histogram" ? "Анализов" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
         {data.hidden_count ? ` · скрыто: ${data.hidden_count}` : ""}
         {data.points.length > points.length ? ` · скрыто стилем слоя: ${data.points.length - points.length}` : ""}
@@ -519,7 +526,7 @@ function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
 }
 
 export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedIds, setSelectedIds, inputIds, onBack,
-  hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
+  hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
   onExport, onAddPublication }) {
   const [axes, setAxes] = useState([]);
   const [patterns, setPatterns] = useState({});
@@ -538,7 +545,29 @@ export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedId
   const [layers, setLayers] = useState([]);
   const [layerName, setLayerName] = useState("");
   const layerInput = inputIds ? selectedIds.filter((id) => inputIds.includes(id)) : selectedIds;
-  const loadWithLayers = useCallback((kind, axes, normalization) => loadData(kind, axes, layers, normalization), [loadData, layers]);
+  // Cache only within this mounted workspace and exact data/visibility/layer
+  // scope. Deduplicate in-flight requests; rejected or oversized entries are
+  // never retained. No persistent cache across project changes or edits.
+  const loadWithLayers = useMemo(() => {
+    const cache = new Map();
+    return (kind, axes, normalization) => {
+      const key = JSON.stringify([kind, axes, normalization]);
+      if (cache.has(key)) {
+        const entry = cache.get(key);
+        cache.delete(key);
+        cache.set(key, entry);
+        return entry;
+      }
+      const entry = Promise.resolve().then(() => loadData(kind, axes, layers, normalization));
+      cache.set(key, entry);
+      while (cache.size > 4) cache.delete(cache.keys().next().value);
+      entry.then(data => {
+        const vertices = (data.points || []).reduce((n, point) => n + (point.vertices?.length || 1), 0);
+        if (vertices > 30000 && cache.get(key) === entry) cache.delete(key);
+      }, () => { if (cache.get(key) === entry) cache.delete(key); });
+      return entry;
+    };
+  }, [loadData, layers]);
   const [exportStatus, setExportStatus] = useState(null);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportOptions, setExportOptions] = useState(null);
@@ -695,7 +724,12 @@ export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedId
         {sources.map((source) => {
           const repeated = sources.some((other) => other.source_id !== source.source_id && other.source_name === source.source_name);
           const label = repeated ? `${source.source_name} · ${source.source_id.slice(0, 8)}` : source.source_name;
-          return <label key={source.source_id}>
+          return <label key={source.source_id} title="Ctrl+клик — изолировать источник; повтор — показать все" onClick={event => {
+            if ((event.ctrlKey || event.metaKey) && onIsolateSource && !busy) {
+              event.preventDefault();
+              onIsolateSource(source.source_id, sources.map(item => item.source_id));
+            }
+          }}>
             <input type="checkbox" checked={!hiddenSourceIds.includes(source.source_id)}
               disabled={!onToggleSource || busy} onChange={() => onToggleSource(source.source_id)} />
             <i style={{ backgroundColor: colorFor(source.source_id) }} aria-hidden="true" />{label}
@@ -775,7 +809,7 @@ export function PlotWorkspace({ loadCatalog, loadData, loadSelection, selectedId
       {!loading && !error && !panels.length && <p>Для построения нужно хотя бы одно поле измерений.</p>}
       <div className={exportOptions ? "plot-content plot-content-export" : "plot-content"}>
         <div className="plot-grid" ref={grid}>
-          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} shape={shape} colorFor={colorFor} layers={layers}
+          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} shape={shape} colorFor={colorFor} layers={layers}
             openExport={onExport && !exportBusy ? () => openExport(panel.id) : undefined}
             update={(next) => setPanels((current) => current.map((item) => item.id === panel.id ? next : item))}
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}

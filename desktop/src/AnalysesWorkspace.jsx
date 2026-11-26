@@ -627,7 +627,15 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
       return;
     }
     if (!event.target.closest?.(".analyses-table-pane")) return;
-    if (event.key === "Escape") {
+    if (event.key === "F2" && !busy && editDraftActions && focused) {
+      const details = event.currentTarget.querySelector(".analysis-edit-drafts");
+      if (details) {
+        event.preventDefault();
+        details.open = true;
+        details.scrollIntoView?.({ block: "nearest" });
+        details.querySelector("input[name=new_value]")?.focus();
+      }
+    } else if (event.key === "Escape") {
       event.preventDefault();
       selectionAnchor.current = null;
       selectionDrag.current = null;
