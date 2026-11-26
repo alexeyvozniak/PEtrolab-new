@@ -141,7 +141,9 @@ def _plot_capture(database_path, capture):
         snapshot = {**panel, "svg_group": node.get("id"), "analysis_ids": ids, "points": projection["points"],
                     "ticks": projection["ticks"], "fields": projection["fields"]}
         if "normalization" in projection:
-            snapshot.update(normalization=projection["normalization"], exclusions=projection["exclusions"])
+            snapshot['normalization'] = projection['normalization']
+        if 'exclusions' in projection:
+            snapshot['exclusions'] = projection['exclusions']
         if "bins" in projection:
             snapshot.update(binning=projection["binning"], bins=projection["bins"])
         snapshots.append(snapshot)

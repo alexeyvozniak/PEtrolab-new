@@ -7,6 +7,17 @@
   "additionalProperties": false,
   "required": ["id", "project_id", "name", "input", "panels", "legend", "filters", "hidden_analysis_ids", "created_at", "updated_at"],
   "$defs": {
+    "measured_operand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "unit", "measurement_set", "method"],
+      "properties": {
+        "field": {"type": "string", "minLength": 1},
+        "unit": {"enum": ["wt.%", "ppm", "ppb"]},
+        "measurement_set": {"type": ["string", "null"]},
+        "method": {"type": ["string", "null"]}
+      }
+    },
     "axis": {
       "type": "object",
       "additionalProperties": false,
@@ -17,6 +28,18 @@
         "method": {"type": ["string", "null"]},
         "measurement_set": {"type": ["string", "null"]},
         "scale": {"type": "string", "enum": ["linear", "log"]},
+        "calculation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation", "version", "operands"],
+          "properties": {
+            "operation": {"enum": ["sum", "ratio"]},
+            "version": {"const": 1},
+            "operands": {"type": "array", "items": {"$ref": "#/$defs/measured_operand"}, "minItems": 2, "maxItems": 16, "uniqueItems": true}
+          },
+          "if": {"properties": {"operation": {"const": "ratio"}}},
+          "then": {"properties": {"operands": {"maxItems": 2}}}
+        },
         "manual_range": {
           "oneOf": [
             {"type": "null"},

@@ -5,7 +5,7 @@ from collections import defaultdict
 from contextlib import closing, nullcontext
 from hashlib import sha256
 import json
-from math import isfinite
+from math import fsum, isfinite
 import re
 from uuid import UUID
 
@@ -13,6 +13,7 @@ from .desktop_workflow import _measurement_numeric_value
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
 from .plot_fields import clip_to_plot_rectangle, convex_hull, normal_probability_ellipse
+from .statistics_core import feature_domain, review_feature_domains
 from .trace_patterns import PATTERN_ORDERS, normalized_pattern_value, pattern_catalog, pattern_coordinates, pattern_reference
 
 
@@ -71,6 +72,29 @@ def _axis_key(axis):
     return tuple(axis[key] for key in _AXIS_FIELDS)
 
 
+def _coordinate_axis(axis):
+    if not isinstance(axis, dict) or 'calculation' not in axis:
+        return _axis_key(axis), None, ()
+    key = _axis_key({field: value for field, value in axis.items() if field != 'calculation'})
+    definition = axis['calculation']
+    if not isinstance(definition, dict) or set(definition) != {'operation', 'version', 'operands'}:
+        raise ValueError('axis_calculation')
+    operation, operands = definition['operation'], definition['operands']
+    if (operation not in ('sum', 'ratio') or type(definition['version']) is not int or definition['version'] != 1
+            or not isinstance(operands, list) or not 2 <= len(operands) <= (2 if operation == 'ratio' else 16)):
+        raise ValueError('axis_calculation')
+    inputs = tuple(map(_axis_key, operands))
+    domains = {feature_domain(item) for item in operands}
+    allowed = {'wt.%'} if domains == {'oxide_wt_percent'} else {'ppm', 'ppb'} if domains == {'trace_concentration'} else set()
+    if (not allowed or len({item[0] for item in inputs}) != len(inputs)
+            or any(item[2:] != key[2:] for item in inputs)
+            or review_feature_domains(operands)['overlapping_iron']
+            or (key[1] != 'ratio' if operation == 'ratio' else key[1] not in allowed)):
+        raise ImportCommandError('PLOT_CALCULATION_INCOMPATIBLE_OPERANDS',
+                                 'Выберите совместимые компоненты одного аналитического набора без двойного учёта железа.')
+    return key, operation, inputs
+
+
 def _plot_keys(kind, axes):
     if not isinstance(kind, str) or not isinstance(axes, list):
         raise ValueError("plot")
@@ -79,14 +103,77 @@ def _plot_keys(kind, axes):
             raise ValueError("plot")
     elif len(axes) != _COORDINATE_AXIS_COUNTS.get(kind):
         raise ValueError("plot")
-    keys = [_axis_key(axis) for axis in axes]
+    definitions = [_coordinate_axis(axis) for axis in axes]
+    keys = [definition[0] for definition in definitions]
+    calculated = any(operation is not None for _, operation, _ in definitions)
     if len(set(keys)) != len(keys):
         raise ValueError("axes")
-    if kind == "ternary" and (len({key[1:] for key in keys}) != 1 or keys[0][1] not in {"wt.%", "ppm", "ppb"}):
+    if calculated and kind not in {"binary", "ternary"}:
+        raise ImportCommandError('PLOT_CALCULATION_UNSUPPORTED', 'Расчётные оси доступны на бинарных и тройных диаграммах.')
+    if kind == "ternary" and (len({key[1:] for key in keys}) != 1 or keys[0][1] not in ({"wt.%", "ppm", "ppb", "ratio"} if calculated else {"wt.%", "ppm", "ppb"})):
         raise ImportCommandError("PLOT_TERNARY_INCOMPATIBLE_AXES", "Для тройной диаграммы выберите компоненты в одной единице и одном аналитическом наборе.")
+    if kind == 'ternary' and calculated:
+        if keys[0][1] == 'ratio':
+            ratio_inputs = [inputs for _, operation, inputs in definitions if operation == 'ratio']
+            combined = [dict(zip(_AXIS_FIELDS, item)) for inputs in ratio_inputs for item in inputs]
+            compatible = (len(ratio_inputs) == 3 and len({inputs[1] for inputs in ratio_inputs}) == 1
+                          and len({inputs[0][0] for inputs in ratio_inputs}) == 3
+                          and not review_feature_domains(combined)['overlapping_iron'])
+        else:
+            operands = [item for key, _, inputs in definitions for item in (inputs or (key,))]
+            features = [dict(zip(_AXIS_FIELDS, item)) for item in operands]
+            compatible = (len({item[0] for item in operands}) == len(operands)
+                          and len({feature_domain(feature) for feature in features}) == 1
+                          and not review_feature_domains(features)['overlapping_iron'])
+        if not compatible:
+            raise ImportCommandError('PLOT_TERNARY_INCOMPATIBLE_AXES', 'Для тройной диаграммы нужны неперекрывающиеся компоненты одного домена или отношения с общим знаменателем.')
     if kind in PATTERN_ORDERS and (len({key[2:] for key in keys}) != 1 or any(key[1] not in {"ppm", "ppb"} for key in keys)):
         raise ImportCommandError("PLOT_PATTERN_INCOMPATIBLE_AXES", "Для спектра выберите концентрации в ppm или ppb из одного аналитического набора и метода.")
     return keys
+
+
+def _required_axis_keys(axes):
+    required = set()
+    for axis in axes:
+        key, _, operands = _coordinate_axis(axis)
+        required.update(operands or (key,))
+    return required
+
+
+def _coordinate_value(record, definition):
+    key, operation, inputs = definition
+    measurements, values = [], []
+    for item in inputs or (key,):
+        rows = record[item]
+        measurements.extend({field: row[field] for field in ('measurement_id', 'raw_token', 'unit', 'value_status', 'reported_fe_form')}
+                            for row in rows)
+        if len(rows) != 1:
+            return None, 'duplicate_measurements' if rows else 'missing', measurements
+        row = rows[0]
+        if item[0] in {'FeO', 'Fe2O3', 'FeOt', 'Fe2O3t'} and row['reported_fe_form'] != item[0]:
+            return None, 'incompatible_iron_form', measurements
+        value = _measurement_numeric_value(row)
+        if value is None:
+            status = row['value_status']
+            return None, status if status and status != 'numeric' else 'unusable_measurement', measurements
+        values.append(value)
+    if operation is None:
+        return values[0], None, measurements
+    if any(value < 0 for value in values):
+        return None, 'negative_operand', measurements
+    if operation == 'ratio' and values[1] == 0:
+        return None, 'zero_denominator', measurements
+    try:
+        if operation == 'ratio':
+            value = values[0] / values[1]
+            if inputs[0][1] != inputs[1][1]:
+                value *= 1000 if inputs[0][1] == 'ppm' else .001
+        else:
+            value = fsum(number * (1 if item[1] == key[1] else 1000 if key[1] == 'ppb' else .001)
+                         for item, number in zip(inputs, values))
+    except (OverflowError, ValueError):
+        return None, 'calculation_out_of_range', measurements
+    return (value, None, measurements) if isfinite(value) else (None, 'calculation_out_of_range', measurements)
 
 
 def _linear_coordinates(values):
@@ -179,6 +266,8 @@ def _pattern_vertices(record, keys, concentrations):
 def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysis_ids=None, hidden_source_ids=None,
                     layers=None, *, normalization=None):
     keys = _plot_keys(kind, axes)
+    calculated = any('calculation' in axis for axis in axes)
+    definitions = [_coordinate_axis(axis) for axis in axes] if calculated else []
     reference = pattern_reference(kind, [key[0] for key in keys], normalization) if kind in PATTERN_ORDERS else None
     layers = _validated_layers(layers)
     parameter, selection = _selection(analysis_ids)
@@ -188,10 +277,10 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
     _selection(hidden_source_ids or None)
     hidden_analyses = set(hidden_analysis_ids or [])
     hidden_sources = set(hidden_source_ids or [])
-    key_set = set(keys)
+    key_set = _required_axis_keys(axes) if calculated else set(keys)
     if reference is not None:
         key_set.update(map(_alternate_concentration_key, keys))
-    fields = json.dumps([axis["field"] for axis in axes])
+    fields = json.dumps(sorted({key[0] for key in key_set}))
     with closing(open_project(database_path)) as connection:
         connection.execute("BEGIN")
         active_analyses = connection.execute(
@@ -201,7 +290,7 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
                    if row["analysis_id"] not in hidden_analyses and row["source_id"] not in hidden_sources}
         rows = connection.execute(f"""
             SELECT {_AXIS_PROJECTION}, a.analysis_id, a.identity_json, s.source_id, s.display_name AS source_name,
-                   m.raw_token, m.qualifier, m.value_status, m.measurement_id, m.detection_limit
+                   m.raw_token, m.qualifier, m.value_status, m.measurement_id, m.detection_limit, m.reported_fe_form
             {_ACTIVE_MEASUREMENTS} AND m.canonical_field IN (SELECT value FROM json_each(?))
             ORDER BY a.analysis_id, m.rowid
         """, (parameter, selection, fields))
@@ -214,12 +303,13 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
             analysis_id = row["analysis_id"]
             if analysis_id not in visible:
                 continue
-            value = row if reference is not None else _measurement_numeric_value(row)
+            value = row if reference is not None or calculated else _measurement_numeric_value(row)
             observed.setdefault(analysis_id, defaultdict(list))[key].append(value)
             metadata[analysis_id] = row
 
     points = []
     pattern_exclusions = []
+    coordinate_exclusions = []
     for analysis_id, record in observed.items():
         row = metadata[analysis_id]
         identity = " · ".join(token for token in json.loads(row["identity_json"]) if token)
@@ -232,13 +322,27 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
             else:
                 pattern_exclusions.append({"analysis_id": analysis_id, "reason": "no_positive_ratio", "vertices": vertices})
             continue
-        values = [record[key][0] if len(record[key]) == 1 else None for key in keys]
+        if calculated:
+            results = [_coordinate_value(record, definition) for definition in definitions]
+            values = [item[0] for item in results]
+            evidence = [{'field': key[0], 'reason': status, 'measurements': measurements}
+                        for key, (_, status, measurements) in zip(keys, results)]
+            failure = next((item['reason'] for item in evidence if item['reason'] is not None), None)
+            if failure:
+                coordinate_exclusions.append({'analysis_id': analysis_id, 'reason': failure, 'axes': evidence})
+                continue
+            point['axis_inputs'] = evidence
+        else:
+            values = [record[key][0] if len(record[key]) == 1 else None for key in keys]
         if any(value is None or not isfinite(value) for value in values):
             continue
         point["values"] = values
         if kind == "ternary":
             magnitude = max(values)
             if magnitude <= 0 or min(values) < 0:
+                if calculated:
+                    coordinate_exclusions.append({'analysis_id': analysis_id, 'axes': evidence,
+                        'reason': 'negative_component' if min(values) < 0 else 'zero_component_sum'})
                 continue
             shares = [value / magnitude for value in values]
             total_shares = sum(shares)
@@ -292,6 +396,10 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
               "excluded_count": len(visible) - len(points)}
     if reference is not None:
         result.update(normalization=reference, exclusions=pattern_exclusions)
+    if calculated:
+        coordinate_exclusions.extend({'analysis_id': analysis_id, 'reason': 'no_matching_axes', 'axes': []}
+                                     for analysis_id in sorted(visible - observed.keys()))
+        result['exclusions'] = sorted(coordinate_exclusions, key=lambda item: item['analysis_id'])
     if kind == "histogram":
         result.update(binning=_HISTOGRAM_BINNING, bins=histogram_bins)
     result["projection_sha256"] = sha256(json.dumps(result, ensure_ascii=False, sort_keys=True,
@@ -440,7 +548,7 @@ def save_plot_specification(database_path, name, analysis_ids, panels, colors, h
         panel_ids.append(panel["id"])
         kind = panel["kind"]
         keys = _plot_keys(kind, panel["axes"])
-        panel_keys.update(keys)
+        panel_keys.update(_required_axis_keys(panel["axes"]))
         normalization = "sum_of_three_components" if kind == "ternary" else None
         if kind in PATTERN_ORDERS:
             normalization = pattern_reference(kind, [key[0] for key in keys], panel.get("normalization"))["id"]
@@ -512,7 +620,11 @@ def open_plot_specification(database_path, spec_id):
         if any(panel["kind"] == "histogram" and panel.get("binning") != _HISTOGRAM_BINNING for panel in spec["panels"]):
             raise ImportCommandError("PLOT_HISTOGRAM_BINNING_UNSUPPORTED", "Версия интервалов гистограммы не поддерживается.")
         _, available = _layout_input(connection, spec["input"]["analysis_ids"])
-        keys = {tuple(axis[key] for key in _AXIS_FIELDS) for panel in spec["panels"] for axis in panel["axes"]}
+        keys = set()
+        for panel in spec['panels']:
+            axes = [{key: value for key, value in axis.items() if key not in {'scale', 'manual_range'}} for axis in panel['axes']]
+            _plot_keys(panel['kind'], axes)
+            keys.update(_required_axis_keys(axes))
         if not keys <= available:
             raise ImportCommandError("PLOT_LAYOUT_AXES_UNAVAILABLE", "Часть сохранённых полей недоступна. Раскладка не изменилась.")
         return spec

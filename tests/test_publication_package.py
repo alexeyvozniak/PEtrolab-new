@@ -15,12 +15,85 @@ from pypdf.generic import DictionaryObject, NameObject
 from petrolab.desktop_workflow import list_project_analyses, suggest_import_recipe
 from petrolab.import_apply import apply_import_plan
 from petrolab.import_preview import ImportCommandError
-from petrolab.plot_data import plot_catalog, query_plot_data, save_plot_specification
+from petrolab.plot_data import open_plot_specification, plot_catalog, query_plot_data, save_plot_specification
 from petrolab.publication import capture_publication_plot, export_publication, prepare_publication
 from petrolab.work_groups import create_work_group
 
 
 class PublicationPackageTests(unittest.TestCase):
+    def test_calculated_ternary_keeps_afm_arithmetic_inputs_and_exclusions(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            database = root / 'project.sqlite'
+            source = root / 'afm.csv'
+            source.write_text('Analysis,Na2O [wt.%],K2O [wt.%],FeOt [wt.%],MgO [wt.%]\n'
+                              'P1,2,3,15,30\nP2,<DL,3,15,30\nP3,0,0,0,0\nP4,2,3,15,-1\n', encoding='utf-8')
+            original = source.read_bytes()
+            apply_import_plan(database, source, suggest_import_recipe(source)['recipe'])
+            catalog = {axis['field']: axis for axis in plot_catalog(database)['axes']}
+            alkalis = {**catalog['Na2O'], 'field': 'Na2O + K2O', 'calculation': {
+                'operation': 'sum', 'version': 1, 'operands': [catalog['Na2O'], catalog['K2O']]}}
+            axes = [alkalis, catalog['FeOt'], catalog['MgO']]
+            projection = query_plot_data(database, 'ternary', axes)
+            point, = projection['points']
+            self.assertEqual(point['values'], [5, 15, 30])
+            self.assertAlmostEqual(point['u'], .6)
+            self.assertAlmostEqual(point['v'], .6)
+            self.assertCountEqual([row['reason'] for row in projection['exclusions']],
+                                  ['below_detection_limit', 'zero_component_sum', 'negative_component'])
+            self.assertEqual([row['raw_token'] for row in point['axis_inputs'][0]['measurements']], ['2', '3'])
+            self.assertEqual(point['axis_inputs'][1]['measurements'][0]['reported_fe_form'], 'FeOt')
+            with self.assertRaises(ImportCommandError) as invalid:
+                query_plot_data(database, 'ternary', [alkalis, catalog['K2O'], catalog['MgO']])
+            self.assertEqual(invalid.exception.code, 'PLOT_TERNARY_INCOMPATIBLE_AXES')
+            panel = {'id': str(uuid4()), 'kind': 'ternary', 'axes': axes}
+            spec = save_plot_specification(database, 'AFM', None, [panel], {}, [], [])
+            reopened = open_plot_specification(database, spec['id'])
+            self.assertEqual(reopened, spec)
+            reopened_axes = [{key: value for key, value in axis.items() if key not in {'scale', 'manual_range'}}
+                             for axis in reopened['panels'][0]['axes']]
+            self.assertEqual(query_plot_data(database, 'ternary', reopened_axes, reopened['input']['analysis_ids']), projection)
+            capture = {'name': 'AFM', 'format': 'svg', 'width_mm': 90, 'dpi': 600, 'include_csv': True,
+                       'svg': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><g><text x="1" y="2">AFM</text></g></svg>',
+                       'analysis_ids': None, 'hidden_analysis_ids': [], 'hidden_source_ids': [], 'layers': [], 'colors': {},
+                       'panels': [{**panel, 'projection_sha256': projection['projection_sha256']}]}
+            item = capture_publication_plot(database, capture, 'AFM')
+            prepared = prepare_publication(database, 'AFM', [item])
+            destination = root / 'afm.zip'
+            export_publication(database, 'AFM', [item], prepared['fingerprint'], str(destination))
+            with ZipFile(destination) as archive:
+                saved, = json.loads(archive.read('materials/01-plot_capture.json'))['panels']
+                self.assertEqual(saved['axes'], axes)
+                self.assertEqual(saved['points'], projection['points'])
+                self.assertEqual(saved['exclusions'], projection['exclusions'])
+            self.assertEqual(source.read_bytes(), original)
+
+    def test_trace_ratios_use_declared_units_and_common_ternary_denominator(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'trace.csv'
+            source.write_text('Analysis,La [ppm],Ce [ppm],Nd [ppm],Yb [ppb]\n'
+                              'P1,2,4,6,2000\nP2,2,4,6,0\nP3,2,4,6,<DL\nP4,-2,-4,-6,-2000\n', encoding='utf-8')
+            database = root / 'project.sqlite'
+            apply_import_plan(database, source, suggest_import_recipe(source)['recipe'])
+            measured = {axis['field']: axis for axis in plot_catalog(database)['axes']}
+
+            def ratio(numerator, denominator):
+                return {**measured[numerator], 'field': f'{numerator}/{denominator}', 'unit': 'ratio', 'calculation': {
+                    'operation': 'ratio', 'version': 1, 'operands': [measured[numerator], measured[denominator]]}}
+
+            axes = [ratio(element, 'Yb') for element in ('La', 'Ce', 'Nd')]
+            projection = query_plot_data(database, 'ternary', axes)
+            self.assertEqual(projection['points'][0]['values'], [1, 2, 3])
+            self.assertAlmostEqual(projection['points'][0]['u'], 7 / 12)
+            self.assertAlmostEqual(projection['points'][0]['v'], .5)
+            self.assertCountEqual([row['reason'] for row in projection['exclusions']],
+                                  ['zero_denominator', 'below_detection_limit', 'negative_operand'])
+            binary = query_plot_data(database, 'binary', [axes[0], measured['Ce']])
+            self.assertEqual(binary['points'][0]['values'], [1, 4])
+            with self.assertRaises(ImportCommandError):
+                query_plot_data(database, 'ternary', [*axes[:2], ratio('Nd', 'La')])
+
     def test_trace_pattern_package_keeps_reference_ratios_and_measurement_gaps(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)
