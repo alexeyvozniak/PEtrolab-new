@@ -3,6 +3,14 @@ import {useState} from "react";
 const format = new Intl.NumberFormat("ru", {maximumSignificantDigits: 7});
 const pointKey = point => JSON.stringify([point.spatial_annotation_id, point.analysis_id]);
 const axisLabel = axis => [axis.field, axis.unit, axis.measurement_set, axis.method].filter(Boolean).join(" · ");
+const reasons = {
+  below_detection_limit: "ниже предела обнаружения",
+  duplicate_measurements: "несколько измерений",
+  missing: "нет измерения",
+  no_matching_axes: "нет данных для выбранной оси",
+  zero_denominator: "нулевой знаменатель",
+  incompatible_iron_form: "другая форма железа",
+};
 
 function ProfileChart({result, onFocus}) {
   const {points, axis} = result;
@@ -15,7 +23,9 @@ function ProfileChart({result, onFocus}) {
   const y = point => maximum === minimum ? 90
     : 155 - 130 * (point.value / magnitude - minimum / magnitude) / (maximum / magnitude - minimum / magnitude);
   return <>
-    {shown.length ? <svg viewBox="0 0 400 195" role="img" aria-label={axisLabel(axis) + " по расстоянию в мкм"}>
+    {shown.length ? <figure className="zoning-profile-chart">
+      <figcaption>{axisLabel(axis)}</figcaption>
+      <svg viewBox="0 0 400 195" role="img" aria-label={axisLabel(axis) + " по расстоянию в мкм"}>
       <path d="M55 25 V155 H380" stroke="currentColor" fill="none"/>
       <text x="55" y="18">{format.format(maximum)}</text>
       {maximum !== minimum && <text x="5" y="155">{format.format(minimum)}</text>}
@@ -28,12 +38,13 @@ function ProfileChart({result, onFocus}) {
           <circle cx={x(point)} cy={y(point)} r="4" fill="#34704e"><title>{point.analysis_id}</title></circle>
         </g>;
       })}
-    </svg> : <p>Для выбранной оси нет пригодных значений.</p>}
+      </svg>
+    </figure> : <p>Для выбранной оси нет пригодных значений.</p>}
     <ol>{points.map(point => <li key={pointKey(point)}>
       <button type="button" className="outline-button" onClick={() => onFocus([point.analysis_id])}>
         {format.format(point.distance_um)} мкм · {point.value === null ? "нет значения" : format.format(point.value)}
       </button>
-      {point.value === null && <small> {point.reason}</small>}
+      {point.value === null && <small> {reasons[point.reason] || "значение непригодно для этой оси"}</small>}
     </li>)}</ol>
   </>;
 }
