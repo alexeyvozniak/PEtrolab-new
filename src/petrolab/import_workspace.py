@@ -21,6 +21,7 @@ from .import_apply import (apply_import_batch, open_project, workspace_commit_ex
 from .import_preview import (ImportCommandError, inspect_source, create_import_plan, validate_recipe,
                              preview_inspection_window, semantic_fingerprint)
 from .manual_mapping import revise_import_mappings, revise_import_sections, review_duplicate_candidates
+from .import_unit_diagnostics import composition_unit_hint
 from .semantic_import import apply_semantic_decision, SEMANTIC_ACTIONS
 from .analyte_dictionary import CANONICAL, confirmed_alias
 
@@ -581,9 +582,14 @@ class ImportWorkspaceStore:
             issues.extend(item for item in source['inspection'].get('warnings', [])
                           if item['code'] in {'MERGED_HEADERS', 'HIDDEN_ROWS', 'FORMULA_WITHOUT_CACHED_VALUE', 'EMBEDDED_DRAWINGS_NOT_PREVIEWED'}
                           and item.get('sheet_name') in enabled_sheets)
+            sheets = {sheet.name: sheet for sheet in inspection.sheets}
             for section in source['recipe']['sections']:
                 if not section.get('enabled', True):
                     continue
+                sheet = sheets.get(section['sheet_name'])
+                hint = composition_unit_hint(sheet, section) if sheet is not None else None
+                if hint:
+                    issues.append(hint)
                 for field in section['mappings']:
                     if field.get('target_role') == 'ignore' and field.get('review_decision') == 'unresolved':
                         issues.append({'code': 'UNIT_REQUIRES_REVIEW' if field.get('suggested_target') == 'measurement' else 'UNMAPPED_FIELD_REQUIRES_REVIEW',
