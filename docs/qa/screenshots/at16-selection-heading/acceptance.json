@@ -1,0 +1,218 @@
+{
+  "steps": {
+    "pinnedAscending": {
+      "rows": [
+        {
+          "label": "A-ZERO",
+          "selected": true
+        },
+        {
+          "label": "A-HIGHEST",
+          "selected": true
+        },
+        {
+          "label": "A-HIGH-OTHER",
+          "selected": false
+        },
+        {
+          "label": "A-BDL",
+          "selected": false
+        },
+        {
+          "label": "A-BLANK",
+          "selected": false
+        },
+        {
+          "label": "A-MODERATE",
+          "selected": false
+        },
+        {
+          "label": "A-HIGH",
+          "selected": false
+        }
+      ],
+      "heading": "Текущий отбор · 2",
+      "chips": [],
+      "selection": "2 выбраноВыбранные строки закреплены сверху."
+    },
+    "pinnedDescending": {
+      "rows": [
+        {
+          "label": "A-ZERO",
+          "selected": true
+        },
+        {
+          "label": "A-HIGHEST",
+          "selected": true
+        },
+        {
+          "label": "A-BDL",
+          "selected": false
+        },
+        {
+          "label": "A-BLANK",
+          "selected": false
+        },
+        {
+          "label": "A-MODERATE",
+          "selected": false
+        },
+        {
+          "label": "A-HIGH",
+          "selected": false
+        },
+        {
+          "label": "A-HIGH-OTHER",
+          "selected": false
+        }
+      ],
+      "heading": "Текущий отбор · 2",
+      "chips": [],
+      "selection": "2 выбраноВыбранные строки закреплены сверху."
+    },
+    "detectionLimits": [
+      {
+        "rows": [
+          {
+            "label": "A-ZERO",
+            "selected": true
+          }
+        ],
+        "heading": "Текущий отбор · 1",
+        "chips": [
+          "F: =0",
+          "Сбросить фильтры"
+        ],
+        "selection": "2 выбраноСкрыто фильтром: 1"
+      },
+      {
+        "rows": [
+          {
+            "label": "A-BDL",
+            "selected": false
+          }
+        ],
+        "heading": null,
+        "chips": [
+          "F: ниже предела",
+          "Сбросить фильтры"
+        ],
+        "selection": "2 выбраноСкрыто фильтром: 2"
+      },
+      {
+        "rows": [
+          {
+            "label": "A-BLANK",
+            "selected": false
+          }
+        ],
+        "heading": null,
+        "chips": [
+          "F: пусто",
+          "Сбросить фильтры"
+        ],
+        "selection": "2 выбраноСкрыто фильтром: 2"
+      },
+      {
+        "rows": [
+          {
+            "label": "A-HIGH",
+            "selected": false
+          }
+        ],
+        "heading": null,
+        "chips": [
+          "F: 9,5..10",
+          "Сбросить фильтры"
+        ],
+        "selection": "2 выбраноСкрыто фильтром: 2"
+      }
+    ],
+    "linked": {
+      "rows": [],
+      "heading": null,
+      "chips": [
+        "at16-primary.csv",
+        "Связь назначена",
+        "Analysis: HIGH",
+        "F: >=10",
+        "Сбросить фильтры"
+      ],
+      "selection": "2 выбраноСкрыто фильтром: 2"
+    },
+    "combined": {
+      "rows": [
+        {
+          "label": "A-HIGHEST",
+          "selected": true
+        },
+        {
+          "label": "A-HIGH",
+          "selected": false
+        }
+      ],
+      "heading": "Текущий отбор · 1",
+      "chips": [
+        "at16-primary.csv",
+        "Без связи",
+        "Analysis: HIGH",
+        "F: >=10",
+        "Сбросить фильтры"
+      ],
+      "selection": "2 выбраноСкрыто фильтром: 1"
+    },
+    "reset": {
+      "rows": [
+        {
+          "label": "A-ZERO",
+          "selected": true
+        },
+        {
+          "label": "A-HIGHEST",
+          "selected": true
+        },
+        {
+          "label": "A-BDL",
+          "selected": false
+        },
+        {
+          "label": "A-BLANK",
+          "selected": false
+        },
+        {
+          "label": "A-MODERATE",
+          "selected": false
+        },
+        {
+          "label": "A-HIGH",
+          "selected": false
+        },
+        {
+          "label": "A-HIGH-OTHER",
+          "selected": false
+        }
+      ],
+      "heading": "Текущий отбор · 2",
+      "chips": [],
+      "selection": "2 выбраноВыбранные строки закреплены сверху."
+    },
+    "headingLayout": {
+      "height": 30,
+      "gapToFirstResult": 0,
+      "scrollX": 300,
+      "labelOffset": 1
+    }
+  },
+  "selection": [
+    "9d1c80ea-cd2e-4a13-b303-35de2b25c222",
+    "f1f19dff-c956-45e7-8a10-0122cb27d9cc"
+  ],
+  "workGroup": [
+    "9d1c80ea-cd2e-4a13-b303-35de2b25c222",
+    "f1f19dff-c956-45e7-8a10-0122cb27d9cc"
+  ],
+  "originalSha256": [
+    "626c16a85d6d7c2704bdeb0915d4bef13dc9d984fd1c43552d38e7e878509812",
+    "a91e5dcf8d1b4b74e0c9ccbb3c9473fbb1b7e21ad27be305f46068bd2a781eff"
+  ]
+}
