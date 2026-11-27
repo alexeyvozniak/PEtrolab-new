@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import "./importMapping.css";
+import {ImportBatchContext} from "./ImportBatchContext";
 
 const TARGETS = ["Ignore", "Analysis", "Sample", "Sample name", "Point", "Mineral", "Method", "Generation", "Rock", "Source", "Comment", "Position", "Photo number", "Size (µm)", "Measurement"];
 const UNITS = ["wt.%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon", "permil"];
@@ -254,6 +255,32 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
     })]);
     return {id:section.block_id,name:section.sheet_name,header:section.header_row,fields,signature};
   }).filter(item=>item.fields.length),[recipe,draft,applied]);
+  const contextBlocks=useMemo(()=>recipe.sections.filter(section=>section.enabled!==false).map(section=>{
+    const fields=section.mappings.flatMap(mapping=>{
+      const key=keyForMapping(section.block_id,mapping),value=draft[key];
+      return value?.target==="Measurement"&&value.field.trim()&&UNITS.includes(value.unit)?[{key,...value}]:[];
+    });
+    const signature=JSON.stringify([section.orientation,section.mappings.map(mapping=>{
+      const value=draft[keyForMapping(section.block_id,mapping)];
+      return [mappingAxis(mapping),mappingIndex(mapping),mapping.source_header,value?.target,value?.field,value?.unit];
+    })]);
+    return {id:section.block_id,name:section.sheet_name,header:section.header_row,fields,signature};
+  }).filter(block=>block.fields.length),[recipe,draft]);
+  const applyContext=(keys,patch)=>{
+    const selected=new Set(keys);
+    setDraft(current=>{
+      const next={...current};
+      for(const block of contextBlocks)for(const field of block.fields){
+        const value=current[field.key];
+        if(!selected.has(field.key)||value?.target!=="Measurement"||!UNITS.includes(value.unit)||!value.field.trim())continue;
+        next[field.key]={...value,
+          method:value.method.trim()?value.method:patch.method,
+          measurementSet:value.measurementSet.trim()?value.measurementSet:patch.measurementSet,
+          reviewDecision:"assigned"};
+      }
+      return next;
+    });
+  };
   const chosenBlocks=bookCandidates.filter(item=>bookBlocks.includes(item.id));
   const bookCount=chosenBlocks.reduce((sum,item)=>sum+item.fields.length,0);
   const applyBookUnit=()=>{
@@ -308,6 +335,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
         <button className="primary-button" type="button" disabled={busy||!bookUnit||!bookCount} onClick={applyBookUnit}>Назначить единицу · {bookCount} полей в {chosenBlocks.length} блоках</button>
         <small>Затем нажмите «Применить сопоставление» один раз для всей книги. Проверяйте, что одинаковая структура действительно означает одинаковые единицы.</small>
       </details>}
+      <ImportBatchContext key={recipe.source_file_sha256||"book"} blocks={contextBlocks} activeBlockId={activeBlockId} busy={busy} onApply={applyContext}/>
       {enabledSections.map((section, sectionIndex) => (
         <section className="mapping-sheet" key={section.block_id}>
           {(() => {
