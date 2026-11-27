@@ -597,6 +597,24 @@ test("categorical mineral colors use reported labels and preserve selection and 
   expect(mode.value).toBe("mineral");
   expect(screen.getAllByRole("button",{name:/^Выбрать точку C1/})[0].localName).toBe("polygon");
   expect(screen.getAllByRole("button",{name:/^Выбрать точку C1/})[0].getAttribute("fill")).toBe("#112233");
+  const styleBox=within(screen.getByLabelText("Окрашивание точек"));
+  const beforeBatch=requests.filter(request=>request.command==="plot_data.query").length;
+  await user.click(styleBox.getByText("Пакетное оформление"));
+  await user.click(styleBox.getByRole("button",{name:"Выбрать все категории"}));
+  fireEvent.change(styleBox.getByLabelText("Общий цвет категорий"),{target:{value:"#228855"}});
+  await user.click(styleBox.getByRole("checkbox",{name:"Изменить символ"}));
+  await user.selectOptions(styleBox.getByLabelText("Общий символ категорий"),"star_open");
+  await user.click(styleBox.getByRole("button",{name:"Применить оформление к категориям"}));
+  for(const name of [/^Выбрать точку C1/,/^Выбрать точку C2/]){
+    const marker=screen.getAllByRole("button",{name})[0];
+    expect(marker.getAttribute("stroke")).toBe("#228855");expect(marker.getAttribute("fill")).toBe("none");
+  }
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  expect(requests.filter(request=>request.command==="plot_data.query").length).toBe(beforeBatch);
+  await user.click(await enabledButton("Сохранить цветовую схему проекта"));
+  await screen.findByText("Цветовая схема сохранена в проекте.");
+  const bulk=(await invokePetrolab("project.plot_colors.get",{project_database_path:join(folder,"project.sqlite")})).result;
+  for(const key of ["olivine","pyroxene"])expect(bulk.scheme.colors).toContainEqual({mode:"mineral",key,color:"#228855",symbol:"star_open"});
 }, 20000);
 
 test("axis catalog drops an exact catalog key and rejects an unknown key", async () => {

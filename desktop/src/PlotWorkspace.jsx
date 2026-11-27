@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import { ContextActions } from "./ContextActions";
 import {duplicatePanel,selectionView} from "./plotQuickActions";
+import {applyBatchStyle} from "./plotBatchStyle";
+import {PlotBatchStyle} from "./PlotBatchStyle";
 import { SYMBOL_LABELS,symbolGeometry,symbolPaint } from "./plotSymbols";
 function PointMarker({symbol,x,y,r,children,fill,...props}) {
   const {tag:Tag,attrs}=symbolGeometry(symbol,x,y,r);
@@ -1162,6 +1164,8 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
               <button type="button" className="outline-button category-cloud-button" disabled={layers.length>=32 || loading || busy}
                 aria-label={"Создать облако: "+entry.label+" · "+entry.count+" анализов"} title="Только облако этой категории" onClick={()=>addCategoryCloud(entry)}>Облако</button></div>)}
           </div>}
+          {category&&<PlotBatchStyle key={colorMode} mode={colorMode} entries={category.entries} disabled={schemeBusy||busy||exportBusy||!colorReady}
+            onApply={(ids,patch)=>{const next=applyBatchStyle(schemeColors,colorMode,category.entries,ids,patch);setSchemeColors(next);setSchemeStatus("");}}/>}
           {category?.entries.length > CATEGORY_COLORS.length && <small>Цвета могут повторяться; сузьте набор для различения групп.</small>}
           <small>Гистограммы и управление видимостью источников сохраняют исходные цвета. Раскладка и пакет фиксируют категории и цвета на момент сохранения.</small>
         </>}
@@ -1191,6 +1195,9 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
               onChange={event=>changeColor("source",source.source_id,event.target.value)}/>
           </div>;
         })}
+        {sources.length>0&&<PlotBatchStyle key="source" mode="source" entries={sources.map(source=>({key:source.source_id,
+          label:sources.some(other=>other.source_id!==source.source_id&&other.source_name===source.source_name)?source.source_name+" · "+source.source_id.slice(0,8):source.source_name,color:colorFor(source.source_id)}))}
+          disabled={schemeBusy||busy||exportBusy||!colorReady} onApply={(ids,patch)=>{const next=applyBatchStyle(schemeColors,"source",sources.map(source=>({key:source.source_id,color:colorFor(source.source_id)})),ids,patch);setSchemeColors(next);setSchemeStatus("");}}/>}
         <p>Зелёный контур — текущий отбор</p>
         <p title="Ctrl+колесо — масштаб, пробел+перетаскивание — панорама, Home — автомасштаб">Пустое поле — снять отбор. Shift — добавить, Ctrl — переключить, Alt — исключить. Esc — отмена жеста, масштаба или отбора.</p>
         {hiddenAnalysisIds.length > 0 && <button className="outline-button" type="button" disabled={busy || !onSetVisibility}
