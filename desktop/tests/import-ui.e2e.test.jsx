@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AnalysesWorkspace } from "../src/AnalysesWorkspace";
+import { ImportMappingEditor } from "../src/ImportMappingEditor";
 import { MediaViewer } from "../src/MediaWorkspace";
 import { SampleWorkspace } from "../src/SampleWorkspace";
 import { ThinSectionLinks } from "../src/ThinSectionLinks";
@@ -635,4 +636,23 @@ test("user resolves a repeated complex workbook with sheet-level and grouped dec
 
   await screen.findByRole("heading", { name: "Анализы" });
   expect(commitImportWorkspace).toHaveBeenCalled();
+});
+
+
+test("recognized bare element mappings use one confirmed unit even when the warning list is filtered",()=>{
+  const onApplyAll=vi.fn();
+  const symbols=["O","Si","Ti","Al","Fe","Mn","Mg","Ca","Na","K","Ba","Cr","Ni","P","V"];
+  const recognized=symbols.map((field,index)=>({source_axis:"column",source_column_index:index,source_header:field,
+    target_role:"ignore",canonical_field:null,suggested_target:"measurement",suggested_canonical_field:field,review_decision:"unresolved"}));
+  const ignored={...recognized[0],source_column_index:15,source_header:"O",review_decision:"explicit_ignore"};
+  const unknown={source_axis:"column",source_column_index:16,source_header:"Comment2",target_role:"ignore",review_decision:"unresolved"};
+  const assigned={source_axis:"column",source_column_index:17,source_header:"La (ppm)",target_role:"measurement",canonical_field:"La",unit:"ppm",review_decision:"recognized"};
+  const recipe={sections:[{block_id:"mica",sheet_name:"слюды",enabled:true,orientation:"rows_are_analyses",header_row:1,mappings:[...recognized,ignored,unknown,assigned]}]};
+  render(<ImportMappingEditor recipe={recipe} warnings={[]} onApplyAll={onApplyAll}/>);
+  expect(screen.getAllByRole("combobox",{name:"Что это"}).filter(node=>node.value==="Measurement")).toHaveLength(15);
+  fireEvent.change(screen.getByLabelText("Общая единица распознанных компонентов: слюды"),{target:{value:"at.%"}});
+  fireEvent.click(screen.getByRole("button",{name:"Назначить полям без единицы"}));
+  fireEvent.click(screen.getByRole("button",{name:"Применить сопоставление (15)"}));
+  expect(onApplyAll).toHaveBeenCalledOnce();
+  expect(onApplyAll.mock.calls[0][0].map(({canonical_field,unit,source_index})=>[canonical_field,unit,source_index])).toEqual(symbols.map((field,index)=>[field,"at.%",index]));
 });

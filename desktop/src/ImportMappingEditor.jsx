@@ -74,8 +74,11 @@ function buildDraft(recipe, warnings) {
     for (const mapping of section.mappings) {
       const key = keyForMapping(section.block_id, mapping);
       const current = appliedState(mapping);
-      const suggestedField = suggestions.get(key);
-      draft[key] = current.target === "Ignore" && suggestedField
+      // Recognition is also stored on the mapping; warning lists may be
+      // filtered independently. Never revive a deliberately ignored field.
+      const suggestedField = mapping.suggested_target === "measurement"
+        ? mapping.suggested_canonical_field || suggestions.get(key) : suggestions.get(key);
+      draft[key] = current.target === "Ignore" && current.reviewDecision !== "explicit_ignore" && suggestedField
         ? { target: "Measurement", field: suggestedField, unit: "", method: "", measurementSet: "", reviewDecision: "unresolved" }
         : current;
     }
@@ -186,7 +189,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
       const next = { ...current };
       for (const mapping of section.mappings) {
         const key = keyForMapping(section.block_id, mapping);
-        if (next[key]?.target === "Measurement" && !next[key]?.unit) next[key] = { ...next[key], unit, reviewDecision: "assigned" };
+        if (next[key]?.target === "Measurement" && next[key].field.trim() && !next[key]?.unit) next[key] = { ...next[key], unit, reviewDecision: "assigned" };
       }
       return next;
     });
@@ -255,6 +258,10 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
               return (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore")
                 || (value.target === "Measurement" && (!value.field.trim() || !value.unit));
             }).length;
+            const missingUnits=section.mappings.filter(mapping=>{
+              const value=draft[keyForMapping(section.block_id,mapping)];
+              return value?.target==="Measurement" && Boolean(value.field.trim()) && !value.unit;
+            });
             const shownMappings = showAll ? section.mappings : section.mappings.filter((mapping) => {
               const value = draft[keyForMapping(section.block_id, mapping)] || appliedState(mapping);
               return (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore")
@@ -272,14 +279,15 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
                 <button type="button" className={showAll ? "active" : ""} onClick={() => setShowAll(true)}>Все {section.mappings.length}</button>
               </div>
               <div className="sheet-unit-control">
-                <label>Одна единица для нерешённых Measurement</label>
-                <select value={blockUnits[section.block_id] || ""} onChange={(event) => setBlockUnits((current) => ({ ...current, [section.block_id]: event.target.value }))} disabled={busy}>
+                <label>Общая единица для распознанных компонентов · {missingUnits.length}</label>
+                <select aria-label={`Общая единица распознанных компонентов: ${section.sheet_name}`} value={blockUnits[section.block_id] || ""} onChange={(event) => setBlockUnits((current) => ({ ...current, [section.block_id]: event.target.value }))} disabled={busy}>
                   <option value="">Выбрать…</option>
                   {UNITS.map((item) => <option key={item} value={item}>{item}</option>)}
                 </select>
-                <button className="compact-button" onClick={() => applyUnitToBlock(section)} disabled={busy || !blockUnits[section.block_id]}>
+                <button className="compact-button" onClick={() => applyUnitToBlock(section)} disabled={busy || !blockUnits[section.block_id] || !missingUnits.length}>
                   Назначить полям без единицы
                 </button>
+                <small>Применяйте только если у перечисленных компонентов одна единица. Уже заданные единицы не меняются.</small>
               </div>
               {section.mappings.some((mapping) => { const value = draft[keyForMapping(section.block_id, mapping)]; return value?.target === 'Ignore' && value.reviewDecision !== 'explicit_ignore'; }) && <button className="mapping-ignore-all" onClick={() => explicitlyIgnoreUnresolved(section)} disabled={busy}>Не импортировать нераспознанные поля</button>}
             </div>
