@@ -226,3 +226,35 @@ class TransposedExplicitUnitTests(unittest.TestCase):
         from petrolab.import_preview import explicit_unit_column
         self.assertEqual(explicit_unit_column((("Analysis",None,"P1"),("Si","wt.%","40"),("La","ppm","3")),1,1,2,3), {2:"wt.%",3:"ppm"})
         self.assertIsNone(explicit_unit_column((("Analysis",None,"P1"),("Si","wt.%","40"),("La","text","3")),1,1,2,3))
+
+class MergedUnitHeaderTests(unittest.TestCase):
+    def test_merged_unit_banners_above_and_below_do_not_fill_source_cells(self):
+        from petrolab.import_preview import SheetInspection, candidate_blocks
+        from petrolab.import_recognition import mappings_for_row_block
+        headers = ("Analysis","SiO2","MgO","La","Yb","Al")
+        units = (None,"wt.%",None,"ppm",None,None)
+        data = ("P1","40","20","3","4","5")
+        for above in (True, False):
+            rows = (units,headers,data) if above else (headers,units,data)
+            header_row = 2 if above else 1
+            unit_number = 1 if above else 2
+            merges = (f"B{unit_number}:C{unit_number}",f"D{unit_number}:E{unit_number}")
+            sheet = SheetInspection("Lab",rows,(header_row,),({"code":"MERGED_HEADERS","ranges":list(merges)},))
+            block, = candidate_blocks(sheet)
+            self.assertEqual(block["data_start_row"],3)
+            fields, _ = mappings_for_row_block(rows,header_row,3,3,block["unit_context"],merges)
+            by_field={row["source_header"]:row for row in fields}
+            self.assertEqual([by_field[name]["unit"] for name in ("SiO2","MgO","La","Yb")],["wt.%","wt.%","ppm","ppm"])
+            self.assertEqual(by_field["Al"]["target_role"],"ignore")
+            self.assertIsNone(rows[unit_number-1][2])
+
+    def test_vertical_units_are_confined_to_explicit_merged_range(self):
+        from petrolab.import_preview import explicit_unit_column
+        from petrolab.import_recognition import mappings_for_column_block
+        rows=(("Analysis","Units","P1","P2"),("SiO2","wt.%","40","41"),("MgO",None,"20","21"),("La","ppm","3","4"),("Al",None,"5","6"))
+        merges=("B2:B3",)
+        self.assertEqual(explicit_unit_column(rows,1,1,2,5,merges),{2:"wt.%",3:"wt.%",4:"ppm"})
+        fields,_=mappings_for_column_block(rows,1,2,5,3,4,None,merges)
+        self.assertEqual([field["unit"] for field in fields],["wt.%","wt.%","ppm",None])
+        self.assertIsNone(rows[2][1])
+        self.assertEqual(explicit_unit_column(rows,1,1,2,5,("B2:C3",)),{2:"wt.%",4:"ppm"})

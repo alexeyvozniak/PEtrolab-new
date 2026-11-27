@@ -269,15 +269,23 @@ def mappings_for_row_block(
     data_start_row: int,
     data_end_row: int,
     context_unit: str | None = None,
+    merges=(),
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Build mappings for every populated physical column in a row-oriented block."""
     header = rows[header_row - 1]
     # Explicit separate unit row is part of the source header structure, not
     # a measurement. Re-check the same evidence when a block is rebuilt.
-    from .import_preview import _unit_row_before_data
-    unit_row = (_unit_row_before_data(rows, header_row, header_row + 1, data_end_row + 1)
+    from .import_preview import _unit_row_before_data, _merged_units_on_row, _explicit_unit_row
+    unit_row = (_unit_row_before_data(rows, header_row, header_row + 1, data_end_row + 1, merges)
                 if data_start_row > header_row + 1 else None)
     column_units = unit_row[1] if unit_row and unit_row[0] == data_start_row else None
+    if column_units is None and header_row > 1:
+        merged = _merged_units_on_row(rows, header_row - 1, merges)
+        if merged:
+            # A merged unit banner directly above the component labels.
+            above = _explicit_unit_row(rows[header_row - 2], merged)
+            column_units = {column: unit for column, unit in above.items()
+                            if column < len(header) and header[column]}
     bounded_end = min(len(rows), data_end_row)
     max_columns = max(
         [len(header), *(len(rows[index - 1]) for index in range(data_start_row, bounded_end + 1))],
@@ -337,6 +345,7 @@ def mappings_for_column_block(
     data_start_column: int,
     data_end_column: int,
     context_unit: str | None = None,
+    merges=(),
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Build mappings for every populated physical field row in a transposed block."""
     mappings: list[dict[str, Any]] = []
@@ -345,7 +354,7 @@ def mappings_for_column_block(
     first_data_index = max(0, data_start_column - 1)
     last_data_index = max(first_data_index, data_end_column - 1)
     from .import_preview import explicit_unit_column
-    row_units = (explicit_unit_column(rows, field_start_row - 1, header_column, field_start_row, field_end_row)
+    row_units = (explicit_unit_column(rows, field_start_row - 1, header_column, field_start_row, field_end_row, merges)
                  if field_start_row > 1 and data_start_column >= header_column + 2 else None)
     for row_number in range(field_start_row, min(field_end_row, len(rows)) + 1):
         row = rows[row_number - 1]

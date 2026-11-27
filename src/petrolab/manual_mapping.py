@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .import_preview import ImportCommandError, create_import_plan, inspect_source, semantic_fingerprint, validate_recipe
+from .import_preview import ImportCommandError, create_import_plan, inspect_source, merged_unit_ranges, semantic_fingerprint, validate_recipe
 from .import_recognition import (
     IRON_FIELDS,
     VALID_UNITS,
@@ -164,6 +164,7 @@ def _rebuild_section_mappings(inspection: Any, section: dict[str, Any]) -> list[
             int(section["data_start_row"]),
             int(section["data_end_row"]),
             context_unit,
+            merged_unit_ranges(sheet.warnings),
         )
         return mappings
     max_columns = max((len(row) for row in sheet.rows), default=0)
@@ -175,6 +176,7 @@ def _rebuild_section_mappings(inspection: Any, section: dict[str, Any]) -> list[
         int(section.get("data_start_column", 2)),
         int(section.get("data_end_column", max_columns)),
         context_unit,
+        merged_unit_ranges(sheet.warnings),
     )
     return mappings
 

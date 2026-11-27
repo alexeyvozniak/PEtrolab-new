@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .import_apply import latest_active_import, open_project
-from .import_preview import ImportCommandError, SourceInspection, candidate_blocks, explicit_unit_column, inspect_source, semantic_fingerprint, validate_recipe, value_status
+from .import_preview import ImportCommandError, SourceInspection, candidate_blocks, explicit_unit_column, merged_unit_ranges, inspect_source, semantic_fingerprint, validate_recipe, value_status
 from .import_recognition import (
     IRON_FIELDS,
     mappings_for_column_block,
@@ -82,7 +82,7 @@ def _transposed_candidate(sheet: Any, block: dict[str, Any], context_unit: str |
         if evidence_count < 3 or evidence_count / len(mappings) < 0.6:
             continue
 
-        unit_column = explicit_unit_column(sheet.rows, header_row, header_column_index + 1, field_start, field_end)
+        unit_column = explicit_unit_column(sheet.rows, header_row, header_column_index + 1, field_start, field_end, merged_unit_ranges(sheet.warnings))
         analysis_columns = [
             column_index
             for column_index in range(header_column_index + (2 if unit_column is not None else 1), len(header))
@@ -132,6 +132,7 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
                 int(block["data_start_row"]),
                 int(block["data_end_row"]),
                 context_unit,
+                merged_unit_ranges(sheet.warnings),
             )
             row_has_identity = any(mapping.get("target_role") == "identity" for mapping in row_mappings)
             row_measurement_evidence = sum(
@@ -152,6 +153,7 @@ def suggest_import_recipe(source_path: str | Path) -> dict[str, Any]:
                     transposed["data_start_column"],
                     transposed["data_end_column"],
                     context_unit,
+                    merged_unit_ranges(sheet.warnings),
                 )
                 section: dict[str, Any] = {
                     "sheet_name": sheet.name,
