@@ -1,4 +1,5 @@
 import {useState} from "react";
+import {GrainPreview} from "./GrainPreview";
 
 const format = new Intl.NumberFormat("ru", {maximumSignificantDigits: 7});
 const pointKey = point => JSON.stringify([point.spatial_annotation_id, point.analysis_id]);
@@ -12,7 +13,8 @@ const reasons = {
   incompatible_iron_form: "другая форма железа",
 };
 
-function ProfileChart({result, onFocus}) {
+function ProfileChart({result, onFocus, loadPhotos, previewPhoto}) {
+  const [hover, setHover] = useState(null);
   const {points, axis} = result;
   const shown = points.filter(point => point.value !== null);
   const minimum = Math.min(...shown.map(point => point.value));
@@ -35,10 +37,18 @@ function ProfileChart({result, onFocus}) {
         const previous = points[index - 1];
         return <g key={pointKey(point)}>
           {previous?.value != null && <line x1={x(previous)} y1={y(previous)} x2={x(point)} y2={y(point)} stroke="#34704e"/>}
-          <circle cx={x(point)} cy={y(point)} r="4" fill="#34704e"><title>{point.analysis_id}</title></circle>
+          <circle cx={x(point)} cy={y(point)} r="4" fill="#34704e" tabIndex={0}
+            aria-label={`${format.format(point.distance_um)} мкм · ${format.format(point.value)}`}
+            onMouseEnter={() => setHover(point.analysis_id)} onMouseLeave={() => setHover(null)}
+            onFocus={() => setHover(point.analysis_id)} onBlur={() => setHover(null)}>
+            <title>{point.analysis_id}</title>
+          </circle>
         </g>;
       })}
       </svg>
+      {hover && loadPhotos && <div className="profile-grain-tooltip" role="tooltip">
+        <GrainPreview key={hover} id={hover} mediaId={result.media_asset_id} loadPhotos={loadPhotos} previewPhoto={previewPhoto}/>
+      </div>}
     </figure> : <p>Для выбранной оси нет пригодных значений.</p>}
     <ol>{points.map(point => <li key={pointKey(point)}>
       <button type="button" className="outline-button" onClick={() => onFocus([point.analysis_id])}>
@@ -49,7 +59,8 @@ function ProfileChart({result, onFocus}) {
   </>;
 }
 
-export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus}) {
+export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus, loadPhotos, previewPhoto,
+  calibration, onPickScale, onClearScale}) {
   const [route, setRoute] = useState([]);
   const [choice, setChoice] = useState("");
   const [axisKey, setAxisKey] = useState("");
@@ -64,8 +75,11 @@ export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus}
     point.analysis_id === row.analysis_id || point.spatial_annotation_id === row.spatial_annotation_id));
   const selected = candidates.find(row => pointKey(row) === choice);
   const axis = axes.get(axisKey);
+  const [first, second] = calibration?.points || [];
+  const measuredPixels = second ? Math.hypot(second.x_px-first.x_px, second.y_px-first.y_px) : null;
+  const referencePixels = calibration ? measuredPixels : Number(pixels);
   const request = {media_asset_id: mediaId, points: route.map(({spatial_annotation_id, analysis_id}) =>
-    ({spatial_annotation_id, analysis_id})), axis, reference_px: Number(pixels), reference_um: Number(length)};
+    ({spatial_annotation_id, analysis_id})), axis, reference_px: referencePixels, reference_um: Number(length)};
   const signature = JSON.stringify(request);
   const current = response?.signature === signature ? response : null;
   const move = (index, delta) => {
@@ -112,15 +126,20 @@ export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus}
           <option value="">Выберите ось</option>
           {[...axes].map(([key, value]) => <option key={key} value={key}>{axisLabel(value)}</option>)}
         </select></label>
-        <label>Длина на оригинале, px <input type="number" min="0" step="any" required value={pixels} onChange={e => {setPixels(e.target.value); setResponse(null);}}/></label>
+        {onPickScale&&<button type="button" className="outline-button" onClick={()=>{setResponse(null);onPickScale();}}>Указать концы линейки на фото</button>}
+        {calibration ? <p>
+          {measuredPixels === null ? "Выберите две точки на фото." : measuredPixels === 0
+            ? "Концы линейки совпадают. Выберите их заново." : `Длина на оригинале: ${format.format(measuredPixels)} px`}
+          <button type="button" className="outline-button" onClick={()=>{setResponse(null);onClearScale();}}>Ввести пиксели вручную</button>
+        </p> : <label>Длина на оригинале, px <input type="number" min="0" step="any" required value={pixels} onChange={e => {setPixels(e.target.value); setResponse(null);}}/></label>}
         <label>Длина в микрометрах <input type="number" min="0" step="any" required value={length} onChange={e => {setLength(e.target.value); setResponse(null);}}/></label>
-        <button type="submit" className="primary-button" disabled={route.length < 2 || !axis || !(Number(pixels) > 0 && Number(length) > 0)}>
+        <button type="submit" className="primary-button" disabled={route.length < 2 || !axis || !(referencePixels > 0 && Number(length) > 0)}>
           Построить профиль
         </button>
       </fieldset>
     </form>
     {pending && <p role="status">Строю профиль…</p>}
     {current?.error && <p role="alert">{current.error}</p>}
-    {current?.result && <ProfileChart result={current.result} onFocus={onFocus}/>}
+    {current?.result && <ProfileChart result={current.result} onFocus={onFocus} loadPhotos={loadPhotos} previewPhoto={previewPhoto}/>}
   </details>;
 }

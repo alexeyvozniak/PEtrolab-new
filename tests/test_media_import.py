@@ -208,8 +208,10 @@ class MediaImportTests(unittest.TestCase):
                     assignment["placements"].extend(placement["placements"])
             plan = create_media_import_plan(database, [assignment])
             apply_media_import_plan(database, plan)
-            route = [{"spatial_annotation_id": get_analysis_photo_locations(database, item)[0]["spatial_annotation_id"],
-                      "analysis_id": item} for item in ids[:3]]
+            locations = [get_analysis_photo_locations(database, item)[0] for item in ids[:3]]
+            self.assertEqual([(row["image_width_px"], row["image_height_px"]) for row in locations], [(12, 8)] * 3)
+            route = [{"spatial_annotation_id": row["spatial_annotation_id"], "analysis_id": item}
+                     for row, item in zip(locations, ids)]
             axis = next(axis for axis in plot_catalog(database)["axes"] if axis["field"] == "SiO2")
             request = {"protocol_version": PROTOCOL_VERSION, "request_id": str(uuid4()), "command": "photo.profile.query",
                        "payload": {"project_database_path": str(database), "media_asset_id": plan["items"][0]["media_asset_id"],
@@ -748,4 +750,3 @@ class MediaImportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
