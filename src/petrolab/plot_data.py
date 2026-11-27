@@ -201,10 +201,20 @@ def _coordinate_axis(axis):
     if not isinstance(definition, dict) or set(definition) != {'operation', 'version', 'operands'}:
         raise ValueError('axis_calculation')
     operation, operands = definition['operation'], definition['operands']
-    if (operation not in ('sum', 'ratio') or type(definition['version']) is not int or definition['version'] != 1
-            or not isinstance(operands, list) or not 2 <= len(operands) <= (2 if operation == 'ratio' else 16)):
+    if (operation not in ('sum', 'ratio', 'mg_number') or type(definition['version']) is not int or definition['version'] != 1
+            or not isinstance(operands, list) or not 2 <= len(operands) <= (2 if operation in ('ratio', 'mg_number') else 16)):
         raise ValueError('axis_calculation')
     inputs = tuple(map(_axis_key, operands))
+    if operation == 'mg_number':
+        # Version 1: CIAAW 2024 abridged Mg 24.305, Fe 55.845, O 15.999.
+        # FeOt is total iron expressed as FeO; it is not measured Fe2+.
+        expected_label = 'Mg# (FeO)' if inputs[1][0] == 'FeO' else 'Mg# (FeOt, total Fe)'
+        if (inputs[0][0] != 'MgO' or inputs[1][0] not in ('FeO', 'FeOt')
+                or any(item[1] != 'wt.%' or item[2:] != key[2:] for item in inputs)
+                or key[:2] != (expected_label, 'mol.%')):
+            raise ImportCommandError('PLOT_CALCULATION_INCOMPATIBLE_OPERANDS',
+                                     'Mg# требует MgO и явно указанного FeO или FeOt в wt.% одного аналитического набора.')
+        return key, operation, inputs
     domains = {feature_domain(item) for item in operands}
     allowed = {'wt.%'} if domains == {'oxide_wt_percent'} else {'ppm', 'ppb'} if domains == {'trace_concentration'} else set()
     if (not allowed or len({item[0] for item in inputs}) != len(inputs)
@@ -324,6 +334,13 @@ def _coordinate_value(record, definition):
         return None, 'negative_operand', measurements
     if operation == 'ratio' and values[1] == 0:
         return None, 'zero_denominator', measurements
+    if operation == 'mg_number':
+        if not any(values):
+            return None, 'zero_denominator', measurements
+        magnitude = max(values)
+        mg = (values[0] / magnitude) / 40.304
+        fe = (values[1] / magnitude) / 71.844
+        return 100 * mg / (mg + fe), None, measurements
     try:
         if operation == 'ratio':
             value = values[0] / values[1]

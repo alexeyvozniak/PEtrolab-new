@@ -5,6 +5,13 @@ export function compatibleMeasured(a,b) {
     ((a.unit==="wt.%" && b.unit==="wt.%") || (["ppm","ppb"].includes(a.unit)&&["ppm","ppb"].includes(b.unit))));
 }
 export function measuredCalculation(operation, operands) {
+  if(operation==="mg_number"){
+    const [mg,fe]=operands;
+    if(operands.length!==2||mg?.field!=="MgO"||!["FeO","FeOt"].includes(fe?.field)||mg.unit!=="wt.%"||fe.unit!=="wt.%"||!compatibleMeasured(mg,fe))
+      throw Error("Mg# требует MgO и явно выбранный FeO или FeOt одного аналитического набора в wt.%.");
+    return {field:fe.field==="FeO"?"Mg# (FeO)":"Mg# (FeOt, total Fe)",unit:"mol.%",measurement_set:mg.measurement_set,method:mg.method,
+      calculation:{operation,version:1,operands:operands.map(exactAxis)}};
+  }
   if (!["sum","ratio"].includes(operation) || operands.length<2 || operands.length>(operation==="ratio"?2:16) ||
       new Set(operands.map(a=>a.field)).size!==operands.length || operands.slice(1).some(a=>!compatibleMeasured(operands[0],a)))
     throw Error("Выберите разные совместимые измеренные компоненты одного набора и метода.");

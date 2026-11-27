@@ -13,7 +13,7 @@
       "required": ["field", "unit", "method", "measurement_set", "calculation"],
       "properties": {
         "field": {"type": "string", "minLength": 1},
-        "unit": {"enum": ["wt.%", "ppm", "ppb", "ratio"]},
+        "unit": {"enum": ["wt.%", "ppm", "ppb", "ratio", "mol.%"]},
         "method": {"type": ["string", "null"]},
         "measurement_set": {"type": ["string", "null"]},
         "calculation": {
@@ -21,11 +21,11 @@
           "additionalProperties": false,
           "required": ["operation", "version", "operands"],
           "properties": {
-            "operation": {"enum": ["sum", "ratio"]},
+            "operation": {"enum": ["sum", "ratio", "mg_number"]},
             "version": {"const": 1},
             "operands": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 2, "maxItems": 16, "uniqueItems": true}
           },
-          "if": {"properties": {"operation": {"const": "ratio"}}},
+          "if": {"properties": {"operation": {"enum": ["ratio", "mg_number"]}}},
           "then": {"properties": {"operands": {"maxItems": 2}}}
         }
       }

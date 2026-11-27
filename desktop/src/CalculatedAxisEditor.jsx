@@ -26,14 +26,14 @@ export function CalculatedAxisEditor({axes,loadCatalog,panel,apply}) {
     <summary>Расчётная ось</summary>
     {opened&&<>
       <label>Заменить ось<select value={target} onChange={e=>setTarget(Number(e.target.value))}>{panel.axes.map((a,i)=><option key={i} value={i}>{i+1}: {label(a)}</option>)}</select></label>
-      <label>Расчёт<select value={operation} onChange={e=>{setOperation(e.target.value);setKeys(["",""]);setError("");}}><option value="ratio">Отношение A / B</option><option value="sum">Сумма компонентов</option><option value="apfu">APFU из сохранённых формул</option></select></label>
+      <label>Расчёт<select value={operation} onChange={e=>{setOperation(e.target.value);setKeys(["",""]);setError("");}}><option value="ratio">Отношение A / B</option><option value="sum">Сумма компонентов</option>{panel.kind==="binary"&&<option value="mg_number">Mg# (молярное отношение)</option>}<option value="apfu">APFU из сохранённых формул</option></select></label>
       {operation!=="apfu"?<>
         {keys.map((key,index)=><label key={index}>Компонент {index+1}<select value={key} onChange={e=>setKeys(current=>index===0?current.map((_,i)=>i===0?e.target.value:""):current.map((value,i)=>i===index?e.target.value:value))}>
           <option value="">Выбрать измеренное поле</option>
-          {eligible.filter(a=>index===0||compatibleMeasured(first,a)&&!keys.some((other,i)=>i!==index&&other===measuredKey(a))).map(a=><option key={measuredKey(a)} value={measuredKey(a)}>{label(a)}</option>)}
+          {eligible.filter(a=>(operation!=="mg_number" || a.unit==="wt.%"&&(index===0?a.field==="MgO":["FeO","FeOt"].includes(a.field)))&&(index===0||compatibleMeasured(first,a)&&!keys.some((other,i)=>i!==index&&other===measuredKey(a)))).map(a=><option key={measuredKey(a)} value={measuredKey(a)}>{label(a)}</option>)}
         </select></label>)}
         {operation==="sum"&&<div className="plot-style-actions"><button type="button" disabled={keys.length>=16} onClick={()=>setKeys(current=>[...current,""])}>+ Компонент</button><button type="button" disabled={keys.length<=2} onClick={()=>setKeys(current=>current.slice(0,-1))}>− Компонент</button></div>}
-        <small>Сумма или отношение массовых концентраций. Не Mg#; молярные отношения требуют отдельного метода.</small>
+        {operation==="mg_number"?<small>100 × n(Mg)/(n(Mg)+n(Fe)). FeO — явно сообщённое FeO; FeOt — всё железо, выраженное как FeO, без оценки Fe³⁺. Варианты подписываются отдельно.</small>:<small>Сумма или отношение массовых концентраций, не молярное Mg#.</small>}
       </>:<>
         {!groups&&!error&&<small>Загружаю сохранённые расчёты…</small>}
         {groups?.length===0&&<small>Нет сохранённых расчётов формул в этом входном наборе.</small>}

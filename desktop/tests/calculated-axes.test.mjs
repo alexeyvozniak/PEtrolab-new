@@ -14,3 +14,9 @@ test("APFU requires explicit exact runs, never silently picks ambiguous",()=>{
  assert.deepEqual(uniqueFormulaRuns(series,"apfu.Mg"),["r3"]);assert.throws(()=>formulaCalculation(series,"apfu.Mg",["r1","r2"]));
  assert.deepEqual(formulaCalculation(series,"apfu.Mg",["r2","r3"]).formula.run_ids,["r2","r3"]);
 });
+
+test("Mg number requires oxide mass concentrations and explicit iron basis",()=>{
+ const f=measuredCalculation("mg_number",[a("MgO"),a("FeO")]);assert.equal(f.field,"Mg# (FeO)");assert.equal(f.unit,"mol.%");
+ assert.equal(measuredCalculation("mg_number",[a("MgO"),a("FeOt")]).field,"Mg# (FeOt, total Fe)");
+ assert.throws(()=>measuredCalculation("mg_number",[a("MgO"),a("Fe2O3")]));assert.throws(()=>measuredCalculation("mg_number",[a("MgO","ppm"),a("FeO","ppm")]));
+});
