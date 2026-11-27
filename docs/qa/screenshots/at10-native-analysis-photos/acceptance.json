@@ -1,0 +1,44 @@
+{
+  "linked": "bc449b92-f27c-46cf-a2b2-6061aa35eef2",
+  "unlinked": "0f645ce9-4c11-4f27-98da-e812eee299eb",
+  "selected": [
+    "P6"
+  ],
+  "locations": [
+    {
+      "media_asset_id": "bf0aeb05-f111-41e5-83fc-a144425144ff",
+      "display_name": "first-view.png",
+      "sample_id": "ae6a7d64-7039-4290-aa6a-28896f58fb07",
+      "sample_name": "AT-37 Sample",
+      "analytical_point_id": "38839d08-f619-45e0-aae0-b1dd49e8830b",
+      "point_name": "AT-37 Point",
+      "link_type": "same_point",
+      "spatial_annotation_id": "e4dad42f-2208-4c97-af43-0e0f1e0c67d7",
+      "geometry_kind": "point",
+      "x_px": 12,
+      "y_px": 14,
+      "width_px": null,
+      "height_px": null,
+      "cross_sample_exception": 0,
+      "exception_reason": null
+    },
+    {
+      "media_asset_id": "f824d76a-25f4-4826-b4cd-d6e60fe19b54",
+      "display_name": "second-view.png",
+      "sample_id": "ae6a7d64-7039-4290-aa6a-28896f58fb07",
+      "sample_name": "AT-37 Sample",
+      "analytical_point_id": "38839d08-f619-45e0-aae0-b1dd49e8830b",
+      "point_name": "AT-37 Point",
+      "link_type": "same_point",
+      "spatial_annotation_id": "0d45f128-9781-4db4-acf7-a39266b1c45e",
+      "geometry_kind": "point",
+      "x_px": 13,
+      "y_px": 15,
+      "width_px": null,
+      "height_px": null,
+      "cross_sample_exception": 0,
+      "exception_reason": null
+    }
+  ],
+  "photoSha256": "15c99b009c3e72cc25fedef0260431f790fecc54fffe69c0d09ca4f05c3bdf59"
+}
