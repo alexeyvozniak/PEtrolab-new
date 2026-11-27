@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./importMapping.css";
+import {ImportBatchContext} from "./ImportBatchContext";
+import {LabTemplatePanel} from "./LabTemplatePanel";
 
 const TARGETS = ["Ignore", "Analysis", "Sample", "Sample name", "Point", "Mineral", "Method", "Generation", "Rock", "Source", "Comment", "Position", "Photo number", "Size (µm)", "Measurement"];
 const UNITS = ["wt.%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon", "permil"];
@@ -74,8 +76,11 @@ function buildDraft(recipe, warnings) {
     for (const mapping of section.mappings) {
       const key = keyForMapping(section.block_id, mapping);
       const current = appliedState(mapping);
-      const suggestedField = suggestions.get(key);
-      draft[key] = current.target === "Ignore" && suggestedField
+      // Recognition is also stored on the mapping; warning lists may be
+      // filtered independently. Never revive a deliberately ignored field.
+      const suggestedField = mapping.suggested_target === "measurement"
+        ? mapping.suggested_canonical_field || suggestions.get(key) : suggestions.get(key);
+      draft[key] = current.target === "Ignore" && current.reviewDecision !== "explicit_ignore" && suggestedField
         ? { target: "Measurement", field: suggestedField, unit: "", method: "", measurementSet: "", reviewDecision: "unresolved" }
         : current;
     }
@@ -156,11 +161,14 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
   const [draft, setDraft] = useState(() => buildDraft(recipe, warnings));
   const [blockUnits, setBlockUnits] = useState({});
   const [showAll, setShowAll] = useState(false);
+  const [bookUnit,setBookUnit]=useState("");
+  const [bookBlocks,setBookBlocks]=useState([]);
 
   useEffect(() => {
     setDraft(buildDraft(recipe, warnings));
     setBlockUnits({});
     setShowAll(false);
+    setBookUnit("");setBookBlocks([]);
   }, [recipe, warnings]);
 
   // Service suggestions are initial display state, not unapplied user edits.
@@ -186,7 +194,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
       const next = { ...current };
       for (const mapping of section.mappings) {
         const key = keyForMapping(section.block_id, mapping);
-        if (next[key]?.target === "Measurement" && !next[key]?.unit) next[key] = { ...next[key], unit, reviewDecision: "assigned" };
+        if (next[key]?.target === "Measurement" && next[key].field.trim() && !next[key]?.unit) next[key] = { ...next[key], unit, reviewDecision: "assigned" };
       }
       return next;
     });
@@ -195,6 +203,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
   const resetDraft = () => {
     setDraft(buildDraft(recipe, warnings));
     setBlockUnits({});
+    setBookUnit("");setBookBlocks([]);
   };
 
   const explicitlyIgnoreUnresolved = (section) => {
@@ -233,6 +242,86 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
   };
 
   const enabledSections = recipe.sections.filter((section) => section.enabled !== false && (!activeBlockId || section.block_id === activeBlockId));
+  // Entire active workbook, not merely the visible sheet. Only explicit
+  // recognition suggestions with no unit are eligible for this action.
+  const bookCandidates=useMemo(()=>recipe.sections.filter(section=>section.enabled!==false).map(section=>{
+    const fields=section.mappings.flatMap(mapping=>{
+      const key=keyForMapping(section.block_id,mapping), value=draft[key], original=applied[key];
+      return original?.target==="Measurement" && !original.unit && value?.target==="Measurement" &&
+        value.field===original.field && !value.unit ? [{key,field:value.field}] : [];
+    });
+    const signature=JSON.stringify([section.orientation,section.mappings.map(mapping=>{
+      const original=applied[keyForMapping(section.block_id,mapping)];
+      return [mappingAxis(mapping),mappingIndex(mapping),mapping.source_header,original?.target,original?.field,original?.unit,original?.method,original?.measurementSet];
+    })]);
+    return {id:section.block_id,name:section.sheet_name,header:section.header_row,fields,signature};
+  }).filter(item=>item.fields.length),[recipe,draft,applied]);
+  const contextBlocks=useMemo(()=>recipe.sections.filter(section=>section.enabled!==false).map(section=>{
+    const fields=section.mappings.flatMap(mapping=>{
+      const key=keyForMapping(section.block_id,mapping),value=draft[key];
+      return value?.target==="Measurement"&&value.field.trim()&&UNITS.includes(value.unit)?[{key,...value}]:[];
+    });
+    const signature=JSON.stringify([section.orientation,section.mappings.map(mapping=>{
+      const value=draft[keyForMapping(section.block_id,mapping)];
+      return [mappingAxis(mapping),mappingIndex(mapping),mapping.source_header,value?.target,value?.field,value?.unit];
+    })]);
+    return {id:section.block_id,name:section.sheet_name,header:section.header_row,fields,signature};
+  }).filter(block=>block.fields.length),[recipe,draft]);
+  const applyContext=(keys,patch)=>{
+    const selected=new Set(keys);
+    setDraft(current=>{
+      const next={...current};
+      for(const block of contextBlocks)for(const field of block.fields){
+        const value=current[field.key];
+        if(!selected.has(field.key)||value?.target!=="Measurement"||!UNITS.includes(value.unit)||!value.field.trim())continue;
+        next[field.key]={...value,
+          method:value.method.trim()?value.method:patch.method,
+          measurementSet:value.measurementSet.trim()?value.measurementSet:patch.measurementSet,
+          reviewDecision:"assigned"};
+      }
+      return next;
+    });
+  };
+  const labBlocks=useMemo(()=>recipe.sections.filter(section=>section.enabled!==false).map(section=>({
+    id:section.block_id,name:section.sheet_name,header:section.header_row,orientation:section.orientation||"rows_are_analyses",
+    rows:section.mappings.map(mapping=>{
+      const key=keyForMapping(section.block_id,mapping),value=draft[key]||appliedState(mapping);
+      return {key,axis:mappingAxis(mapping),index:mappingIndex(mapping),header:mapping.source_header??null,...value};
+    })
+  })),[recipe,draft]);
+  const applyLabTemplate=changes=>{
+    setDraft(current=>{
+      const next={...current};
+      for(const {key,patch} of changes){
+        const value=current[key];
+        if(value?.target!=="Measurement")continue;
+        const filled={...value};
+        for(const property of ["unit","method","measurementSet"])if(patch[property]&&!filled[property])filled[property]=patch[property];
+        next[key]={...filled,reviewDecision:"assigned"};
+      }
+      return next;
+    });
+  };
+  const chosenBlocks=bookCandidates.filter(item=>bookBlocks.includes(item.id));
+  const bookCount=chosenBlocks.reduce((sum,item)=>sum+item.fields.length,0);
+  const applyBookUnit=()=>{
+    if(!UNITS.includes(bookUnit)||!bookCount)return;
+    const keys=new Set(chosenBlocks.flatMap(item=>item.fields.map(field=>field.key)));
+    setDraft(current=>{
+      const next={...current};
+      for(const key of keys){
+        const value=current[key],original=applied[key];
+        if(value?.target==="Measurement"&&original?.target==="Measurement"&&!original.unit&&value.field===original.field&&!value.unit)
+          next[key]={...value,unit:bookUnit,reviewDecision:"assigned"};
+      }
+      return next;
+    });
+    setBookBlocks([]);
+  };
+  const selectSimilar=()=>{
+    const reference=bookCandidates.find(item=>item.id===activeBlockId);
+    if(reference)setBookBlocks(bookCandidates.filter(item=>item.signature===reference.signature).map(item=>item.id));
+  };
 
   return (
     <div className="mapping-editor">
@@ -247,6 +336,28 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
         </div>
       </div>
 
+      {bookCandidates.length>1&&<details className="mapping-book-bulk">
+        <summary>Распознавание по всей книге · {new Set(bookCandidates.map(item=>item.name)).size} листов · {bookCandidates.reduce((sum,item)=>sum+item.fields.length,0)} полей без единиц</summary>
+        <small>Выберите таблицы с одинаковой единицей. Явно заданные единицы, неизвестные поля и исключённые таблицы не меняются.</small>
+        <div className="mapping-book-buttons">
+          <button className="outline-button" type="button" disabled={busy||!bookCandidates.some(item=>item.id===activeBlockId)} onClick={selectSimilar}>Выбрать блоки такой же структуры</button>
+          <button className="outline-button" type="button" disabled={busy} onClick={()=>setBookBlocks(bookCandidates.map(item=>item.id))}>Выбрать все блоки с неуказанными единицами</button>
+          <button className="outline-button" type="button" disabled={busy||!chosenBlocks.length} onClick={()=>setBookBlocks([])}>Снять выбор блоков</button>
+        </div>
+        <div className="mapping-book-list" aria-label="Блоки книги для назначения единицы">
+          {bookCandidates.map(item=><label key={item.id}>
+            <input type="checkbox" checked={bookBlocks.includes(item.id)} disabled={busy} onChange={event=>setBookBlocks(current=>event.target.checked?[...new Set([...current,item.id])]:current.filter(id=>id!==item.id))}/>
+            <span><b>{item.name} · заголовок {item.header ?? "—"} · {item.fields.length} полей</b><small>{item.fields.map(field=>field.field).join(", ")}</small></span>
+          </label>)}
+        </div>
+        <label className="mapping-book-unit">Единица выбранных блоков<select aria-label="Общая единица выбранных блоков" value={bookUnit} disabled={busy} onChange={event=>setBookUnit(event.target.value)}>
+          <option value="">Выбрать…</option>{UNITS.map(unit=><option key={unit}>{unit}</option>)}
+        </select></label>
+        <button className="primary-button" type="button" disabled={busy||!bookUnit||!bookCount} onClick={applyBookUnit}>Назначить единицу · {bookCount} полей в {chosenBlocks.length} блоках</button>
+        <small>Затем нажмите «Применить сопоставление» один раз для всей книги. Проверяйте, что одинаковая структура действительно означает одинаковые единицы.</small>
+      </details>}
+      <LabTemplatePanel key={"lab:"+ (recipe.source_file_sha256||"book")} blocks={labBlocks} activeBlockId={activeBlockId} busy={busy} onApply={applyLabTemplate}/>
+      <ImportBatchContext key={recipe.source_file_sha256||"book"} blocks={contextBlocks} activeBlockId={activeBlockId} busy={busy} onApply={applyContext}/>
       {enabledSections.map((section, sectionIndex) => (
         <section className="mapping-sheet" key={section.block_id}>
           {(() => {
@@ -255,6 +366,10 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
               return (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore")
                 || (value.target === "Measurement" && (!value.field.trim() || !value.unit));
             }).length;
+            const missingUnits=section.mappings.filter(mapping=>{
+              const value=draft[keyForMapping(section.block_id,mapping)];
+              return value?.target==="Measurement" && Boolean(value.field.trim()) && !value.unit;
+            });
             const shownMappings = showAll ? section.mappings : section.mappings.filter((mapping) => {
               const value = draft[keyForMapping(section.block_id, mapping)] || appliedState(mapping);
               return (value.target === "Ignore" && value.reviewDecision !== "explicit_ignore")
@@ -272,14 +387,15 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
                 <button type="button" className={showAll ? "active" : ""} onClick={() => setShowAll(true)}>Все {section.mappings.length}</button>
               </div>
               <div className="sheet-unit-control">
-                <label>Одна единица для нерешённых Measurement</label>
-                <select value={blockUnits[section.block_id] || ""} onChange={(event) => setBlockUnits((current) => ({ ...current, [section.block_id]: event.target.value }))} disabled={busy}>
+                <label>Общая единица для распознанных компонентов · {missingUnits.length}</label>
+                <select aria-label={`Общая единица распознанных компонентов: ${section.sheet_name}`} value={blockUnits[section.block_id] || ""} onChange={(event) => setBlockUnits((current) => ({ ...current, [section.block_id]: event.target.value }))} disabled={busy}>
                   <option value="">Выбрать…</option>
                   {UNITS.map((item) => <option key={item} value={item}>{item}</option>)}
                 </select>
-                <button className="compact-button" onClick={() => applyUnitToBlock(section)} disabled={busy || !blockUnits[section.block_id]}>
+                <button className="compact-button" onClick={() => applyUnitToBlock(section)} disabled={busy || !blockUnits[section.block_id] || !missingUnits.length}>
                   Назначить полям без единицы
                 </button>
+                <small>Применяйте только если у перечисленных компонентов одна единица. Уже заданные единицы не меняются.</small>
               </div>
               {section.mappings.some((mapping) => { const value = draft[keyForMapping(section.block_id, mapping)]; return value?.target === 'Ignore' && value.reviewDecision !== 'explicit_ignore'; }) && <button className="mapping-ignore-all" onClick={() => explicitlyIgnoreUnresolved(section)} disabled={busy}>Не импортировать нераспознанные поля</button>}
             </div>

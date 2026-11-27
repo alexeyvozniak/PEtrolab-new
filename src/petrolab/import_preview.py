@@ -209,7 +209,9 @@ def _header_candidates(rows: list[list[str | None]]) -> tuple[int, ...]:
                 matches += 1
                 if matches >= 2:
                     break
-        if matches >= 2 or _looks_like_generic_header(rows, index):
+        # A pure explicit unit row belongs to the preceding header, not to
+        # the generic fallback for another logical table.
+        if matches >= 2 or (_looks_like_generic_header(rows, index) and not _explicit_unit_row(row)):
             result.append(index + 1)
     # Narrow fallback for an otherwise unrecognized two-column labelled table.
     # Do not change block boundaries in already recognized complex workbooks.
@@ -248,6 +250,137 @@ def _unit_from_text(text: str) -> str | None:
     return None
 
 
+def explicit_unit_cell(value) -> str | None:
+    """Recognize a complete unit label, never a substring of a data value."""
+    from .analyte_dictionary import split_unit
+    if value is None or not str(value).strip():
+        return None
+    token = str(value).strip()
+    field, unit = split_unit(token)
+    if unit and not field.strip(" []()"):
+        return unit
+    if token.casefold() in {"вес", "вес.", "weight", "mass", "атом", "атом.", "atomic"}:
+        return _unit_from_text(token)
+    return None
+
+
+def merged_unit_ranges(warnings):
+    return tuple(ref for warning in warnings if warning.get("code") == "MERGED_HEADERS"
+                 for ref in warning.get("ranges", []) if isinstance(ref, str))
+
+
+def _unit_merge_bounds(ref):
+    match = re.fullmatch(r"([A-Z]{1,3})([1-9][0-9]{0,6}):([A-Z]{1,3})([1-9][0-9]{0,6})", ref)
+    if not match:
+        return None
+    left, top, right, bottom = match.groups()
+    return int(top), _column_index(left + top), int(bottom), _column_index(right + bottom)
+
+
+def _merged_units_on_row(rows, number, merges):
+    """Expand explicit unit labels for recognition only, never source cells."""
+    if not 1 <= number <= len(rows):
+        return {}
+    row = rows[number - 1]
+    units = {}
+    for ref in merges:
+        bounds = _unit_merge_bounds(ref)
+        if bounds is None:
+            continue
+        top, left, bottom, right = bounds
+        if top != number or bottom != number or not 0 <= left < right < 16384 or left >= len(row):
+            continue
+        unit = explicit_unit_cell(row[left])
+        if not unit or any(value not in (None, "") for value in row[left + 1:right + 1]):
+            continue
+        if any(column in units for column in range(left, right + 1)):
+            return {}
+        units.update((column, unit) for column in range(left, right + 1))
+    return units
+
+
+def explicit_unit_column(rows, header_row, header_column, field_start_row, field_end_row, merges=()):
+    """Recognize an adjacent Units column in a column-oriented table.
+
+    Coordinates here are one-based. Unlabelled columns need at least two
+    explicit unit cells and no non-unit contents; labelled columns may have
+    missing or unknown unit cells, which remain unresolved.
+    """
+    index = header_column
+    header = rows[header_row - 1]
+    label = str(header[index] or "").strip().casefold().rstrip(":") if index < len(header) else ""
+    labelled = label in {"unit", "units", "единица", "единицы", "ед. изм.", "ед.изм."}
+    if label and not labelled:
+        return None
+    units = {}
+    unknown = False
+    for number in range(field_start_row, min(field_end_row, len(rows)) + 1):
+        row = rows[number - 1]
+        value = row[index] if index < len(row) else None
+        if value is None or not str(value).strip():
+            continue
+        unit = explicit_unit_cell(value)
+        if unit:
+            units[number] = unit
+        else:
+            unknown = True
+    for ref in merges:
+        bounds = _unit_merge_bounds(ref)
+        if bounds is None:
+            continue
+        top, left, bottom, right = bounds
+        if left != index or right != index or not field_start_row <= top < bottom <= min(field_end_row, len(rows)):
+            continue
+        unit = units.get(top)
+        if not unit or any(index < len(rows[number - 1]) and rows[number - 1][index] not in (None, "")
+                           for number in range(top + 1, bottom + 1)):
+            continue
+        units.update((number, unit) for number in range(top + 1, bottom + 1))
+    if labelled or (len(units) >= 2 and not unknown):
+        return units
+    return None
+
+
+def _explicit_unit_row(row, merged_units=None) -> dict[int, str]:
+    """Strict column-aligned unit row; no inference from numeric values."""
+    units = {}
+    for column, value in enumerate(row):
+        if value is None or not str(value).strip():
+            continue
+        token = str(value).strip()
+        if column == 0 and token.casefold().rstrip(":") in {"unit", "units", "единица", "единицы", "ед. изм."}:
+            continue
+        unit = explicit_unit_cell(token)
+        if not unit:
+            return {}
+        units[column] = unit
+    units.update(merged_units or {})
+    return units if len(units) >= 2 else {}
+
+
+def _unit_row_before_data(rows, header_row: int, first_row: int, stop: int, merges=()):
+    """Return the first following data row and explicit unit cells, if proven.
+
+    Require an immediately following unit-only row (blank cells allowed),
+    aligned to actual header columns, plus numeric evidence below it.
+    """
+    if first_row != header_row + 1:
+        return None
+    units = _explicit_unit_row(rows[first_row - 1], _merged_units_on_row(rows, first_row, merges))
+    if not units:
+        return None
+    header = rows[header_row - 1]
+    if any(column >= len(header) or not header[column] for column in units):
+        return None
+    data_row = _next_nonempty_row(rows, first_row + 1, stop)
+    if data_row is None:
+        return None
+    values = rows[data_row - 1]
+    if not any(column < len(values) and _number(values[column]) is not None for column in units):
+        return None
+    return data_row, units
+
+
 def _unit_context(rows: tuple[tuple[str | None, ...], ...], header_row: int) -> dict[str, Any] | None:
     for number in range(header_row, max(0, header_row - 6), -1):
         text = " | ".join(str(value).strip() for value in rows[number - 1] if value not in (None, ""))
@@ -275,12 +408,16 @@ def _last_nonempty_row(rows: tuple[tuple[str | None, ...], ...], start: int, end
 
 def candidate_blocks(sheet: SheetInspection) -> list[dict[str, Any]]:
     blocks: list[dict[str, Any]] = []
+    merges = merged_unit_ranges(sheet.warnings)
     headers = list(sheet.header_rows)
     for position, header_row in enumerate(headers):
         next_header = headers[position + 1] if position + 1 < len(headers) else len(sheet.rows) + 1
         data_start = _next_nonempty_row(sheet.rows, header_row + 1, next_header)
         if data_start is None:
             continue
+        unit_row = _unit_row_before_data(sheet.rows, header_row, data_start, next_header, merges)
+        if unit_row:
+            data_start = unit_row[0]
         data_end = _last_nonempty_row(sheet.rows, data_start, next_header - 1)
         blocks.append({
             "block_id": f"{sheet.name}:{header_row}",
@@ -288,7 +425,8 @@ def candidate_blocks(sheet: SheetInspection) -> list[dict[str, Any]]:
             "data_start_row": data_start,
             "data_end_row": data_end,
             "orientation": "rows_are_analyses",
-            "unit_context": _unit_context(sheet.rows, header_row),
+            "unit_context": _unit_context(sheet.rows, header_row)
+                if not unit_row and not _merged_units_on_row(sheet.rows, header_row - 1, merges) else None,
         })
     return blocks
 
