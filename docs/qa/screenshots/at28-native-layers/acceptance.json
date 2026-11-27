@@ -1,0 +1,108 @@
+{
+  "stats": {
+    "order": [
+      "AT-28 B · 3",
+      "AT-28 A · 2"
+    ],
+    "markersWithoutLayer": [
+      "5c0ddad2-3c6e-4548-918d-42b880f9f017",
+      "9b60492e-141b-412a-8493-bea7dc6ab196",
+      "bd639c37-2c8f-4f98-b50a-9585ea12e3b6",
+      "c7f938bd-a4d1-407b-bd03-d89c7a70e09e"
+    ],
+    "selection": [
+      "P1",
+      "P4",
+      "P7"
+    ]
+  },
+  "layout": {
+    "id": "0134458a-7365-4eb0-8329-7c7d9ace55c5",
+    "project_id": "cf740bbb-40fb-4d61-895c-ba332be6a1b8",
+    "name": "AT-28 слои и поле",
+    "schema_version": 1,
+    "input": {
+      "kind": "analysis_snapshot",
+      "analysis_ids": [
+        "27e71efc-d618-40b3-abb4-a60346b574a3",
+        "5c0ddad2-3c6e-4548-918d-42b880f9f017",
+        "9b60492e-141b-412a-8493-bea7dc6ab196",
+        "236ba9b8-21cd-4098-a482-e37242b99efa",
+        "bd639c37-2c8f-4f98-b50a-9585ea12e3b6",
+        "c7f938bd-a4d1-407b-bd03-d89c7a70e09e",
+        "bf2cfd2e-735e-4936-9326-7a8890e641d7"
+      ]
+    },
+    "panels": [
+      {
+        "axes": [
+          {
+            "field": "SiO2",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "72a3dbc0-1eb1-4695-baf2-9a2199388a81",
+        "kind": "binary",
+        "title": "SiO2 / Al2O3",
+        "normalization": null
+      }
+    ],
+    "legend": {
+      "group_by": "source",
+      "entries": [
+        {
+          "value": "670731e6-69a6-493d-9ba7-7f71f9210485",
+          "label": "at14-analyses.csv",
+          "color": "#527eac",
+          "symbol": "circle"
+        }
+      ]
+    },
+    "filters": [],
+    "layers": [
+      {
+        "analysis_ids": [
+          "27e71efc-d618-40b3-abb4-a60346b574a3",
+          "236ba9b8-21cd-4098-a482-e37242b99efa",
+          "bf2cfd2e-735e-4936-9326-7a8890e641d7"
+        ],
+        "field": {
+          "method": "normal_probability_ellipse",
+          "probability": 0.95,
+          "visible": true
+        },
+        "id": "b33dba97-a792-44b9-b7d0-4872d8af8d05",
+        "name": "AT-28 B",
+        "opacity": 1,
+        "show_points": false
+      },
+      {
+        "analysis_ids": [
+          "5c0ddad2-3c6e-4548-918d-42b880f9f017",
+          "c7f938bd-a4d1-407b-bd03-d89c7a70e09e"
+        ],
+        "field": null,
+        "id": "afb1d02c-d2f1-4dea-9bef-747e159f01ad",
+        "name": "AT-28 A",
+        "opacity": 0.4,
+        "show_points": true
+      }
+    ],
+    "hidden_analysis_ids": [],
+    "hidden_source_ids": [],
+    "created_at": "2026-11-27T13:23:01Z",
+    "updated_at": "2026-11-27T13:23:01Z"
+  }
+}
