@@ -1,0 +1,385 @@
+{
+  "mixed": {
+    "id": "ac2c39a1-0463-48a7-8b0c-9238bd2850ad",
+    "project_id": "a063ced7-6b94-43cb-87b5-d64748099ddf",
+    "method_id": "statistics.cluster.kmeans_lloyd",
+    "method_version": "1.0.0",
+    "method_definition_fingerprint": "afc97929b5e1c72b1726d5e6a143a388df40e75a33ff67f3dfa1fdacea31fee6",
+    "input": {
+      "kind": "work_group_snapshot",
+      "work_group_id": "ac99eae3-41b4-44a0-a63c-54d92cd246f1",
+      "analysis_ids": [
+        "105bc9f4-7020-4994-9f01-44ec0c3670f4",
+        "1e6db3b0-229b-4358-8481-689894f59422",
+        "29bc9e1f-471a-417d-a33f-dfa711b9b021",
+        "1d806091-9b82-4e17-82e4-97335dafc973",
+        "34cd6d90-9db8-4e70-8069-4075a6095a3e",
+        "d2fe819e-ff67-4a87-a042-b61e58b12ee9"
+      ]
+    },
+    "input_measurement_ids": [
+      "69b8cc01-d1df-4b3c-b661-097267c63d90",
+      "9453c4cf-af45-4ca5-a240-f37ad101d109",
+      "a71e7760-8cf1-4689-b215-3b0db164b0e8",
+      "b8f348cc-3489-4f27-a9e2-9161eb647d67",
+      "0133f133-44b8-4d8d-88da-aa721c6cd546",
+      "ab50582f-f7dd-4aeb-a165-06ca4b27277d",
+      "b3e68da1-459d-4506-82b0-3a94f51843ee",
+      "f9f80011-746a-4a45-9858-0c989859dffa",
+      "119b7c0c-73d1-4ced-9008-9d8520d8570f",
+      "5ddf0f06-9730-4bc0-9b54-b0aa37bca7ac",
+      "92b50ae5-a9b8-4a43-8130-5c22f6dee659",
+      "ce79bff8-e799-42c3-8ca0-d36062494231",
+      "a4034161-fc7a-420b-8d3b-5eddfd3d7736",
+      "d36b0f79-5f24-4cd1-80c3-e5dcf8365fc1",
+      "f032ffe3-b132-4eff-8be8-1af8c5c89f6e",
+      "f4e0a273-239e-4df8-bc4e-002ef46e05d2",
+      "389973f6-f156-4e23-83b8-43fa43d453ce",
+      "5ff72aa7-8872-40d2-943d-2ddfab2277f8",
+      "6368fa84-d3b2-473c-b3ff-3366e695a65a",
+      "fc136d4f-a849-4d98-8147-1cd1b2ff9aef",
+      "2857a283-b294-413b-8551-03687846839e",
+      "29216c82-0461-4115-8593-9e55704c84d7",
+      "8d994ed0-c18f-4bda-a950-ca111806390f",
+      "e5d73c02-8677-494e-be58-f304d5efdbcd"
+    ],
+    "input_fingerprint": "2c3cddc7090a42eb17288b89a4eb4d2736b06ccb1f3d6701e3f828c4aa269775",
+    "parameters": {
+      "clusters": 2,
+      "scaling": "robust",
+      "seed": 42,
+      "transform": "euclidean",
+      "features": [
+        {
+          "field": "Mg#",
+          "measurement_set": null,
+          "method": null,
+          "unit": "ratio"
+        },
+        {
+          "field": "SiO2",
+          "measurement_set": null,
+          "method": null,
+          "unit": "wt.%"
+        },
+        {
+          "field": "La",
+          "measurement_set": null,
+          "method": null,
+          "unit": "ppm"
+        },
+        {
+          "field": "Si",
+          "measurement_set": null,
+          "method": null,
+          "unit": "apfu"
+        }
+      ],
+      "feature_domains": [
+        "ratio_or_index",
+        "oxide_wt_percent",
+        "trace_concentration",
+        "apfu"
+      ],
+      "missing_and_censored": "exclude",
+      "nonpositive": "keep",
+      "scaling_parameters": {
+        "center": [
+          0.72,
+          2,
+          5,
+          0.7
+        ],
+        "scale": [
+          0.21999999999999997,
+          19,
+          2,
+          0.20000000000000007
+        ]
+      }
+    },
+    "status": "current",
+    "stale_reasons": [],
+    "seed": 42,
+    "excluded": [
+      {
+        "analysis_id": "34cd6d90-9db8-4e70-8069-4075a6095a3e",
+        "field": "SiO2",
+        "reason": "censored"
+      }
+    ],
+    "result_manifest": {
+      "members": [
+        {
+          "analysis_id": "105bc9f4-7020-4994-9f01-44ec0c3670f4",
+          "label": "A",
+          "cluster": 1,
+          "scores": [
+            -2.111303159047216,
+            -0.3073324399898798
+          ],
+          "u": 0,
+          "v": 0.2405552522826961
+        },
+        {
+          "analysis_id": "1e6db3b0-229b-4358-8481-689894f59422",
+          "label": "B",
+          "cluster": 1,
+          "scores": [
+            -0.9996498373097911,
+            -0.38262946854214985
+          ],
+          "u": 0.2454059545778217,
+          "v": 0.1810741314584022
+        },
+        {
+          "analysis_id": "29bc9e1f-471a-417d-a33f-dfa711b9b021",
+          "label": "C",
+          "cluster": 0,
+          "scores": [
+            -0.014088406832666609,
+            0.6540471046502019
+          ],
+          "u": 0.4629761618644875,
+          "v": 1
+        },
+        {
+          "analysis_id": "1d806091-9b82-4e17-82e4-97335dafc973",
+          "label": "D",
+          "cluster": 0,
+          "scores": [
+            0.7064898419232305,
+            0.6477656431304316
+          ],
+          "u": 0.6220493095141327,
+          "v": 0.9950379400250668
+        },
+        {
+          "analysis_id": "d2fe819e-ff67-4a87-a042-b61e58b12ee9",
+          "label": "F",
+          "cluster": 0,
+          "scores": [
+            2.418551561266444,
+            -0.6118508392486032
+          ],
+          "u": 1,
+          "v": 0
+        }
+      ],
+      "fit": {
+        "centers": [
+          [
+            -0.19696969696969682,
+            0.6140350877192983,
+            0.8333333333333334,
+            -0.6666666666666663
+          ],
+          [
+            0.9318181818181819,
+            -0.02631578947368421,
+            -1,
+            0.7500000000000001
+          ]
+        ],
+        "inertia": 4.847036850499453,
+        "iterations": 2
+      },
+      "pca": {
+        "mean": [
+          0.2545454545454547,
+          0.3578947368421052,
+          0.1,
+          -0.09999999999999973
+        ],
+        "loadings": [
+          [
+            -0.35093687252283545,
+            0.046560860610691646,
+            0.7502467939155252,
+            -0.5583951521839692
+          ],
+          [
+            -0.34311242693511007,
+            0.9216271469115717,
+            -0.16922317287728306,
+            0.06512128929681715
+          ]
+        ],
+        "explained_variance_ratio": [
+          0.8869898053026999,
+          0.10988915279217527
+        ]
+      }
+    },
+    "software_versions": {
+      "numpy": "2.4.2",
+      "python": "3.14.3"
+    },
+    "created_at": "2026-11-27T13:58:45Z"
+  },
+  "ilr": {
+    "id": "ee6c6773-7b07-4a3c-b7f0-b4ff0866ff54",
+    "project_id": "a063ced7-6b94-43cb-87b5-d64748099ddf",
+    "method_id": "statistics.cluster.kmeans_lloyd",
+    "method_version": "1.0.0",
+    "method_definition_fingerprint": "afc97929b5e1c72b1726d5e6a143a388df40e75a33ff67f3dfa1fdacea31fee6",
+    "input": {
+      "kind": "work_group_snapshot",
+      "work_group_id": "ac99eae3-41b4-44a0-a63c-54d92cd246f1",
+      "analysis_ids": [
+        "105bc9f4-7020-4994-9f01-44ec0c3670f4",
+        "1e6db3b0-229b-4358-8481-689894f59422",
+        "29bc9e1f-471a-417d-a33f-dfa711b9b021",
+        "1d806091-9b82-4e17-82e4-97335dafc973",
+        "34cd6d90-9db8-4e70-8069-4075a6095a3e",
+        "d2fe819e-ff67-4a87-a042-b61e58b12ee9"
+      ]
+    },
+    "input_measurement_ids": [
+      "467c53c8-21f0-4c7a-9a1f-1fb8d3bf6662",
+      "a71e7760-8cf1-4689-b215-3b0db164b0e8",
+      "92d09a40-69e5-4080-bbd9-f13860c50ee1",
+      "ab50582f-f7dd-4aeb-a165-06ca4b27277d",
+      "4007fafa-8073-468b-8c5b-550bec2472b7",
+      "5ddf0f06-9730-4bc0-9b54-b0aa37bca7ac",
+      "d36b0f79-5f24-4cd1-80c3-e5dcf8365fc1",
+      "d4f3d16d-5c20-43f2-84b6-3a6a0b5916c4",
+      "389973f6-f156-4e23-83b8-43fa43d453ce",
+      "b59a2994-1075-41f5-b421-20ebcd982f7e",
+      "232213ba-1c93-4eaa-bc00-76bc7dd5e870",
+      "8d994ed0-c18f-4bda-a950-ca111806390f"
+    ],
+    "input_fingerprint": "e50edf376c90a9b97df570538a4d59f4ff3207a6908729af1f440855ad2ef172",
+    "parameters": {
+      "clusters": 2,
+      "scaling": "none",
+      "seed": 42,
+      "transform": "ilr",
+      "features": [
+        {
+          "field": "SiO2",
+          "measurement_set": null,
+          "method": null,
+          "unit": "wt.%"
+        },
+        {
+          "field": "Al2O3",
+          "measurement_set": null,
+          "method": null,
+          "unit": "wt.%"
+        }
+      ],
+      "feature_domains": [
+        "oxide_wt_percent",
+        "oxide_wt_percent"
+      ],
+      "missing_and_censored": "exclude",
+      "nonpositive": "exclude",
+      "scaling_parameters": {
+        "center": [
+          0
+        ],
+        "scale": [
+          1
+        ]
+      }
+    },
+    "status": "current",
+    "stale_reasons": [],
+    "seed": 42,
+    "excluded": [
+      {
+        "analysis_id": "34cd6d90-9db8-4e70-8069-4075a6095a3e",
+        "field": "SiO2",
+        "reason": "censored"
+      },
+      {
+        "analysis_id": "d2fe819e-ff67-4a87-a042-b61e58b12ee9",
+        "field": "SiO2",
+        "reason": "zero"
+      }
+    ],
+    "result_manifest": {
+      "members": [
+        {
+          "analysis_id": "105bc9f4-7020-4994-9f01-44ec0c3670f4",
+          "label": "A",
+          "cluster": 0,
+          "scores": [
+            -0.055115371597000036,
+            0
+          ],
+          "u": 2.3877589758023145e-16,
+          "v": 0.5
+        },
+        {
+          "analysis_id": "1e6db3b0-229b-4358-8481-689894f59422",
+          "label": "B",
+          "cluster": 1,
+          "scores": [
+            0.14830657265945388,
+            0
+          ],
+          "u": 1,
+          "v": 0.5
+        },
+        {
+          "analysis_id": "29bc9e1f-471a-417d-a33f-dfa711b9b021",
+          "label": "C",
+          "cluster": 0,
+          "scores": [
+            -0.055115371597000085,
+            0
+          ],
+          "u": 0,
+          "v": 0.5
+        },
+        {
+          "analysis_id": "1d806091-9b82-4e17-82e4-97335dafc973",
+          "label": "D",
+          "cluster": 0,
+          "scores": [
+            -0.038075829465453855,
+            0
+          ],
+          "u": 0.08376452301559209,
+          "v": 0.5
+        }
+      ],
+      "fit": {
+        "centers": [
+          [
+            -0.48444922435709153
+          ],
+          [
+            -0.28670712747781973
+          ]
+        ],
+        "inertia": 0.00019356399736849221,
+        "iterations": 2
+      },
+      "pca": {
+        "mean": [
+          -0.4350137001372736
+        ],
+        "loadings": [
+          [
+            1
+          ],
+          [
+            0
+          ]
+        ],
+        "explained_variance_ratio": [
+          1,
+          0
+        ]
+      }
+    },
+    "software_versions": {
+      "numpy": "2.4.2",
+      "python": "3.14.3"
+    },
+    "created_at": "2026-11-27T13:58:46Z"
+  }
+}

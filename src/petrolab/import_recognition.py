@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from .analyte_dictionary import recognize_analyte
+from .analyte_dictionary import REPORTED_INDICES, REPORTED_INDEX_UNITS, recognize_analyte
 
 
 IDENTITY_FIELDS = {
@@ -198,14 +198,19 @@ def mapping_for_header(
     if form and form != "unresolved":
         measurement = form
     if measurement:
-        unit = recognition['unit'] or unit_from_header(header) or context_unit
+        reported_index = measurement in REPORTED_INDICES
+        unit = recognition['unit'] or unit_from_header(header)
+        if reported_index:
+            unit = unit if unit in REPORTED_INDEX_UNITS else None
+        else:
+            unit = unit or context_unit
         if unit:
             return ({
                 **base,
                 "target_role": "measurement",
                 "canonical_field": measurement,
                 "unit": unit,
-                "measurement_semantics": "measured",
+                "measurement_semantics": "source_derived" if reported_index else "measured",
                 "review_decision": "recognized",
                 "recognition": recognition,
             }, None)

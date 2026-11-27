@@ -2000,7 +2000,9 @@ test("mineral formula batch uses the highlighted range and leaves censored rows 
 }, 20000);
 
 test("statistics reviews mixed domains before clustering and preserves saved cluster membership on a new run", async () => {
-  await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],La [ppm],MgO [wt.%],FeO [wt.%]\nA,1,2,2,45,10\nB,2,3,4,45,10\nC,20,40,5,45,10\nD,21,41,6,45,10\nE,<1,2,5,45,10\nF,0,3,5,45,10\n");
+  await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],La [ppm],MgO [wt.%],FeO [wt.%],Mg# [ratio],Si [apfu]\n"
+    + "A,1,2,2,45,10,0.95,0.9\nB,2,3,4,45,10,0.90,0.8\nC,20,40,5,45,10,0.72,0.7\n"
+    + "D,21,41,6,45,10,0.68,0.6\nE,<1,2,5,45,10,0.66,0.5\nF,0,3,5,45,10,0.63,0.4\n");
   queue = [second];
   const user = userEvent.setup();
   render(<App />);
@@ -2010,6 +2012,7 @@ test("statistics reviews mixed domains before clustering and preserves saved clu
   const database = { project_database_path: join(folder, "project.sqlite") };
   const analyses = (await invokePetrolab("project.analyses.list", database)).result.analyses;
   const analysis = analyses.find(({ identity }) => identity.Analysis === "D");
+  expect(analysis.measurements["Mg#"].raw_token).toBe("0.68");
   const formulaInput = { ...database, method_id: "formula.olivine.4o", analysis_id: analysis.analysis_id,
     measurement_ids: ["SiO2", "MgO", "FeO"].map((field) => analysis.measurements[field].measurement_id) };
   const formulaReview = (await invokePetrolab("formula.review", formulaInput)).result;
@@ -2023,13 +2026,19 @@ test("statistics reviews mixed domains before clustering and preserves saved clu
   await user.click(await enabledButton("Проверить данные"));
   await user.click(await screen.findByRole("checkbox", { name: /SiO2 · wt\.%/ }));
   await user.click(screen.getByRole("checkbox", { name: /La · ppm/ }));
+  await user.click(screen.getByRole("checkbox", { name: /Mg# · ratio/ }));
+  await user.click(screen.getByRole("checkbox", { name: /Si · apfu/ }));
   await user.click(await enabledButton("Проверить состав"));
   await screen.findByText(/CLR и ILR недоступны/);
+  expect(screen.getByText(/Mg# · ratio · Отношение или индекс/)).toBeTruthy();
+  expect(screen.getByText(/Si · apfu · APFU/)).toBeTruthy();
   await user.click(await enabledButton("К выбору метода"));
   expect(screen.getByRole("option", { name: "CLR" }).disabled).toBe(true);
   expect(screen.getByRole("option", { name: "ILR" }).disabled).toBe(true);
   await user.click(await enabledButton("Назад к данным"));
   await user.click(screen.getByRole("checkbox", { name: /La · ppm/ }));
+  await user.click(screen.getByRole("checkbox", { name: /Mg# · ratio/ }));
+  await user.click(screen.getByRole("checkbox", { name: /Si · apfu/ }));
   await user.click(screen.getByRole("checkbox", { name: /Al2O3 · wt\.%/ }));
   await user.click(await enabledButton("Проверить состав"));
   await screen.findByText("Полных положительных строк · 4");
