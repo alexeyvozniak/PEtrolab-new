@@ -95,6 +95,16 @@ function mergeStatusCounts(...counts) {
   }, {});
 }
 
+function appendAnalysisPage(project, page) {
+  return {
+    ...project,
+    ...page,
+    returned: project.analyses.length + page.analyses.length,
+    mineral_status_counts: mergeStatusCounts(project.mineral_status_counts, page.mineral_status_counts),
+    analyses: [...project.analyses, ...page.analyses],
+  };
+}
+
 async function attachMineralIdentifications(path, project) {
   if (!project.analyses.length) return { ...project, mineral_status_counts: {} };
   const review = unwrap(await listProjectMineralIdentifications(path, project.returned || project.analyses.length, project.offset || 0));
@@ -221,13 +231,7 @@ export function App() {
     try {
       const next = unwrap(await listProjectAnalyses(databasePath, ANALYSES_PAGE_SIZE, project.analyses.length));
       const enriched = await attachMineralIdentifications(databasePath, next);
-      setProject((current) => ({
-        ...current,
-        ...enriched,
-        returned: current.analyses.length + enriched.analyses.length,
-        mineral_status_counts: mergeStatusCounts(current.mineral_status_counts, enriched.mineral_status_counts),
-        analyses: [...current.analyses, ...enriched.analyses],
-      }));
+      setProject((current) => appendAnalysisPage(current, enriched));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -543,11 +547,26 @@ export function App() {
     if(state.active_surface==="plotting"&&!state.plot_specification_ids.length)throw new Error("Не сохранена раскладка диаграмм.");
     if(state.active_surface==="analyses"&&!state.table_view_id)throw new Error("Не сохранено представление таблицы.");
     let table=null,layout=null,plot=null;
+    let tableProject = project;
     if(state.table_view_id){
       const catalog=unwrap(await listTableViews(databasePath));
       const view=catalog.views.find(item=>item.id===state.table_view_id&&item.data_universe_fingerprint===catalog.data_universe_fingerprint);
       if(!view)throw new Error("Представление таблицы изменилось.");
-      table=tableMemoryFromView(view,project);
+      if (project.has_more) {
+        const first = unwrap(await listProjectAnalyses(databasePath, ANALYSES_PAGE_SIZE, 0));
+        tableProject = await attachMineralIdentifications(databasePath, first);
+        while (tableProject.has_more) {
+          const page = unwrap(await listProjectAnalyses(databasePath, ANALYSES_PAGE_SIZE, tableProject.analyses.length));
+          if (!page.analyses.length || page.total !== first.total) throw new Error("Состав проекта изменился при загрузке анализов.");
+          tableProject = appendAnalysisPage(tableProject, await attachMineralIdentifications(databasePath, page));
+        }
+        const currentCatalog = unwrap(await listTableViews(databasePath));
+        if (currentCatalog.data_universe_fingerprint !== catalog.data_universe_fingerprint ||
+            new Set(tableProject.analyses.map(({ analysis_id }) => analysis_id)).size !== first.total) {
+          throw new Error("Состав проекта изменился при загрузке анализов.");
+        }
+      }
+      table=tableMemoryFromView(view,tableProject);
     }
     if(state.plot_specification_ids.length){
       layout=unwrap(await openPlotSpecification(databasePath,state.plot_specification_ids[0]));
@@ -555,6 +574,7 @@ export function App() {
     }
     // No view mutation before every referenced component was successfully read.
     if(table)Object.assign(viewMemory.table,table);
+    if (tableProject !== project) setProject(tableProject);
     if(plot){
       Object.assign(viewMemory.plot,plot);
       setPlotInputIds(layout.input.analysis_ids);

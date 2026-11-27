@@ -1080,7 +1080,9 @@ test("a saved work group restores the exact selection after reopening the applic
   expect(screen.getByText("Анализов · 1")).toBeTruthy();
 }, 40000);
 
-test("AT-33 restores a saved table and its exact hidden selection after restarting", async () => {
+test("AT-33 loads later pages and restores a saved table and its exact hidden selection", async () => {
+  const labels = ["B1", "B2", ...Array.from({ length: 499 }, (_, index) => `Other-${index}`), "B1-Late"];
+  await writeFile(second, `Analysis,SiO2 [wt.%]\n${labels.map((label) => `${label},41`).join("\n")}\n`);
   queue = [second];
   const user = userEvent.setup();
   const app = render(<App />);
@@ -1116,6 +1118,7 @@ test("AT-33 restores a saved table and its exact hidden selection after restarti
   await screen.findByText("Рабочее состояние «Отбор для пересчёта» восстановлено.");
   const restored = within(await screen.findByRole("table"));
   expect(restored.getByRole("textbox", { name: "Фильтр Analysis" }).value).toBe("B1");
+  expect(restored.getByRole("checkbox", { name: "Выбрать B1-Late" }).checked).toBe(false);
   expect(restored.queryByRole("checkbox", { name: "Выбрать B2" })).toBeNull();
   expect(screen.getByText("Скрыто фильтром: 1")).toBeTruthy();
   await user.click(await enabledButton("Экспорт отбора CSV"));
