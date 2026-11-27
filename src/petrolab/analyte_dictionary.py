@@ -5,7 +5,7 @@ from difflib import get_close_matches
 import re
 import unicodedata
 
-DICTIONARY_VERSION = '2026.09.1'
+DICTIONARY_VERSION = '2026.09.2'
 
 # Atomic number order. Names are aliases, not new scientific components.
 ELEMENT_DATA = '''H hydrogen водород
@@ -129,7 +129,9 @@ Og oganesson оганесон'''
 
 ELEMENTS = tuple(line.split()[0] for line in ELEMENT_DATA.splitlines())
 COMPONENTS = tuple('SiO2 TiO2 Al2O3 FeO FeOt Fe2O3 Fe2O3t MnO MgO CaO Na2O K2O P2O5 Cr2O3 NiO BaO SrO ZnO ZrO2 V2O3 V2O5 B2O3 Li2O CuO Cu2O SO2 SO3 H2O H2O+ H2O- CO2 Total LOI Nb2O5 Ta2O5 Y2O3 La2O3 Ce2O3 CeO2 Pr2O3 Nd2O3 Sm2O3 Eu2O3 Gd2O3 Tb2O3 Dy2O3 Ho2O3 Er2O3 Tm2O3 Yb2O3 Lu2O3 ThO2 UO2 U3O8 SnO2 HfO2'.split())
-CANONICAL = ELEMENTS + COMPONENTS
+REPORTED_INDICES = ('Mg#', 'Cr#')
+REPORTED_INDEX_UNITS = frozenset({'ratio', 'mol%'})
+CANONICAL = ELEMENTS + COMPONENTS + REPORTED_INDICES
 
 
 def normalize(text):

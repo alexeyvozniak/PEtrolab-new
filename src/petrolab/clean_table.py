@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .analyte_dictionary import REPORTED_INDICES, REPORTED_INDEX_UNITS
 from .import_preview import SourceInspection, create_import_plan, semantic_fingerprint
 
 
@@ -41,7 +42,8 @@ METADATA_ALIASES = {
     "agema": "Age [Ma]",
 }
 
-SOURCE_DERIVED_FIELDS = {"total", "mg#", "xmg", "fe3+"}
+REPORTED_INDEX_FIELDS = {field.casefold(): field for field in REPORTED_INDICES}
+SOURCE_DERIVED_FIELDS = {"total", "xmg", "fe3+", *REPORTED_INDEX_FIELDS}
 IRON_FIELDS = {"feo", "feot", "fe2o3", "fe2o3t", "fe", "fetotal"}
 
 OFFICIAL_HELPER_SHEETS = {
@@ -127,6 +129,10 @@ def _mapping(column: int, header: str) -> tuple[dict[str, Any] | None, str | Non
     if measurement:
         field, unit = measurement
         field_token = _normalized(field)
+        if field_token in REPORTED_INDEX_FIELDS:
+            if unit not in REPORTED_INDEX_UNITS:
+                return None, "UNRECOGNIZED_CLEAN_FIELD"
+            field = REPORTED_INDEX_FIELDS[field_token]
         return ({
             "source_axis": "column",
             "source_column_index": column,
