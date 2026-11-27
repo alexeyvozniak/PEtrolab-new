@@ -490,6 +490,12 @@ await withWindow(async (evaluate, screenshot) => {
     return selected[0].length === 5 && selected[1].length === 1 ? selected : null;
   }, calculatedPanels.map(({ id }) => id)));
   assert.deepEqual(selected, [[...expectedIds].sort(), [boundAnalysis.analysis_id]]);
+  assert.equal(await evaluate(() => {
+    const sidebar = document.querySelector(".plot-workspace > aside");
+    const limit = sidebar.getBoundingClientRect().right;
+    const controls = [...sidebar.querySelectorAll('section[aria-label="Окрашивание точек"] > :is(select, button)')];
+    return controls.length >= 3 && controls.every((control) => control.getBoundingClientRect().right <= limit);
+  }), true, "Plot color controls must fit within the sidebar.");
   await screenshot("AT-33-restored-checkpoint");
 });
 const checkpoints = serviceRequest("workspace.snapshot.list");
