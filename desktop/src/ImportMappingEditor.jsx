@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./importMapping.css";
 import {ImportBatchContext} from "./ImportBatchContext";
+import {LabTemplatePanel} from "./LabTemplatePanel";
 
 const TARGETS = ["Ignore", "Analysis", "Sample", "Sample name", "Point", "Mineral", "Method", "Generation", "Rock", "Source", "Comment", "Position", "Photo number", "Size (µm)", "Measurement"];
 const UNITS = ["wt.%", "at.%", "ppm", "ppb", "apfu", "mol%", "ratio", "epsilon", "permil"];
@@ -281,6 +282,26 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
       return next;
     });
   };
+  const labBlocks=useMemo(()=>recipe.sections.filter(section=>section.enabled!==false).map(section=>({
+    id:section.block_id,name:section.sheet_name,header:section.header_row,orientation:section.orientation||"rows_are_analyses",
+    rows:section.mappings.map(mapping=>{
+      const key=keyForMapping(section.block_id,mapping),value=draft[key]||appliedState(mapping);
+      return {key,axis:mappingAxis(mapping),index:mappingIndex(mapping),header:mapping.source_header??null,...value};
+    })
+  })),[recipe,draft]);
+  const applyLabTemplate=changes=>{
+    setDraft(current=>{
+      const next={...current};
+      for(const {key,patch} of changes){
+        const value=current[key];
+        if(value?.target!=="Measurement")continue;
+        const filled={...value};
+        for(const property of ["unit","method","measurementSet"])if(patch[property]&&!filled[property])filled[property]=patch[property];
+        next[key]={...filled,reviewDecision:"assigned"};
+      }
+      return next;
+    });
+  };
   const chosenBlocks=bookCandidates.filter(item=>bookBlocks.includes(item.id));
   const bookCount=chosenBlocks.reduce((sum,item)=>sum+item.fields.length,0);
   const applyBookUnit=()=>{
@@ -335,6 +356,7 @@ export function ImportMappingEditor({ recipe, warnings = [], activeBlockId = nul
         <button className="primary-button" type="button" disabled={busy||!bookUnit||!bookCount} onClick={applyBookUnit}>Назначить единицу · {bookCount} полей в {chosenBlocks.length} блоках</button>
         <small>Затем нажмите «Применить сопоставление» один раз для всей книги. Проверяйте, что одинаковая структура действительно означает одинаковые единицы.</small>
       </details>}
+      <LabTemplatePanel key={"lab:"+ (recipe.source_file_sha256||"book")} blocks={labBlocks} activeBlockId={activeBlockId} busy={busy} onApply={applyLabTemplate}/>
       <ImportBatchContext key={recipe.source_file_sha256||"book"} blocks={contextBlocks} activeBlockId={activeBlockId} busy={busy} onApply={applyContext}/>
       {enabledSections.map((section, sectionIndex) => (
         <section className="mapping-sheet" key={section.block_id}>
