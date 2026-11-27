@@ -194,3 +194,35 @@ class ExplicitUnitRowTests(unittest.TestCase):
         self.assertEqual(_explicit_unit_row(("Units", "%", "%")), {})
         self.assertEqual(_explicit_unit_row(("Units", "[wt.%]", "(ppm)")), {1:"wt.%", 2:"ppm"})
         self.assertEqual(_explicit_unit_row(("Units", "ppm", "10")), {})
+
+class TransposedExplicitUnitTests(unittest.TestCase):
+    def test_units_column_not_imported_as_analysis_and_cells_preserved(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "transposed.csv"
+            path.write_text("Analysis,Units,P1,P2\nSiO2,wt.%,40,42\nMgO,wt.%,20,22\nLa,ppm,3,4\nYb,ppb,40,60\nAl,,5,6\n", encoding="utf-8")
+            suggestion = suggest_import_recipe(path)
+            section, = suggestion["recipe"]["sections"]
+            self.assertEqual(section["orientation"], "columns_are_analyses")
+            self.assertEqual(section["data_start_column"], 3)
+            fields = {row["source_header"]: row for row in section["mappings"]}
+            self.assertEqual([fields[name]["unit"] for name in ["SiO2","MgO","La","Yb"]], ["wt.%","wt.%","ppm","ppb"])
+            self.assertEqual(fields["Al"]["suggested_canonical_field"], "Al")
+            self.assertEqual(fields["Al"]["target_role"], "ignore")
+            plan = create_import_plan(inspect_source(path), suggestion["recipe"])
+            self.assertEqual(plan["summary"]["planned_analysis_count"], 2)
+            self.assertEqual([record["source_column_number"] for record in plan["planned_records"]], [3,4])
+            self.assertEqual(plan["planned_records"][0]["measurements"][0]["source_cell"], "C2")
+
+    def test_conflicting_explicit_units_require_review_in_both_orientations(self):
+        from petrolab.import_recognition import mapping_with_explicit_unit
+        for axis in ("row","column"):
+            mapping, warning = mapping_with_explicit_unit(2, "MgO (wt.%)", axis, "at.%")
+            self.assertEqual(mapping["target_role"], "ignore")
+            self.assertEqual(mapping["suggested_canonical_field"], "MgO")
+            self.assertEqual(warning["code"], "UNIT_REQUIRES_REVIEW")
+            self.assertEqual((warning["header_unit"],warning["adjacent_unit"]), ("wt.%","at.%"))
+
+    def test_unlabelled_units_column_requires_strict_evidence(self):
+        from petrolab.import_preview import explicit_unit_column
+        self.assertEqual(explicit_unit_column((("Analysis",None,"P1"),("Si","wt.%","40"),("La","ppm","3")),1,1,2,3), {2:"wt.%",3:"ppm"})
+        self.assertIsNone(explicit_unit_column((("Analysis",None,"P1"),("Si","wt.%","40"),("La","text","3")),1,1,2,3))

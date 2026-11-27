@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .import_apply import latest_active_import, open_project
-from .import_preview import ImportCommandError, SourceInspection, candidate_blocks, inspect_source, semantic_fingerprint, validate_recipe, value_status
+from .import_preview import ImportCommandError, SourceInspection, candidate_blocks, explicit_unit_column, inspect_source, semantic_fingerprint, validate_recipe, value_status
 from .import_recognition import (
     IRON_FIELDS,
     mappings_for_column_block,
@@ -82,9 +82,10 @@ def _transposed_candidate(sheet: Any, block: dict[str, Any], context_unit: str |
         if evidence_count < 3 or evidence_count / len(mappings) < 0.6:
             continue
 
+        unit_column = explicit_unit_column(sheet.rows, header_row, header_column_index + 1, field_start, field_end)
         analysis_columns = [
             column_index
-            for column_index in range(header_column_index + 1, len(header))
+            for column_index in range(header_column_index + (2 if unit_column is not None else 1), len(header))
             if header[column_index] not in (None, "")
         ]
         if len(analysis_columns) < 2:

@@ -250,9 +250,52 @@ def _unit_from_text(text: str) -> str | None:
     return None
 
 
+def explicit_unit_cell(value) -> str | None:
+    """Recognize a complete unit label, never a substring of a data value."""
+    from .analyte_dictionary import split_unit
+    if value is None or not str(value).strip():
+        return None
+    token = str(value).strip()
+    field, unit = split_unit(token)
+    if unit and not field.strip(" []()"):
+        return unit
+    if token.casefold() in {"вес", "вес.", "weight", "mass", "атом", "атом.", "atomic"}:
+        return _unit_from_text(token)
+    return None
+
+
+def explicit_unit_column(rows, header_row, header_column, field_start_row, field_end_row):
+    """Recognize an adjacent Units column in a column-oriented table.
+
+    Coordinates here are one-based. Unlabelled columns need at least two
+    explicit unit cells and no non-unit contents; labelled columns may have
+    missing or unknown unit cells, which remain unresolved.
+    """
+    index = header_column
+    header = rows[header_row - 1]
+    label = str(header[index] or "").strip().casefold().rstrip(":") if index < len(header) else ""
+    labelled = label in {"unit", "units", "единица", "единицы", "ед. изм.", "ед.изм."}
+    if label and not labelled:
+        return None
+    units = {}
+    unknown = False
+    for number in range(field_start_row, min(field_end_row, len(rows)) + 1):
+        row = rows[number - 1]
+        value = row[index] if index < len(row) else None
+        if value is None or not str(value).strip():
+            continue
+        unit = explicit_unit_cell(value)
+        if unit:
+            units[number] = unit
+        else:
+            unknown = True
+    if labelled or (len(units) >= 2 and not unknown):
+        return units
+    return None
+
+
 def _explicit_unit_row(row) -> dict[int, str]:
     """Strict column-aligned unit row; no inference from numeric values."""
-    from .analyte_dictionary import split_unit
     units = {}
     for column, value in enumerate(row):
         if value is None or not str(value).strip():
@@ -260,10 +303,7 @@ def _explicit_unit_row(row) -> dict[int, str]:
         token = str(value).strip()
         if column == 0 and token.casefold().rstrip(":") in {"unit", "units", "единица", "единицы", "ед. изм."}:
             continue
-        field, unit = split_unit(token)
-        if not unit or field.strip(" []()"):
-            # Common stand-alone Russian/English instrument labels.
-            unit = _unit_from_text(token) if token.casefold() in {"вес", "вес.", "weight", "mass", "атом", "атом.", "atomic"} else None
+        unit = explicit_unit_cell(token)
         if not unit:
             return {}
         units[column] = unit
