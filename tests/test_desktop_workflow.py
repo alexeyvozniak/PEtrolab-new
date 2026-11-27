@@ -167,3 +167,30 @@ class DesktopWorkflowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExplicitUnitRowTests(unittest.TestCase):
+    def test_separate_mixed_units_are_column_specific_and_not_analyses(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "mixed.csv"
+            path.write_text("Analysis,Si,Mg,La,Yb,Al\nUnits,wt.%,at.%,ppm,ppb,\nP1,40,25,3,40,5\nP2,42,22,4,60,6\n", encoding="utf-8")
+            original = path.read_bytes()
+            suggestion = suggest_import_recipe(path)
+            section, = suggestion["recipe"]["sections"]
+            self.assertEqual(section["header_row"], 1)
+            self.assertEqual(section["data_start_row"], 3)
+            self.assertEqual(section["data_end_row"], 4)
+            fields = {item["source_header"]: item for item in section["mappings"]}
+            self.assertEqual([fields[name]["unit"] for name in ["Si", "Mg", "La", "Yb"]], ["wt.%", "at.%", "ppm", "ppb"])
+            self.assertEqual(fields["Al"]["target_role"], "ignore")
+            self.assertEqual(fields["Al"]["suggested_canonical_field"], "Al")
+            plan = create_import_plan(inspect_source(path), suggestion["recipe"])
+            self.assertEqual(plan["summary"]["planned_analysis_count"], 2)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_unit_row_rejects_free_text_and_unqualified_percent(self):
+        from petrolab.import_preview import _explicit_unit_row
+        self.assertEqual(_explicit_unit_row(("Units", "wt.%", "ppm", "comment")), {})
+        self.assertEqual(_explicit_unit_row(("Units", "%", "%")), {})
+        self.assertEqual(_explicit_unit_row(("Units", "[wt.%]", "(ppm)")), {1:"wt.%", 2:"ppm"})
+        self.assertEqual(_explicit_unit_row(("Units", "ppm", "10")), {})

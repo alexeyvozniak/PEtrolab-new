@@ -209,7 +209,9 @@ def _header_candidates(rows: list[list[str | None]]) -> tuple[int, ...]:
                 matches += 1
                 if matches >= 2:
                     break
-        if matches >= 2 or _looks_like_generic_header(rows, index):
+        # A pure explicit unit row belongs to the preceding header, not to
+        # the generic fallback for another logical table.
+        if matches >= 2 or (_looks_like_generic_header(rows, index) and not _explicit_unit_row(row)):
             result.append(index + 1)
     # Narrow fallback for an otherwise unrecognized two-column labelled table.
     # Do not change block boundaries in already recognized complex workbooks.
@@ -248,6 +250,49 @@ def _unit_from_text(text: str) -> str | None:
     return None
 
 
+def _explicit_unit_row(row) -> dict[int, str]:
+    """Strict column-aligned unit row; no inference from numeric values."""
+    from .analyte_dictionary import split_unit
+    units = {}
+    for column, value in enumerate(row):
+        if value is None or not str(value).strip():
+            continue
+        token = str(value).strip()
+        if column == 0 and token.casefold().rstrip(":") in {"unit", "units", "единица", "единицы", "ед. изм."}:
+            continue
+        field, unit = split_unit(token)
+        if not unit or field.strip(" []()"):
+            # Common stand-alone Russian/English instrument labels.
+            unit = _unit_from_text(token) if token.casefold() in {"вес", "вес.", "weight", "mass", "атом", "атом.", "atomic"} else None
+        if not unit:
+            return {}
+        units[column] = unit
+    return units if len(units) >= 2 else {}
+
+
+def _unit_row_before_data(rows, header_row: int, first_row: int, stop: int):
+    """Return the first following data row and explicit unit cells, if proven.
+
+    Require an immediately following unit-only row (blank cells allowed),
+    aligned to actual header columns, plus numeric evidence below it.
+    """
+    if first_row != header_row + 1:
+        return None
+    units = _explicit_unit_row(rows[first_row - 1])
+    if not units:
+        return None
+    header = rows[header_row - 1]
+    if any(column >= len(header) or not header[column] for column in units):
+        return None
+    data_row = _next_nonempty_row(rows, first_row + 1, stop)
+    if data_row is None:
+        return None
+    values = rows[data_row - 1]
+    if not any(column < len(values) and _number(values[column]) is not None for column in units):
+        return None
+    return data_row, units
+
+
 def _unit_context(rows: tuple[tuple[str | None, ...], ...], header_row: int) -> dict[str, Any] | None:
     for number in range(header_row, max(0, header_row - 6), -1):
         text = " | ".join(str(value).strip() for value in rows[number - 1] if value not in (None, ""))
@@ -281,6 +326,9 @@ def candidate_blocks(sheet: SheetInspection) -> list[dict[str, Any]]:
         data_start = _next_nonempty_row(sheet.rows, header_row + 1, next_header)
         if data_start is None:
             continue
+        unit_row = _unit_row_before_data(sheet.rows, header_row, data_start, next_header)
+        if unit_row:
+            data_start = unit_row[0]
         data_end = _last_nonempty_row(sheet.rows, data_start, next_header - 1)
         blocks.append({
             "block_id": f"{sheet.name}:{header_row}",
@@ -288,7 +336,7 @@ def candidate_blocks(sheet: SheetInspection) -> list[dict[str, Any]]:
             "data_start_row": data_start,
             "data_end_row": data_end,
             "orientation": "rows_are_analyses",
-            "unit_context": _unit_context(sheet.rows, header_row),
+            "unit_context": _unit_context(sheet.rows, header_row) if not unit_row else None,
         })
     return blocks
 

@@ -251,6 +251,12 @@ def mappings_for_row_block(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Build mappings for every populated physical column in a row-oriented block."""
     header = rows[header_row - 1]
+    # Explicit separate unit row is part of the source header structure, not
+    # a measurement. Re-check the same evidence when a block is rebuilt.
+    from .import_preview import _unit_row_before_data
+    unit_row = (_unit_row_before_data(rows, header_row, header_row + 1, data_end_row + 1)
+                if data_start_row > header_row + 1 else None)
+    column_units = unit_row[1] if unit_row and unit_row[0] == data_start_row else None
     bounded_end = min(len(rows), data_end_row)
     max_columns = max(
         [len(header), *(len(rows[index - 1]) for index in range(data_start_row, bounded_end + 1))],
@@ -269,7 +275,8 @@ def mappings_for_row_block(
         if raw_header in (None, ""):
             mappings.append(ignored_mapping(column, source_axis="column", source_header=None))
             continue
-        mapping, warning = mapping_for_header(column, str(raw_header), source_axis="column", context_unit=context_unit)
+        field_unit = column_units.get(column) if column_units is not None else context_unit
+        mapping, warning = mapping_for_header(column, str(raw_header), source_axis="column", context_unit=field_unit)
         mappings.append(mapping)
         if warning:
             warnings.append(warning)
