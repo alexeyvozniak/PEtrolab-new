@@ -1,0 +1,424 @@
+{
+  "selected": [
+    {
+      "id": "plot-99f69e11-d7d1-4a04-913b-c89f72622d3a",
+      "kind": "binary",
+      "points": [
+        "1f81e5bb-24f3-4ce2-b14e-003b00e1cc0b",
+        "32553b57-6ce9-4b11-85f1-5d8ab30c9bce",
+        "435e51b8-ad85-4675-9242-a8c0aba8a06b",
+        "6b5b3a98-89ef-46c3-ad98-97d7b24ef817",
+        "6f4c4422-af90-45f7-aa52-425733d6ed02",
+        "935d3792-3b51-4c12-a2dc-78be48b1b128",
+        "a2714b87-a61f-4524-a3d6-a9ce7156540a"
+      ],
+      "selected": [
+        "935d3792-3b51-4c12-a2dc-78be48b1b128"
+      ],
+      "belowViewport": false
+    },
+    {
+      "id": "plot-fd3e695a-bb7f-4371-8a07-ecc5391def06",
+      "kind": "ternary",
+      "points": [
+        "1f81e5bb-24f3-4ce2-b14e-003b00e1cc0b",
+        "32553b57-6ce9-4b11-85f1-5d8ab30c9bce",
+        "435e51b8-ad85-4675-9242-a8c0aba8a06b",
+        "6b5b3a98-89ef-46c3-ad98-97d7b24ef817",
+        "6f4c4422-af90-45f7-aa52-425733d6ed02",
+        "935d3792-3b51-4c12-a2dc-78be48b1b128",
+        "a2714b87-a61f-4524-a3d6-a9ce7156540a"
+      ],
+      "selected": [
+        "935d3792-3b51-4c12-a2dc-78be48b1b128"
+      ],
+      "belowViewport": false
+    },
+    {
+      "id": "plot-3504f836-28c8-4ae2-9e7a-4200a966c29b",
+      "kind": "binary",
+      "points": [
+        "1f81e5bb-24f3-4ce2-b14e-003b00e1cc0b",
+        "32553b57-6ce9-4b11-85f1-5d8ab30c9bce",
+        "435e51b8-ad85-4675-9242-a8c0aba8a06b",
+        "6b5b3a98-89ef-46c3-ad98-97d7b24ef817",
+        "6f4c4422-af90-45f7-aa52-425733d6ed02",
+        "935d3792-3b51-4c12-a2dc-78be48b1b128",
+        "a2714b87-a61f-4524-a3d6-a9ce7156540a"
+      ],
+      "selected": [
+        "935d3792-3b51-4c12-a2dc-78be48b1b128"
+      ],
+      "belowViewport": false
+    },
+    {
+      "id": "plot-443004ec-13e2-40bd-9e6c-7385fd3bfb03",
+      "kind": "binary",
+      "points": [
+        "1f81e5bb-24f3-4ce2-b14e-003b00e1cc0b",
+        "32553b57-6ce9-4b11-85f1-5d8ab30c9bce",
+        "435e51b8-ad85-4675-9242-a8c0aba8a06b",
+        "6b5b3a98-89ef-46c3-ad98-97d7b24ef817",
+        "6f4c4422-af90-45f7-aa52-425733d6ed02",
+        "935d3792-3b51-4c12-a2dc-78be48b1b128",
+        "a2714b87-a61f-4524-a3d6-a9ce7156540a"
+      ],
+      "selected": [
+        "935d3792-3b51-4c12-a2dc-78be48b1b128"
+      ],
+      "belowViewport": false
+    },
+    {
+      "id": "plot-ed362473-5155-4be0-9f07-05d90fbba5df",
+      "kind": "binary",
+      "points": [
+        "1f81e5bb-24f3-4ce2-b14e-003b00e1cc0b",
+        "32553b57-6ce9-4b11-85f1-5d8ab30c9bce",
+        "435e51b8-ad85-4675-9242-a8c0aba8a06b",
+        "6b5b3a98-89ef-46c3-ad98-97d7b24ef817",
+        "6f4c4422-af90-45f7-aa52-425733d6ed02",
+        "935d3792-3b51-4c12-a2dc-78be48b1b128",
+        "a2714b87-a61f-4524-a3d6-a9ce7156540a"
+      ],
+      "selected": [
+        "935d3792-3b51-4c12-a2dc-78be48b1b128"
+      ],
+      "belowViewport": true
+    },
+    {
+      "id": "plot-6ded2600-3f82-484a-b68a-2eb8e024770c",
+      "kind": "binary",
+      "points": [
+        "1f81e5bb-24f3-4ce2-b14e-003b00e1cc0b",
+        "32553b57-6ce9-4b11-85f1-5d8ab30c9bce",
+        "435e51b8-ad85-4675-9242-a8c0aba8a06b",
+        "6b5b3a98-89ef-46c3-ad98-97d7b24ef817",
+        "6f4c4422-af90-45f7-aa52-425733d6ed02",
+        "935d3792-3b51-4c12-a2dc-78be48b1b128",
+        "a2714b87-a61f-4524-a3d6-a9ce7156540a"
+      ],
+      "selected": [
+        "935d3792-3b51-4c12-a2dc-78be48b1b128"
+      ],
+      "belowViewport": true
+    },
+    {
+      "id": "plot-18f3337c-47cc-4555-a3b5-9fec95e9b88c",
+      "kind": "binary",
+      "points": [
+        "1f81e5bb-24f3-4ce2-b14e-003b00e1cc0b",
+        "32553b57-6ce9-4b11-85f1-5d8ab30c9bce",
+        "435e51b8-ad85-4675-9242-a8c0aba8a06b",
+        "6b5b3a98-89ef-46c3-ad98-97d7b24ef817",
+        "6f4c4422-af90-45f7-aa52-425733d6ed02",
+        "935d3792-3b51-4c12-a2dc-78be48b1b128",
+        "a2714b87-a61f-4524-a3d6-a9ce7156540a"
+      ],
+      "selected": [
+        "935d3792-3b51-4c12-a2dc-78be48b1b128"
+      ],
+      "belowViewport": true
+    },
+    {
+      "id": "plot-a2ea30e5-57fa-4c0b-81a3-76c8fa79500f",
+      "kind": "binary",
+      "points": [
+        "1f81e5bb-24f3-4ce2-b14e-003b00e1cc0b",
+        "32553b57-6ce9-4b11-85f1-5d8ab30c9bce",
+        "435e51b8-ad85-4675-9242-a8c0aba8a06b",
+        "6b5b3a98-89ef-46c3-ad98-97d7b24ef817",
+        "6f4c4422-af90-45f7-aa52-425733d6ed02",
+        "935d3792-3b51-4c12-a2dc-78be48b1b128",
+        "a2714b87-a61f-4524-a3d6-a9ce7156540a"
+      ],
+      "selected": [
+        "935d3792-3b51-4c12-a2dc-78be48b1b128"
+      ],
+      "belowViewport": true
+    }
+  ],
+  "dockVisible": [
+    {
+      "id": "935d3792-3b51-4c12-a2dc-78be48b1b128",
+      "label": "P1",
+      "visibility": "Не скрыт"
+    }
+  ],
+  "dockHidden": [
+    {
+      "id": "935d3792-3b51-4c12-a2dc-78be48b1b128",
+      "label": "P1",
+      "visibility": "Скрыт"
+    }
+  ],
+  "intervals": [
+    {
+      "label": "Выбрать интервал 12–19.25 · 2 анализов",
+      "x": "55",
+      "width": "92.5",
+      "height": "142"
+    },
+    {
+      "label": "Выбрать интервал 19.25–26.5 · 1 анализов",
+      "x": "147.5",
+      "width": "92.50000000000003",
+      "height": "71"
+    },
+    {
+      "label": "Выбрать интервал 26.5–33.75 · 1 анализов",
+      "x": "240.00000000000003",
+      "width": "92.50000000000003",
+      "height": "71"
+    },
+    {
+      "label": "Выбрать интервал 33.75–41 · 3 анализов",
+      "x": "332.50000000000006",
+      "width": "92.49999999999994",
+      "height": "213"
+    }
+  ],
+  "selectedBin": [
+    {
+      "id": "32553b57-6ce9-4b11-85f1-5d8ab30c9bce",
+      "label": "P7",
+      "visibility": "Не скрыт"
+    },
+    {
+      "id": "6f4c4422-af90-45f7-aa52-425733d6ed02",
+      "label": "P5",
+      "visibility": "Не скрыт"
+    }
+  ],
+  "saved": {
+    "id": "1676a66a-5070-4edb-ac41-bb0d990d4eb5",
+    "project_id": "0236e41f-2be1-4045-8146-c6c660cc7b2f",
+    "name": "AT-18 eight panels",
+    "schema_version": 1,
+    "input": {
+      "kind": "analysis_snapshot",
+      "analysis_ids": [
+        "1f81e5bb-24f3-4ce2-b14e-003b00e1cc0b",
+        "32553b57-6ce9-4b11-85f1-5d8ab30c9bce",
+        "435e51b8-ad85-4675-9242-a8c0aba8a06b",
+        "6b5b3a98-89ef-46c3-ad98-97d7b24ef817",
+        "6f4c4422-af90-45f7-aa52-425733d6ed02",
+        "935d3792-3b51-4c12-a2dc-78be48b1b128",
+        "a2714b87-a61f-4524-a3d6-a9ce7156540a"
+      ]
+    },
+    "panels": [
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "MgO",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "99f69e11-d7d1-4a04-913b-c89f72622d3a",
+        "kind": "binary",
+        "title": "Al2O3 / MgO",
+        "normalization": null
+      },
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "MgO",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "SiO2",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "fd3e695a-bb7f-4371-8a07-ecc5391def06",
+        "kind": "ternary",
+        "title": "Al2O3 / MgO / SiO2",
+        "normalization": "sum_of_three_components"
+      },
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "MgO",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "3504f836-28c8-4ae2-9e7a-4200a966c29b",
+        "kind": "binary",
+        "title": "Al2O3 / MgO",
+        "normalization": null
+      },
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "MgO",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "443004ec-13e2-40bd-9e6c-7385fd3bfb03",
+        "kind": "binary",
+        "title": "Al2O3 / MgO",
+        "normalization": null
+      },
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "MgO",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "ed362473-5155-4be0-9f07-05d90fbba5df",
+        "kind": "binary",
+        "title": "Al2O3 / MgO",
+        "normalization": null
+      },
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "MgO",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "6ded2600-3f82-484a-b68a-2eb8e024770c",
+        "kind": "binary",
+        "title": "Al2O3 / MgO",
+        "normalization": null
+      },
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          },
+          {
+            "field": "MgO",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "18f3337c-47cc-4555-a3b5-9fec95e9b88c",
+        "kind": "binary",
+        "title": "Al2O3 / MgO",
+        "normalization": null
+      },
+      {
+        "axes": [
+          {
+            "field": "Al2O3",
+            "measurement_set": null,
+            "method": null,
+            "unit": "wt.%",
+            "scale": "linear",
+            "manual_range": null
+          }
+        ],
+        "id": "a2ea30e5-57fa-4c0b-81a3-76c8fa79500f",
+        "kind": "histogram",
+        "title": "Al2O3",
+        "normalization": null,
+        "binning": "sturges_v1"
+      }
+    ],
+    "legend": {
+      "group_by": "source",
+      "entries": [
+        {
+          "value": "c466e824-132a-45b5-966d-ccc8292e0a5f",
+          "label": "at14-analyses.csv",
+          "color": "#84506d",
+          "symbol": "circle"
+        }
+      ]
+    },
+    "filters": [],
+    "layers": [],
+    "hidden_analysis_ids": [],
+    "hidden_source_ids": [],
+    "created_at": "2026-11-27T21:26:25Z",
+    "updated_at": "2026-11-27T21:26:25Z"
+  },
+  "target": "935d3792-3b51-4c12-a2dc-78be48b1b128",
+  "originalSha256": "2c55fd1324c5b927772e7c6074b2a8c10a1a7224fdd0ee46f6af5c32fb3d1e0c"
+}
