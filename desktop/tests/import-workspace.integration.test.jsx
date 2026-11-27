@@ -917,6 +917,57 @@ test("mineral patterns share selection and keep censored gaps through SVG export
   expect(await readFile(second, "utf8")).toBe(content);
 }, 35000);
 
+test("KDE settings round-trip with the exact contour, visible SVG and selection", async () => {
+  const content = "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\nP1,20,30,50\nP2,10,80,10\nP3,55,35,10\n";
+  await writeFile(second, content);
+  queue = [second];
+  const user = userEvent.setup();
+  const { container } = render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton(/^(Импортировать таблицу|Сохранить импорт в проект)$/));
+  await screen.findByRole("heading", { name: "Анализы" });
+  await user.click(await enabledButton("Построение"));
+  await screen.findAllByRole("button", { name: "Выбрать точку P3" });
+  for (const label of ["P1", "P2", "P3"]) {
+    fireEvent.keyDown(screen.getAllByRole("button", { name: `Выбрать точку ${label}` })[0], { key: "Enter" });
+  }
+  await user.click(screen.getByText("Слои и поля", { exact: true }));
+  await user.type(screen.getByLabelText("Название слоя"), "KDE серия");
+  await user.click(await enabledButton("Только облако выделения · 3"));
+  const layer = within(screen.getByRole("group", { name: "KDE серия · 3" }));
+  await user.selectOptions(layer.getByLabelText("Метод поля"), "gaussian_kde_v1");
+  const contour = () => container.querySelector("path.plot-field");
+  await waitFor(() => expect(contour()?.getAttribute("fill-rule")).toBe("evenodd"));
+  expect(screen.getByText(/Малая выборка для KDE/)).toBeTruthy();
+  const defaultGeometry = contour().getAttribute("d");
+  fireEvent.change(layer.getByLabelText("Ширина ядра X"), { target: { value: "0.24" } });
+  await waitFor(() => {
+    expect(contour()).toBeTruthy();
+    expect(contour().getAttribute("d")).not.toBe(defaultGeometry);
+  });
+  const geometry = contour().getAttribute("d");
+
+  const svg = new DOMParser().parseFromString(await readFile(await savePlot(user), "utf8"), "image/svg+xml");
+  const exported = svg.querySelector('path[fill-rule="evenodd"]');
+  expect(exported?.getAttribute("d")).toBe(geometry);
+  expect(exported?.getAttribute("fill")).not.toBe("none");
+  expect(screen.getByText("Выбранные анализы · 3")).toBeTruthy();
+
+  await user.click(screen.getByText("Сохранённые раскладки", { exact: true }));
+  await user.type(screen.getByLabelText("Название раскладки"), "KDE QA");
+  await user.click(await enabledButton("Сохранить раскладку"));
+  await screen.findByText("Сохранена раскладка «KDE QA».");
+  fireEvent.change(layer.getByLabelText("Ширина ядра X"), { target: { value: "0.40" } });
+  await waitFor(() => {
+    expect(contour()).toBeTruthy();
+    expect(contour().getAttribute("d")).not.toBe(geometry);
+  });
+  await user.click(await enabledButton("Открыть «KDE QA»"));
+  await waitFor(() => expect(contour()?.getAttribute("d")).toBe(geometry));
+  expect(layer.getByLabelText("Ширина ядра X").value).toBe("0.24");
+  expect(await readFile(second, "utf8")).toBe(content);
+}, 35000);
+
 test("visible plot fields survive marker hiding and SVG includes their geometry", async () => {
   await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\nP1,20,30,50\nP2,10,80,10\nP3,55,35,10\n");
   queue = [second];

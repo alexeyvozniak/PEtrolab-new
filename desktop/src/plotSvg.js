@@ -2,7 +2,7 @@ import {symbolGeometry,symbolPaint} from "./plotSymbols";
 const SVG = "http://www.w3.org/2000/svg";
 export const PLOT_SIZE = { width: 460, height: 280 };
 const COPY_ATTRIBUTES = ["x", "y", "width", "height", "x1", "x2", "y1", "y2", "cx", "cy", "r", "d", "text-anchor", "transform",
-  "points", "fill-opacity", "stroke", "stroke-width", "opacity"];
+  "points", "fill-opacity", "fill-rule", "stroke", "stroke-width", "opacity"];
 
 export function plotPanelLabel(index, alphabet = "latin", uppercase = false) {
   const letters = alphabet === "cyrillic" ? "абвгдежзийклмнопрстуфхцчшщъыьэюя" : "abcdefghijklmnopqrstuvwxyz";
@@ -37,12 +37,12 @@ export function buildPlotSvg(canvases, { showLabel = true, alphabet, uppercase, 
       letter.textContent = label;
       group.append(letter);
     }
-    for (const source of svg.querySelectorAll("path.plot-frame, path.plot-series, line, text, circle.plot-point, rect.plot-point, polygon.plot-point, polygon.plot-field")) {
+    for (const source of svg.querySelectorAll("path.plot-frame, path.plot-series, line, text, circle.plot-point, rect.plot-point, polygon.plot-point, .plot-field")) {
       const element = create(source.localName);
       for (const name of COPY_ATTRIBUTES) {
         if (source.hasAttribute(name)) element.setAttribute(name, source.getAttribute(name));
       }
-      if (source.localName === "path") {
+      if (source.localName === "path" && !source.classList.contains("plot-field")) {
         element.setAttribute("fill", "none");
         if (source.classList.contains("plot-frame")) element.setAttribute("stroke", "#76897b");
       } else if (source.localName === "line") {
