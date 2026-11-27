@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "test:ui": "vitest run tests/import-ui.e2e.test.jsx tests/import-workspace.integration.test.jsx",
     "test:sites": "node --test tests/sites-worker.test.mjs",
-    "test:tauri-contract": "node --test tests/tauri-shell-contract.test.mjs tests/selection-history.test.mjs tests/plot-presets.test.mjs tests/session-preferences.test.mjs tests/workspace-checkpoint.test.mjs tests/plot-symbols.test.mjs",
+    "test:tauri-contract": "node --test tests/tauri-shell-contract.test.mjs tests/selection-history.test.mjs tests/plot-presets.test.mjs tests/session-preferences.test.mjs tests/workspace-checkpoint.test.mjs tests/plot-symbols.test.mjs tests/calculated-axes.test.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

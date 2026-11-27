@@ -100,3 +100,10 @@
 
 /* Outline symbols must stay selectable even inside their unpainted interior. */
 .plot-point { pointer-events: all; }
+
+.plot-calculated-axis { margin-top:6px;font-size:12px; }
+.plot-calculated-axis[open] { display:grid;gap:6px; }
+.plot-calculated-axis label { display:grid;gap:3px; }
+.plot-calculated-axis select { min-width:0;max-width:100%; }
+.plot-formula-run-list { max-height:150px;overflow:auto; }
+.plot-formula-run-list label { display:flex;gap:5px;align-items:center; }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import { ContextActions } from "./ContextActions";
+import { CalculatedAxisEditor } from "./CalculatedAxisEditor";
 import { SYMBOL_LABELS,symbolGeometry,symbolPaint } from "./plotSymbols";
 function PointMarker({symbol,x,y,r,children,fill,...props}) {
   const {tag:Tag,attrs}=symbolGeometry(symbol,x,y,r);
@@ -442,7 +443,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
   ] : []} /></>;
 }
 
-function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor, categorySymbol, onApplyStyle }) {
+function PlotPanel({ panel, axes, patterns, load, loadCatalog, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor, categorySymbol, onApplyStyle }) {
   const [projection, setProjection] = useState(null);
   const projectionPanel = useMemo(() => ({kind:panel.kind, axes:panel.axes, normalization:panel.normalization}), [panel.kind, panel.axes, panel.normalization]);
   const current = projection?.load === load && projection.panel === projectionPanel ? projection : null;
@@ -524,9 +525,9 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
       </select>}
       {panel.axes.map((axis, index) => {
         const locked = isCalculatedAxis(axis);
-        const candidates = locked ? [axis] : pattern ? group?.fields.get(axis.field) || [] : axes;
+        const candidates = locked ? [axis,...axes.filter(item=>axisKey(item)!==axisKey(axis))] : pattern ? group?.fields.get(axis.field) || [] : axes;
         if (pattern && candidates.length < 2) return null;
-        return <select key={index} aria-label={pattern ? `Предпочтительная единица ${axis.field}` : `Ось ${index + 1}`} value={axisKey(axis)} disabled={locked}
+        return <select key={index} aria-label={pattern ? `Предпочтительная единица ${axis.field}` : `Ось ${index + 1}`} value={axisKey(axis)}
           title={locked ? axisLabel(axis) : "Выберите поле или перетащите его из каталога осей"}
           onDragOver={event => {
             if (!locked && event.dataTransfer.types.includes(AXIS_DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }
@@ -543,6 +544,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
         </select>;
       })}
     </div>
+    {["binary","ternary"].includes(panel.kind)&&<CalculatedAxisEditor key={panel.kind} axes={axes} loadCatalog={loadCatalog} panel={panel} apply={updateAxis}/>}
     {panel.kind !== "histogram" && <details className="plot-point-style">
       <summary>Оформление точек · {Math.round(pointStyle.opacity*100)}%</summary>
       <label>Непрозрачность · {Math.round(pointStyle.opacity*100)}%
@@ -1275,7 +1277,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
       }}>
         <div className="plot-grid" ref={grid}>
-          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} categorySymbol={category?.symbolFor} layers={layers} viewMemory={viewMemory}
+          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} loadCatalog={loadCatalog} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} categorySymbol={category?.symbolFor} layers={layers} viewMemory={viewMemory}
             openExport={onExport && !exportBusy && colorReady ? () => openExport(panel.id) : undefined}
             favorite={Boolean(makePreset(panel) && favoritePresets.some(item => presetKey(item) === presetKey(makePreset(panel))))}
             onFavorite={!presetBusy && (!loadPresets || presetRevision!==null) ? () => toggleFavorite(panel) : undefined}

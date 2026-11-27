@@ -523,7 +523,7 @@ export function App() {
   const savePresets = useCallback(async (preferences,revision) => unwrap(await saveProjectPlotPresets(databasePath,preferences,revision)), [databasePath]);
   const loadColorScheme = useCallback(async () => unwrap(await getProjectPlotColors(databasePath)),[databasePath]);
   const saveColorScheme = useCallback(async (scheme,revision) => unwrap(await saveProjectPlotColors(databasePath,scheme,revision)),[databasePath]);
-  const loadPlotCatalog = useCallback(async (includeCategories = false) => unwrap(await getPlotCatalog(databasePath, plotInputIds, includeCategories)), [databasePath, plotInputIds]);
+  const loadPlotCatalog = useCallback(async (includeCategories = false, includeFormula = false) => unwrap(await getPlotCatalog(databasePath, plotInputIds, includeCategories, includeFormula)), [databasePath, plotInputIds]);
   const loadPlotAnalysis = useCallback(async id => unwrap(await getProjectAnalysis(databasePath, id)), [databasePath]);
   const loadPlotSelection = useCallback(async (analysisIds, offset, limit) =>
     unwrap(await queryProjectAnalyses(databasePath, { analysis_ids: analysisIds, offset, limit })), [databasePath]);
