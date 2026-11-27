@@ -1,0 +1,79 @@
+name: Prepare Windows release draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows_run_id:
+        description: Successful Windows test build run ID from main
+        required: true
+        type: string
+      release_tag:
+        description: Existing version tag pointing at the tested commit
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  draft:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      WINDOWS_RUN_ID: ${{ inputs.windows_run_id }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify the selected test run and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$WINDOWS_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          release_commit=$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")
+          git merge-base --is-ancestor "$release_commit" HEAD
+          build=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$WINDOWS_RUN_ID")
+          jq -e --arg commit "$release_commit" --arg repo "$GITHUB_REPOSITORY" '
+            .path == ".github/workflows/windows-test-build.yml" and .head_repository.full_name == $repo
+            and .head_branch == "main" and .head_sha == $commit and .conclusion == "success"
+            and (.event == "push" or .event == "workflow_dispatch")
+          ' <<< "$build" >/dev/null
+          attempt=$(jq -er '.run_attempt' <<< "$build")
+          version=$(git show "$release_commit:desktop/src-tauri/tauri.conf.json" | jq -er '.version')
+          [[ "$RELEASE_TAG" == "v$version" ]]
+          {
+            printf 'TESTED_COMMIT=%s\n' "$release_commit"
+            printf 'TESTED_ATTEMPT=%s\n' "$attempt"
+            printf 'RELEASE_VERSION=%s\n' "$version"
+          } >> "$GITHUB_ENV"
+      - name: Download and verify the tested MSI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$WINDOWS_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "PetroLab-Windows-verified-MSI-$TESTED_COMMIT" --dir "$RUNNER_TEMP/petrolab-release"
+          installer=$(python scripts/verify_windows_release_package.py "$RUNNER_TEMP/petrolab-release" \
+            "$TESTED_COMMIT" "$WINDOWS_RUN_ID" "$TESTED_ATTEMPT" "$RELEASE_VERSION")
+          printf 'RELEASE_INSTALLER=%s\n' "$installer" >> "$GITHUB_ENV"
+      - name: Create release draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="$RUNNER_TEMP/petrolab-release"
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+            --title "PetroLab $RELEASE_VERSION" --generate-notes \
+            "$package/$RELEASE_INSTALLER" "$package/SHA256SUMS.txt" "$package/build-info.json"

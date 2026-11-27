@@ -89,4 +89,8 @@ $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $candidateInfo.instal
 if ($actualHash -ne $candidateInfo.sha256) { throw 'Контрольная сумма MSI не совпала' }
 ```
 
+### Подготовка GitHub Releases
+
+После выпускной приёмки на `main` создайте тег версии для коммита из успешного `Windows test build`. В Actions запустите `Prepare Windows release draft` на `main` с этим тегом и номером прогона. Задание сверит версию, коммит, попытку сборки и SHA-256 MSI, затем приложит MSI, `SHA256SUMS.txt` и `build-info.json` к черновику. Перед публикацией сверьте заметки и добавьте известные ограничения выпуска.
+
 Архив `PetroLab-Windows-test-<коммит>` также содержит тестовый NSIS. Проверки установки и удаления в этом workflow выполняются для MSI.
