@@ -159,9 +159,10 @@ async function withWindow(check, { projectPath = database, editConfirmations = n
     };
     await command("Page.enable");
     await command("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-    await check(evaluate, screenshot, command);
+    const result = await check(evaluate, screenshot, command);
     const close = `$app = Get-Process -Id ${child.pid} -ErrorAction Stop; if (-not $app.CloseMainWindow() -or -not $app.WaitForExit(15000)) { exit 1 }`;
     execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", close], { windowsHide: true, timeout: 18000 });
+    return result;
   } catch (error) {
     if (screenshot) await screenshot("failure").catch(() => {});
     if (!socket) {
@@ -750,12 +751,80 @@ assert.deepEqual(importMeasurements.map(({ measurements }) => measurements.Fe), 
 assert.deepEqual(await readFile(importBook), importedBytes);
 assert.equal(serviceRequest("import.workspace.restore", importProject).workspace, null);
 
+// Build axes in the installed UI as well as reopening a prebuilt layout.
+const editedAxisEvidence = await withWindow(async (evaluate, screenshot) => {
+  await click(evaluate, "Построение");
+  await until("the saved layouts for the axis editor", () => evaluate(() => {
+    const list = document.querySelector(".plot-saved-layouts");
+    if (!list) return false;
+    list.open = true;
+    return true;
+  }));
+  await click(evaluate, `Открыть «${calculatedName}»`);
+  const panelId = `plot-${calculatedPanels[0].id}`;
+  const openEditor = () => until("the calculation editor", () => evaluate((id) => {
+    const editor = document.getElementById(id)?.querySelector(".plot-calculated-axis");
+    if (!editor) return false;
+    editor.open = true;
+    editor.scrollIntoView({ block: "center" });
+    return true;
+  }, panelId));
+  const choose = (caption, option) => until(`${caption}: ${option}`, () => evaluate(({ id, caption, option }) => {
+    const labels = document.getElementById(id)?.querySelectorAll(".plot-calculated-axis label");
+    const select = [...(labels || [])].find((label) => [...label.childNodes]
+      .filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join("").trim() === caption)
+      ?.querySelector("select");
+    const item = [...(select?.options || [])].find((entry) => entry.textContent === option || entry.textContent.startsWith(`${option} ·`));
+    if (!item || select.disabled || item.disabled) return false;
+    select.value = item.value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }, { id: panelId, caption, option }));
+  const projectedIds = (field, count) => until(`the projection for ${field}`, () => evaluate(({ id, field, count }) => {
+    const panel = document.getElementById(id);
+    const points = [...(panel?.querySelectorAll(".plot-point") || [])];
+    const axis = panel?.querySelector('select[aria-label="Ось 1"]');
+    return axis?.selectedOptions[0]?.textContent.startsWith(`${field} ·`) && points.length === count
+      ? points.map((point) => point.dataset.analysisId).sort()
+      : null;
+  }, { id: panelId, field, count }));
+
+  await openEditor();
+  await choose("Компонент 1", "SiO2");
+  await choose("Компонент 2", "Al2O3");
+  await screenshot("AT-07-axis-editor-ratio");
+  await click(evaluate, "Применить расчётную ось");
+  const ratioIds = await projectedIds("SiO2 / Al2O3", expectedIds.length);
+  assert.deepEqual(ratioIds, [...expectedIds].sort());
+  const ratioForP1 = 0.5;
+  await until("P1 is plotted at 11 divided by 22", () => evaluate(({ id, analysisId, ratio }) => {
+    const point = document.getElementById(id)?.querySelector(`[data-analysis-id="${analysisId}"] title`);
+    return point?.textContent.endsWith(` · ${ratio} / 67`);
+  }, { id: panelId, analysisId: expectedIds[chosenLabels.indexOf("P1")], ratio: ratioForP1 }));
+
+  await openEditor();
+  await choose("Расчёт", "APFU из сохранённых формул");
+  const { formula_series: series } = serviceRequest("plot_data.catalog", { analysis_ids: expectedIds, include_formula: true });
+  const method = series.find(({ runs }) => runs.some(({ run_id }) => run_id === formulaRun.id));
+  assert.ok(method);
+  await choose("Метод формулы", method.name);
+  await choose("Компонент APFU", "apfu.Si");
+  await click(evaluate, "Выбрать однозначные расчёты");
+  await screenshot("AT-07-axis-editor-apfu");
+  await click(evaluate, "Применить расчётную ось");
+  const apfuIds = await projectedIds("apfu.Si", 1);
+  assert.deepEqual(apfuIds, [boundAnalysis.analysis_id]);
+  return { ratioIds, ratioForP1, apfuIds, formulaRunId: formulaRun.id };
+});
+assert.deepEqual(serviceRequest("plot_spec.open", { id: calculatedLayout.id }), calculatedLayout);
+assert.deepEqual(await readFile(source), finalSource);
+
 await writeFile(join(evidence, "acceptance.json"), JSON.stringify({
   scenarios: ["AT-01", "AT-02 (two sheets, ambiguous Fe, censoring, blank and duplicates)", "AT-03", "AT-06", "AT-07", "AT-09",
     "AT-17 (zoom, pan and reset)", "AT-32", "AT-33 (restore plot and selection)", "AT-37 (domain and visibility actions)"],
   selected: chosenLabels.map((label, index) => ({ label, analysisId: expectedIds[index] })),
   workPlanTask, workGroup: before, plotSpecification: layout, plotZoom, journal, editDraft,
-  calculatedLayout, formulaRunId: formulaRun.id,
+  calculatedLayout, formulaRunId: formulaRun.id, editedAxisEvidence,
   checkpoint: { id: checkpoint.id, layoutId: calculatedLayout.id, selectionIds: snapshot.selection_analysis_ids },
   workbookImport: { measurements: importMeasurements, sourceSha256: sha256(importedBytes) },
   sourceSha256: sha256(finalSource),
