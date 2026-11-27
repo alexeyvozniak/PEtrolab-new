@@ -1080,6 +1080,50 @@ test("a saved work group restores the exact selection after reopening the applic
   expect(screen.getByText("Анализов · 1")).toBeTruthy();
 }, 40000);
 
+test("AT-33 restores a saved table and its exact hidden selection after restarting", async () => {
+  queue = [second];
+  const user = userEvent.setup();
+  const app = render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton("Импортировать таблицу"));
+  await screen.findByRole("heading", { name: "Анализы" });
+  const database = { project_database_path: join(folder, "project.sqlite") };
+  const original = (await invokePetrolab("project.analyses.list", database)).result;
+  const selectedId = original.analyses.find(({ identity }) => identity.Analysis === "B2").analysis_id;
+  const table = within(await screen.findByRole("table"));
+  await user.click(table.getByRole("checkbox", { name: "Выбрать B2" }));
+  fireEvent.change(table.getByRole("textbox", { name: "Фильтр Analysis" }), { target: { value: "B1" } });
+  await user.click(screen.getByText("Представления таблицы", { exact: true }));
+  await user.type(screen.getByLabelText("Название представления"), "Строка B1");
+  await user.click(await enabledButton("Сохранить представление"));
+  await screen.findByText("Сохранено представление «Строка B1».");
+
+  await user.click(await enabledButton("Рабочие состояния"));
+  const dialog = within(await screen.findByRole("dialog", { name: "Рабочие состояния проекта" }));
+  const view = await dialog.findByLabelText("Представление таблицы");
+  await user.selectOptions(view, dialog.getByRole("option", { name: "Строка B1" }));
+  await user.selectOptions(dialog.getByLabelText("Открывать раздел"), "analyses");
+  await user.type(dialog.getByLabelText("Название состояния"), "Отбор для пересчёта");
+  await user.click(dialog.getByRole("button", { name: "Сохранить рабочее состояние" }));
+  await dialog.findByText("Рабочее состояние сохранено в проекте.");
+
+  app.unmount();
+  await stopService();
+  await startService();
+  render(<App />);
+  await user.click(await enabledButton("Рабочие состояния"));
+  await user.click(await enabledButton("Открыть «Отбор для пересчёта»"));
+  await screen.findByText("Рабочее состояние «Отбор для пересчёта» восстановлено.");
+  const restored = within(await screen.findByRole("table"));
+  expect(restored.getByRole("textbox", { name: "Фильтр Analysis" }).value).toBe("B1");
+  expect(restored.queryByRole("checkbox", { name: "Выбрать B2" })).toBeNull();
+  expect(screen.getByText("Скрыто фильтром: 1")).toBeTruthy();
+  await user.click(await enabledButton("Экспорт отбора CSV"));
+  await screen.findByText(/Экспортировано анализов: 1/);
+  expect(requests.findLast(({ command }) => command === "analysis.selection.export_csv").payload.analysis_ids).toEqual([selectedId]);
+  expect((await invokePetrolab("project.analyses.list", database)).result.analyses).toEqual(original.analyses);
+}, 25000);
+
 test("AT-36 exports exactly 17 selected analyses across loaded pages with unchanged state and provenance", async () => {
   const labels = Array.from({ length: 502 }, (_, index) => {
     if (index < 15) return `PICK-${String(index + 1).padStart(2, "0")}`;

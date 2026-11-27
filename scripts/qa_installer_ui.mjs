@@ -413,6 +413,7 @@ const calculatedPanels = [
   { id: randomUUID(), kind: "ternary", axes: apfu },
 ];
 const calculatedLayout = serviceRequest("plot_spec.save", { name: calculatedName, panels: calculatedPanels, analysis_ids: expectedIds, colors: {} });
+const checkpointName = "AT-33 раскладка и отбор";
 
 await withWindow(async (evaluate, screenshot) => {
   await expectCompletedTask(evaluate);
@@ -451,7 +452,52 @@ await withWindow(async (evaluate, screenshot) => {
   }, calculatedPanels.map(({ id }) => id)));
   assert.deepEqual(displayed, [[...expectedIds].sort(), [boundAnalysis.analysis_id]]);
   await screenshot("AT-07-calculated-layout");
+  await click(evaluate, "Рабочие состояния");
+  await until("workspace checkpoint form is ready", () => evaluate(({ name, layoutId }) => {
+    const form = document.querySelector(".checkpoint-form");
+    if (!form) return false;
+    const input = form.querySelector('input:not([type="checkbox"])');
+    const [, plot] = form.querySelectorAll("select");
+    if (![...plot.options].some((option) => option.value === layoutId)) return false;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, name);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    plot.value = layoutId;
+    plot.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }, { name: checkpointName, layoutId: calculatedLayout.id }));
+  await until("plotting is available as the checkpoint destination", () => evaluate(() => {
+    const surface = document.querySelectorAll(".checkpoint-form select")[2];
+    const plotting = surface?.querySelector('option[value="plotting"]');
+    if (!plotting || plotting.disabled) return false;
+    surface.value = "plotting";
+    surface.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }));
+  await click(evaluate, "Сохранить рабочее состояние");
+  await until("workspace checkpoint was saved", () => evaluate(() =>
+    document.querySelector(".workspace-checkpoints")?.textContent.includes("Рабочее состояние сохранено в проекте.")));
 });
+
+await withWindow(async (evaluate, screenshot) => {
+  await click(evaluate, "Рабочие состояния");
+  await click(evaluate, `Открыть «${checkpointName}»`);
+  const selected = await until("workspace checkpoint reinstated the exact plot selection", () => evaluate((ids) => {
+    const [sum, apfu] = ids.map((id) => document.getElementById(`plot-${id}`));
+    if (!sum || !apfu?.textContent.includes("нет выбранной формулы (4)")) return null;
+    const points = (panel) => [...panel.querySelectorAll('.plot-point[aria-pressed="true"]')]
+      .map((point) => point.dataset.analysisId).sort();
+    const selected = [points(sum), points(apfu)];
+    return selected[0].length === 5 && selected[1].length === 1 ? selected : null;
+  }, calculatedPanels.map(({ id }) => id)));
+  assert.deepEqual(selected, [[...expectedIds].sort(), [boundAnalysis.analysis_id]]);
+  await screenshot("AT-33-restored-checkpoint");
+});
+const checkpoints = serviceRequest("workspace.snapshot.list");
+const checkpoint = checkpoints.find(({ name }) => name === checkpointName);
+assert.ok(checkpoint);
+const { snapshot } = serviceRequest("workspace.snapshot.open", { id: checkpoint.id });
+assert.deepEqual(snapshot.plot_specification_ids, [calculatedLayout.id]);
+assert.deepEqual([...snapshot.selection_analysis_ids].sort(), [...expectedIds].sort());
 assert.deepEqual(serviceRequest("project.overview").work_plan, [workPlanTask]);
 
 const operations = serviceRequest("operation_journal.list").entries;
@@ -700,10 +746,11 @@ assert.equal(serviceRequest("import.workspace.restore", importProject).workspace
 
 await writeFile(join(evidence, "acceptance.json"), JSON.stringify({
   scenarios: ["AT-01", "AT-02 (two sheets, ambiguous Fe, censoring, blank and duplicates)", "AT-03", "AT-06", "AT-07", "AT-09",
-    "AT-17 (zoom, pan and reset)", "AT-32", "AT-37 (domain and visibility actions)"],
+    "AT-17 (zoom, pan and reset)", "AT-32", "AT-33 (restore plot and selection)", "AT-37 (domain and visibility actions)"],
   selected: chosenLabels.map((label, index) => ({ label, analysisId: expectedIds[index] })),
   workPlanTask, workGroup: before, plotSpecification: layout, plotZoom, journal, editDraft,
   calculatedLayout, formulaRunId: formulaRun.id,
+  checkpoint: { id: checkpoint.id, layoutId: calculatedLayout.id, selectionIds: snapshot.selection_analysis_ids },
   workbookImport: { measurements: importMeasurements, sourceSha256: sha256(importedBytes) },
   sourceSha256: sha256(finalSource),
 }, null, 2));
