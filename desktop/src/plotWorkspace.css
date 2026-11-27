@@ -100,3 +100,9 @@
 
 /* Outline symbols must stay selectable even inside their unpainted interior. */
 .plot-point { pointer-events: all; }
+
+.plot-batch-style { border:1px solid #dce5de;border-radius:5px;padding:6px;min-width:0; }
+.plot-batch-style[open] { display:grid;gap:6px; }
+.plot-batch-list { display:grid;gap:4px;max-height:180px;overflow:auto; }
+.plot-batch-list label { min-width:0; }
+.plot-batch-list label span { overflow-wrap:anywhere; }

@@ -47,6 +47,7 @@ function warningLabel(item) {
     UNRECOGNIZED_CLEAN_FIELD: "Не определена роль поля",
     HEADER_NOT_DETECTED: "Не распознан заголовок",
     UNIT_REQUIRES_REVIEW: "Нужно указать единицу",
+    UNIT_NUMERIC_HINT: "Подсказка по сумме компонентов",
     UNMAPPED_FIELD_REQUIRES_REVIEW: "Нужно выбрать роль поля",
     MERGED_HEADERS: "Объединённые ячейки в заголовке",
     HIDDEN_ROWS: "В исходнике есть скрытые строки",
@@ -333,6 +334,7 @@ export function ImportWorkspace({
   const selectedGroup = issueGroups.find((entry) => entry.key === selectedIssueKey && (!workspace || entry.item.source_id === workspace.active_source_id)) || issueGroups.find((entry) => !workspace || entry.item.source_id === workspace.active_source_id) || null;
   const selectedIssue = selectedGroup?.item || null;
   const activeSection = sections.find((item) => item.block_id === activeBlockId) || sections[0];
+  const unitHint=issues.find(item=>item.code==="UNIT_NUMERIC_HINT"&&item.block_id===activeBlockId&&(!workspace||item.source_id===workspace.active_source_id));
   const cleanFast = cleanClassification?.mode === "clean_table_fast" && !detailedReview && !mineralReview;
   const blockingCount = workspace ? workspace.issues.filter((item) => item.blocking).length + Number(blockDraftDirty) + Number(mappingDraftDirty) : (blockDraftDirty ? 1 : 0)
     + (plan.issues || []).filter((item) => item.blocking).length
@@ -563,6 +565,14 @@ export function ImportWorkspace({
                 <b>{activeSection.sheet_name}</b>
                 {selectedIssue && <small>{warningLabel(selectedIssue)}</small>}
               </div>
+              {unitHint&&<div className="import-bulk-scope" role="note">
+                <b>Подсказка по числам · {unitHint.field_count} {unitHint.field_family==="oxide"?"оксидных":"элементных"} полей</b>
+                <small>Медиана суммы: {unitHint.median_sum}; диапазон {unitHint.min_sum}–{unitHint.max_sum}. Полных числовых анализов: {unitHint.complete_count} из {unitHint.sample_count} проверенных.</small>
+                <small>{unitHint.hint_kind==="near_100"
+                  ?"Сумма близка к 100. Возможны массовые, атомные или молярные проценты; по сумме они не различаются."
+                  :"Небольшая сумма элементов: проверьте, не являются ли данные формульными коэффициентами (APFU) либо неполным составом."}</small>
+                <small>Единица не назначена. Пропуски и значения ниже предела обнаружения не заменялись нулями. Подтвердите исходный формат.</small>
+              </div>}
               <ImportMappingEditor
                 recipe={recipe}
                 warnings={recipeWarnings}

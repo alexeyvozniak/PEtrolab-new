@@ -167,3 +167,94 @@ class DesktopWorkflowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExplicitUnitRowTests(unittest.TestCase):
+    def test_separate_mixed_units_are_column_specific_and_not_analyses(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "mixed.csv"
+            path.write_text("Analysis,Si,Mg,La,Yb,Al\nUnits,wt.%,at.%,ppm,ppb,\nP1,40,25,3,40,5\nP2,42,22,4,60,6\n", encoding="utf-8")
+            original = path.read_bytes()
+            suggestion = suggest_import_recipe(path)
+            section, = suggestion["recipe"]["sections"]
+            self.assertEqual(section["header_row"], 1)
+            self.assertEqual(section["data_start_row"], 3)
+            self.assertEqual(section["data_end_row"], 4)
+            fields = {item["source_header"]: item for item in section["mappings"]}
+            self.assertEqual([fields[name]["unit"] for name in ["Si", "Mg", "La", "Yb"]], ["wt.%", "at.%", "ppm", "ppb"])
+            self.assertEqual(fields["Al"]["target_role"], "ignore")
+            self.assertEqual(fields["Al"]["suggested_canonical_field"], "Al")
+            plan = create_import_plan(inspect_source(path), suggestion["recipe"])
+            self.assertEqual(plan["summary"]["planned_analysis_count"], 2)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_unit_row_rejects_free_text_and_unqualified_percent(self):
+        from petrolab.import_preview import _explicit_unit_row
+        self.assertEqual(_explicit_unit_row(("Units", "wt.%", "ppm", "comment")), {})
+        self.assertEqual(_explicit_unit_row(("Units", "%", "%")), {})
+        self.assertEqual(_explicit_unit_row(("Units", "[wt.%]", "(ppm)")), {1:"wt.%", 2:"ppm"})
+        self.assertEqual(_explicit_unit_row(("Units", "ppm", "10")), {})
+
+class TransposedExplicitUnitTests(unittest.TestCase):
+    def test_units_column_not_imported_as_analysis_and_cells_preserved(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "transposed.csv"
+            path.write_text("Analysis,Units,P1,P2\nSiO2,wt.%,40,42\nMgO,wt.%,20,22\nLa,ppm,3,4\nYb,ppb,40,60\nAl,,5,6\n", encoding="utf-8")
+            suggestion = suggest_import_recipe(path)
+            section, = suggestion["recipe"]["sections"]
+            self.assertEqual(section["orientation"], "columns_are_analyses")
+            self.assertEqual(section["data_start_column"], 3)
+            fields = {row["source_header"]: row for row in section["mappings"]}
+            self.assertEqual([fields[name]["unit"] for name in ["SiO2","MgO","La","Yb"]], ["wt.%","wt.%","ppm","ppb"])
+            self.assertEqual(fields["Al"]["suggested_canonical_field"], "Al")
+            self.assertEqual(fields["Al"]["target_role"], "ignore")
+            plan = create_import_plan(inspect_source(path), suggestion["recipe"])
+            self.assertEqual(plan["summary"]["planned_analysis_count"], 2)
+            self.assertEqual([record["source_column_number"] for record in plan["planned_records"]], [3,4])
+            self.assertEqual(plan["planned_records"][0]["measurements"][0]["source_cell"], "C2")
+
+    def test_conflicting_explicit_units_require_review_in_both_orientations(self):
+        from petrolab.import_recognition import mapping_with_explicit_unit
+        for axis in ("row","column"):
+            mapping, warning = mapping_with_explicit_unit(2, "MgO (wt.%)", axis, "at.%")
+            self.assertEqual(mapping["target_role"], "ignore")
+            self.assertEqual(mapping["suggested_canonical_field"], "MgO")
+            self.assertEqual(warning["code"], "UNIT_REQUIRES_REVIEW")
+            self.assertEqual((warning["header_unit"],warning["adjacent_unit"]), ("wt.%","at.%"))
+
+    def test_unlabelled_units_column_requires_strict_evidence(self):
+        from petrolab.import_preview import explicit_unit_column
+        self.assertEqual(explicit_unit_column((("Analysis",None,"P1"),("Si","wt.%","40"),("La","ppm","3")),1,1,2,3), {2:"wt.%",3:"ppm"})
+        self.assertIsNone(explicit_unit_column((("Analysis",None,"P1"),("Si","wt.%","40"),("La","text","3")),1,1,2,3))
+
+class MergedUnitHeaderTests(unittest.TestCase):
+    def test_merged_unit_banners_above_and_below_do_not_fill_source_cells(self):
+        from petrolab.import_preview import SheetInspection, candidate_blocks
+        from petrolab.import_recognition import mappings_for_row_block
+        headers = ("Analysis","SiO2","MgO","La","Yb","Al")
+        units = (None,"wt.%",None,"ppm",None,None)
+        data = ("P1","40","20","3","4","5")
+        for above in (True, False):
+            rows = (units,headers,data) if above else (headers,units,data)
+            header_row = 2 if above else 1
+            unit_number = 1 if above else 2
+            merges = (f"B{unit_number}:C{unit_number}",f"D{unit_number}:E{unit_number}")
+            sheet = SheetInspection("Lab",rows,(header_row,),({"code":"MERGED_HEADERS","ranges":list(merges)},))
+            block, = candidate_blocks(sheet)
+            self.assertEqual(block["data_start_row"],3)
+            fields, _ = mappings_for_row_block(rows,header_row,3,3,block["unit_context"],merges)
+            by_field={row["source_header"]:row for row in fields}
+            self.assertEqual([by_field[name]["unit"] for name in ("SiO2","MgO","La","Yb")],["wt.%","wt.%","ppm","ppm"])
+            self.assertEqual(by_field["Al"]["target_role"],"ignore")
+            self.assertIsNone(rows[unit_number-1][2])
+
+    def test_vertical_units_are_confined_to_explicit_merged_range(self):
+        from petrolab.import_preview import explicit_unit_column
+        from petrolab.import_recognition import mappings_for_column_block
+        rows=(("Analysis","Units","P1","P2"),("SiO2","wt.%","40","41"),("MgO",None,"20","21"),("La","ppm","3","4"),("Al",None,"5","6"))
+        merges=("B2:B3",)
+        self.assertEqual(explicit_unit_column(rows,1,1,2,5,merges),{2:"wt.%",3:"wt.%",4:"ppm"})
+        fields,_=mappings_for_column_block(rows,1,2,5,3,4,None,merges)
+        self.assertEqual([field["unit"] for field in fields],["wt.%","wt.%","ppm",None])
+        self.assertIsNone(rows[2][1])
+        self.assertEqual(explicit_unit_column(rows,1,1,2,5,("B2:C3",)),{2:"wt.%",4:"ppm"})

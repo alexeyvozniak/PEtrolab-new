@@ -132,3 +132,13 @@
   .metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mapping-explainer { align-items: flex-start; flex-direction: column; }
 }
+
+.mapping-book-bulk { border:1px solid #c8d9cd;border-radius:8px;padding:10px;background:#f4f8f5;margin:8px 0; }
+.mapping-book-bulk[open] { display:grid;gap:8px; }
+.mapping-book-bulk summary { font-weight:650;cursor:pointer; }
+.mapping-book-buttons { display:flex;gap:6px;flex-wrap:wrap; }
+.mapping-book-list { max-height:220px;overflow:auto;display:grid;gap:5px; }
+.mapping-book-list label { display:flex;align-items:flex-start;gap:8px; }
+.mapping-book-list label span { min-width:0;overflow-wrap:anywhere; }
+.mapping-book-list small { display:block; }
+.mapping-book-unit { display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
