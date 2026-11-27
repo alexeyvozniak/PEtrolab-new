@@ -656,3 +656,22 @@ test("recognized bare element mappings use one confirmed unit even when the warn
   expect(onApplyAll).toHaveBeenCalledOnce();
   expect(onApplyAll.mock.calls[0][0].map(({canonical_field,unit,source_index})=>[canonical_field,unit,source_index])).toEqual(symbols.map((field,index)=>[field,"at.%",index]));
 });
+
+test("workbook bulk units select matching enabled structures and preserve different sheets",()=>{
+  const onApplyAll=vi.fn();
+  const suggestion=(field,index)=>({source_axis:"column",source_column_index:index,source_header:field,target_role:"ignore",suggested_target:"measurement",suggested_canonical_field:field,review_decision:"unresolved"});
+  const section=(id,name,fields,enabled=true)=>({block_id:id,sheet_name:name,enabled,orientation:"rows_are_analyses",header_row:1,mappings:fields.map(suggestion)});
+  const recipe={sections:[section("a","Mica I",["Si","Mg","Fe"]),section("b","Mica II",["Si","Mg","Fe"]),section("c","Trace",["La","Yb"]),section("d","Excluded",["Si","Mg","Fe"],false)]};
+  render(<ImportMappingEditor recipe={recipe} warnings={[]} activeBlockId="a" onApplyAll={onApplyAll}/>);
+  fireEvent.click(screen.getByText(/Распознавание по всей книге/));
+  fireEvent.click(screen.getByRole("button",{name:"Выбрать блоки такой же структуры"}));
+  const blocks=within(screen.getByLabelText("Блоки книги для назначения единицы"));
+  expect(blocks.getAllByRole("checkbox").map(node=>node.checked)).toEqual([true,true,false]);
+  expect(blocks.queryByText(/Excluded/)).toBeNull();
+  fireEvent.change(screen.getByLabelText("Общая единица выбранных блоков"),{target:{value:"at.%"}});
+  fireEvent.click(screen.getByRole("button",{name:"Назначить единицу · 6 полей в 2 блоках"}));
+  fireEvent.click(screen.getByRole("button",{name:"Применить сопоставление (6)"}));
+  expect(onApplyAll).toHaveBeenCalledOnce();
+  expect(onApplyAll.mock.calls[0][0].map(({block_id,canonical_field,unit})=>[block_id,canonical_field,unit])).toEqual(
+    ["a","b"].flatMap(id=>["Si","Mg","Fe"].map(field=>[id,field,"at.%"])));
+});
