@@ -272,6 +272,9 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(smoke, /qa_installer_project\.py"\) verify/);
   assert.match(workflow, /-HistoricalSource historical-source/);
   assert.match(smoke, /qa_installer_project\.py"\) historical/);
+  assert.match(workflow, /-LaunchEvidence .*petrolab-upgrade-launch/);
+  assert.match(workflow, /Upload upgrade launch diagnostics\r?\n\s+if: failure\(\)/);
+  assert.match(smoke, /RedirectStandardError.*app-stderr\.txt/);
   assert.match(smoke, /Uninstall removed persistent project data/);
   assert.match(workflow, /npm run test:ui/);
   assert.match(smoke, /msiexec\.exe/);

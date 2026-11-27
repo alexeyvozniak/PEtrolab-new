@@ -2,7 +2,8 @@ param(
     [string]$BundleRoot = "desktop/src-tauri/target/release/bundle",
     [string]$BaselineMsi,
     [string]$HistoricalSource,
-    [string]$UiEvidence
+    [string]$UiEvidence,
+    [string]$LaunchEvidence
 )
 
 $ErrorActionPreference = "Stop"
@@ -131,7 +132,13 @@ try {
     }
 
     Write-Host "Launching $($appExecutable.FullName)"
-    $appProcess = Start-Process -FilePath $appExecutable.FullName -PassThru
+    $launchOptions = @{ FilePath = $appExecutable.FullName; PassThru = $true }
+    if ($LaunchEvidence) {
+        New-Item -ItemType Directory -Path $LaunchEvidence -Force | Out-Null
+        $launchOptions.RedirectStandardOutput = Join-Path $LaunchEvidence "app-stdout.txt"
+        $launchOptions.RedirectStandardError = Join-Path $LaunchEvidence "app-stderr.txt"
+    }
+    $appProcess = Start-Process @launchOptions
     $windowReady = $false
     $serviceReady = $false
     $databaseReady = $false
@@ -197,6 +204,17 @@ try {
     }
 
     $beforeUninstall = (Get-FileHash -Algorithm SHA256 -LiteralPath $database).Hash
+}
+catch {
+    if ($LaunchEvidence -and (Test-Path -LiteralPath $LaunchEvidence)) {
+        $_.Exception.Message | Set-Content -Encoding utf8 -LiteralPath (Join-Path $LaunchEvidence "failure.txt")
+        if ($appProcess) {
+            $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue -Filter "ProcessId = $($appProcess.Id) OR ParentProcessId = $($appProcess.Id) OR Name = 'petrolab-service.exe'")
+            $processes | Select-Object Name, ProcessId, ParentProcessId, SessionId, ExecutablePath |
+                ConvertTo-Json -AsArray | Set-Content -Encoding utf8 -LiteralPath (Join-Path $LaunchEvidence "processes.json")
+        }
+    }
+    throw
 }
 finally {
     if ($null -ne $appProcess -and -not $appProcess.HasExited) {
