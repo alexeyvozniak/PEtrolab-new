@@ -3,7 +3,7 @@ import { ThinSectionLinks } from "./ThinSectionLinks";
 import { MediaAttachment } from "./MediaAttachment";
 import "./mediaWorkspace.css";
 
-export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, shape = "point", alt = "Изображение шлифа" }) {
+export function MediaViewer({ image, annotations, onPlace, onFocusAnnotation, loadRegion, focus, shape = "point", alt = "Изображение шлифа" }) {
   const [zoom, setZoom] = useState(100);
   const [start, setStart] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -137,7 +137,11 @@ export function MediaViewer({ image, annotations, onPlace, loadRegion, focus, sh
           } : undefined}
           onPointerCancel={reset} onLostPointerCapture={reset}>
           {[...annotations, ...(preview ? [{ ...preview, id: "draft" }] : [])].map((item) =>
-            <g key={item.id} className={item.provisional ? "media-provisional" : undefined}>
+            <g key={item.id} className={item.highlighted?"media-highlighted":item.provisional ? "media-provisional" : onFocusAnnotation&&!onPlace?"media-clickable":undefined}
+              role={onFocusAnnotation&&!onPlace&&item.id!=="draft"?"button":undefined} tabIndex={onFocusAnnotation&&!onPlace&&item.id!=="draft"?0:undefined}
+              aria-label={onFocusAnnotation&&!onPlace?"Открыть точку "+(item.label||item.id):undefined}
+              onClick={onFocusAnnotation&&!onPlace?()=>onFocusAnnotation(item):undefined}
+              onKeyDown={onFocusAnnotation&&!onPlace?e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onFocusAnnotation(item);}}:undefined}>
               {item.kind === "point"
                 ? <circle cx={item.x_px} cy={item.y_px} r={length / 95} />
                 : <rect x={item.x_px} y={item.y_px} width={item.width_px} height={item.height_px} />}
@@ -284,9 +288,10 @@ export function MediaGallery({ images, previewMedia, exportOriginal, exportRende
         <div>
           <MediaViewer key={openId} image={image} alt={images.find(({ media_asset_id }) => media_asset_id === openId)?.thin_section_id === null
             ? "Снимок образца" : undefined} loadRegion={(region) => previewMedia(openId, region)} focus={focus}
+            onFocusAnnotation={showPoints&&!drawing&&!pending?item=>{setFocus({...item});}:undefined}
             onPlace={drawing && !pending ? saveRegion : undefined} shape={shape} annotations={image.annotations.filter((item) => !exportRendered ||
               (renderOptions[item.geometry_kind === "point" ? "points" : "regions"] && !excludedAnnotations.includes(item.spatial_annotation_id))).map((item) => ({
-            ...item, id: item.spatial_annotation_id, kind: item.geometry_kind, label: !exportRendered || renderOptions.labels ? item.point_name || item.label : null,
+            ...item, id: item.spatial_annotation_id, kind: item.geometry_kind, highlighted:focus?.spatial_annotation_id===item.spatial_annotation_id, label: !exportRendered || renderOptions.labels ? item.point_name || item.label : null,
           }))} />
         </div>
         {attachment && focus && !drawing && <MediaAttachment key={focus.spatial_annotation_id} target={focus}

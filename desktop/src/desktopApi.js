@@ -223,6 +223,7 @@ export const exportMediaBatch = (projectDatabasePath, mediaAssetIds, outputPath,
 });
 export const createSamplePoint = (projectDatabasePath, fields) =>
   invokePetrolab("analytical_point.create", { project_database_path: projectDatabasePath, ...fields });
+export const listAnalysisPhotos = (projectDatabasePath,analysisId) => invokePetrolab("analysis.photos",{project_database_path:projectDatabasePath,analysis_id:analysisId});
 export const listPointAnalyses = (projectDatabasePath, pointId) =>
   invokePetrolab("analytical_point.analyses", { project_database_path: projectDatabasePath, point_id: pointId });
 export const createManualPointAnalysis = (projectDatabasePath, pointId, entry) =>
@@ -247,9 +248,9 @@ export const saveProjectPlotPresets = (path,preferences,revision) => invokePetro
 export const getProjectPlotColors = path => invokePetrolab("project.plot_colors.get", {project_database_path:path});
 export const saveProjectPlotColors = (path,scheme,revision) => invokePetrolab("project.plot_colors.save", {project_database_path:path,scheme,expected_revision:revision});
 export const getPlotGradient = (path,axis,analysisIds) => invokePetrolab("plot_data.gradient",{project_database_path:path,axis,analysis_ids:analysisIds});
-export const getPlotCatalog = (projectDatabasePath, analysisIds, includeCategories = false) =>
+export const getPlotCatalog = (projectDatabasePath, analysisIds, includeCategories = false, includeFormula = false) =>
   invokePetrolab("plot_data.catalog", { project_database_path: projectDatabasePath, analysis_ids: analysisIds,
-    ...(includeCategories ? { include_categories: true } : {}) });
+    ...(includeCategories ? { include_categories: true } : {}), ...(includeFormula ? {include_formula:true} : {}) });
 export const listPlotSpecifications = (projectDatabasePath) =>
   invokePetrolab("plot_spec.list", { project_database_path: projectDatabasePath });
 export const savePlotSpecification = (projectDatabasePath, layout) =>
@@ -259,6 +260,8 @@ export const openPlotSpecification = (projectDatabasePath, id) =>
 export const getPlotData = (projectDatabasePath, analysisIds, kind, axes, hiddenAnalysisIds, hiddenSourceIds, layers, normalization) =>
   invokePetrolab("plot_data.query", { project_database_path: projectDatabasePath, analysis_ids: analysisIds, kind, axes,
     hidden_analysis_ids: hiddenAnalysisIds, hidden_source_ids: hiddenSourceIds, layers, normalization });
+export const getZoningProfile = (projectDatabasePath, request) =>
+  invokePetrolab("photo.profile.query", { project_database_path: projectDatabasePath, ...request });
 export const recordPlotVisibility = (projectDatabasePath, analysisIds, hidden, sessionId) =>
   invokePetrolab(hidden ? "plot_visibility.hide" : "plot_visibility.restore", {
     project_database_path: projectDatabasePath, analysis_ids: analysisIds, session_id: sessionId,
@@ -399,3 +402,4 @@ export const createAnalyticalPoint = (projectDatabasePath, sampleName, pointName
     analysis_ids: analysisIds,
     link_type: linkType,
   });
+

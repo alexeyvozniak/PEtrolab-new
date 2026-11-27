@@ -17,10 +17,10 @@ from .selection_export import export_selection_csv, export_selection_xlsx
 from .table_views import list_table_views, save_table_view
 from .edit_drafts import check_edit_draft, commit_edit_draft, list_edit_drafts, save_edit_draft
 from .project_navigation import project_overview, save_work_plan_task, search_analyses
-from .sample_workspace import add_sample_note, change_point_link, get_point_analyses, get_project_sample, list_project_samples, save_sample_context, undo_point_link
+from .sample_workspace import add_sample_note, change_point_link, get_point_analyses, get_analysis_photo_locations, get_project_sample, list_project_samples, save_sample_context, undo_point_link
 from .manual_analysis import create_manual_analysis
 from .media_links import change_media_link, create_media_region, import_linked_photo, list_media_links
-from .plot_data import list_plot_specifications, open_plot_specification, plot_catalog, query_plot_data, record_plot_visibility, save_plot_specification, undo_plot_visibility
+from .plot_data import list_plot_specifications, open_plot_specification, plot_catalog, query_plot_data, query_zoning_profile, record_plot_visibility, save_plot_specification, undo_plot_visibility
 from .plot_gradient import plot_gradient_values
 from .plot_export import export_plot
 from .plot_colors import (get_project_plot_colors, save_project_plot_colors,
@@ -391,7 +391,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "plot_spec.save": lambda params: {"result": save_plot_specification(
         _project_database_path(params), params.get("name"), params.get("analysis_ids"), params.get("panels"),
         params.get("colors"), params.get("hidden_analysis_ids", []), params.get("hidden_source_ids", []),
-        params.get("layers"), category_style=params.get("category_style"),
+        params.get("layers"), category_style=params.get("category_style"), photo_view=params.get("photo_view"),
     )},
     "plot_spec.list": lambda params: {"result": list_plot_specifications(_project_database_path(params))},
     "plot_spec.open": lambda params: {"result": open_plot_specification(_project_database_path(params), params.get("id"))},
@@ -421,6 +421,10 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
         params.get("hidden_analysis_ids"), params.get("hidden_source_ids"), params.get("layers"),
         normalization=params.get("normalization"),
     )},
+    "photo.profile.query": lambda params: {"result": query_zoning_profile(
+        _project_database_path(params), params.get("media_asset_id"), params.get("points"),
+        params.get("axis"), params.get("reference_px"), params.get("reference_um"),
+    )},
     "project.overview": lambda params: {"result": project_overview(_project_database_path(params))},
     "project.work_plan.save": lambda params: {"result": save_work_plan_task(
         _project_database_path(params), params.get("task_id"), params.get("title"), params.get("completed"),
@@ -434,6 +438,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "project.sample.note.add": lambda params: {"result": add_sample_note(
         _project_database_path(params), params.get("sample_id"), params.get("author"), params.get("body"),
     )},
+    "analysis.photos": lambda params: {"result": get_analysis_photo_locations(_project_database_path(params), params.get("analysis_id"))},
     "analytical_point.analyses": lambda params: {"result": get_point_analyses(
         _project_database_path(params), params.get("point_id"),
     )},
@@ -682,3 +687,4 @@ def serve(input_stream: TextIO = sys.stdin, output_stream: TextIO = sys.stdout) 
 
 if __name__ == "__main__":
     serve()
+

@@ -235,6 +235,31 @@ class PublicationPackageTests(unittest.TestCase):
             with self.assertRaises(ImportCommandError):
                 query_plot_data(database, 'ternary', [*axes[:2], ratio('Nd', 'La')])
 
+    def test_molar_mg_number_exact_iron_basis_and_exclusions(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            database = root / 'project.sqlite'
+            source = root / 'mg.csv'
+            # Independently constructed equimolar and three-to-one molar cases.
+            source.write_text('Analysis,MgO [wt.%],FeO [wt.%],SiO2 [wt.%]\n'
+                              'P1,40.304,71.844,40\nP2,30.228,17.961,40\n'
+                              'P3,10,0,40\nP4,0,0,40\nP5,10,<DL,40\nP6,-1,10,40\n', encoding='utf-8')
+            original = source.read_bytes()
+            apply_import_plan(database, source, suggest_import_recipe(source)['recipe'])
+            measured = {axis['field']: axis for axis in plot_catalog(database)['axes']}
+            axis = {**measured['MgO'], 'field':'Mg# (FeO)', 'unit':'mol.%', 'calculation':{
+                'operation':'mg_number','version':1,'operands':[measured['MgO'],measured['FeO']]}}
+            projection = query_plot_data(database, 'binary', [axis, measured['SiO2']])
+            self.assertEqual(sorted(round(point['values'][0],8) for point in projection['points']), [50,75,100])
+            self.assertCountEqual([row['reason'] for row in projection['exclusions']], ['zero_denominator','below_detection_limit','negative_operand'])
+            self.assertTrue(all(point['axis_inputs'][0]['measurements'][1]['reported_fe_form']=='FeO' for point in projection['points']))
+            with self.assertRaises(ImportCommandError):
+                query_plot_data(database, 'binary', [{**axis,'field':'Mg# (FeOt, total Fe)'},measured['SiO2']])
+            panel = {'id':str(uuid4()),'kind':'binary','axes':[axis,measured['SiO2']]}
+            spec = save_plot_specification(database,'Mg number',None,[panel],{},[],[])
+            self.assertEqual(open_plot_specification(database,spec['id']),spec)
+            self.assertEqual(source.read_bytes(),original)
+
     def test_trace_pattern_package_keeps_reference_ratios_and_measurement_gaps(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)

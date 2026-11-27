@@ -5,7 +5,7 @@ from collections import defaultdict
 from contextlib import closing, nullcontext
 from hashlib import sha256
 import json
-from math import fsum, isfinite
+from math import fsum, hypot, isfinite
 import re
 from uuid import UUID
 
@@ -201,10 +201,20 @@ def _coordinate_axis(axis):
     if not isinstance(definition, dict) or set(definition) != {'operation', 'version', 'operands'}:
         raise ValueError('axis_calculation')
     operation, operands = definition['operation'], definition['operands']
-    if (operation not in ('sum', 'ratio') or type(definition['version']) is not int or definition['version'] != 1
-            or not isinstance(operands, list) or not 2 <= len(operands) <= (2 if operation == 'ratio' else 16)):
+    if (operation not in ('sum', 'ratio', 'mg_number') or type(definition['version']) is not int or definition['version'] != 1
+            or not isinstance(operands, list) or not 2 <= len(operands) <= (2 if operation in ('ratio', 'mg_number') else 16)):
         raise ValueError('axis_calculation')
     inputs = tuple(map(_axis_key, operands))
+    if operation == 'mg_number':
+        # Version 1: CIAAW 2024 abridged Mg 24.305, Fe 55.845, O 15.999.
+        # FeOt is total iron expressed as FeO; it is not measured Fe2+.
+        expected_label = 'Mg# (FeO)' if inputs[1][0] == 'FeO' else 'Mg# (FeOt, total Fe)'
+        if (inputs[0][0] != 'MgO' or inputs[1][0] not in ('FeO', 'FeOt')
+                or any(item[1] != 'wt.%' or item[2:] != key[2:] for item in inputs)
+                or key[:2] != (expected_label, 'mol.%')):
+            raise ImportCommandError('PLOT_CALCULATION_INCOMPATIBLE_OPERANDS',
+                                     'Mg# требует MgO и явно указанного FeO или FeOt в wt.% одного аналитического набора.')
+        return key, operation, inputs
     domains = {feature_domain(item) for item in operands}
     allowed = {'wt.%'} if domains == {'oxide_wt_percent'} else {'ppm', 'ppb'} if domains == {'trace_concentration'} else set()
     if (not allowed or len({item[0] for item in inputs}) != len(inputs)
@@ -324,6 +334,13 @@ def _coordinate_value(record, definition):
         return None, 'negative_operand', measurements
     if operation == 'ratio' and values[1] == 0:
         return None, 'zero_denominator', measurements
+    if operation == 'mg_number':
+        if not any(values):
+            return None, 'zero_denominator', measurements
+        magnitude = max(values)
+        mg = (values[0] / magnitude) / 40.304
+        fe = (values[1] / magnitude) / 71.844
+        return 100 * mg / (mg + fe), None, measurements
     try:
         if operation == 'ratio':
             value = values[0] / values[1]
@@ -425,9 +442,10 @@ def _pattern_vertices(record, keys, concentrations):
 
 
 def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysis_ids=None, hidden_source_ids=None,
-                    layers=None, *, normalization=None):
-    keys = _plot_keys(kind, axes)
-    calculated = any('calculation' in axis or 'formula' in axis for axis in axes)
+                    layers=None, *, normalization=None, profile_connection=None):
+    profile = profile_connection is not None
+    keys = [_coordinate_axis(axes[0])[0]] if profile else _plot_keys(kind, axes)
+    calculated = profile or any('calculation' in axis or 'formula' in axis for axis in axes)
     definitions = [_coordinate_axis(axis) for axis in axes] if calculated else []
     formula_bindings = [binding for _, operation, binding in definitions if operation == 'apfu']
     reference = pattern_reference(kind, [key[0] for key in keys], normalization) if kind in PATTERN_ORDERS else None
@@ -443,8 +461,9 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
     if reference is not None:
         key_set.update(map(_alternate_concentration_key, keys))
     fields = json.dumps(sorted({key[0] for key in key_set}))
-    with closing(open_project(database_path)) as connection:
-        connection.execute("BEGIN")
+    with (nullcontext(profile_connection) if profile else closing(open_project(database_path))) as connection:
+        if not profile:
+            connection.execute("BEGIN")
         active_analyses = connection.execute(
             f"SELECT a.analysis_id, a.source_id, a.identity_json, s.display_name AS source_name {_ACTIVE_ANALYSES}", (parameter, selection),
         ).fetchall()
@@ -574,6 +593,63 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
     result["projection_sha256"] = sha256(json.dumps(result, ensure_ascii=False, sort_keys=True,
                                                      allow_nan=False).encode()).hexdigest()
     return result
+
+
+def query_zoning_profile(database_path, media_id, points, axis, reference_px, reference_um):
+    _selection([media_id])
+    if not isinstance(points, list) or not 2 <= len(points) <= 100:
+        raise ValueError("profile_points")
+    if any(not isinstance(point, dict) or set(point) != {"spatial_annotation_id", "analysis_id"}
+           for point in points):
+        raise ValueError("profile_point")
+    _selection([point["spatial_annotation_id"] for point in points])
+    analysis_ids = [point["analysis_id"] for point in points]
+    _selection(analysis_ids)
+    if any(type(value) not in (int, float) or not 0 < value <= 1e12
+           for value in (reference_px, reference_um)):
+        raise ImportCommandError("PROFILE_CALIBRATION", "Введите положительную длину в пикселях и микрометрах.")
+    scale = reference_um / reference_px
+    if not isfinite(scale) or scale <= 0:
+        raise ValueError("profile_calibration")
+    ordered = []
+    with closing(open_project(database_path)) as connection:
+        connection.execute("BEGIN")
+        for point in points:
+            location = connection.execute("""
+                SELECT a.x_px, a.y_px
+                FROM spatial_annotation a
+                JOIN media_asset m USING (media_asset_id)
+                JOIN analytical_point_annotation pa USING (spatial_annotation_id)
+                JOIN analytical_point p USING (analytical_point_id)
+                JOIN analytical_point_analysis l USING (analytical_point_id)
+                WHERE a.media_asset_id = ? AND a.spatial_annotation_id = ?
+                  AND l.analysis_id = ? AND l.link_type = 'same_point'
+                  AND a.geometry_kind = 'point' AND pa.cross_sample_exception = 0
+                  AND p.sample_id = m.sample_id
+            """, (media_id, point["spatial_annotation_id"], point["analysis_id"])).fetchone()
+            if location is None:
+                raise ImportCommandError("PROFILE_POINT_UNAVAILABLE", "Сохранённая точная связь точки с анализом недоступна.")
+            ordered.append({**point, **dict(location)})
+        projection = query_plot_data(database_path, "profile", [axis], analysis_ids, profile_connection=connection)
+    if set(projection["input_analysis_ids"]) != set(analysis_ids):
+        raise ImportCommandError("PROFILE_POINT_UNAVAILABLE", "Один из анализов больше недоступен.")
+    values = {row["analysis_id"]: row for row in projection["points"]}
+    exclusions = {row["analysis_id"]: row for row in projection["exclusions"]}
+    distance = 0.0
+    previous = ordered[0]
+    for point in ordered:
+        distance += hypot(point["x_px"] - previous["x_px"], point["y_px"] - previous["y_px"]) * scale
+        if not isfinite(distance):
+            raise ValueError("profile_calibration")
+        previous = point
+        analysis_id = point["analysis_id"]
+        value = values.get(analysis_id)
+        excluded = exclusions.get(analysis_id)
+        point.update(distance_um=distance, value=value["values"][0] if value else None,
+                     reason=excluded["reason"] if excluded else "unusable_measurement" if not value else None,
+                     evidence=value["axis_inputs"] if value else excluded["axes"] if excluded else [])
+    return {"method": "ordered_euclidean_v1", "media_asset_id": media_id, "axis": axis,
+            "reference_px": reference_px, "reference_um": reference_um, "points": ordered}
 
 
 def _write_visibility_entry(connection, analysis_ids, hidden, session_id, *, reverses_operation_id=None,
@@ -720,7 +796,7 @@ def validate_point_style(panel):
         raise ValueError("plot_point_style")
 
 
-def save_plot_specification(database_path, name, analysis_ids, panels, colors, hidden_analyses, hidden_sources, layers=None, *, transaction=None, category_style=None):
+def save_plot_specification(database_path, name, analysis_ids, panels, colors, hidden_analyses, hidden_sources, layers=None, *, transaction=None, category_style=None, photo_view=None):
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
         raise ImportCommandError("PLOT_LAYOUT_NAME_INVALID", "Введите название раскладки до 120 символов.")
     if not isinstance(panels, list) or not 1 <= len(panels) <= 32:
@@ -762,10 +838,10 @@ def save_plot_specification(database_path, name, analysis_ids, panels, colors, h
             if transaction is None:
                 connection.execute("BEGIN IMMEDIATE")
             return _insert_plot_specification(connection, name, analysis_ids, saved_panels, panel_keys, colors,
-                                              hidden_analyses, hidden_sources, layers, category_style)
+                                              hidden_analyses, hidden_sources, layers, category_style, photo_view)
 
 
-def _insert_plot_specification(connection, name, analysis_ids, saved_panels, panel_keys, colors, hidden_analyses, hidden_sources, layers, category_style=None):
+def _insert_plot_specification(connection, name, analysis_ids, saved_panels, panel_keys, colors, hidden_analyses, hidden_sources, layers, category_style=None, photo_view=None):
     rows, available = _layout_input(connection, analysis_ids)
     if not panel_keys <= available:
         raise ImportCommandError("PLOT_LAYOUT_AXES_UNAVAILABLE", "Часть полей раскладки недоступна для выбранного набора.")
@@ -807,6 +883,9 @@ def _insert_plot_specification(connection, name, analysis_ids, saved_panels, pan
         spec["schema_version"] = 4
     if any("symbol" in panel.get("point_style", {}) for panel in saved_panels) or any("symbol" in entry for entry in (category_style or {}).get("entries", [])):
         spec["schema_version"] = 5
+    if photo_view is not None:
+        spec["photo_view"] = _validate_photo_view(connection, photo_view, saved_panels)
+        spec["schema_version"] = 6
     connection.execute("INSERT INTO plot_specification (id, name, definition_json) VALUES (?, ?, ?)",
                        (spec["id"], name, json.dumps(spec, ensure_ascii=False)))
     return spec
@@ -827,7 +906,7 @@ def open_plot_specification(database_path, spec_id):
         spec = json.loads(row[0])
         _validated_layers(spec.get("layers"))
         has_symbols = any("symbol" in panel.get("point_style", {}) for panel in spec["panels"]) or any("symbol" in entry for entry in spec.get("category_style", {}).get("entries", []))
-        expected_version = (5 if has_symbols else 4 if any("style" in (layer["field"] or {}) for layer in spec.get("layers", []))
+        expected_version = (6 if "photo_view" in spec else 5 if has_symbols else 4 if any("style" in (layer["field"] or {}) for layer in spec.get("layers", []))
                             else 3 if any("point_style" in panel for panel in spec["panels"])
                             else 2 if "category_style" in spec else 1)
         if spec.get("schema_version") != expected_version:
@@ -845,4 +924,22 @@ def open_plot_specification(database_path, spec_id):
             raise ImportCommandError("PLOT_LAYOUT_AXES_UNAVAILABLE", "Часть сохранённых полей недоступна. Раскладка не изменилась.")
         if "category_style" in spec:
             validate_category_style(connection, spec["input"]["analysis_ids"], spec["category_style"])
+        if "photo_view" in spec:
+            _validate_photo_view(connection, spec["photo_view"], spec["panels"])
         return spec
+
+def _validate_photo_view(connection, view, panels):
+    if not isinstance(view, dict) or set(view) != {"media_asset_id", "panel_ids"}:
+        raise ValueError("photo_view")
+    ids = view["panel_ids"]
+    if not isinstance(ids, list) or not 1 <= len(ids) <= 3 or len(set(ids)) != len(ids):
+        raise ValueError("photo_view.panel_ids")
+    if not set(ids) <= {panel["id"] for panel in panels}:
+        raise ValueError("photo_view.panel_ids")
+    media_id = view["media_asset_id"]
+    if media_id is not None:
+        _selection([media_id])
+        if not connection.execute("SELECT 1 FROM media_asset WHERE media_asset_id = ?", (media_id,)).fetchone():
+            raise ImportCommandError("PHOTO_VIEW_UNAVAILABLE", "Сохранённое фото недоступно; замена не выбрана.")
+    return {"media_asset_id": media_id, "panel_ids": list(ids)}
+

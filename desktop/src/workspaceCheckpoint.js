@@ -34,6 +34,8 @@ export function plotMemoryFromLayout(layout) {
     id,kind,axes:axes.map(({scale,manual_range,...axis})=>axis),
     ...(["ree_pattern","spider"].includes(kind)?{normalization}:{}),...(point_style?{point_style}:{})
   })),layers:layout.layers||[],views:new Map(),scrollTop:0,scrollLeft:0,
+    photoView:layout.photo_view||null,
     savedColors:Object.fromEntries(layout.legend.entries.map(({value,color})=>[value,color])),
     colorMode:category?.mode||"source",schemeColors:colors,schemeLoaded:true,schemeRevision:null};
 }
+
