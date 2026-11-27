@@ -144,6 +144,12 @@ test("large table virtualizes rows while selection, search and keyboard cover th
   fireEvent.change(pin,{target:{value:"identity:Analysis"}});
   expect(table.querySelector("thead tr:first-child th:nth-child(2)").classList.contains("analysis-pinned-column")).toBe(true);
   expect(table.querySelector("tbody tr:not(.analysis-row-spacer) td:nth-child(2)").textContent).toBe("V-0001");
+  const secondPin=screen.getByLabelText("Закреплённая колонка 2");
+  fireEvent.change(secondPin,{target:{value:"source"}});
+  expect(table.querySelectorAll("thead tr:first-child th.analysis-pinned-column")).toHaveLength(2);
+  expect(table.querySelector("thead tr:first-child th:nth-child(3)").style.left).toBe("192px");
+  fireEvent.change(secondPin,{target:{value:""}});
+  expect(table.querySelectorAll("thead tr:first-child th.analysis-pinned-column")).toHaveLength(1);
   fireEvent.keyDown(scroll, { key: "a", ctrlKey: true });
   expect(screen.getByText("1000 выбрано")).toBeTruthy();
   fireEvent.keyDown(scroll, { key: "End" });

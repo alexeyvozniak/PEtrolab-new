@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import { ContextActions } from "./ContextActions";
+import {duplicatePanel,selectionView} from "./plotQuickActions";
+import { CalculatedAxisEditor } from "./CalculatedAxisEditor";
 import { SYMBOL_LABELS,symbolGeometry,symbolPaint } from "./plotSymbols";
 function PointMarker({symbol,x,y,r,children,fill,...props}) {
   const {tag:Tag,attrs}=symbolGeometry(symbol,x,y,r);
@@ -149,7 +151,7 @@ function initialPanels(axes) {
     : make("binary", [axes[1], axes[0]])];
 }
 
-function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, shape, colorFor, categoryColor, categorySymbol, points, fieldStyles, pointStyle = DEFAULT_POINT_STYLE, rememberedView, rememberView }) {
+function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, onOpenPhotos, loadAnalysis, shape, colorFor, categoryColor, categorySymbol, points, fieldStyles, pointStyle = DEFAULT_POINT_STYLE, rememberedView, rememberView }) {
   const drag = useRef(null);
   const canvas = useRef(null);
   const hovered = useRef(false);
@@ -336,7 +338,10 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
       .flatMap((point) => point.analysis_ids || [point.analysis_id]))], modifier);
   };
   const clear = () => { drag.current = null; setRubber(null); };
+  const zoomTarget=useMemo(()=>["binary","ternary"].includes(data.kind)?selectionView(
+    markers.filter(point=>selected.has(point.analysis_id)).map(point=>({x:px(point.u),y:py(point.v)})),FULL_VIEW):null,[data.kind,markers,selected]);
   return <>
+  {zoomTarget&&<button type="button" className="outline-button" onClick={()=>{clear();setHover(null);setView(zoomTarget);}}>Приблизить выделенные точки</button>}
   {zoomed && <button type="button" className="outline-button plot-reset-zoom" onClick={() => setView(FULL_VIEW)}>Автомасштаб</button>}
   <svg ref={canvas} className="plot-canvas" viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`} aria-label="Диаграмма"
     tabIndex={0} onPointerEnter={() => { hovered.current = true; }} onPointerLeave={() => { hovered.current = false; setHover(null); }}
@@ -438,12 +443,13 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
   <PointTooltip hover={hover} shift={shift} detail={detail?.id === hoveredId ? detail : null} loadAnalysis={loadAnalysis} />
   <ContextActions menu={contextMenu} onClose={() => setContextMenu(null)} actions={contextMenu ? [
     { label: "Открыть анализ", disabled: !onOpenAnalysis, run: () => onOpenAnalysis(contextMenu.id) },
+    ...(onOpenPhotos?[{label:"Показать фотографии анализа",run:()=>onOpenPhotos(contextMenu.id)}]:[]),
     { label: selected.has(contextMenu.id) ? "Снять выделение" : "Добавить к отбору", run: () => onSelect([contextMenu.id], "toggle") },
     { label: "Выбрать только этот анализ", run: () => onSelect([contextMenu.id], "replace") },
   ] : []} /></>;
 }
 
-function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor, categorySymbol, onApplyStyle }) {
+function PlotPanel({ panel, axes, patterns, load, loadCatalog, update, remove, duplicate, selected, onSelect, onOpenAnalysis, onOpenPhotos, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor, categorySymbol, onApplyStyle }) {
   const [projection, setProjection] = useState(null);
   const projectionPanel = useMemo(() => ({kind:panel.kind, axes:panel.axes, normalization:panel.normalization}), [panel.kind, panel.axes, panel.normalization]);
   const current = projection?.load === load && projection.panel === projectionPanel ? projection : null;
@@ -504,6 +510,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
         {onFavorite && <button type="button" className="outline-button" aria-label={favorite ? "Убрать диаграмму из избранного" : "Добавить диаграмму в избранное"}
           aria-pressed={favorite} disabled={!makePreset(panel)} title="Избранное сохраняет комбинацию осей, а не исходные данные" onClick={onFavorite}>{favorite ? "★" : "☆"}</button>}
         {openExport && <button type="button" className="outline-button" disabled={!data} onClick={openExport}>Выгрузить панель</button>}
+        {duplicate&&<button type="button" className="outline-button" onClick={duplicate} title="Копирует оси и оформление, но не текущий масштаб">Дублировать диаграмму</button>}
         {canRemove && <button type="button" className="outline-button" onClick={remove}>Убрать панель</button>}
       </div>
     </header>
@@ -525,9 +532,9 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
       </select>}
       {panel.axes.map((axis, index) => {
         const locked = isCalculatedAxis(axis);
-        const candidates = locked ? [axis] : pattern ? group?.fields.get(axis.field) || [] : axes;
+        const candidates = locked ? [axis,...axes.filter(item=>axisKey(item)!==axisKey(axis))] : pattern ? group?.fields.get(axis.field) || [] : axes;
         if (pattern && candidates.length < 2) return null;
-        return <select key={index} aria-label={pattern ? `Предпочтительная единица ${axis.field}` : `Ось ${index + 1}`} value={axisKey(axis)} disabled={locked}
+        return <select key={index} aria-label={pattern ? `Предпочтительная единица ${axis.field}` : `Ось ${index + 1}`} value={axisKey(axis)}
           title={locked ? axisLabel(axis) : "Выберите поле или перетащите его из каталога осей"}
           onDragOver={event => {
             if (!locked && event.dataTransfer.types.includes(AXIS_DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }
@@ -544,6 +551,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
         </select>;
       })}
     </div>
+    {["binary","ternary"].includes(panel.kind)&&<CalculatedAxisEditor key={panel.kind} axes={axes} loadCatalog={loadCatalog} panel={panel} apply={updateAxis}/>}
     {panel.kind !== "histogram" && <details className="plot-point-style">
       <summary>Оформление точек · {Math.round(pointStyle.opacity*100)}%</summary>
       <label>Непрозрачность · {Math.round(pointStyle.opacity*100)}%
@@ -565,7 +573,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
     </details>}
     {status && <p role="status">{status}</p>}
     {data && <>
-      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} categoryColor={categoryColor} categorySymbol={categorySymbol} points={points} fieldStyles={fieldStyles} pointStyle={pointStyle}
+      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} onOpenPhotos={onOpenPhotos} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} categoryColor={categoryColor} categorySymbol={categorySymbol} points={points} fieldStyles={fieldStyles} pointStyle={pointStyle}
         rememberedView={viewMemory?.views.get(panel.id)?.fingerprint === data.projection_sha256 ? viewMemory.views.get(panel.id).view : undefined}
         rememberView={view => viewMemory?.views.set(panel.id, { fingerprint: data.projection_sha256, view })} />
       <small>{pattern ? "Спектров" : panel.kind === "histogram" ? "Анализов" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
@@ -691,7 +699,7 @@ function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
 }
 
 export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
-  hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
+  hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onOpenPhotos, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
   onExport, onAddPublication, loadColorScheme, saveColorScheme, onSummary, loadPresets, savePresets }) {
   const [axes, setAxes] = useState([]);
   const [axisQuery, setAxisQuery] = useState("");
@@ -1270,7 +1278,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
       }}>
         <div className="plot-grid" ref={grid}>
-          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} categorySymbol={category?.symbolFor} layers={layers} viewMemory={viewMemory}
+          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} loadCatalog={loadCatalog} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} onOpenPhotos={onOpenPhotos} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} categorySymbol={category?.symbolFor} layers={layers} viewMemory={viewMemory}
             openExport={onExport && !exportBusy && colorReady ? () => openExport(panel.id) : undefined}
             favorite={Boolean(makePreset(panel) && favoritePresets.some(item => presetKey(item) === presetKey(makePreset(panel))))}
             onFavorite={!presetBusy && (!loadPresets || presetRevision!==null) ? () => toggleFavorite(panel) : undefined}
@@ -1281,6 +1289,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
               if ((next.kind!==panel.kind || next.axes!==panel.axes || next.normalization!==panel.normalization) && preset && resolvePreset(preset,axes,patterns) && !presetBusy && (!loadPresets || presetRevision!==null))
                 setRecentPresets(current => rememberPreset(current,preset));
             }}
+            duplicate={panels.length<32?()=>{const id=crypto.randomUUID();setPanels(current=>duplicatePanel(current,panel.id,id));}:undefined}
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}
         </div>
         {exportOptions && <PlotExport options={exportOptions} panels={panels} pending={exportBusy} submit={submitExport}

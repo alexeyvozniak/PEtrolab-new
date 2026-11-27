@@ -11,7 +11,8 @@ export function sanitizeSession(value) {
     table:{
       visibleColumnIds:Array.isArray(table.visibleColumnIds)?[...new Set(table.visibleColumnIds.filter(column))].slice(0,500):[],
       columnWidths:Object.fromEntries(Object.entries(table.columnWidths || {}).filter(([key,width])=>column(key)&&typeof width==="number"&&Number.isFinite(width)).slice(0,500).map(([key,width])=>[key,bounded(width,104,600)])),
-      pinnedColumnId:column(table.pinnedColumnId)?table.pinnedColumnId:"",
+      pinnedColumnId:(Array.isArray(table.pinnedColumnIds)?table.pinnedColumnIds.filter(column)[0]:column(table.pinnedColumnId)?table.pinnedColumnId:"")||"",
+      pinnedColumnIds:Array.isArray(table.pinnedColumnIds)?[...new Set(table.pinnedColumnIds.filter(column))].slice(0,3):column(table.pinnedColumnId)?[table.pinnedColumnId]:[],
       scrollLeft:bounded(table.scrollLeft,0,300000),
     },
     samples:{tab:TABS.has(samples.tab)?samples.tab:"Обзор"},

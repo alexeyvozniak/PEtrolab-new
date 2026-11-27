@@ -130,6 +130,7 @@ export function SampleWorkspace({ viewMemory, loadSamples, loadSample, saveConte
     <button className="outline-button" type="button" disabled={busy} onClick={() => onOpenAnalyses(current, source)}>Открыть анализы источника</button>
   </li>)}</ul>;
   const gallery = current && <MediaGallery key={sampleId} images={current.images} previewMedia={previewMedia}
+    showPoints pointLinks={pointLinks} mediaLinks={mediaLinks} reloadSample={reloadSample}
     exportOriginal={exportOriginal} exportRendered={exportRendered} exportBatch={exportBatch} addPublication={addPublication} />;
   return <section className="sample-workspace">
     <div className="sample-header">

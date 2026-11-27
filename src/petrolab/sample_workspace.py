@@ -156,6 +156,30 @@ def get_point_analyses(database_path, point_id):
         return [_point_analysis(row) for row in rows]
 
 
+def get_analysis_photo_locations(database_path, analysis_id):
+    """Exact persisted spatial links for an active analysis, never name matching."""
+    _sample_id(analysis_id)
+    with closing(open_project(database_path)) as connection:
+        rows = connection.execute("""
+            SELECT m.media_asset_id, m.display_name, m.sample_id, s.sample_name,
+                   p.analytical_point_id, p.point_name, l.link_type,
+                   a.spatial_annotation_id, a.geometry_kind, a.x_px, a.y_px, a.width_px, a.height_px,
+                   pa.cross_sample_exception, pa.exception_reason
+            FROM analytical_point_analysis l
+            JOIN analysis n USING (analysis_id)
+            JOIN import_batch b USING (import_batch_id)
+            LEFT JOIN import_batch_retraction r USING (import_batch_id)
+            JOIN analytical_point p USING (analytical_point_id)
+            JOIN analytical_point_annotation pa USING (analytical_point_id)
+            JOIN spatial_annotation a USING (spatial_annotation_id)
+            JOIN media_asset m USING (media_asset_id)
+            JOIN sample s ON s.sample_id = m.sample_id
+            WHERE l.analysis_id = ? AND b.status = 'applied' AND r.import_batch_id IS NULL
+            ORDER BY m.display_name, m.media_asset_id, p.point_name, a.spatial_annotation_id
+        """, (analysis_id,))
+        return [dict(row) for row in rows]
+
+
 def _point_analysis(row):
     record = dict(row)
     record["identity"] = " · ".join(value for value in json.loads(record.pop("identity_json")) if value)

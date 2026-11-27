@@ -720,6 +720,11 @@ test("one common selection highlights the same analysis on binary and ternary pl
   expect(screen.getAllByRole("button", { name: "Выбрать точку P1" })
     .every((point) => point.getAttribute("aria-pressed") === "true")).toBe(true);
   const originalView = canvas.getAttribute("viewBox");
+  await user.click(within(canvas.closest("article")).getByRole("button",{name:"Приблизить выделенные точки"}));
+  expect(Number(canvas.getAttribute("viewBox").split(" ")[2])).toBeLessThan(460);
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  await user.click(within(canvas.closest("article")).getByRole("button",{name:"Автомасштаб"}));
+  expect(canvas.getAttribute("viewBox")).toBe(originalView);
   fireEvent.wheel(canvas, { deltaY: -120, clientX: 230, clientY: 140 });
   expect(canvas.getAttribute("viewBox")).toBe(originalView);
   fireEvent.wheel(canvas, { deltaY: -120, clientX: 230, clientY: 140, ctrlKey: true });
@@ -797,7 +802,12 @@ test("one common selection highlights the same analysis on binary and ternary pl
   expect(panelOrder()).toEqual([beforeOrder[1], beforeOrder[0]]);
   await user.click(await enabledButton("Переместить панель 2 выше"));
   expect(panelOrder()).toEqual(beforeOrder);
-  await user.click(await enabledButton("Добавить диаграмму"));
+  const firstPanel=document.getElementById(beforeOrder[0]);
+  await user.click(within(firstPanel).getByRole("button",{name:"Дублировать диаграмму"}));
+  expect(panelOrder()).toHaveLength(3);
+  expect(panelOrder()[0]).toBe(beforeOrder[0]);
+  expect(panelOrder()[2]).toBe(beforeOrder[1]);
+  expect(document.getElementById(panelOrder()[1]).querySelector("header b").textContent).toBe(firstPanel.querySelector("header b").textContent);
   await user.click(await enabledButton("Скрыть отбор на графиках"));
   await screen.findByRole("button", { name: "Вернуть скрытые точки · 1" });
   await user.click(screen.getByText("Сохранённые раскладки", { exact: true }));

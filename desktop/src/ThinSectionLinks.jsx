@@ -30,7 +30,7 @@ function ManualAnalysisForm({ point, pending, onSave, onCancel }) {
 }
 
 export function ThinSectionLinks({ point, actions }) {
-  const { loadPoint, changeLink, queryProject, selectedIds, addToSelection, openAnalysis, createManualAnalysis } = actions;
+  const { loadPoint, changeLink, queryProject, selectedIds, addToSelection, openAnalysis, openPlots, createManualAnalysis } = actions;
   const [rows, setRows] = useState(null);
   const [search, setSearch] = useState(false);
   const [manual, setManual] = useState(false);
@@ -138,6 +138,8 @@ export function ThinSectionLinks({ point, actions }) {
       </div>
       {!rows && !error && <p role="status">Загружаю анализы точки…</p>}
       {rows?.length === 0 && <p>У этой точки нет связанных анализов.</p>}
+      {openPlots&&rows?.some(row=>row.active)&&<button type="button" className="outline-button" disabled={pending}
+        onClick={()=>openPlots(rows.filter(row=>row.active).map(row=>row.analysis_id))}>Показать связанные анализы на диаграммах</button>}
       {rows?.length > 0 && <ul className="sample-items">{rows.map((row) => <li key={row.analysis_id}>
         <div><b>{row.identity || row.analysis_id}</b><p>{row.method || "Метод не указан"} · {row.source_name}{!row.active && " · импорт отозван"}</p></div>
         <div className="point-row-actions">

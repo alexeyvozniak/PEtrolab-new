@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSelectionHistory } from "./selectionHistory";
 import { SelectionSummary } from "./SelectionSummary";
+import { AnalysisPhotos } from "./AnalysisPhotos";
 import { WorkspaceCheckpoints } from "./WorkspaceCheckpoints";
 import { tableMemoryFromView, plotMemoryFromLayout } from "./workspaceCheckpoint";
 import { sessionKey, readSession, writeSession, memoryFromSession } from "./sessionPreferences";
@@ -29,7 +30,7 @@ import {
   getProjectDatabasePath,
   getProjectOverview, getProjectAnalysis, queryProjectAnalyses, queryProjectAnalysisIds, saveProjectWorkPlanTask,
   listProjectSamples, getProjectSample, saveSampleContext, addSampleNote,
-  createSamplePoint, listPointAnalyses, setPointAnalysisLink, undoPointAnalysisLink, createManualPointAnalysis,
+  createSamplePoint, listPointAnalyses, listAnalysisPhotos, setPointAnalysisLink, undoPointAnalysisLink, createManualPointAnalysis,
   pickMediaFiles, pickMediaExportPath, inspectMediaFiles, previewMediaFile, draftMediaImport, commitMediaImport,
   pickMediaFolder, inspectMediaFolder, loadMediaImportDraft, saveMediaImportDraft,
   createMediaRegion, listMediaLinks, setMediaLink, importLinkedPhoto,
@@ -137,6 +138,8 @@ export function App() {
   const [selectedAnalysisIds, setSelectedAnalysisIds, undoSelection, redoSelection] = useSelectionHistory();
   const [shortcutHelp, setShortcutHelp] = useState(false);
   const [summaryRequest,setSummaryRequest] = useState(null);
+  const [photoAnalysisId,setPhotoAnalysisId]=useState("");
+  const openPhotos=id=>setPhotoAnalysisId(id);
   const [checkpointOpen,setCheckpointOpen]=useState(false);
   const [checkpointEpoch,setCheckpointEpoch]=useState(0);
   const openSummary = () => setSummaryRequest([...selectedAnalysisIds]);
@@ -527,7 +530,7 @@ export function App() {
   const savePresets = useCallback(async (preferences,revision) => unwrap(await saveProjectPlotPresets(databasePath,preferences,revision)), [databasePath]);
   const loadColorScheme = useCallback(async () => unwrap(await getProjectPlotColors(databasePath)),[databasePath]);
   const saveColorScheme = useCallback(async (scheme,revision) => unwrap(await saveProjectPlotColors(databasePath,scheme,revision)),[databasePath]);
-  const loadPlotCatalog = useCallback(async (includeCategories = false) => unwrap(await getPlotCatalog(databasePath, plotInputIds, includeCategories)), [databasePath, plotInputIds]);
+  const loadPlotCatalog = useCallback(async (includeCategories = false, includeFormula = false) => unwrap(await getPlotCatalog(databasePath, plotInputIds, includeCategories, includeFormula)), [databasePath, plotInputIds]);
   const loadPlotAnalysis = useCallback(async id => unwrap(await getProjectAnalysis(databasePath, id)), [databasePath]);
   const loadPlotSelection = useCallback(async (analysisIds, offset, limit) =>
     unwrap(await queryProjectAnalyses(databasePath, { analysis_ids: analysisIds, offset, limit })), [databasePath]);
@@ -894,6 +897,11 @@ export function App() {
             selectedIds: selectedAnalysisIds,
             addToSelection: (id) => setSelectedAnalysisIds((current) => current.includes(id) ? current : [...current, id]),
             openAnalysis: openSearchAnalysis,
+            openPlots: ids=>{
+              setSelectedAnalysisIds(current=>[...new Set([...current,...ids])]);
+              if(viewMemory.plot.opened && (!plotInputIds || ids.every(id=>plotInputIds.includes(id))))setScreen("Построение");
+              else openPlots(ids);
+            },
           }}
           onOpenAnalyses={openSampleAnalyses} busy={busy} />}
         {screen === "Импорт изображений" && <MediaImport actions={{
@@ -947,7 +955,7 @@ export function App() {
           onSetVisibility={setPlotVisibility}
           onUndoVisibility={visibilityOperation ? undoVisibility : null}
           onToggleSource={togglePlotSource} onIsolateSource={isolatePlotSource}
-          onOpenAnalysis={id => openSearchAnalysis(id)} />}
+          onOpenAnalysis={id => openSearchAnalysis(id)} onOpenPhotos={openPhotos} />}
         {screen === "Импорт" && (
           <section className={`live-page${sourcePath ? " import-live-page" : ""}`}>
             {!sourcePath && (
@@ -1030,6 +1038,7 @@ export function App() {
             onExportSelection={exportSelection}
             onPublishSelection={publishSelection}
             onSummary={openSummary}
+            onOpenPhotos={openPhotos}
             onOpenPlots={(ids) => openPlots(Array.isArray(ids) ? ids : selectedAnalysisIds)}
             hiddenPlotAnalysisIds={hiddenAnalysisIds}
             onSetPlotVisibility={setPlotVisibility}
@@ -1052,6 +1061,9 @@ export function App() {
       </section>
       {checkpointOpen && <WorkspaceCheckpoints load={loadCheckpoints} selection={selectedAnalysisIds}
         save={async(name,state)=>unwrap(await saveWorkspaceSnapshot(databasePath,name,state))} restore={restoreCheckpoint} close={()=>setCheckpointOpen(false)}/>}
+      {photoAnalysisId&&<AnalysisPhotos key={photoAnalysisId} id={photoAnalysisId}
+        load={id=>listAnalysisPhotos(databasePath,id).then(unwrap)} preview={(id,region)=>previewProjectMedia(databasePath,id,region).then(unwrap)}
+        close={()=>setPhotoAnalysisId("")}/>}
       {summaryRequest && <SelectionSummary ids={summaryRequest} load={ids=>getSelectionSummary(databasePath,ids).then(unwrap)} close={()=>setSummaryRequest(null)} />}
       {commandPalette && <div className="import-result-overlay" role="presentation" onMouseDown={event => {
         if (event.target === event.currentTarget) setCommandPalette(false);

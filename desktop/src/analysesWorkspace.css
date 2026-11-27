@@ -193,3 +193,8 @@
 .analysis-pin-control select { width:100%;min-width:0; }
 
 .analysis-measurement.provenance-focused { outline:2px solid #397450;outline-offset:-2px;background:#eaf4ec; }
+
+.analysis-pin-control { display:grid;gap:4px; }
+.analysis-pin-control label { display:grid;gap:3px; }
+.analysis-pin-control select { width:100%;min-width:0; }
+.analysis-copy-status { position:sticky;bottom:0;z-index:7;background:#f3f7f4;border:1px solid #bdcec1;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;gap:8px; }
