@@ -304,6 +304,14 @@ class NdjsonServiceTests(unittest.TestCase):
                 {"id": item["id"], "name": item["name"]} for item in (saved, saved_histogram, applied_histogram["plot"])
             ])
             self.assertEqual(call("plot_spec.open", id=saved["id"])["result"], saved)
+            photo_view = {"media_asset_id": None, "panel_ids": [panels[1]["id"]]}
+            photo_saved = call("plot_spec.save", name="Фото и диаграммы", analysis_ids=mask["analysis_ids"],
+                               panels=panels, colors={}, photo_view=photo_view,
+                               hidden_analysis_ids=[p2["analysis_id"]])["result"]
+            self.assertEqual(photo_saved["schema_version"], 7)
+            self.assertEqual(photo_saved["photo_view"], photo_view)
+            self.assertEqual(call("plot_spec.open", id=photo_saved["id"])["result"], photo_saved)
+            self.assertEqual(photo_saved["hidden_analysis_ids"], [p2["analysis_id"]])
             field_axes = [axes["Al2O3"], axes["F"]]
             field_input = call("plot_data.query", kind="binary", axes=field_axes)["result"]
             layer = {"id": str(uuid.uuid4()), "name": "Сравнение", "analysis_ids": [
@@ -339,6 +347,10 @@ class NdjsonServiceTests(unittest.TestCase):
             kde_layout = call("plot_spec.save", name="KDE", panels=panels, colors={}, layers=[layer])["result"]
             self.assertEqual(kde_layout["schema_version"], 6)
             self.assertEqual(call("plot_spec.open", id=kde_layout["id"])["result"]["layers"], [layer])
+            photo_kde = call("plot_spec.save", name="Фото и KDE", panels=panels, colors={},
+                             layers=[layer], photo_view=photo_view)["result"]
+            self.assertEqual(photo_kde["schema_version"], 7)
+            self.assertEqual(call("plot_spec.open", id=photo_kde["id"])["result"], photo_kde)
             invalid_layer = {**layer, "field": {**layer["field"], "bandwidth_y": 0}}
             self.assertIn("error", call("plot_data.query", kind="binary", axes=field_axes, layers=[invalid_layer]))
             self.assertEqual(source.read_bytes(), source_bytes)

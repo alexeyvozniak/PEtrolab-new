@@ -180,6 +180,50 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual(get_analysis_photo_locations(database, other_id), [])
             self.assertEqual(found[0]["media_asset_id"], plan["items"][0]["media_asset_id"])
 
+    def test_zoning_profile_uses_original_pixels_exact_links_and_censored_gaps(self):
+        from uuid import uuid4
+        from petrolab.desktop_workflow import suggest_import_recipe
+        from petrolab.ndjson_service import PROTOCOL_VERSION, handle_request
+        from petrolab.plot_data import plot_catalog
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / "project.sqlite"
+            source = root / "profile.csv"
+            source.write_text("Analysis,SiO2 (wt.%),MgO (wt.%)\nP1,20,5\nP2,<1,4\nP3,30,3\n"
+                              "R1,21,5\nR2,25,4\nR3,31,3\n", encoding="utf-8")
+            apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
+            with closing(open_project(database)) as connection:
+                ids = [row[0] for row in connection.execute("SELECT analysis_id FROM analysis ORDER BY rowid")]
+            image = root / "profile.png"
+            write_png(image)
+            assignment = None
+            for index, coords in enumerate([(1, 0), (4, 4), (4, 7)]):
+                point = create_analytical_point(database, "KIV-2", f"profile-{index}", [ids[index], ids[index + 3]], "same_point")
+                placement = self._assignment(image, point["analytical_point_id"])
+                placement["placements"][0]["geometry"].update(zip(("x_px", "y_px"), coords))
+                if assignment is None:
+                    assignment = placement
+                else:
+                    assignment["placements"].extend(placement["placements"])
+            plan = create_media_import_plan(database, [assignment])
+            apply_media_import_plan(database, plan)
+            route = [{"spatial_annotation_id": get_analysis_photo_locations(database, item)[0]["spatial_annotation_id"],
+                      "analysis_id": item} for item in ids[:3]]
+            axis = next(axis for axis in plot_catalog(database)["axes"] if axis["field"] == "SiO2")
+            request = {"protocol_version": PROTOCOL_VERSION, "request_id": str(uuid4()), "command": "photo.profile.query",
+                       "payload": {"project_database_path": str(database), "media_asset_id": plan["items"][0]["media_asset_id"],
+                                   "points": route, "axis": axis, "reference_px": 5, "reference_um": 10}}
+            response = handle_request(request)
+            self.assertIn("result", response)
+            points = response["result"]["points"]
+            self.assertEqual([item["distance_um"] for item in points], [0, 10, 16])
+            self.assertEqual([item["value"] for item in points], [20, None, 30])
+            self.assertEqual(points[1]["reason"], "below_detection_limit")
+            with closing(open_project(database)) as connection, connection:
+                connection.execute("UPDATE analytical_point_analysis SET link_type = 'same_zone' WHERE analysis_id = ?", (ids[1],))
+            self.assertEqual(handle_request(request)["error"]["code"], "PROFILE_POINT_UNAVAILABLE")
+
     def test_png_and_tiff_metadata_are_inspected_without_writes(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             directory = Path(directory_name)
@@ -704,3 +748,4 @@ class MediaImportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
