@@ -38,7 +38,7 @@ import {
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
   getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication, capturePublicationPlot,
   capturePublicationTable, capturePublicationMedia,
-  getPlotCatalog, getPlotData, recordPlotVisibility, undoPlotVisibility, getProjectPlotColors, saveProjectPlotColors, getSelectionSummary, getProjectPlotPresets, saveProjectPlotPresets,
+  getPlotCatalog, getPlotData, getZoningProfile, recordPlotVisibility, undoPlotVisibility, getProjectPlotColors, saveProjectPlotColors, getSelectionSummary, getProjectPlotPresets, saveProjectPlotPresets,
   listPlotSpecifications, openPlotSpecification, savePlotSpecification, pickPlotExportPath, exportPlot,
   isPetrolabDesktop,
   listProjectAnalyses,
@@ -506,7 +506,7 @@ export function App() {
     const next = ids.length ? [...ids] : null;
     if (JSON.stringify(next) !== JSON.stringify(plotInputIds)) {
       // A deliberately new input does not inherit layers or zoom from the old input.
-      Object.assign(viewMemory.plot, { panels: [], layers: [], views: new Map(), scrollTop: 0, scrollLeft: 0 });
+      Object.assign(viewMemory.plot, { panels: [], layers: [], views: new Map(), scrollTop: 0, scrollLeft: 0, photoView: null });
       setPlotInputIds(next);
     }
     viewMemory.plot.opened = true;
@@ -650,6 +650,9 @@ export function App() {
     : { groups: [], layouts: [], runs: [] }, [databasePath]);
   const loadSamples = useCallback(async () => databasePath ? unwrap(await listProjectSamples(databasePath)) : [], [databasePath]);
   const loadSample = useCallback(async (id) => unwrap(await getProjectSample(databasePath, id)), [databasePath]);
+  const loadPhotoPlotLinks=useCallback(async id=>unwrap(await listAnalysisPhotos(databasePath,id)),[databasePath]);
+  const loadZoningProfile=useCallback(async request=>unwrap(await getZoningProfile(databasePath,request)),[databasePath]);
+  const previewPhotoPlot=useCallback(async (id,region)=>unwrap(await previewProjectMedia(databasePath,id,region)),[databasePath]);
   const loadPointAnalyses = useCallback(async (id) => unwrap(await listPointAnalyses(databasePath, id)), [databasePath]);
   const loadMediaLinks = useCallback(async (id) => unwrap(await listMediaLinks(databasePath, id)), [databasePath]);
   const loadMediaDraft = useCallback(async () => unwrap(await loadMediaImportDraft(databasePath)), [databasePath]);
@@ -940,7 +943,7 @@ export function App() {
             const destination = await pickPublicationExportPath();
             return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination, settings)) : null;
           }} />}
-        {screen === "Построение" && <PlotWorkspace key={checkpointEpoch} viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
+        {screen === "Построение" && <PlotWorkspace loadPhotos={loadPhotoPlotLinks} previewPhoto={previewPhotoPlot} loadProfile={loadZoningProfile} key={checkpointEpoch} viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
           loadSelection={loadPlotSelection} loadAnalysis={loadPlotAnalysis} loadColorScheme={loadColorScheme} saveColorScheme={saveColorScheme} loadPresets={loadPresets} savePresets={savePresets} onSummary={openSummary}
           loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}
           openLayout={restorePlotLayout} onExport={async (svg, options) => {
