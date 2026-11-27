@@ -46,6 +46,9 @@ function categoryStyle(rows, mode, overrides, symbols) {
     symbolFor:id=>shapes.get(byId.get(id)??null)||"circle"};
 }
 const AXIS_DRAG_TYPE = "application/x-petrolab-axis";
+const KDE_METHOD = "gaussian_kde_v1";
+const KDE_DEFAULTS = { bandwidth_x: 0.10, bandwidth_y: 0.10, level: 0.50 };
+const hasFieldGeometry = (field) => field.vertices.length >= 3 || Boolean(field.rings?.length);
 function PointTooltip({ hover, detail, shift, loadAnalysis }) {
   if (!hover) return null;
   const { point, x, y } = hover;
@@ -397,13 +400,19 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, onOpenPhotos, lo
       <text transform={`translate(12 ${py(0.5)}) rotate(-90)`} textAnchor="middle">{isPattern ? "Отношение к эталону"
         : isHistogram ? "Число анализов" : `${data.axes[1].field} (${data.axes[1].unit})`}</text>
     </>}
-    {(data.fields || []).filter(field=>field.vertices.length>=3).map(field=>{
+    {(data.fields || []).filter(hasFieldGeometry).map(field=>{
       const style=fieldStyles?.get(field.layer_id);
-      return <polygon key={field.layer_id} className="plot-field"
-        fill={style?.mode==="outline" ? "none" : style?.color || "#99b9a0"}
-        fillOpacity={style?.fill_opacity ?? 0.26}
-        stroke={style?.mode==="fill" ? "none" : style?.color || "#5c7d66"}
-        strokeWidth={style?.stroke_width ?? 1} points={field.vertices.map(([u,v])=>`${px(u)},${py(v)}`).join(" ")} />;
+      const paint = {
+        fill: style?.mode === "outline" ? "none" : style?.color || "#99b9a0",
+        fillOpacity: style?.fill_opacity ?? 0.26,
+        stroke: style?.mode === "fill" ? "none" : style?.color || "#5c7d66",
+        strokeWidth: style?.stroke_width ?? 1,
+      };
+      const coordinates = (ring) => ring.map(([u, v]) => `${px(u)},${py(v)}`).join(" ");
+      return field.rings
+        ? <path key={field.layer_id} className="plot-field" {...paint} fillRule="evenodd"
+            d={field.rings.map((ring) => `M ${coordinates(ring)} Z`).join(" ")} />
+        : <polygon key={field.layer_id} className="plot-field" {...paint} points={coordinates(field.vertices)} />;
     })}
     {paths.map(({ point, path }) => <path key={point.analysis_id} className="plot-series" data-analysis-id={point.analysis_id}
       d={path} fill="none" stroke={categoryColor ? categoryColor(point.analysis_id) : colorFor(point.source_id)} strokeWidth={1.25} opacity={point.opacity * pointStyle.opacity} />)}
@@ -466,7 +475,7 @@ function PlotPanel({ panel, axes, patterns, load, loadCatalog, update, remove, d
   }
   const styles = useMemo(() => {
     const result = new Map();
-    const available = new Set((data?.fields || []).filter(field=>field.vertices.length>=3).map(field=>field.layer_id));
+    const available = new Set((data?.fields || []).filter(hasFieldGeometry).map(field=>field.layer_id));
     layers.forEach(({ id:layerId, analysis_ids, opacity, show_points, field }, order) => {
       const fallback = field?.visible && !available.has(layerId);
       for (const id of analysis_ids) result.set(id, { order, opacity: show_points || fallback ? (fallback && !show_points ? 1 : opacity) : 0 });
@@ -583,7 +592,7 @@ function PlotPanel({ panel, axes, patterns, load, loadCatalog, update, remove, d
       {Object.keys(exclusions).length > 0 && <small className="plot-exclusion-summary">{Object.entries(exclusions)
         .map(([reason, count]) => `${reason} (${count})`).join(" · ")}</small>}
       {(data.fields || []).filter((field) => field.message).map((field) =>
-        <p key={field.layer_id}><small>{layers.find((layer) => layer.id === field.layer_id)?.name}: {field.message}{layers.some(layer=>layer.id===field.layer_id && !layer.show_points) ? " Маркеры показаны вместо поля." : ""}</small></p>)}
+        <p key={field.layer_id}><small>{layers.find((layer) => layer.id === field.layer_id)?.name}: {field.message}{!hasFieldGeometry(field) && layers.some(layer=>layer.id===field.layer_id && !layer.show_points) ? " Маркеры показаны вместо поля." : ""}</small></p>)}
     </>}
   </article>;
 }
@@ -842,7 +851,11 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
   // Cache only within this mounted workspace and exact data/visibility/layer
   // scope. Deduplicate in-flight requests; rejected or oversized entries are
   // never retained. No persistent cache across project changes or edits.
-  const geometrySignature=JSON.stringify(layers.map(layer=>({...layer,field:layer.field ? {method:layer.field.method,visible:layer.field.visible,probability:layer.field.probability} : null})));
+  const geometrySignature = JSON.stringify(layers.map((layer) => {
+    if (!layer.field) return layer;
+    const { style, ...field } = layer.field;
+    return { ...layer, field };
+  }));
   const geometryLayers=useMemo(()=>JSON.parse(geometrySignature),[geometrySignature]);
   const loadWithLayers = useMemo(() => {
     const cache = new Map();
@@ -1211,11 +1224,29 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
             onChange={(event) => updateLayer(layer.id, { opacity: Number(event.target.value) })} /></label>
           <label>Метод поля <select value={layer.field?.method || ""} onChange={(event) => {
             const method = event.target.value;
-            updateLayer(layer.id, { field: method ? { method, visible: true, probability: method === "convex_hull" ? null : 0.95, ...(layer.field?.style ? {style:layer.field.style} : {}) } : null });
+            updateLayer(layer.id, { field: method ? { method, visible: true,
+              probability: method === "normal_probability_ellipse" ? 0.95 : null,
+              ...(method === KDE_METHOD ? KDE_DEFAULTS : {}),
+              ...(layer.field?.style ? { style: layer.field.style } : {}),
+            } : null });
           }}>
             <option value="">Без поля</option><option value="convex_hull">Выпуклая оболочка</option>
             <option value="normal_probability_ellipse">Эллипс вероятности</option>
+            <option value={KDE_METHOD}>KDE-контур</option>
           </select></label>
+          {layer.field?.method === KDE_METHOD && <>
+            {[
+              ["bandwidth_x", "Ширина ядра X", 0.02, 0.5],
+              ["bandwidth_y", "Ширина ядра Y", 0.02, 0.5],
+              ["level", "Доля максимума плотности", 0.01, 0.99],
+            ].map(([parameter, label, min, max]) => <label key={parameter}>{label}
+              <input type="range" min={min} max={max} step={0.01} aria-label={label}
+                value={layer.field[parameter]} onChange={(event) =>
+                  updateLayer(layer.id, { field: { ...layer.field, [parameter]: Number(event.target.value) } })} />
+              <output>{layer.field[parameter].toFixed(2)}</output>
+            </label>)}
+            <small>Для бинарной диаграммы. Ширина ядра задана в долях диапазона соответствующей оси.</small>
+          </>}
           {layer.field && <label><input type="checkbox" checked={layer.field.visible}
             onChange={(event) => updateLayer(layer.id, { field: { ...layer.field, visible: event.target.checked } })} /> Поле</label>}
           {layer.field && <div className="plot-cloud-style">

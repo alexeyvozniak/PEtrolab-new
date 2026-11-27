@@ -19,7 +19,8 @@ from .import_apply import open_project
 from .formula_service import list_formula_runs, open_formula_run
 from .import_preview import ImportCommandError
 from .media_display import _annotations, _asset_source, _publish_new_file, export_media_original, export_media_rendered
-from .plot_data import list_plot_specifications, open_plot_specification, query_plot_data, validate_category_style, validate_point_style
+from .plot_data import (list_plot_specifications, open_plot_specification, plot_schema_version, query_plot_data,
+                        validate_category_style, validate_point_style)
 from .plot_symbols import marker_legend_signature
 from .plot_export import SVG_LIMIT, checked_svg, render_plot
 from .selection_export import selection_xlsx_bytes
@@ -168,10 +169,7 @@ def _plot_capture(database_path, capture):
         with closing(open_project(database_path)) as connection:
             connection.execute("BEGIN")
             validate_category_style(connection, scope, category_style)
-    has_symbols = any("symbol" in panel.get("point_style", {}) for panel in snapshots) or any("symbol" in entry for entry in (category_style or {}).get("entries", []))
-    result["schema_version"] = (5 if has_symbols else 4 if any("style" in (layer["field"] or {}) for layer in capture["layers"])
-                                else 3 if any("point_style" in panel for panel in snapshots)
-                                else 2 if category_style is not None else 1)
+    result["schema_version"] = plot_schema_version(snapshots, capture["layers"], category_style)
     return result, list(contributors)
 
 

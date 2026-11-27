@@ -21,6 +21,20 @@ PLOT = """<svg xmlns="http://www.w3.org/2000/svg" width="460" height="280" viewB
 
 
 class PlotExportTests(unittest.TestCase):
+    def test_compound_field_keeps_its_hole_in_svg_and_raster(self):
+        figure = """<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+<g id="panel-a"><path d="M 10,10 90,10 90,90 10,90 Z M 30,30 70,30 70,70 30,70 Z"
+fill-rule="evenodd" fill="#c92f36"/></g></svg>"""
+        with TemporaryDirectory() as folder:
+            svg = Path(folder) / "field.svg"
+            png = Path(folder) / "field.png"
+            export_plot(figure, "svg", str(svg))
+            self.assertEqual(svg.read_text(encoding="utf-8"), figure)
+            export_plot(figure, "png", str(png), 90, 300)
+            with Image.open(png) as image:
+                self.assertNotEqual(image.getpixel((image.width // 5, image.height // 2)), (255, 255, 255))
+                self.assertEqual(image.getpixel((image.width // 2, image.height // 2)), (255, 255, 255))
+
     def test_pdf_keeps_editable_text_and_graphic_paths_and_matches_lithos_width(self):
         with TemporaryDirectory() as folder:
             path = Path(folder) / "figure.pdf"

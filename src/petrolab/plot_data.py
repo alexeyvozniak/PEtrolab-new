@@ -12,7 +12,8 @@ from uuid import UUID
 from .desktop_workflow import _measurement_numeric_value
 from .import_apply import _id, _now, open_project
 from .import_preview import ImportCommandError
-from .plot_fields import clip_to_plot_rectangle, convex_hull, normal_probability_ellipse
+from .plot_fields import (KDE_BANDWIDTH_RANGE, clip_to_plot_rectangle, convex_hull, gaussian_kde_rings,
+                          normal_probability_ellipse)
 from .plot_symbols import PLOT_SYMBOLS
 from .statistics_core import feature_domain, review_feature_domains
 from .trace_patterns import PATTERN_ORDERS, normalized_pattern_value, pattern_catalog, pattern_coordinates, pattern_reference
@@ -567,6 +568,21 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
         message = None
         if field["method"] == "convex_hull":
             vertices = convex_hull(coordinates)
+        elif field["method"] == "gaussian_kde_v1":
+            rings = []
+            if kind != "binary":
+                message = "KDE v1 поддерживается на бинарной диаграмме."
+            elif len(coordinates) < 3:
+                message = "Для KDE нужны как минимум три действительных анализа."
+            else:
+                rings = gaussian_kde_rings(
+                    coordinates, field["bandwidth_x"], field["bandwidth_y"], field["level"],
+                )
+                if len(coordinates) < 10:
+                    message = "Малая выборка для KDE. Интерпретируйте контур с осторожностью."
+            fields.append({"layer_id": layer["id"], "analysis_ids": [point["analysis_id"] for point in included],
+                           "vertices": [], "rings": rings, "message": message})
+            continue
         elif kind == "binary":
             vertices = clip_to_plot_rectangle(normal_probability_ellipse(coordinates, field["probability"]))
         else:
@@ -709,11 +725,24 @@ def _validated_layers(layers):
         field = layer["field"]
         if field is None:
             continue
-        if (not isinstance(field, dict) or set(field) - {"style"} != {"method", "visible", "probability"}
-                or type(field["visible"]) is not bool):
+        if not isinstance(field, dict) or type(field.get("visible")) is not bool:
+            raise ValueError("field")
+        required = {"method", "visible", "probability"}
+        kde_parameters = {"bandwidth_x", "bandwidth_y", "level"}
+        if field.get("method") == "gaussian_kde_v1":
+            required |= kde_parameters
+        if set(field) - {"style"} != required:
             raise ValueError("field")
         if "style" in field:
             _validate_field_style(field["style"])
+        if field["method"] == "gaussian_kde_v1":
+            low, high = KDE_BANDWIDTH_RANGE
+            if (field["probability"] is not None
+                    or any(type(field[key]) not in (int, float) or not low <= field[key] <= high
+                           for key in ("bandwidth_x", "bandwidth_y"))
+                    or type(field["level"]) not in (int, float) or not 0 < field["level"] < 1):
+                raise ValueError("field")
+            continue
         if field["method"] == "convex_hull" and field["probability"] is None:
             continue
         if (field["method"] != "normal_probability_ellipse" or type(field["probability"]) not in (int, float)
@@ -735,6 +764,19 @@ def validate_point_style(panel):
             or not 0.05 <= style["opacity"] <= 1
             or not 0.5 <= style["size_scale"] <= 2):
         raise ValueError("plot_point_style")
+
+
+def plot_schema_version(panels, layers, category_style):
+    if any((layer["field"] or {}).get("method") == "gaussian_kde_v1" for layer in layers):
+        return 6
+    if (any("symbol" in panel.get("point_style", {}) for panel in panels)
+            or any("symbol" in entry for entry in (category_style or {}).get("entries", []))):
+        return 5
+    if any("style" in (layer["field"] or {}) for layer in layers):
+        return 4
+    if any("point_style" in panel for panel in panels):
+        return 3
+    return 2 if category_style is not None else 1
 
 
 def save_plot_specification(database_path, name, analysis_ids, panels, colors, hidden_analyses, hidden_sources, layers=None, *, transaction=None, category_style=None):
@@ -808,7 +850,7 @@ def _insert_plot_specification(connection, name, analysis_ids, saved_panels, pan
     now = _now()
     spec = {
         "id": _id(), "project_id": connection.execute("SELECT project_id FROM project_identity WHERE singleton = 1").fetchone()[0],
-        "name": name, "schema_version": 1,
+        "name": name,
         "input": {"kind": "analysis_snapshot", "analysis_ids": list(analysis_ids or sorted(scope))},
         "panels": saved_panels, "legend": {"group_by": "source", "entries": legend}, "filters": [],
         "layers": layers,
@@ -817,13 +859,7 @@ def _insert_plot_specification(connection, name, analysis_ids, saved_panels, pan
     }
     if category_style is not None:
         spec["category_style"] = validate_category_style(connection, spec["input"]["analysis_ids"], category_style)
-        spec["schema_version"] = 2
-    if any("point_style" in panel for panel in saved_panels):
-        spec["schema_version"] = 3
-    if any("style" in (layer["field"] or {}) for layer in layers):
-        spec["schema_version"] = 4
-    if any("symbol" in panel.get("point_style", {}) for panel in saved_panels) or any("symbol" in entry for entry in (category_style or {}).get("entries", [])):
-        spec["schema_version"] = 5
+    spec["schema_version"] = plot_schema_version(saved_panels, layers, spec.get("category_style"))
     connection.execute("INSERT INTO plot_specification (id, name, definition_json) VALUES (?, ?, ?)",
                        (spec["id"], name, json.dumps(spec, ensure_ascii=False)))
     return spec
@@ -843,10 +879,7 @@ def open_plot_specification(database_path, spec_id):
             raise ImportCommandError("PLOT_LAYOUT_UNAVAILABLE", "Раскладка недоступна.")
         spec = json.loads(row[0])
         _validated_layers(spec.get("layers"))
-        has_symbols = any("symbol" in panel.get("point_style", {}) for panel in spec["panels"]) or any("symbol" in entry for entry in spec.get("category_style", {}).get("entries", []))
-        expected_version = (5 if has_symbols else 4 if any("style" in (layer["field"] or {}) for layer in spec.get("layers", []))
-                            else 3 if any("point_style" in panel for panel in spec["panels"])
-                            else 2 if "category_style" in spec else 1)
+        expected_version = plot_schema_version(spec["panels"], spec.get("layers", []), spec.get("category_style"))
         if spec.get("schema_version") != expected_version:
             raise ImportCommandError("PLOT_LAYOUT_VERSION_UNSUPPORTED", "Версия раскладки несовместима с этой версией PetroLab.")
         if any(panel["kind"] == "histogram" and panel.get("binning") != _HISTOGRAM_BINNING for panel in spec["panels"]):

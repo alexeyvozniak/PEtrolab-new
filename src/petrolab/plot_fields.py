@@ -3,6 +3,50 @@
 from math import atan2, cos, hypot, log1p, pi, sin, sqrt
 from statistics import covariance, mean, variance
 
+from contourpy import contour_generator
+import numpy as np
+
+
+KDE_GRID_SIZE = 129
+KDE_BANDWIDTH_RANGE = (0.02, 0.5)
+
+
+def gaussian_kde_grid(points, bandwidth_x, bandwidth_y):
+    """Evaluate an equal-weight Gaussian KDE on the normalized plot rectangle."""
+    samples = np.asarray(points, dtype=np.float64)
+    if (samples.ndim != 2 or samples.shape[1] != 2 or not len(samples)
+            or not np.all(np.isfinite(samples) & (samples >= 0) & (samples <= 1))):
+        raise ValueError("KDE points must be nonempty, finite, normalized pairs")
+    low, high = KDE_BANDWIDTH_RANGE
+    if not (low <= bandwidth_x <= high and low <= bandwidth_y <= high):
+        raise ValueError("KDE bandwidth outside the supported grid range")
+
+    axis = np.linspace(0.0, 1.0, KDE_GRID_SIZE)
+    grid = np.zeros((KDE_GRID_SIZE, KDE_GRID_SIZE))
+    positions = axis[np.newaxis, :]
+    for start in range(0, len(samples), 1024):
+        x, y = samples[start:start + 1024].T
+        horizontal = np.exp(-0.5 * ((positions - x[:, np.newaxis]) / bandwidth_x) ** 2)
+        vertical = np.exp(-0.5 * ((positions - y[:, np.newaxis]) / bandwidth_y) ** 2)
+        grid += vertical.T @ horizontal
+    grid /= len(samples) * 2 * pi * bandwidth_x * bandwidth_y
+    return axis, grid
+
+
+def gaussian_kde_rings(points, bandwidth_x, bandwidth_y, level):
+    """Return closed rings of the region at or above a fraction of the grid peak."""
+    if not 0 < level < 1:
+        raise ValueError("KDE level must be a fraction between zero and one")
+    axis, grid = gaussian_kde_grid(points, bandwidth_x, bandwidth_y)
+    peak = float(grid.max())
+    generator = contour_generator(x=axis, y=axis, z=grid, name="serial", fill_type="OuterOffset")
+    polygons, offsets = generator.filled(level * peak, float("inf"))
+    return [
+        polygon[int(start):int(stop)].tolist()
+        for polygon, boundaries in zip(polygons, offsets)
+        for start, stop in zip(boundaries[:-1], boundaries[1:])
+    ]
+
 
 def convex_hull(points):
     ordered = sorted(set(points))
