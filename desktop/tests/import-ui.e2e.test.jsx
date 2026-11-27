@@ -152,12 +152,17 @@ test("large table virtualizes rows while selection, search and keyboard cover th
   expect(table.querySelectorAll("thead tr:first-child th.analysis-pinned-column")).toHaveLength(1);
   fireEvent.keyDown(scroll, { key: "a", ctrlKey: true });
   expect(screen.getByText("1000 выбрано")).toBeTruthy();
+  expect(table.getAttribute("aria-rowcount")).toBe("1003");
+  expect(within(table).getByText("Текущий отбор · 1000")).toBeTruthy();
   fireEvent.keyDown(scroll, { key: "End" });
-  expect(within(table).getByRole("checkbox", { name: "Выбрать V-1000" }).checked).toBe(true);
+  const last = within(table).getByRole("checkbox", { name: "Выбрать V-1000" });
+  expect(last.checked).toBe(true);
+  expect(last.closest("tr").getAttribute("aria-rowindex")).toBe("1003");
   expect(table.querySelectorAll("tbody tr:not(.analysis-row-spacer)").length).toBeLessThan(60);
   fireEvent.change(screen.getByRole("textbox", { name: "Поиск анализов" }), { target: { value: "V-1000" } });
   expect(within(table).getByRole("checkbox", { name: "Выбрать V-1000" }).checked).toBe(true);
   expect(screen.getByText("Скрыто фильтром: 999")).toBeTruthy();
+  expect(within(table).getByText("Текущий отбор · 1")).toBeTruthy();
   expect(screen.getByText("1000 выбрано")).toBeTruthy();
   expect(table.querySelector("tbody tr:not(.analysis-row-spacer) td.analysis-pinned-column").textContent).toBe("V-1000");
   fireEvent.contextMenu(table.querySelector('td[data-source-cell="B1001"]'),{clientX:100,clientY:100});

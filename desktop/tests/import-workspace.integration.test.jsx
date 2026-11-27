@@ -1423,9 +1423,13 @@ test("numeric filters distinguish blanks, detection limits and zero without clea
   const filter = table.getByRole("textbox", { name: "Фильтр F" });
   for (const [expression, expected] of [["=0", "A-ZERO"], ["ниже предела", "A-CENSORED"], ["пусто", "A-MISSING"], ["9,5..10", "A-HIGH"]]) {
     fireEvent.change(filter, { target: { value: expression } });
-    expect(table.getAllByRole("row")).toHaveLength(3);
+    expect(table.getAllByRole("row")).toHaveLength(expected === "A-HIGH" ? 4 : 3);
     expect(table.getByText(expected)).toBeTruthy();
-    if (expected !== "A-HIGH") expect(screen.getByText("Скрыто фильтром: 1")).toBeTruthy();
+    if (expected === "A-HIGH") expect(table.getByText("Текущий отбор · 1")).toBeTruthy();
+    else {
+      expect(table.queryByText(/Текущий отбор/)).toBeNull();
+      expect(screen.getByText("Скрыто фильтром: 1")).toBeTruthy();
+    }
   }
   await user.click(screen.getByRole("button", { name: "Снять фильтр F" }));
   expect(table.getByRole("checkbox", { name: "Выбрать A-HIGH" }).checked).toBe(true);

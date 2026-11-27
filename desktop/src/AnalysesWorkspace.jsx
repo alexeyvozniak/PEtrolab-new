@@ -520,19 +520,25 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const filteredIds = useMemo(() => ordered.map(analysis => analysis.analysis_id), [ordered]);
   const filteredSet = useMemo(() => new Set(filteredIds), [filteredIds]);
   const hiddenSelectionCount = selectedIds.filter(id => !filteredSet.has(id)).length;
+  const visibleSelectionCount = selectedIds.length - hiddenSelectionCount;
+  const selectionHeadingHeight = visibleSelectionCount > 0 ? 30 : 0;
+  const tableHeaderRowCount = visibleSelectionCount > 0 ? 3 : 2;
   const allVisibleSelected = filteredIds.length > 0 && filteredIds.every(id => selected.has(id));
   const virtual = ordered.length > 300;
-  const rowRange = virtual ? virtualRowRange(ordered.length, viewport.top, viewport.height) : { start: 0, end: ordered.length };
+  const rowRange = virtual
+    ? virtualRowRange(ordered.length, viewport.top - selectionHeadingHeight, viewport.height)
+    : { start: 0, end: ordered.length };
   const renderedRows = ordered.slice(rowRange.start, rowRange.end);
   useLayoutEffect(() => {
     const element = tableScroll.current;
     if (!element) return;
-    const top = Math.min(element.scrollTop, Math.max(0, ordered.length * ROW_HEIGHT + TABLE_HEADER_HEIGHT - viewport.height));
+    const contentHeight = ordered.length * ROW_HEIGHT + TABLE_HEADER_HEIGHT + selectionHeadingHeight;
+    const top = Math.min(element.scrollTop, Math.max(0, contentHeight - viewport.height));
     if (top !== element.scrollTop) {
       element.scrollTop = top;
       setViewport(current => ({ ...current, top }));
     }
-  }, [ordered.length, viewport.height]);
+  }, [ordered.length, selectionHeadingHeight, viewport.height]);
 
   const toggleSelection = (id, extend = false) => {
     const anchor = selectionAnchor.current;
@@ -760,7 +766,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
         const element = tableScroll.current;
         if (virtual && element) {
           // Keep keyboard navigation in the logical full result, even when a row is not mounted.
-          const top = next * ROW_HEIGHT;
+          const top = next * ROW_HEIGHT + selectionHeadingHeight;
           const available = Math.max(ROW_HEIGHT, viewport.height - TABLE_HEADER_HEIGHT);
           if (top < element.scrollTop) element.scrollTop = top;
           else if (top + ROW_HEIGHT > element.scrollTop + available) element.scrollTop = top + ROW_HEIGHT - available;
@@ -938,7 +944,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
             setSelectedIds([]);
           }
         }}>
-          <table aria-rowcount={ordered.length + 2} className={`analyses-data-table${dragIds.length ? " selecting-range" : ""}${virtual ? " virtual-rows" : ""}`}
+          <table aria-rowcount={ordered.length + tableHeaderRowCount} className={`analyses-data-table${dragIds.length ? " selecting-range" : ""}${virtual ? " virtual-rows" : ""}`}
             style={virtual ? { width: 42 + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 150), 0) } : undefined}>
             <thead>
               <tr>
@@ -979,6 +985,11 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                   return <th key={column.id} className={pinClass(column.id)} style={columnStyle(column.id)}><input value={columnFilters[column.id] || ""} onChange={(event) => setColumnFilters((current) => ({ ...current, [column.id]: event.target.value }))} placeholder={column.kind === "measurement" ? ">10, 5..20" : "Фильтр"} title={hint} aria-invalid={invalidFilters.has(column.id)} aria-label={`Фильтр ${column.label}`} /></th>;
                 })}
               </tr>
+              {visibleSelectionCount > 0 && <tr className="analysis-selection-heading" aria-rowindex={3}>
+                <td colSpan={visibleColumns.length + 1} style={{ height: selectionHeadingHeight }}>
+                  <span>Текущий отбор · {visibleSelectionCount}</span>
+                </td>
+              </tr>}
             </thead>
             <tbody>
               {virtual && rowRange.start > 0 && <tr aria-hidden="true" className="analysis-row-spacer"><td colSpan={visibleColumns.length + 1} style={{ height: rowRange.start * ROW_HEIGHT }} /></tr>}
@@ -986,7 +997,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                 const checked = selected.has(analysis.analysis_id);
                 const focusedRow = focused?.analysis_id === analysis.analysis_id;
                 return (
-                  <tr className={`${checked || dragged.has(analysis.analysis_id) ? "selected " : ""}${focusedRow ? "focused" : ""}`} key={analysis.analysis_id} aria-rowindex={rowRange.start + index + 3}
+                  <tr className={`${checked || dragged.has(analysis.analysis_id) ? "selected " : ""}${focusedRow ? "focused" : ""}`} key={analysis.analysis_id} aria-rowindex={rowRange.start + index + tableHeaderRowCount + 1}
                     onPointerEnter={(event) => extendSelectionDrag(event, analysis.analysis_id)}
                     onContextMenu={event => {
                       if (event.target.closest?.("input, textarea, select")) return;

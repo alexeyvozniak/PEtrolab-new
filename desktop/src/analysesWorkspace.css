@@ -65,6 +65,8 @@
 .analyses-data-table td { min-width: 104px; max-width: 190px; height: 42px; padding: 6px 9px; border-right: 1px solid #edf0ed; border-bottom: 1px solid #e8ece9; text-align: left; white-space: nowrap; }
 .analyses-data-table thead th { position: sticky; z-index: 4; top: 0; background: #f5f7f5; color: #506057; }
 .analyses-data-table thead tr.analysis-filter-row th { top: 42px; z-index: 3; height: 35px; padding: 4px 6px; background: #fbfcfb; }
+.analyses-data-table .analysis-selection-heading td { padding: 0; border-bottom-color: #b8cfbd; background: #f1f7f2; color: #315d45; font-weight: 700; }
+.analyses-data-table .analysis-selection-heading span { position: sticky; left: 0; width: max-content; padding: 0 10px; }
 .analyses-data-table th button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 5px; border: 0; background: transparent; color: inherit; padding: 0; font-size: 10px; font-weight: 750; text-align: left; }
 .analyses-data-table th input { width: 100%; min-width: 74px; height: 25px; border: 1px solid #dce2dd; border-radius: 6px; padding: 0 6px; background: #fff; font-size: 9px; }
 .analyses-data-table th input[aria-invalid="true"] { border-color: #a87529; }
