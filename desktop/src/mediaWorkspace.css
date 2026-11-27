@@ -97,3 +97,8 @@ fieldset.media-import-links input { flex: none; width: auto; margin: 0; accent-c
 .media-export-annotations { flex-basis: 100%; }
 .media-export-annotations label { display: inline-flex; align-items: center; margin-right: 10px; }
 .media-export-options input[type="checkbox"] { accent-color: #267048; }
+
+.analysis-photos-dialog { width:min(920px,calc(100vw - 32px));max-height:90vh;overflow:auto; }
+.analysis-photo-choices { display:flex; flex-wrap:wrap;gap:6px;margin:8px 0; }
+.media-scene svg .media-clickable,.media-scene svg .media-highlighted { pointer-events:auto;cursor:pointer; }
+.media-scene svg .media-highlighted circle,.media-scene svg .media-highlighted rect { stroke:#f9c74f;stroke-width:3;vector-effect:non-scaling-stroke; }

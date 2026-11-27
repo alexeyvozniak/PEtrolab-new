@@ -223,6 +223,7 @@ export const exportMediaBatch = (projectDatabasePath, mediaAssetIds, outputPath,
 });
 export const createSamplePoint = (projectDatabasePath, fields) =>
   invokePetrolab("analytical_point.create", { project_database_path: projectDatabasePath, ...fields });
+export const listAnalysisPhotos = (projectDatabasePath,analysisId) => invokePetrolab("analysis.photos",{project_database_path:projectDatabasePath,analysis_id:analysisId});
 export const listPointAnalyses = (projectDatabasePath, pointId) =>
   invokePetrolab("analytical_point.analyses", { project_database_path: projectDatabasePath, point_id: pointId });
 export const createManualPointAnalysis = (projectDatabasePath, pointId, entry) =>

@@ -268,7 +268,7 @@ function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlot
   );
 }
 
-export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initialDraftId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, generationActions, onExportSelection, onPublishSelection, onSummary, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, onUndoPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
+export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initialDraftId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, generationActions, onExportSelection, onPublishSelection, onSummary, onOpenPhotos, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, onUndoPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
   const analyses = project.analyses || [];
   const mineralStatusCounts = project.mineral_status_counts || {};
   const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
@@ -993,6 +993,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
       <ContextActions menu={contextMenu} onClose={() => setContextMenu(null)} actions={contextMenu ? [
         ...(contextMenu.cell ? [{label:`Показать исходную ячейку ${contextMenu.cell}`, run:()=>setProvenanceFocus({analysisId:contextMenu.id,cell:contextMenu.cell,field:contextMenu.field})}] : []),
         { label: selected.has(contextMenu.id) ? "Снять выделение анализа" : "Добавить анализ в отбор", run: () => toggleSelection(contextMenu.id) },
+        ...(onOpenPhotos?[{label:"Показать фотографии анализа",run:()=>onOpenPhotos(contextMenu.id)}]:[]),
         { label: "Построить диаграммы для анализа", disabled: busy || !onOpenPlots, run: () => onOpenPlots([contextMenu.id]) },
         { label: "Фильтровать по источнику", run: () => { const analysis = byId.get(contextMenu.id); if (analysis) { setSourceFilter(analysis.source_id); setSheetFilter("all"); } } },
         { label: "Открыть черновик правки", disabled: busy || !editDraftActions, run: () => {

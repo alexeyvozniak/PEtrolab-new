@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from petrolab.import_apply import MIGRATIONS, apply_import_plan, latest_active_import, open_project  # noqa: E402
 from petrolab.import_preview import ImportCommandError  # noqa: E402
+from petrolab.sample_workspace import get_analysis_photo_locations
 from petrolab.manual_analysis import create_manual_analysis  # noqa: E402
 from petrolab.media_links import attach_media, change_media_link, create_media_region, import_linked_photo, list_media_links  # noqa: E402
 from petrolab.media_display import export_media_batch, export_media_original, export_media_rendered, preview_input_media, preview_project_media  # noqa: E402
@@ -159,6 +160,25 @@ class MediaImportTests(unittest.TestCase):
                 }
             ],
         }
+
+    def test_analysis_photo_locations_use_exact_stored_links_and_coordinates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database, first, second = self._project_with_points(root)
+            source = root / "grain.png"
+            write_png(source)
+            plan = create_media_import_plan(database, [self._assignment(source, first["analytical_point_id"])])
+            apply_media_import_plan(database, plan)
+            with closing(open_project(database)) as connection:
+                first_id = connection.execute("SELECT analysis_id FROM analytical_point_analysis WHERE analytical_point_id = ? ORDER BY analysis_id", (first["analytical_point_id"],)).fetchone()[0]
+                other_id = connection.execute("SELECT analysis_id FROM analytical_point_analysis WHERE analytical_point_id = ? ORDER BY analysis_id", (second["analytical_point_id"],)).fetchone()[0]
+            found = get_analysis_photo_locations(database, first_id)
+            self.assertEqual(len(found), 1)
+            self.assertEqual(found[0]["analytical_point_id"], first["analytical_point_id"])
+            self.assertEqual((found[0]["x_px"], found[0]["y_px"]), (5.25, 3.5))
+            self.assertEqual(found[0]["link_type"], "same_point")
+            self.assertEqual(get_analysis_photo_locations(database, other_id), [])
+            self.assertEqual(found[0]["media_asset_id"], plan["items"][0]["media_asset_id"])
 
     def test_png_and_tiff_metadata_are_inspected_without_writes(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
