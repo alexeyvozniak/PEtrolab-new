@@ -693,6 +693,10 @@ def _qualifier(token: str | None) -> tuple[str | None, float | None]:
 def value_status(token: str | None) -> str:
     """Classify notation, without substituting a concentration or guessing ND's meaning."""
     qualifier, _ = _qualifier(token)
+    return _value_status_from_qualifier(token, qualifier)
+
+
+def _value_status_from_qualifier(token: str | None, qualifier: str | None) -> str:
     if qualifier:
         return qualifier
     if str(token).strip().lower() in {"n.d.", "nd"}:
@@ -729,33 +733,52 @@ def _is_repeated_header(sheet: SheetInspection, section: dict[str, Any], row_num
     return bool(_header_signature(header)) and _header_signature(row) == _header_signature(header)
 
 
-def _measurement(mapping: dict[str, Any], token: str | None, physical_row: int, physical_column: int) -> dict[str, Any]:
-    qualifier, detection_limit = _qualifier(token)
+def _measurement_template(mapping: dict[str, Any]) -> dict[str, Any]:
+    """Resolve immutable mapping evidence once per field in the logical block."""
     fe_form = reported_fe_form(mapping.get("source_header"))
     if fe_form is None and _header_token(mapping.get("canonical_field")) in IRON_FIELDS | {"fe"}:
         fe_form = "unresolved"
     return {
         "field": mapping["canonical_field"],
         "unit": mapping["unit"],
-        "raw_token": token,
-        "qualifier": qualifier,
-        "detection_limit": detection_limit,
-        "value_status": value_status(token),
         "reported_fe_form": fe_form,
         "fe_handling": "strictly_as_reported_no_conversion" if fe_form else None,
         "source_header": mapping["source_header"],
         "source_column_index": _mapping_index(mapping),
-        "physical_source_row_number": physical_row,
-        "physical_source_column_index": physical_column,
-        "source_cell": f"{_column_letters(physical_column)}{physical_row}",
         "measurement_set": mapping.get("measurement_set"),
         "method": mapping.get("method"),
     }
 
 
+def _measurement_from_template(template: dict[str, Any], token: str | None, physical_row: int, physical_column: int) -> dict[str, Any]:
+    qualifier, detection_limit = _qualifier(token)
+    return {
+        "field": template["field"],
+        "unit": template["unit"],
+        "raw_token": token,
+        "qualifier": qualifier,
+        "detection_limit": detection_limit,
+        "value_status": _value_status_from_qualifier(token, qualifier),
+        "reported_fe_form": template["reported_fe_form"],
+        "fe_handling": template["fe_handling"],
+        "source_header": template["source_header"],
+        "source_column_index": template["source_column_index"],
+        "physical_source_row_number": physical_row,
+        "physical_source_column_index": physical_column,
+        "source_cell": f"{_column_letters(physical_column)}{physical_row}",
+        "measurement_set": template["measurement_set"],
+        "method": template["method"],
+    }
+
+
+def _measurement(mapping: dict[str, Any], token: str | None, physical_row: int, physical_column: int) -> dict[str, Any]:
+    return _measurement_from_template(_measurement_template(mapping), token, physical_row, physical_column)
+
+
 def _plan_rows(inspection: SourceInspection, sheet: SheetInspection, section: dict[str, Any], duplicate_keys: dict[tuple[str, ...], list[str]]) -> list[dict[str, Any]]:
     mappings = section["mappings"]
     identities = [item for item in mappings if item["target_role"] == "identity"]
+    fields = [(_mapping_index(item), _measurement_template(item)) for item in mappings if item["target_role"] == "measurement"]
     result: list[dict[str, Any]] = []
     header_signature = _header_signature(sheet.rows[int(section["header_row"]) - 1])
     for row_number in range(int(section["data_start_row"]), int(section["data_end_row"]) + 1):
@@ -769,8 +792,8 @@ def _plan_rows(inspection: SourceInspection, sheet: SheetInspection, section: di
         if not identity and section.get("analysis_identity_policy") == "source_row":
             identity = (f"Source row {row_number}",)
         measurements = [
-            _measurement(item, _row_value(row, _mapping_index(item)), row_number, _mapping_index(item))
-            for item in mappings if item["target_role"] == "measurement"
+            _measurement_from_template(template, _row_value(row, index), row_number, index)
+            for index, template in fields
         ]
         preview_id = _preview_id(inspection.fingerprint, sheet.name, row_number, section["block_id"], "rows_are_analyses")
         duplicate_keys.setdefault(identity, []).append(preview_id)
@@ -790,6 +813,7 @@ def _plan_rows(inspection: SourceInspection, sheet: SheetInspection, section: di
 def _plan_columns(inspection: SourceInspection, sheet: SheetInspection, section: dict[str, Any], duplicate_keys: dict[tuple[str, ...], list[str]]) -> list[dict[str, Any]]:
     mappings = section["mappings"]
     header_row = int(section["header_row"])
+    fields = [(_mapping_index(item), _measurement_template(item)) for item in mappings if item["target_role"] == "measurement"]
     result: list[dict[str, Any]] = []
     for column_number in range(int(section["data_start_column"]), int(section["data_end_column"]) + 1):
         column_index = column_number - 1
@@ -806,8 +830,8 @@ def _plan_columns(inspection: SourceInspection, sheet: SheetInspection, section:
         )
         identity = tuple(identity_values)
         measurements = [
-            _measurement(item, _row_value(sheet.rows[_mapping_index(item)], column_index), _mapping_index(item) + 1, column_index)
-            for item in mappings if item["target_role"] == "measurement"
+            _measurement_from_template(template, _row_value(sheet.rows[index], column_index), index + 1, column_index)
+            for index, template in fields
         ]
         preview_id = _preview_id(inspection.fingerprint, sheet.name, column_number, section["block_id"], "columns_are_analyses")
         duplicate_keys.setdefault(identity, []).append(preview_id)

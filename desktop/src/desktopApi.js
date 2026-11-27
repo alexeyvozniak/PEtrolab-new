@@ -36,10 +36,27 @@ export const previewImportFormula = (workspace, selection, methodId) =>
   invokePetrolab("import.workspace.preview_formula", { workspace_id: workspace.workspace_id,
     expected_revision: workspace.draft_revision, source_id: workspace.active_source_id,
     ...(Array.isArray(selection) ? { preview_ids: selection } : { preview_id: selection }), method_id: methodId });
-export const applyWorkspaceDecision = (workspaceId, revision, sourceId, decision, bulk = false) =>
-  invokePetrolab(bulk ? "import.workspace.apply_bulk_decision" : "import.workspace.apply_decision", {
+export const applyWorkspaceDecision = async (workspaceId, revision, sourceId, decision, bulk = false, knownPlan = null) => {
+  const response = await invokePetrolab(bulk ? "import.workspace.apply_bulk_decision" : "import.workspace.apply_decision", {
     workspace_id: workspaceId, expected_revision: revision, source_id: sourceId, decision,
+    ...(knownPlan ? { known_active_plan: knownPlan.reference } : {}),
   });
+  const projection = response?.result;
+  const reference = projection?.active?.plan_reference;
+  if (!reference) return response;
+  if (knownPlan?.plan && projection.session.workspace_id === workspaceId
+      && projection.session.active_source_id === sourceId
+      && reference.source_id === sourceId
+      && reference.source_id === knownPlan.reference.source_id
+      && reference.plan_fingerprint === knownPlan.reference.plan_fingerprint
+      && projection.session.plans.some(item => item.source_id === sourceId && item.plan_fingerprint === reference.plan_fingerprint)) {
+    const { plan_reference, ...active } = projection.active;
+    return { ...response, result: { ...projection, active: { ...active, plan: knownPlan.plan } } };
+  }
+  // The revision was already accepted by Python. Retrieve its full projection
+  // rather than attempting another mutation with the previous revision.
+  return getImportWorkspace(workspaceId);
+};
 export const discardImportWorkspace = (workspaceId, revision) =>
   invokePetrolab("import.workspace.discard", { workspace_id: workspaceId, expected_revision: revision });
 export const commitImportWorkspace = (workspaceId, revision) =>
@@ -221,8 +238,14 @@ export const queryProjectAnalysisIds = (projectDatabasePath, query) =>
   invokePetrolab("analysis.query.ids", { project_database_path: projectDatabasePath, ...query });
 export const getProjectAnalysis = (projectDatabasePath, analysisId) =>
   invokePetrolab("project.analysis.get", { project_database_path: projectDatabasePath, analysis_id: analysisId });
-export const getPlotCatalog = (projectDatabasePath, analysisIds) =>
-  invokePetrolab("plot_data.catalog", { project_database_path: projectDatabasePath, analysis_ids: analysisIds });
+export const getSelectionSummary = (path,analysisIds) => invokePetrolab("project.selection.summary",{project_database_path:path,analysis_ids:analysisIds});
+export const getProjectPlotPresets = path => invokePetrolab("project.plot_presets.get", {project_database_path:path});
+export const saveProjectPlotPresets = (path,preferences,revision) => invokePetrolab("project.plot_presets.save", {project_database_path:path,preferences,expected_revision:revision});
+export const getProjectPlotColors = path => invokePetrolab("project.plot_colors.get", {project_database_path:path});
+export const saveProjectPlotColors = (path,scheme,revision) => invokePetrolab("project.plot_colors.save", {project_database_path:path,scheme,expected_revision:revision});
+export const getPlotCatalog = (projectDatabasePath, analysisIds, includeCategories = false) =>
+  invokePetrolab("plot_data.catalog", { project_database_path: projectDatabasePath, analysis_ids: analysisIds,
+    ...(includeCategories ? { include_categories: true } : {}) });
 export const listPlotSpecifications = (projectDatabasePath) =>
   invokePetrolab("plot_spec.list", { project_database_path: projectDatabasePath });
 export const savePlotSpecification = (projectDatabasePath, layout) =>

@@ -22,6 +22,9 @@ from .manual_analysis import create_manual_analysis
 from .media_links import change_media_link, create_media_region, import_linked_photo, list_media_links
 from .plot_data import list_plot_specifications, open_plot_specification, plot_catalog, query_plot_data, record_plot_visibility, save_plot_specification, undo_plot_visibility
 from .plot_export import export_plot
+from .plot_colors import (get_project_plot_colors, save_project_plot_colors,
+                          get_project_plot_presets, save_project_plot_presets)
+from .selection_summary import selection_summary
 from .desktop_workflow import apply_bulk_ignore_scope, apply_bulk_unit_scope, bulk_ignore_scopes, bulk_unit_scopes, list_project_analyses, list_project_mineral_identifications, suggest_import_recipe
 from .import_apply import (
     apply_import_plan,
@@ -391,7 +394,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "plot_spec.save": lambda params: {"result": save_plot_specification(
         _project_database_path(params), params.get("name"), params.get("analysis_ids"), params.get("panels"),
         params.get("colors"), params.get("hidden_analysis_ids", []), params.get("hidden_source_ids", []),
-        params.get("layers"),
+        params.get("layers"), category_style=params.get("category_style"),
     )},
     "plot_spec.list": lambda params: {"result": list_plot_specifications(_project_database_path(params))},
     "plot_spec.open": lambda params: {"result": open_plot_specification(_project_database_path(params), params.get("id"))},
@@ -405,8 +408,16 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
         _project_database_path(params), _string(params, "operation_id"), _string(params, "session_id"),
         params.get("hidden_analysis_ids"),
     )},
+    "project.selection.summary": lambda params: {"result": selection_summary(_project_database_path(params),params.get("analysis_ids"))},
+    "project.plot_presets.get": lambda params: {"result": get_project_plot_presets(_project_database_path(params))},
+    "project.plot_presets.save": lambda params: {"result": save_project_plot_presets(
+        _project_database_path(params), params.get("preferences"), params.get("expected_revision"))},
+    "project.plot_colors.get": lambda params: {"result": get_project_plot_colors(_project_database_path(params))},
+    "project.plot_colors.save": lambda params: {"result": save_project_plot_colors(
+        _project_database_path(params), params.get("scheme"), params.get("expected_revision"))},
     "plot_data.catalog": lambda params: {"result": plot_catalog(_project_database_path(params), params.get("analysis_ids"),
-                                                               include_formula=params.get("include_formula", False))},
+                                                               include_formula=params.get("include_formula", False),
+                                                               include_categories=params.get("include_categories", False))},
     "plot_data.query": lambda params: {"result": query_plot_data(
         _project_database_path(params), params.get("kind"), params.get("axes"), params.get("analysis_ids"),
         params.get("hidden_analysis_ids"), params.get("hidden_source_ids"), params.get("layers"),

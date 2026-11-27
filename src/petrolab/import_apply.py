@@ -279,6 +279,14 @@ def open_project(database_path: str | Path) -> sqlite3.Connection:
         connection.close()
         raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции поколений.",
                                  {"incompatible_migration": 22})
+    if 24 in applied and "project_plot_colors" not in existing_tables:
+        connection.close()
+        raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции цветовых схем.",
+                                 {"incompatible_migration": 24})
+    if 25 in applied and "project_plot_presets" not in existing_tables:
+        connection.close()
+        raise ImportCommandError("PROJECT_SCHEMA_UNSUPPORTED", "Структура проекта не соответствует миграции избранных диаграмм.",
+                                 {"incompatible_migration": 25})
     meta = None
     if "project_meta" in existing_tables:
         meta = connection.execute("SELECT project_schema_version FROM project_meta WHERE singleton = 1").fetchone()

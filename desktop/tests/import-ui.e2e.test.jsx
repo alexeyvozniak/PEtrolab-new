@@ -126,6 +126,30 @@ test("drag, Shift and Ctrl select stable analysis IDs without changing focus sem
   expect(screen.getByText("Скрыто фильтром: 12")).toBeTruthy();
 });
 
+test("large table virtualizes rows while selection, search and keyboard cover the full loaded result", () => {
+  const analyses = Array.from({ length: 1000 }, (_, index) => ({
+    analysis_id: "row-" + index, source_id: "source", source_name: "large.xlsx", sheet_name: "Sheet",
+    source_row_number: index + 2, identity: { Analysis: "V-" + String(index + 1).padStart(4, "0") },
+    measurements: { SiO2: { raw_token: "40", numeric_value: 40, unit: "wt.%" } }, source_metadata: {},
+  }));
+  render(<SelectionTestWorkspace project={{ total: 1000, source_count: 1, analyses }} busy={false} />);
+  const table = screen.getByRole("table");
+  const scroll = screen.getByLabelText(/Таблица анализов: Ctrl\+A/);
+  Object.defineProperty(scroll, "clientHeight", { value: 420, configurable: true });
+  expect(table.getAttribute("aria-rowcount")).toBe("1002");
+  expect(table.querySelectorAll("tbody tr:not(.analysis-row-spacer)").length).toBeLessThan(60);
+  expect(within(table).queryByRole("checkbox", { name: "Выбрать V-1000" })).toBeNull();
+  fireEvent.keyDown(scroll, { key: "a", ctrlKey: true });
+  expect(screen.getByText("1000 выбрано")).toBeTruthy();
+  fireEvent.keyDown(scroll, { key: "End" });
+  expect(within(table).getByRole("checkbox", { name: "Выбрать V-1000" }).checked).toBe(true);
+  expect(table.querySelectorAll("tbody tr:not(.analysis-row-spacer)").length).toBeLessThan(60);
+  fireEvent.change(screen.getByRole("textbox", { name: "Поиск анализов" }), { target: { value: "V-1000" } });
+  expect(within(table).getByRole("checkbox", { name: "Выбрать V-1000" }).checked).toBe(true);
+  expect(screen.getByText("Скрыто фильтром: 999")).toBeTruthy();
+  expect(screen.getByText("1000 выбрано")).toBeTruthy();
+});
+
 test("same-named sources filter independently without changing selection", async () => {
   const user = userEvent.setup();
   const analyses = [
@@ -301,6 +325,11 @@ vi.mock("../src/desktopApi", () => {
   const api = {
     isPetrolabDesktop: () => true,
     getProjectDatabasePath: vi.fn().mockResolvedValue("C:/PetroLab/project.sqlite"),
+    getProjectPlotPresets: vi.fn().mockResolvedValue({result:{preferences:{favorites:[],recent:[]},revision:0}}),
+    saveProjectPlotPresets: vi.fn().mockImplementation(async (_path,preferences,revision)=>({result:{preferences,revision:revision+1}})),
+    getProjectPlotColors: vi.fn().mockResolvedValue({result:{scheme:{mode:"source",colors:[]},revision:0}}),
+    saveProjectPlotColors: vi.fn().mockImplementation(async (_path,scheme,revision)=>({result:{scheme,revision:revision+1}})),
+    getSelectionSummary: vi.fn().mockResolvedValue({result:{analysis_count:0,pair:null,rows:[]}}),
     listProjectAnalyses: vi.fn().mockImplementation(async () => ({ result: uiState.imported ? importedProject : emptyProject })),
     listProjectMineralIdentifications: vi.fn().mockImplementation(async () => {
       const analyses = uiState.imported ? importedProject.analyses : [];
@@ -443,7 +472,16 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
   await user.type(within(preview).getByRole("textbox", { name: "Поиск в результате импорта" }), "UI-2");
   expect(within(preview).getByText("UI-2")).toBeTruthy();
   expect(within(preview).queryByText("UI-1")).toBeNull();
-  await user.click(within(preview).getByRole("button", { name: "Закрыть предпросмотр" }));
+  const previewSearch = within(preview).getByRole("textbox", { name: "Поиск в результате импорта" });
+  await user.clear(previewSearch);
+  expect(within(preview).getByText("UI-1")).toBeTruthy();
+  await user.type(previewSearch, "uI-1");
+  expect(within(preview).getByText("UI-1")).toBeTruthy();
+  expect(within(preview).queryByText("UI-2")).toBeNull();
+  await user.type(previewSearch, "-not-found");
+  expect(within(preview).getByText("По этому запросу записей нет.")).toBeTruthy();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "Что попадёт в проект" })).toBeNull();
 
   await user.click(importButton);
   await screen.findByRole("heading", { name: "Анализы" });
@@ -451,19 +489,62 @@ test("user clicks through Clean Table import and sees the saved Analysis", async
   expect(screen.getAllByText("UI-1").length).toBeGreaterThan(0);
   expect(screen.getAllByText("Trace-15").length).toBeGreaterThan(0);
 
-  await user.click(screen.getByRole("checkbox", { name: "Выбрать UI-1" }));
+  const analysisTable = screen.getByLabelText(/Таблица анализов: Ctrl\+A/);
+  analysisTable.focus();
+  await user.keyboard("{Control>}a{/Control}");
+  expect(screen.getByText("2 выбрано")).toBeTruthy();
+  const clipboard = { setData: vi.fn() };
+  fireEvent.copy(analysisTable, { clipboardData: clipboard });
+  expect(clipboard.setData).toHaveBeenCalledOnce();
+  const copied = clipboard.setData.mock.calls[0][1];
+  expect(copied).toContain("UI-1");
+  expect(copied).toContain("UI-2");
+  expect(copied).toContain("SiO2 · единица");
+  await user.keyboard("{Escape}");
+  expect(screen.queryByText("2 выбрано")).toBeNull();
+  await user.keyboard("{Control>}z{/Control}");
+  expect(screen.getByText("2 выбрано")).toBeTruthy();
+  await user.keyboard("{Control>}{Shift>}z{/Shift}{/Control}");
+  expect(screen.queryByText("2 выбрано")).toBeNull();
+  await user.keyboard("{F1}");
+  expect(screen.getByRole("dialog", { name: "Горячие клавиши PetroLab" })).toBeTruthy();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "Горячие клавиши PetroLab" })).toBeNull();
+  analysisTable.focus();
+  await user.keyboard("{Control>}f{/Control}");
+  expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Поиск анализов" }));
+  await user.type(document.activeElement, "UI-2");
+  expect(screen.queryByRole("checkbox", { name: "Выбрать UI-1" })).toBeNull();
+  await user.keyboard("{Escape}");
+  fireEvent.contextMenu(screen.getByRole("checkbox", { name: "Выбрать UI-1" }).closest("tr"), { clientX: 100, clientY: 100 });
+  const menu = screen.getByRole("menu", { name: "UI-1" });
+  await user.click(within(menu).getByRole("menuitem", { name: "Добавить анализ в отбор" }));
   expect(screen.getByText("1 выбрано")).toBeTruthy();
+  await user.keyboard("{Control>}k{/Control}");
+  const palette = screen.getByRole("dialog", { name: "Быстрые команды PetroLab" });
+  await user.type(within(palette).getByRole("textbox", { name: "Найти команду" }), "нет такой команды");
+  expect(within(palette).getByText("Команды не найдены.")).toBeTruthy();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "Быстрые команды PetroLab" })).toBeNull();
   const nav = within(screen.getByRole("navigation"));
   await user.click(nav.getByRole("button", { name: "Импорт" }));
   await user.click(nav.getByRole("button", { name: "Анализы" }));
   expect(screen.getByRole("checkbox", { name: "Выбрать UI-1" }).checked).toBe(true);
 
   const search = screen.getByRole("textbox", { name: "Поиск анализов" });
+  const resizer = screen.getByRole("separator", { name: "Ширина колонки SiO2" });
+  resizer.focus();
+  await user.keyboard("{ArrowRight}");
+  expect(resizer.getAttribute("aria-valuenow")).toBe("120");
   await user.type(search, "KIV-3");
+  await user.click(nav.getByRole("button", { name: "Импорт" }));
+  await user.click(nav.getByRole("button", { name: "Анализы" }));
+  expect(screen.getByRole("textbox", { name: "Поиск анализов" }).value).toBe("KIV-3");
+  expect(screen.getByRole("separator", { name: "Ширина колонки SiO2" }).getAttribute("aria-valuenow")).toBe("120");
   const table = screen.getByRole("table");
   expect(within(table).getByText("UI-2")).toBeTruthy();
   expect(within(table).queryByText("UI-1")).toBeNull();
-  await user.clear(search);
+  await user.clear(screen.getByRole("textbox", { name: "Поиск анализов" }));
   expect(commitImportWorkspace).toHaveBeenCalledWith("workspace-1", expect.any(Number));
   await waitFor(() => expect(uiState.imported).toBe(true));
 });

@@ -60,3 +60,27 @@ NDJSON opt-in `columns_v1` avoids repeating 15+ measurement field names for ever
 ### Lazy physical preview
 
 The approved Import workspace displays one active table. Instead of fetching all sheet/block previews on every decision, App requests only the current active block, including on source and sheet switching. Existing layout, draft guards and full scientific readiness remain unchanged. Real sidecar integration verifies one initial preview and one request when switching the sheet. User goal: immediate source navigation with the original table visible; primary action still review/commit; existing loading/error states and explicit exclusions remain. Native visual QA remains open.
+
+### Import polish — 1/6
+
+Reuse the successful clean-table classification plan and parsed source when adding a source. Rehash the staged bytes before retaining the inspection; seed only if the exact recipe digest matches (including project aliases). Both caches retain existing bounds. Final validation is unchanged. Test verifies one parse and one plan construction for clean input.
+
+### Import polish — 2/6
+
+Prepare immutable measurement mapping evidence once per field in row-oriented and transposed blocks, instead of resolving Fe header and mapping metadata for every measurement. Keep the exact measurement shape, coordinate construction, token handling, and independent mutable measurement objects. Regression checks mapping resolution count and coordinates; existing transposed and provenance fixtures remain in the full suite.
+
+### Import polish — 3/6
+
+Reuse the already parsed qualifier when computing the measurement value status. Public value_status continues to use the same helper. Tests include numeric zero, decimal comma, censored limits including underflow/overflow, <DL, ND, non-finite and missing values; no change to token or status semantics.
+
+### Import polish — 4/6
+
+Memoize the existing case-insensitive full-record JSON search index on the first nonempty query, reuse it across keystrokes, clear it when the query is cleared and invalidate it when the plan changes. All fields and all records remain searchable; the existing 120-row rendering limit, result count and UI layout are unchanged. Interaction test covers clearing, case-insensitivity and no matches.
+
+### Import polish — 5/6
+
+Use the existing activity message and spinner as an accessible stage indicator: 1–4 select/stage/recognize/preview; 1–2 review decision/preview; 1–3 atomic validation and persistence/staging cleanup/project refresh. Update only at actual awaited boundaries; no fabricated percentage or promise of progress within the synchronous service. Success/error and guards are unchanged. Real-service integration pauses the staging request and checks the status before release and after completion.
+
+### Import polish — 6/6
+
+Switching blocks of the same ready workbook now sends an exact plan reference rather than re-copying, serializing and re-parsing all measurements. Python recomputes current authoritative readiness and plan hash, so changed files or recipes return a full projection. Client checks source/workspace/fingerprint and falls back to full get if necessary. Existing physical preview and full search remain available across all sheets. Regression covers mutated input and two-way sheet navigation, and the comparative benchmark reports activation response bytes and time. Native UI acceptance still required.

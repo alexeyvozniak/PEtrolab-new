@@ -9,7 +9,7 @@ export function plotPanelLabel(index, alphabet = "latin", uppercase = false) {
   return uppercase ? label.toUpperCase() : label;
 }
 
-export function buildPlotSvg(canvases, { showLabel = true, alphabet, uppercase, labelPosition } = {}) {
+export function buildPlotSvg(canvases, { showLabel = true, alphabet, uppercase, labelPosition, legend } = {}) {
   const { width, height } = PLOT_SIZE;
   const columns = Math.min(canvases.length, 2);
   const rows = Math.ceil(canvases.length / columns);
@@ -19,8 +19,10 @@ export function buildPlotSvg(canvases, { showLabel = true, alphabet, uppercase, 
     for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
     return element;
   };
+  const legendHeight = legend ? 38 + legend.entries.length * 16 + (legend.histogramNote ? 18 : 0) : 0;
+  const totalHeight = rows * height + legendHeight;
   const root = create("svg", {
-    width: columns * width, height: rows * height, viewBox: `0 0 ${columns * width} ${rows * height}`,
+    width: columns * width, height: totalHeight, viewBox: `0 0 ${columns * width} ${totalHeight}`,
   });
   for (const [index, { svg, panelIndex }] of canvases.entries()) {
     const offsetX = (index % columns) * width;
@@ -55,6 +57,23 @@ export function buildPlotSvg(canvases, { showLabel = true, alphabet, uppercase, 
       }
       group.append(element);
     }
+    root.append(group);
+  }
+  if (legend) {
+    const group = create("g", {id:"category-legend", transform:`translate(0 ${rows * height})`});
+    const addText = (x,y,value) => {
+      const element = create("text",{x,y,fill:"#31473a","font-size":"10","font-family":"Arial"});
+      element.textContent = value;
+      group.append(element);
+    };
+    addText(12,18,legend.title);
+    legend.entries.forEach((entry,index) => {
+      const y = 30 + index * 16;
+      group.append(create("rect",{x:12,y,width:10,height:10,fill:entry.color}));
+      const label = entry.label.length > 54 ? entry.label.slice(0,51) + "…" : entry.label;
+      addText(28,y+9,label + " · " + entry.count);
+    });
+    if (legend.histogramNote) addText(12,30 + legend.entries.length * 16 + 9,"Гистограммы окрашены по источникам.");
     root.append(group);
   }
   return new XMLSerializer().serializeToString(root);

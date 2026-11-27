@@ -32,6 +32,42 @@ FIXTURE = ROOT / "fixtures/import/m1_1_ambiguous_multisheet.xlsx"
 
 
 class HeaderRecognitionPerformanceTests(unittest.TestCase):
+    def test_measurement_qualifier_parsed_once_without_changing_status(self):
+        from petrolab import import_preview as preview
+        from unittest.mock import patch
+        field = next(item for item in fixture_recipe()["sections"][0]["mappings"] if item["target_role"] == "measurement")
+        template = preview._measurement_template(field)
+        tokens = [None, "", " ", "0", "0.00", "1,25", "<0.01", "<1e-500", "<1e500",
+                  "<DL", "<dl>", "BDL", "n.d.", "ND", "NaN", "inf", "text", "-0.1"]
+        expected = [(preview._qualifier(token), preview.value_status(token)) for token in tokens]
+        with patch.object(preview, "_qualifier", wraps=preview._qualifier) as qualifier:
+            measurements = [preview._measurement_from_template(template, token, 3, 4) for token in tokens]
+            self.assertEqual(qualifier.call_count, len(tokens))
+        for token, measurement, ((kind, limit), status) in zip(tokens, measurements, expected, strict=True):
+            self.assertEqual(measurement["raw_token"], token)
+            self.assertEqual((measurement["qualifier"], measurement["detection_limit"]), (kind, limit))
+            self.assertEqual(measurement["value_status"], status)
+
+    def test_measurement_template_preserves_exact_values_and_coordinates(self):
+        from petrolab import import_preview as preview
+        from unittest.mock import patch
+        recipe = fixture_recipe()
+        inspection = preview.inspect_source(FIXTURE)
+        section = recipe["sections"][0]
+        sheet = next(item for item in inspection.sheets if item.name == section["sheet_name"])
+        fields = [field for field in section["mappings"] if field["target_role"] == "measurement"]
+        with patch.object(preview, "reported_fe_form", wraps=preview.reported_fe_form) as fe:
+            records = preview._plan_rows(inspection, sheet, section, {})
+            self.assertGreater(len(records), 1)
+            self.assertEqual(fe.call_count, len(fields))
+        for record in records:
+            for field, measurement in zip(fields, record["measurements"], strict=True):
+                index = field["source_column_index"]
+                raw = preview._row_value(sheet.rows[record["row_number"] - 1], index)
+                self.assertEqual(measurement, preview._measurement(field, raw, record["row_number"], index))
+                self.assertEqual(measurement["raw_token"], raw)
+                self.assertEqual(measurement["physical_source_column_index"], index)
+
     def test_header_vocabulary_fast_path_matches_original_predicate(self):
         from petrolab import import_preview as preview
         from unittest.mock import patch

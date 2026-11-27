@@ -50,3 +50,41 @@
 .plot-layers fieldset { display: grid; min-width: 0; gap: 4px; margin: 6px 0; padding: 5px; }
 .plot-field { pointer-events: none; }
 @media (max-width: 1250px) { .plot-workspace { grid-template-columns: 135px minmax(0, 1fr); } }
+
+.plot-panel-order { display:flex; align-items:center; gap:3px; min-width:0; }
+.plot-panel-order a { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.plot-panel-order button { border:1px solid #dce5dd; border-radius:4px; background:#fff; color:#315d45; padding:2px 5px; }
+.plot-panel-order button:disabled { opacity:.35; }
+
+.plot-point-tooltip { position:fixed; z-index:1100; width:max-content; max-width:min(320px,calc(100vw - 16px)); max-height:360px; overflow:hidden; display:grid; gap:4px; padding:10px 12px; background:#fff; color:#23372c; border:1px solid #c8d3cb; border-radius:7px; box-shadow:0 4px 18px #182f2026; font-size:11px; pointer-events:none; overflow-wrap:anywhere; }
+.plot-point-tooltip small { font-size:10px; color:#61746a; }
+.plot-tooltip-measurements { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:2px 12px; }
+.plot-axis-catalog { margin:8px 0; }
+.plot-axis-catalog input { width:100%; min-width:0; margin:5px 0; }
+.plot-axis-catalog-list { display:grid; gap:4px; max-height:180px; overflow:auto; }
+.plot-axis-catalog-list > div { padding:4px 6px; border:1px solid #dce5dd; border-radius:4px; cursor:grab; overflow-wrap:anywhere; }
+
+.plot-presets { margin:8px 0; }
+.plot-presets[open] { display:grid; gap:5px; }
+.plot-presets > small,.plot-presets > b { display:block; overflow-wrap:anywhere; font-size:10px; }
+.plot-presets button { min-width:0; white-space:normal; overflow-wrap:anywhere; text-align:left; font-size:10px; }
+.plot-preset-row { display:flex; gap:4px; }
+.plot-preset-row > button:first-child { flex:1; }
+
+.plot-category-legend { display:grid; gap:4px; max-height:220px; overflow:auto; }
+.plot-category-legend > div { display:flex; align-items:center; gap:5px; min-width:0; }
+.plot-category-legend > div > i { width:9px; height:9px; flex:none; border-radius:50%; }
+.plot-category-legend > div > span { flex:1; overflow-wrap:anywhere; }
+.plot-category-legend > div > small { flex:none; }
+
+.plot-category-legend input[type=color],.plot-source-legend input[type=color] { width:23px;height:20px;padding:0;border:0;background:transparent;flex:none;cursor:pointer; }
+
+.plot-source-color-row { display:flex;align-items:center;gap:5px;min-width:0; }
+.plot-source-color-row label { flex:1;min-width:0; }
+.plot-source-color-row label span { overflow-wrap:anywhere; }
+
+.plot-point-style { margin-top:5px; font-size:11px; }
+.plot-point-style[open] { display:grid; gap:5px; }
+.plot-point-style label { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.plot-point-style input[type=range] { width:55%; min-width:60px; }
+.plot-style-actions { display:flex; gap:4px; flex-wrap:wrap; }

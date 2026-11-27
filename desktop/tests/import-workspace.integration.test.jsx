@@ -175,7 +175,39 @@ test("multisheet review requests only the currently visible physical table", asy
   await enabledButton("Добавить файл");
   expect(previews()).toHaveLength(2);
   expect(previews()[1].payload.sheet_name).toBe("SecondSheet");
+  expect(requests.find(r => r.command === "import.workspace.apply_decision").payload.known_active_plan?.plan_fingerprint).toMatch(/^[a-f0-9]{64}$/);
   expect(within(await screen.findByRole("table")).getByText("B1")).toBeTruthy();
+  await user.click(await enabledButton(/FirstSheet.*Готов/));
+  await enabledButton("Добавить файл");
+  expect(previews()).toHaveLength(3);
+  expect(within(await screen.findByRole("table")).getByText("A1")).toBeTruthy();
+  await user.click(await enabledButton("Предпросмотр результата"));
+  const preview = screen.getByRole("dialog", { name: "Что попадёт в проект" });
+  expect(within(preview).getByText("A1")).toBeTruthy();
+  expect(within(preview).getByText("B1")).toBeTruthy();
+}, 20000);
+
+test("import stage indicator follows real awaited operations and clears after completion", async () => {
+  queue = [second];
+  const invoke = bridge.invoke;
+  let release;
+  bridge.invoke = async (command, args) => {
+    if (command === "stage_import_file") await new Promise(resolve => { release = resolve; });
+    return invoke(command, args);
+  };
+  try {
+    render(<App />);
+    fireEvent.click(await enabledButton("Выбрать файл"));
+    const stage = await screen.findByText("2/4 · Копирую файл в рабочую область PetroLab…");
+    expect(stage.closest('[role="status"]')).toBeTruthy();
+    expect(screen.queryByText(/3\/4 · Распознаю/)).toBeNull();
+    release();
+    await enabledButton("Импортировать таблицу");
+    expect(screen.queryByText(/4\/4 · Открываю предпросмотр/)).toBeNull();
+  } finally {
+    release?.();
+    bridge.invoke = invoke;
+  }
 }, 20000);
 
 test("real Python clean single-source still commits and displays persisted analyses", async () => {
@@ -474,10 +506,132 @@ test("AT-08 excludes only the focused source from both plots and restores it fro
   await waitFor(() => expect(point("P1")).toHaveLength(2));
   expect(point("P2")).toHaveLength(2);
   expect(point("P1").every((node) => node.getAttribute("aria-pressed") === "true")).toBe(true);
-  await user.click(await enabledButton("Развернуть таблицу"));
+  // The dock remains expanded when returning to the same plot workspace.
+  expect(screen.getByRole("button", { name: "Свернуть таблицу" }).getAttribute("aria-expanded")).toBe("true");
   expect(within(await screen.findByRole("table", { name: "Таблица выбранных анализов" })).getByText("Не скрыт")).toBeTruthy();
   expect((await invokePetrolab("project.analyses.list", database)).result.analyses).toEqual(before);
   for (const [path, content] of files) expect(await readFile(path, "utf8")).toBe(content);
+}, 20000);
+
+test("categorical mineral colors use reported labels and preserve selection and vector export", async () => {
+  await writeFile(second, "Analysis,Mineral,SiO2 [wt.%],MgO [wt.%]\nC1,olivine,40,50\nC2,pyroxene,50,20\n");
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton(/^(Импортировать таблицу|Сохранить импорт в проект)$/));
+  await screen.findByRole("heading", { name: "Анализы" });
+  await user.click(await enabledButton("Построение"));
+  await screen.findAllByRole("button", { name: /^Выбрать точку C1/ });
+  const mode = screen.getByRole("combobox",{name:"Окрашивать по"});
+  await waitFor(()=>expect(mode.disabled).toBe(false));
+  await user.selectOptions(mode,"mineral");
+  const legend = await screen.findByLabelText("Легенда категорий");
+  expect(within(legend).getByText("olivine")).toBeTruthy();
+  expect(within(legend).getByText("pyroxene")).toBeTruthy();
+  fireEvent.change(within(legend).getByLabelText("Цвет: olivine"),{target:{value:"#112233"}});
+  await user.click(await enabledButton("Сохранить цветовую схему проекта"));
+  await screen.findByText("Цветовая схема сохранена в проекте.");
+  const stored = (await invokePetrolab("project.plot_colors.get",{project_database_path:join(folder,"project.sqlite")})).result;
+  expect(stored.scheme.mode).toBe("mineral");
+  expect(stored.scheme.colors).toContainEqual({mode:"mineral",key:"olivine",color:"#112233"});
+  const first = screen.getAllByRole("button", {name:/^Выбрать точку C1/})[0];
+  const secondMarker = screen.getAllByRole("button", {name:/^Выбрать точку C2/})[0];
+  expect(first.getAttribute("fill")).toBe("#112233");
+  expect(first.getAttribute("fill")).not.toBe(secondMarker.getAttribute("fill"));
+  const firstPanel = first.closest(".plot-panel");
+  await user.click(within(firstPanel).getByText("Оформление точек · 100%"));
+  const beforeStyle = requests.filter(request=>request.command==="plot_data.query").length;
+  fireEvent.change(within(firstPanel).getByRole("slider",{name:"Непрозрачность точек панели"}),{target:{value:"0.35"}});
+  fireEvent.change(within(firstPanel).getByRole("slider",{name:"Размер точек панели"}),{target:{value:"1.5"}});
+  expect(first.getAttribute("opacity")).toBe("0.35");
+  expect(Number(first.getAttribute("r"))).toBe(5.25);
+  await user.click(within(firstPanel).getByRole("button",{name:"Применить оформление ко всем диаграммам"}));
+  expect(screen.getAllByRole("button",{name:/^Выбрать точку C1/}).every(node=>node.getAttribute("opacity")==="0.35")).toBe(true);
+  expect(requests.filter(request=>request.command==="plot_data.query").length).toBe(beforeStyle);
+  fireEvent.keyDown(first,{key:"Enter"});
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  fireEvent.keyDown(secondMarker,{key:"Enter"});
+  await user.click(await enabledButton("Сравнить составы"));
+  const comparison = await screen.findByRole("table",{name:"Сравнение составов"});
+  const mg = within(comparison).getByText("MgO").closest("tr");
+  expect(within(mg).getByText("50")).toBeTruthy();
+  expect(within(mg).getByText("20")).toBeTruthy();
+  expect(within(mg).getByText("-30")).toBeTruthy();
+  await user.click(await enabledButton("Показать статистику"));
+  const summary=await screen.findByRole("table",{name:"Статистика полей"});
+  expect(within(within(summary).getByText("MgO").closest("tr")).getAllByText("35").length).toBe(2);
+  await user.click(await enabledButton("Закрыть статистику"));
+  fireEvent.keyDown(secondMarker,{key:"Enter",ctrlKey:true});
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  const svg = await readFile(await savePlot(user),"utf8");
+  expect(svg).toContain("category-legend");
+  expect(svg).toContain("olivine");
+  expect(svg).toContain("pyroxene");
+  expect(svg).toContain(first.getAttribute("fill"));
+  expect(svg).toContain('opacity="0.35"');
+  expect(svg).toContain('r="5.25"');
+  await user.selectOptions(mode,"generation");
+  expect(within(await screen.findByLabelText("Легенда категорий")).getByText("Не указано")).toBeTruthy();
+  await user.selectOptions(mode,"source");
+  expect(screen.queryByLabelText("Легенда категорий")).toBeNull();
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  expect(requests.filter(request=>request.command==="plot_data.catalog" && request.payload.include_categories)).toHaveLength(1);
+  await user.click(await enabledButton("Загрузить сохранённую схему"));
+  await screen.findByText("Загружена сохранённая цветовая схема.");
+  expect(mode.value).toBe("mineral");
+  expect(first.getAttribute("fill")).toBe("#112233");
+}, 20000);
+
+test("axis catalog drops an exact catalog key and rejects an unknown key", async () => {
+  await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\nP1,20,30,50\nP2,10,80,10\n");
+  queue = [second];
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await enabledButton("Выбрать файл"));
+  await user.click(await enabledButton(/^(Импортировать таблицу|Сохранить импорт в проект)$/));
+  await screen.findByRole("heading", { name: "Анализы" });
+  await user.click(await enabledButton("Построение"));
+  await screen.findAllByRole("button", { name: "Выбрать точку P1" });
+  const panel = document.querySelector(".plot-panel");
+  const axis = within(panel).getByRole("combobox", { name: "Ось 1" });
+  const original = axis.value;
+  const target = [...axis.options].find(option => option.value !== original && option.value !== within(panel).getByRole("combobox", { name: "Ось 2" }).value);
+  expect(target).toBeTruthy();
+  await user.click(screen.getByText(/Каталог осей ·/));
+  const search = await screen.findByRole("textbox", { name: "Поиск полей осей" });
+  const catalog = search.closest("details");
+  const field = [...catalog.querySelectorAll("[draggable=true]")].find(node => node.textContent === target.textContent);
+  expect(field).toBeTruthy();
+  const values = new Map();
+  const dataTransfer = { types: ["application/x-petrolab-axis"], setData: (type, value) => values.set(type, value),
+    getData: type => values.get(type) || "" };
+  fireEvent.dragStart(field, { dataTransfer });
+  expect(values.get("application/x-petrolab-axis")).toBe(target.value);
+  fireEvent.dragOver(axis, { dataTransfer });
+  fireEvent.drop(axis, { dataTransfer });
+  await waitFor(() => expect(axis.value).toBe(target.value));
+  await screen.findAllByRole("button", { name: "Выбрать точку P1" });
+  values.set("application/x-petrolab-axis", JSON.stringify(["not_a_field", "wt.%", null, null]));
+  fireEvent.drop(axis, { dataTransfer });
+  expect(axis.value).toBe(target.value);
+  expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
+  await user.click(await within(panel).findByRole("button", {name:"Добавить диаграмму в избранное"}));
+  await user.click(screen.getByText("Избранное и недавние оси"));
+  const presets = screen.getByText("Избранные комбинации").closest("details");
+  await user.click(await enabledButton("Сохранить комбинации в проекте"));
+  await screen.findByText("Избранное и недавние оси сохранены в проекте.");
+  await user.click(within(presets).getByRole("button",{name:"Удалить избранную комбинацию"}));
+  expect(within(presets).queryByRole("button",{name:"Удалить избранную комбинацию"})).toBeNull();
+  await user.click(await enabledButton("Загрузить сохранённые комбинации"));
+  await screen.findByText("Загружены сохранённые комбинации.");
+  const favorite = within(presets).getByRole("button",{name:"Удалить избранную комбинацию"}).parentElement.firstElementChild;
+  await user.click(favorite);
+  await waitFor(() => expect(screen.getAllByRole("combobox", {name:"Тип диаграммы"})).toHaveLength(3));
+  await user.click(screen.getByText("Минеральные шаблоны"));
+  await user.click(await enabledButton("Добавить графики шаблона"));
+  await waitFor(() => expect(screen.getAllByRole("combobox", {name:"Тип диаграммы"})).toHaveLength(4));
+  expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
 }, 20000);
 
 test("one common selection highlights the same analysis on binary and ternary plots and in the table", async () => {
@@ -493,6 +647,18 @@ test("one common selection highlights the same analysis on binary and ternary pl
   await waitFor(() => expect(screen.getAllByRole("button", { name: "Выбрать точку P1" })).toHaveLength(2));
   await user.selectOptions(screen.getByRole("combobox", { name: "Область" }), "lasso");
   const point = screen.getAllByRole("button", { name: "Выбрать точку P1" })[0];
+  fireEvent.mouseEnter(point, { shiftKey: true });
+  const tooltip = await screen.findByRole("tooltip");
+  await within(tooltip).findByText("Исходные измерения (без пересчёта)");
+  expect(within(tooltip).getAllByText(/MgO: 50 wt\.%/).some(node => node.closest(".plot-tooltip-measurements"))).toBe(true);
+  expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
+  fireEvent.mouseLeave(point);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  const detailRequests = requests.filter(request => request.command === "project.analysis.get").length;
+  fireEvent.mouseEnter(point, { shiftKey: true });
+  await within(await screen.findByRole("tooltip")).findByText("Исходные измерения (без пересчёта)");
+  expect(requests.filter(request => request.command === "project.analysis.get").length).toBe(detailRequests);
+  fireEvent.mouseLeave(point);
   const canvas = point.closest("svg");
   canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 460, height: 280 });
   canvas.setPointerCapture = () => {};
@@ -524,6 +690,23 @@ test("one common selection highlights the same analysis on binary and ternary pl
   expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
   await user.click(await enabledButton("Автомасштаб"));
   expect(canvas.getAttribute("viewBox")).toBe(originalView);
+  // Blank click clears the common selection even in add mode.
+  pointer("pointerdown", 15, 15);
+  pointer("pointerup", 15, 15);
+  expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
+  fireEvent.keyDown(point, { key: "Enter", shiftKey: true });
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  const secondPoint = screen.getAllByRole("button", { name: "Выбрать точку P2" })[0];
+  fireEvent.keyDown(secondPoint, { key: "Enter", ctrlKey: true });
+  expect(screen.getByText("Выбранные анализы · 2")).toBeTruthy();
+  fireEvent.keyDown(secondPoint, { key: "Enter", altKey: true });
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
+  fireEvent.keyDown(canvas, { key: "Escape" });
+  expect(screen.getByText("Выбранные анализы · 0")).toBeTruthy();
+  fireEvent.keyDown(canvas, { key: "a", ctrlKey: true });
+  expect(screen.getByText("Выбранные анализы · 2")).toBeTruthy();
+  fireEvent.keyDown(secondPoint, { key: "Enter", ctrlKey: true });
+  expect(screen.getByText("Выбранные анализы · 1")).toBeTruthy();
   for (let count = 0; count < 6; count += 1) {
     await user.click(screen.getByRole("button", { name: "Добавить диаграмму" }));
   }
@@ -558,6 +741,19 @@ test("one common selection highlights the same analysis on binary and ternary pl
   expect(table.getByRole("checkbox", { name: "Выбрать P2" }).checked).toBe(false);
   await user.click(await enabledButton("Построение"));
   await screen.findAllByRole("button", { name: "Выбрать точку P1" });
+  await waitFor(() => expect(screen.getAllByRole("button", { name: "Выбрать точку P1" })).toHaveLength(8));
+  expect(screen.getByRole("combobox", { name: "Область" }).value).toBe("lasso");
+  // Layout now persists, explicitly reduce it before saving the three-panel fixture.
+  while (screen.getAllByRole("combobox", { name: "Тип диаграммы" }).length > 2) {
+    const buttons = screen.getAllByRole("button", { name: "Убрать панель" });
+    await user.click(buttons.at(-1));
+  }
+  const panelOrder = () => [...document.querySelectorAll(".plot-grid .plot-panel")].map(node => node.id);
+  const beforeOrder = panelOrder();
+  await user.click(await enabledButton("Переместить панель 1 ниже"));
+  expect(panelOrder()).toEqual([beforeOrder[1], beforeOrder[0]]);
+  await user.click(await enabledButton("Переместить панель 2 выше"));
+  expect(panelOrder()).toEqual(beforeOrder);
   await user.click(await enabledButton("Добавить диаграмму"));
   await user.click(await enabledButton("Скрыть отбор на графиках"));
   await screen.findByRole("button", { name: "Вернуть скрытые точки · 1" });
@@ -580,7 +776,10 @@ test("one common selection highlights the same analysis on binary and ternary pl
   expect([...single.querySelectorAll("g")].map((group) => group.id)).toEqual(["panel-b"]);
   const layout = await readSvg(await savePlot(user));
   expect([...layout.querySelectorAll("g")].map((group) => group.id)).toEqual(["panel-a", "panel-b", "panel-c"]);
-  expect(layout.querySelector("clipPath, mask, foreignObject, image, circle")).toBeNull();
+  expect(layout.querySelector("clipPath, mask, foreignObject, image")).toBeNull();
+  // Returning to the layout preserves the original input P1/P2. P1 is
+  // explicitly hidden, so exactly one visible P2 marker per panel remains.
+  expect(layout.querySelectorAll("circle")).toHaveLength(3);
   expect(layout.querySelector("text")?.textContent).toBe("a");
   app.unmount();
   await stopService();
@@ -1046,6 +1245,9 @@ test("selected analyses can be assigned to a new physical sample during import",
   await screen.findByRole("heading", { name: "Анализы" });
   expect(within(await screen.findByRole("table")).getByRole("checkbox", { name: "Выбрать B2" }).checked).toBe(true);
   await user.click(await enabledButton("Образцы"));
+  const sampleTabs = within(await screen.findByRole("navigation", { name: "Разделы образца" }));
+  expect(sampleTabs.getByRole("button", { name: "Источники" }).getAttribute("aria-current")).toBe("page");
+  await user.click(sampleTabs.getByRole("button", { name: "Обзор" }));
   expect(await screen.findByText("Северный массив")).toBeTruthy();
   expect(await screen.findByText("Полевое описание образца")).toBeTruthy();
 }, 20000);

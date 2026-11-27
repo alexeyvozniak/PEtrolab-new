@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CaretDown,
   CaretUp,
@@ -14,6 +14,8 @@ import "./analysesWorkspace.css";
 import { EditDraftPanel } from "./EditDraftPanel";
 import { GenerationAssignment } from "./GenerationAssignment";
 import { selectionRange } from "./selectionRange";
+import { ContextActions } from "./ContextActions";
+import { virtualRowRange, ROW_HEIGHT, TABLE_HEADER_HEIGHT } from "./virtualRows";
 
 function originLabel(analysis) {
   return analysis.source_orientation === "columns_are_analyses"
@@ -82,6 +84,14 @@ function valueFor(analysis, column) {
   if (column.kind === "metadata") return analysis.source_metadata?.[column.field] || "";
   if (column.kind === "measurement") return analysis.measurements?.[column.field]?.raw_token ?? "";
   return "";
+}
+
+// Quoted TSV is suitable for spreadsheet paste. Treat formula-like text as
+// literal; signed numeric tokens remain numbers. Never write back to the source.
+function clipboardCell(value) {
+  let text = String(value ?? "");
+  if (/^[\s]*[=+\-@]/.test(text) && !/^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][+-]?\d+)?$/.test(text.trim())) text = "'" + text;
+  return /[\t\r\n"]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
 }
 
 function mainIdentity(analysis) {
@@ -248,7 +258,7 @@ function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlot
   );
 }
 
-export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, generationActions, onExportSelection, onPublishSelection, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, onUndoPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
+export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initialDraftId, selectedIds, setSelectedIds, onListWorkGroups, onCreateWorkGroup, generationActions, onExportSelection, onPublishSelection, onSummary, onOpenPlots, onListTableViews, onSaveTableView, editDraftActions, hiddenPlotAnalysisIds = [], onSetPlotVisibility, onUndoPlotVisibility, busy, onRefresh, onRetract, onAddData, onLoadMore }) {
   const analyses = project.analyses || [];
   const mineralStatusCounts = project.mineral_status_counts || {};
   const mineralReviewedCount = Object.values(mineralStatusCounts).reduce((total, count) => total + Number(count || 0), 0);
@@ -281,15 +291,18 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
     ...measurementFields.slice(0, 8).map((field) => columnId("measurement", field)),
   ]), [identityFields, metadataFields, measurementFields]);
 
-  const [query, setQuery] = useState("");
-  const [sourceFilter, setSourceFilter] = useState("all");
-  const [sheetFilter, setSheetFilter] = useState("all");
-  const [mineralStatusFilter, setMineralStatusFilter] = useState([]);
-  const [statusQuery, setStatusQuery] = useState("");
-  const [sampleLinkFilter, setSampleLinkFilter] = useState("all");
-  const [columnFilters, setColumnFilters] = useState({});
-  const [visibleColumnIds, setVisibleColumnIds] = useState([]);
+  const [query, setQuery] = useState(() => viewMemory?.query ?? "");
+  const [sourceFilter, setSourceFilter] = useState(() => viewMemory?.sourceFilter ?? "all");
+  const [sheetFilter, setSheetFilter] = useState(() => viewMemory?.sheetFilter ?? "all");
+  const [mineralStatusFilter, setMineralStatusFilter] = useState(() => viewMemory?.mineralStatusFilter ?? []);
+  const [statusQuery, setStatusQuery] = useState(() => viewMemory?.statusQuery ?? "");
+  const [sampleLinkFilter, setSampleLinkFilter] = useState(() => viewMemory?.sampleLinkFilter ?? "all");
+  const [columnFilters, setColumnFilters] = useState(() => viewMemory?.columnFilters ?? {});
+  const [visibleColumnIds, setVisibleColumnIds] = useState(() => viewMemory?.visibleColumnIds ?? []);
+  const [columnWidths, setColumnWidths] = useState(() => viewMemory?.columnWidths ?? {});
+  const columnResize = useRef(null);
   const [dragIds, setDragIds] = useState([]);
+  const [contextMenu, setContextMenu] = useState(null);
   const [workGroups, setWorkGroups] = useState(null);
   const [groupForm, setGroupForm] = useState(false);
   const [groupBusy, setGroupBusy] = useState(false);
@@ -298,11 +311,40 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
   const [tableViews, setTableViews] = useState([]);
   const [viewBusy, setViewBusy] = useState(false);
   const [viewMessage, setViewMessage] = useState(null);
+  const searchInput = useRef(null);
   const selectionAnchor = useRef(null);
   const selectionDrag = useRef(null);
-  const [focusedId, setFocusedId] = useState(initialFocusedId || "");
-  const [sort, setSort] = useState({ id: "source", direction: "asc" });
+  const [focusedId, setFocusedId] = useState(initialFocusedId || viewMemory?.focusedId || "");
+  const tableScroll = useRef(null);
+  const [viewport, setViewport] = useState(() => ({ top: viewMemory?.scrollTop || 0, height: 420 }));
+  useLayoutEffect(() => {
+    const element = tableScroll.current;
+    if (!element) return;
+    const measure = () => setViewport(current => {
+      const next = { top: element.scrollTop, height: element.clientHeight || 420 };
+      return current.top === next.top && current.height === next.height ? current : next;
+    });
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [analyses.length > 0]);
+  const [sort, setSort] = useState(() => viewMemory?.sort ?? { id: "source", direction: "asc" });
 
+  useLayoutEffect(() => {
+    if (!viewMemory) return;
+    Object.assign(viewMemory, { query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery,
+      sampleLinkFilter, columnFilters, visibleColumnIds, columnWidths, focusedId, sort });
+  }, [viewMemory, query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery, sampleLinkFilter,
+    columnFilters, visibleColumnIds, columnWidths, focusedId, sort]);
+  useLayoutEffect(() => {
+    const element = tableScroll.current;
+    if (!element || !viewMemory) return;
+    element.scrollTop = viewMemory.scrollTop || 0;
+    element.scrollLeft = viewMemory.scrollLeft || 0;
+    setViewport({ top: element.scrollTop, height: element.clientHeight || 420 });
+  }, [viewMemory, visibleColumnIds.length > 0]);
   useEffect(() => {
     const finish = (event) => {
       const drag = selectionDrag.current;
@@ -375,27 +417,32 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
   }), [availableColumns, columnFilters, measurementUnits]);
   const invalidFilters = new Set(activeColumnFilters.filter((condition) => condition.invalid).map(({ column }) => column.id));
 
+  const needle = query.trim().toLowerCase();
+  const searching = needle.length > 0;
+  const searchIndex = useMemo(() => searching
+    ? analyses.map(analysis => JSON.stringify(analysis).toLowerCase())
+    : null, [analyses, searching]);
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return analyses.filter((analysis) => {
+    return analyses.filter((analysis, index) => {
       if (sourceFilter !== "all" && analysis.source_id !== sourceFilter) return false;
       if (sheetFilter !== "all" && analysis.sheet_name !== sheetFilter) return false;
       if (mineralStatusFilter.length && !mineralStatusFilter.includes(mineralStatus(analysis))) return false;
       if (sampleLinkFilter !== "all" && Boolean(analysis.sample_association?.sample_id) !== (sampleLinkFilter === "linked")) return false;
-      if (needle && !JSON.stringify(analysis).toLowerCase().includes(needle)) return false;
+      if (needle && !searchIndex[index].includes(needle)) return false;
       return activeColumnFilters.every(({ column, expression, testMeasurement, invalid }) =>
         invalid || (testMeasurement
           ? testMeasurement(analysis.measurements?.[column.field])
           : String(valueFor(analysis, column)).toLowerCase().includes(expression.toLowerCase())));
     });
-  }, [analyses, activeColumnFilters, mineralStatusFilter, sampleLinkFilter, query, sheetFilter, sourceFilter]);
+  }, [analyses, activeColumnFilters, mineralStatusFilter, sampleLinkFilter, needle, searchIndex, sheetFilter, sourceFilter]);
 
-  const ordered = useMemo(() => {
-    const selected = new Set(selectedIds);
+  const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const dragged = useMemo(() => new Set(dragIds), [dragIds]);
+  const sorted = useMemo(() => {
     const column = availableColumns.find((item) => item.id === sort.id) || availableColumns[0];
+    const collator = new Intl.Collator("ru", { numeric: true });
+    const values = new Map(filtered.map(analysis => [analysis, column ? String(valueFor(analysis, column)) : ""]));
     return [...filtered].sort((left, right) => {
-      const selectedDifference = Number(selected.has(right.analysis_id)) - Number(selected.has(left.analysis_id));
-      if (selectedDifference) return selectedDifference;
       if (column?.kind === "measurement") {
         const leftMeasurement = left.measurements?.[column.field];
         const rightMeasurement = right.measurements?.[column.field];
@@ -409,17 +456,34 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
           return sort.direction === "asc" ? comparison : -comparison;
         }
       }
-      const comparison = column
-        ? String(valueFor(left, column)).localeCompare(String(valueFor(right, column)), "ru", { numeric: true })
-        : 0;
+      const comparison = collator.compare(values.get(left), values.get(right));
       return sort.direction === "asc" ? comparison : -comparison;
     });
-  }, [availableColumns, filtered, selectedIds, sort]);
-
-  const focused = analyses.find((analysis) => analysis.analysis_id === focusedId) || ordered[0] || null;
-  const filteredIds = ordered.map((analysis) => analysis.analysis_id);
-  const hiddenSelectionCount = selectedIds.filter((id) => !filteredIds.includes(id)).length;
-  const allVisibleSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedIds.includes(id));
+  }, [availableColumns, filtered, sort]);
+  // Stable partition preserves the original sort order within both groups.
+  const ordered = useMemo(() => {
+    const marked = [], remaining = [];
+    for (const analysis of sorted) (selected.has(analysis.analysis_id) ? marked : remaining).push(analysis);
+    return marked.concat(remaining);
+  }, [sorted, selected]);
+  const byId = useMemo(() => new Map(analyses.map(analysis => [analysis.analysis_id, analysis])), [analyses]);
+  const focused = byId.get(focusedId) || ordered[0] || null;
+  const filteredIds = useMemo(() => ordered.map(analysis => analysis.analysis_id), [ordered]);
+  const filteredSet = useMemo(() => new Set(filteredIds), [filteredIds]);
+  const hiddenSelectionCount = selectedIds.filter(id => !filteredSet.has(id)).length;
+  const allVisibleSelected = filteredIds.length > 0 && filteredIds.every(id => selected.has(id));
+  const virtual = ordered.length > 300;
+  const rowRange = virtual ? virtualRowRange(ordered.length, viewport.top, viewport.height) : { start: 0, end: ordered.length };
+  const renderedRows = ordered.slice(rowRange.start, rowRange.end);
+  useLayoutEffect(() => {
+    const element = tableScroll.current;
+    if (!element) return;
+    const top = Math.min(element.scrollTop, Math.max(0, ordered.length * ROW_HEIGHT + TABLE_HEADER_HEIGHT - viewport.height));
+    if (top !== element.scrollTop) {
+      element.scrollTop = top;
+      setViewport(current => ({ ...current, top }));
+    }
+  }, [ordered.length, viewport.height]);
 
   const toggleSelection = (id, extend = false) => {
     const anchor = selectionAnchor.current;
@@ -430,7 +494,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
         return;
       }
     }
-    const checked = selectedIds.includes(id);
+    const checked = selected.has(id);
     selectionAnchor.current = checked ? null : { id, order: filteredIds, base: selectedIds, filtered, sort };
     setSelectedIds(checked ? selectedIds.filter((item) => item !== id) : [...selectedIds, id]);
   };
@@ -447,7 +511,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
   const toggleAllVisible = () => {
     selectionAnchor.current = null;
     setSelectedIds((current) => {
-      if (allVisibleSelected) return current.filter((id) => !filteredIds.includes(id));
+      if (allVisibleSelected) return current.filter(id => !filteredSet.has(id));
       return [...new Set([...current, ...filteredIds])];
     });
   };
@@ -591,10 +655,115 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
     }
   };
 
+  const handleKeys = (event) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+    const typing = event.target.closest?.("input, textarea, select, [contenteditable=true]");
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      searchInput.current?.focus();
+      searchInput.current?.select();
+      return;
+    }
+    if (typing) {
+      if (event.key === "Escape" && event.target === searchInput.current) {
+        event.preventDefault();
+        setQuery("");
+      }
+      return;
+    }
+    if (!event.target.closest?.(".analyses-table-pane")) return;
+    if (event.key === "F2" && !busy && editDraftActions && focused) {
+      const details = event.currentTarget.querySelector(".analysis-edit-drafts");
+      if (details) {
+        event.preventDefault();
+        details.open = true;
+        details.scrollIntoView?.({ block: "nearest" });
+        details.querySelector("input[name=new_value]")?.focus();
+      }
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      selectionAnchor.current = null;
+      selectionDrag.current = null;
+      setDragIds([]);
+      setSelectedIds([]);
+    } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      selectionAnchor.current = null;
+      setSelectedIds(current => [...new Set([...current, ...filteredIds])]);
+    } else if (event.target.closest?.(".analyses-table-scroll") && ["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+      if (event.target.closest?.("button, [role=button]")) return;
+      event.preventDefault();
+      const index = ordered.findIndex(analysis => analysis.analysis_id === focused?.analysis_id);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? ordered.length - 1 :
+        Math.max(0, Math.min(ordered.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+      if (ordered[next]) {
+        const id = ordered[next].analysis_id;
+        setFocusedId(id);
+        if (event.shiftKey) {
+          const anchor = selectionAnchor.current;
+          if (!anchor || anchor.filtered !== filtered || anchor.sort !== sort) {
+            selectionAnchor.current = { id: focused?.analysis_id || id, order: filteredIds, base: selectedIds, filtered, sort };
+          }
+          toggleSelection(id, true);
+        } else {
+          selectionAnchor.current = null;
+        }
+        const element = tableScroll.current;
+        if (virtual && element) {
+          // Keep keyboard navigation in the logical full result, even when a row is not mounted.
+          const top = next * ROW_HEIGHT;
+          const available = Math.max(ROW_HEIGHT, viewport.height - TABLE_HEADER_HEIGHT);
+          if (top < element.scrollTop) element.scrollTop = top;
+          else if (top + ROW_HEIGHT > element.scrollTop + available) element.scrollTop = top + ROW_HEIGHT - available;
+          setViewport(current => ({ ...current, top: element.scrollTop }));
+        } else {
+          event.currentTarget.querySelectorAll(".analyses-data-table tbody tr")[next]?.scrollIntoView?.({ block: "nearest" });
+        }
+      }
+    }
+  };
+
+  const resizeColumn = (id, width) => setColumnWidths(current => ({ ...current, [id]: Math.max(104, Math.min(600, Math.round(width))) }));
+  const columnStyle = id => {
+    const width = columnWidths[id] || (virtual ? 150 : undefined);
+    return width ? { width, minWidth: width, maxWidth: width } : undefined;
+  };
+  const autoWidth = column => {
+    // Measure displayed text (including raw tokens and units), not a numerical conversion.
+    const canvas = document.createElement("canvas");
+    let context = null;
+    if (!navigator.userAgent.includes("jsdom")) context = canvas.getContext("2d");
+    if (context) context.font = "10px " + getComputedStyle(tableScroll.current).fontFamily;
+    const measure = text => context ? context.measureText(String(text)).width : String(text).length * 7;
+    let max = measure(column.label) + 38;
+    for (const analysis of ordered) {
+      max = Math.max(max, measure(valueFor(analysis, column)) + 26);
+      if (column.kind === "measurement") {
+        const m = analysis.measurements?.[column.field];
+        if (m) max = Math.max(max, measure([m.unit, measurementContext(m)].filter(Boolean).join(" · ")) + 26);
+      }
+      if (max >= 600) break;
+    }
+    resizeColumn(column.id, max);
+  };
+
+  const copyVisibleSelection = (event) => {
+    if (event.target.closest?.("input, textarea, select, [contenteditable=true]") || window.getSelection()?.toString()) return;
+    const rows = ordered.filter(analysis => selected.has(analysis.analysis_id));
+    if (!rows.length || !event.clipboardData) return;
+    const header = visibleColumns.flatMap(column => column.kind === "measurement"
+      ? [column.label, column.label + " · единица"] : [column.label]);
+    const lines = [header, ...rows.map(analysis => visibleColumns.flatMap(column => column.kind === "measurement"
+      ? [valueFor(analysis, column), analysis.measurements?.[column.field]?.unit ?? ""]
+      : [valueFor(analysis, column)]))];
+    event.clipboardData.setData("text/plain", lines.map(line => line.map(clipboardCell).join("\t")).join("\r\n"));
+    event.preventDefault();
+  };
+
   if (project.total === 0 && !project.has_work_groups && !project.has_table_views) return <EmptyAnalyses onAddData={onAddData} />;
 
   return (
-    <div className="analyses-workspace">
+    <div className="analyses-workspace" onKeyDown={handleKeys}>
       <aside className="analyses-sources">
         <div className="analyses-pane-title"><span>Источники</span><b>{project.source_count}</b></div>
         <button className={`analysis-source-row${sourceFilter === "all" ? " active" : ""}`} type="button" onClick={() => { setSourceFilter("all"); setSheetFilter("all"); }}><span>Все источники</span><b>{analyses.length}</b></button>
@@ -662,7 +831,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
       <main className="analyses-table-pane">
         <div>
         <div className="analyses-toolbar">
-          <div className="analysis-search"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sample, Mineral, Generation, значение…" aria-label="Поиск анализов" /></div>
+          <div className="analysis-search"><MagnifyingGlass size={18} /><input ref={searchInput} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sample, Mineral, Generation, значение…" aria-label="Поиск анализов" title="Ctrl+F — поиск, Esc — очистить поиск" /></div>
           <span className="analyses-result-count">{project.has_more ? `${ordered.length} из ${analyses.length} загруженных` : `${ordered.length} из ${project.total}`}</span>
           <span className={`analysis-mineral-health ${mineralReviewedCount === 0 || mineralAttentionCount ? "attention" : "ok"}`} title={`Проверено для ${mineralReviewedCount} загруженных анализов`}>
             {mineralReviewedCount === 0
@@ -696,13 +865,45 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
         </div>}
         </div>
 
-        <div className="analyses-table-scroll">
-          <table className={`analyses-data-table${dragIds.length ? " selecting-range" : ""}`}>
+        <div className="analyses-table-scroll" ref={tableScroll} onScroll={event => {
+          const element = event.currentTarget;
+          if (viewMemory) Object.assign(viewMemory, { scrollTop: element.scrollTop, scrollLeft: element.scrollLeft });
+          setViewport(current => current.top === element.scrollTop ? current : { ...current, top: element.scrollTop });
+        }} tabIndex={0} aria-label="Таблица анализов: Ctrl+A — выбрать показанные, Esc — снять выбор, стрелки — перейти к анализу, Ctrl+C — копировать показанные выбранные строки" onCopy={copyVisibleSelection} onClick={event => {
+          if (event.target === event.currentTarget) {
+            selectionAnchor.current = null;
+            setSelectedIds([]);
+          }
+        }}>
+          <table aria-rowcount={ordered.length + 2} className={`analyses-data-table${dragIds.length ? " selecting-range" : ""}${virtual ? " virtual-rows" : ""}`}
+            style={virtual ? { width: 42 + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 150), 0) } : undefined}>
             <thead>
               <tr>
                 <th className="analysis-select-cell"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} aria-label="Выбрать показанные анализы" /></th>
                 {visibleColumns.map((column) => (
-                  <th key={column.id}><button type="button" onClick={() => changeSort(column.id)}>{column.label}{sort.id === column.id ? (sort.direction === "asc" ? <CaretUp size={12} /> : <CaretDown size={12} />) : null}</button></th>
+                  <th key={column.id} style={columnStyle(column.id)}><button type="button" onClick={() => changeSort(column.id)}
+                    onDoubleClick={event => { event.preventDefault(); autoWidth(column); }}>{column.label}{sort.id === column.id ? (sort.direction === "asc" ? <CaretUp size={12} /> : <CaretDown size={12} />) : null}</button>
+                    <span className="analysis-column-resizer" role="separator" aria-orientation="vertical" tabIndex={0}
+                      aria-label={`Ширина колонки ${column.label}`} aria-valuemin={104} aria-valuemax={600} aria-valuenow={columnWidths[column.id] || 104}
+                      title="Перетащить для изменения ширины; двойной клик — по содержимому"
+                      onPointerDown={event => {
+                        if (event.button !== 0) return;
+                        event.preventDefault(); event.stopPropagation();
+                        columnResize.current = { id: column.id, x: event.clientX, width: event.currentTarget.parentElement.getBoundingClientRect().width };
+                        event.currentTarget.setPointerCapture?.(event.pointerId);
+                      }}
+                      onPointerMove={event => { const drag = columnResize.current; if (drag?.id === column.id) resizeColumn(column.id, drag.width + event.clientX - drag.x); }}
+                      onPointerUp={() => { columnResize.current = null; }}
+                      onPointerCancel={() => { columnResize.current = null; }}
+                      onLostPointerCapture={() => { columnResize.current = null; }}
+                      onDoubleClick={event => { event.preventDefault(); event.stopPropagation(); autoWidth(column); }}
+                      onKeyDown={event => {
+                        if (!["ArrowLeft", "ArrowRight", "Enter"].includes(event.key)) return;
+                        event.preventDefault(); event.stopPropagation();
+                        if (event.key === "Enter") autoWidth(column);
+                        else resizeColumn(column.id, (columnWidths[column.id] || event.currentTarget.parentElement.getBoundingClientRect().width || 104) + (event.key === "ArrowRight" ? 16 : -16));
+                      }} />
+                  </th>
                 ))}
               </tr>
               <tr className="analysis-filter-row">
@@ -712,17 +913,24 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
                   const hint = column.kind === "measurement"
                     ? `Число, >10, 5..20, пусто, ниже предела${units.length > 1 ? `. Укажите единицу: ${units.join(", ")}` : ""}`
                     : "Поиск по фрагменту";
-                  return <th key={column.id}><input value={columnFilters[column.id] || ""} onChange={(event) => setColumnFilters((current) => ({ ...current, [column.id]: event.target.value }))} placeholder={column.kind === "measurement" ? ">10, 5..20" : "Фильтр"} title={hint} aria-invalid={invalidFilters.has(column.id)} aria-label={`Фильтр ${column.label}`} /></th>;
+                  return <th key={column.id} style={columnStyle(column.id)}><input value={columnFilters[column.id] || ""} onChange={(event) => setColumnFilters((current) => ({ ...current, [column.id]: event.target.value }))} placeholder={column.kind === "measurement" ? ">10, 5..20" : "Фильтр"} title={hint} aria-invalid={invalidFilters.has(column.id)} aria-label={`Фильтр ${column.label}`} /></th>;
                 })}
               </tr>
             </thead>
             <tbody>
-              {ordered.map((analysis) => {
-                const selected = selectedIds.includes(analysis.analysis_id);
+              {virtual && rowRange.start > 0 && <tr aria-hidden="true" className="analysis-row-spacer"><td colSpan={visibleColumns.length + 1} style={{ height: rowRange.start * ROW_HEIGHT }} /></tr>}
+              {renderedRows.map((analysis, index) => {
+                const checked = selected.has(analysis.analysis_id);
                 const focusedRow = focused?.analysis_id === analysis.analysis_id;
                 return (
-                  <tr className={`${selected || dragIds.includes(analysis.analysis_id) ? "selected " : ""}${focusedRow ? "focused" : ""}`} key={analysis.analysis_id}
+                  <tr className={`${checked || dragged.has(analysis.analysis_id) ? "selected " : ""}${focusedRow ? "focused" : ""}`} key={analysis.analysis_id} aria-rowindex={rowRange.start + index + 3}
                     onPointerEnter={(event) => extendSelectionDrag(event, analysis.analysis_id)}
+                    onContextMenu={event => {
+                      if (event.target.closest?.("input, textarea, select")) return;
+                      event.preventDefault();
+                      setFocusedId(analysis.analysis_id);
+                      setContextMenu({ id: analysis.analysis_id, label: mainIdentity(analysis), x: event.clientX, y: event.clientY });
+                    }}
                     onClick={(event) => {
                       if (event.shiftKey || event.ctrlKey || event.metaKey) {
                         toggleSelection(analysis.analysis_id, event.shiftKey);
@@ -730,12 +938,12 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
                       setFocusedId(analysis.analysis_id);
                     }}>
                     <td className="analysis-select-cell" onPointerDown={(event) => startSelectionDrag(event, analysis.analysis_id)}>
-                      <input type="checkbox" checked={selected} onChange={(event) => toggleSelection(analysis.analysis_id, event.nativeEvent.shiftKey)} onClick={(event) => event.stopPropagation()} aria-label={`Выбрать ${mainIdentity(analysis)}`} />
+                      <input type="checkbox" checked={checked} onChange={(event) => toggleSelection(analysis.analysis_id, event.nativeEvent.shiftKey)} onClick={(event) => event.stopPropagation()} aria-label={`Выбрать ${mainIdentity(analysis)}`} />
                     </td>
                     {visibleColumns.map((column) => {
                       const measurement = column.kind === "measurement" ? analysis.measurements?.[column.field] : null;
                       return (
-                        <td key={column.id} title={String(valueFor(analysis, column))}>
+                        <td key={column.id} style={columnStyle(column.id)} title={String(valueFor(analysis, column))}>
                           <span>{valueFor(analysis, column)}</span>
                           {measurement ? <small>{measurement.unit}{measurementContext(measurement) ? ` · ${measurementContext(measurement)}` : ""}</small> : null}
                         </td>
@@ -744,6 +952,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
                   </tr>
                 );
               })}
+              {virtual && rowRange.end < ordered.length && <tr aria-hidden="true" className="analysis-row-spacer"><td colSpan={visibleColumns.length + 1} style={{ height: (ordered.length - rowRange.end) * ROW_HEIGHT }} /></tr>}
             </tbody>
           </table>
           {ordered.length === 0 && <div className="analyses-no-results"><MagnifyingGlass size={25} /><b>Ничего не найдено</b><span>Сбрось поиск или фильтры колонок.</span></div>}
@@ -752,6 +961,15 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
         {project.has_more && <button className="analyses-load-more" type="button" onClick={onLoadMore} disabled={busy}>Загрузить ещё анализы</button>}
       </main>
 
+      <ContextActions menu={contextMenu} onClose={() => setContextMenu(null)} actions={contextMenu ? [
+        { label: selected.has(contextMenu.id) ? "Снять выделение анализа" : "Добавить анализ в отбор", run: () => toggleSelection(contextMenu.id) },
+        { label: "Построить диаграммы для анализа", disabled: busy || !onOpenPlots, run: () => onOpenPlots([contextMenu.id]) },
+        { label: "Фильтровать по источнику", run: () => { const analysis = byId.get(contextMenu.id); if (analysis) { setSourceFilter(analysis.source_id); setSheetFilter("all"); } } },
+        { label: "Открыть черновик правки", disabled: busy || !editDraftActions, run: () => {
+          const details = document.querySelector(".analysis-edit-drafts");
+          if (details) { details.open = true; details.scrollIntoView?.({ block: "nearest" }); details.querySelector("input[name=new_value]")?.focus(); }
+        } },
+      ] : []} />
       <AnalysisDetail analysis={focused} editDraftActions={editDraftActions} initialDraftId={initialDraftId} hiddenPlotAnalysisIds={hiddenPlotAnalysisIds}
         onSetPlotVisibility={onSetPlotVisibility} onUndoPlotVisibility={onUndoPlotVisibility} busy={busy} />
 
@@ -760,7 +978,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
           <div><CheckSquare size={20} weight="fill" /><b>{selectedIds.length} выбрано</b><span>{hiddenSelectionCount ? `Скрыто фильтром: ${hiddenSelectionCount}` : "Выбранные строки закреплены сверху."}</span></div>
           <div className="analysis-selection-chips">
             {selectedIds.slice(0, 5).map((id) => {
-              const analysis = analyses.find((item) => item.analysis_id === id);
+              const analysis = byId.get(id);
               return <button type="button" key={id} onClick={() => toggleSelection(id)}>{analysis ? mainIdentity(analysis) : "Анализ вне загруженных страниц"} <X size={13} /></button>;
             })}
             {selectedIds.length > 5 && <span>+{selectedIds.length - 5}</span>}
@@ -769,6 +987,7 @@ export function AnalysesWorkspace({ project, initialFocusedId, initialDraftId, s
             {onCreateWorkGroup && <button className="primary-button" type="button" disabled={busy || groupBusy} onClick={() => setGroupForm(true)}>Сохранить как рабочую группу</button>}
             {generationActions && <GenerationAssignment actions={generationActions} selectedIds={selectedIds} busy={busy} />}
             {onOpenPlots && <button className="outline-button" type="button" disabled={busy} onClick={onOpenPlots}>Построить диаграммы</button>}
+            {onSummary && <button className="outline-button" type="button" disabled={busy || selectedIds.length>50000} onClick={onSummary}>{selectedIds.length===2?"Сравнить составы":"Статистика отбора"}</button>}
             {onExportSelection && <>
               <button className="outline-button" type="button" disabled={busy} onClick={() => onExportSelection("xlsx")}>Экспорт отбора XLSX</button>
               <button className="outline-button" type="button" disabled={busy} onClick={() => onExportSelection("csv")}>Экспорт отбора CSV</button>

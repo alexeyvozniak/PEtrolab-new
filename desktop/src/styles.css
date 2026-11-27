@@ -113,3 +113,16 @@ button:disabled { cursor: default; opacity: .48; }
   .metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .analysis-preview-row { grid-template-columns: 130px minmax(160px, .6fr) minmax(260px, 1fr); }
 }
+
+/* Local, reversible context actions; no changes to the workspace layout. */
+.context-actions { position: fixed; z-index: 1200; display: grid; gap: 2px; width: 250px; max-width: calc(100vw - 8px); padding: 7px; border: 1px solid #c8d3cb; border-radius: 8px; background: #fff; color: #23372c; box-shadow: 0 8px 28px #182f2026; }
+.context-actions strong { padding: 6px 8px; overflow-wrap: anywhere; font-size: 12px; }
+.context-actions button { text-align: left; background: transparent; color: inherit; border: 0; border-radius: 4px; padding: 8px; font: inherit; cursor: pointer; }
+.context-actions button:hover, .context-actions button:focus-visible { background: #e9f2eb; outline: 1px solid #568166; }
+.context-actions button:disabled { opacity: .45; cursor: default; }
+.command-palette-results { display: grid; gap: 6px; padding: 12px; max-height: 55vh; overflow: auto; }
+.command-palette-results button { text-align: left; justify-content: flex-start; }
+
+.selection-summary-dialog { width:min(1120px,calc(100vw - 32px)); }
+.selection-summary-note { font-size:11px; color:#51655b; padding:4px 12px; }
+.selection-summary-dialog td { font-variant-numeric:tabular-nums; }

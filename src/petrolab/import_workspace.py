@@ -62,7 +62,7 @@ class ImportWorkspaceStore:
             raise ImportCommandError('WORKSPACE_SOURCE_NOT_FOUND', 'Источник не найден в этой очереди.')
         return source
 
-    def _check(self, source):
+    def _check(self, source, *, inspected=None):
         path = Path(source['staged_path'])
         expected = source['sha256']
         key = (str(path.resolve()), expected)
@@ -84,7 +84,7 @@ class ImportWorkspaceStore:
             verify()
             self._inspection_cache.move_to_end(key)
             return cached[0]
-        inspection = inspect_source(path)
+        inspection = inspected if inspected is not None else inspect_source(path)
         if inspection.fingerprint != expected:
             raise ImportCommandError('SOURCE_FINGERPRINT_MISMATCH', 'Файл изменился после добавления. Добавьте его заново.', {'source_id': source['source_id']})
         # Detect a source change during parsing before caching the snapshot.
@@ -111,7 +111,8 @@ class ImportWorkspaceStore:
             if any(Path(s['staged_path']).resolve() == Path(path).resolve() for s in session['sources']):
                 raise ImportCommandError('WORKSPACE_SOURCE_EXISTS', 'Этот файл уже есть в очереди.')
             inspection = inspect_source(path)
-            classification = classify_clean_table(inspection)
+            clean_plans = []
+            classification = classify_clean_table(inspection, on_clean_plan=lambda recipe, plan: clean_plans.append((digest(recipe), plan)))
             suggestion = ({'recipe': classification['recipe'], 'warnings': []}
                           if classification['mode'] == 'clean_table_fast' else suggest_import_recipe(path))
             aliases = session.get('project_aliases', {})
@@ -137,6 +138,11 @@ class ImportWorkspaceStore:
                 'inspection': inspection.projection(), 'decisions': [],
                 'active_block_id': suggestion['recipe']['sections'][0]['block_id'],
             }
+            # Verify the bytes again before seeding either bounded cache.
+            # Aliases may have changed the recipe since classification.
+            self._check(source, inspected=inspection)
+            if clean_plans and clean_plans[0][0] == digest(source['recipe']):
+                self._remember_review_plan(source, inspection, clean_plans[0][1])
             session['sources'].append(source)
             session['active_source_id'] = source['source_id']
 
@@ -195,6 +201,7 @@ class ImportWorkspaceStore:
         return {'workspace': restored}
 
     def command(self, operation, params):
+        known_active_plan = None
         if operation == 'restore':
             database_path = params.get('project_database_path')
             if not isinstance(database_path, str) or not database_path:
@@ -275,6 +282,9 @@ class ImportWorkspaceStore:
                         raise ValueError('block_id')
                     session['active_source_id'] = source['source_id']
                     source['active_block_id'] = block_id
+                    candidate = params.get('known_active_plan')
+                    if isinstance(candidate, dict) and candidate.get('source_id') == source['source_id']:
+                        known_active_plan = candidate
                 elif kind in {'mappings', 'sections'}:
                     fn = revise_import_mappings if kind == 'mappings' else revise_import_sections
                     source['recipe'] = fn(source['staged_path'], source['recipe'], decision['decisions'])['recipe']
@@ -371,7 +381,7 @@ class ImportWorkspaceStore:
             if operation != 'get':
                 session['draft_revision'] += 1
                 session['updated_at'] = now()
-        result = self._project(session)
+        result = self._project(session, known_active_plan=known_active_plan)
         if operation != 'get':
             self._save_draft(session)
             self.sessions[session['workspace_id']] = session
@@ -538,6 +548,11 @@ class ImportWorkspaceStore:
             # Readiness is written by _review; the shared plan is read-only.
             return dict(cached[0])
         plan = create_import_plan(inspection, recipe)
+        self._remember_review_plan(source, inspection, plan)
+        return plan
+
+    def _remember_review_plan(self, source, inspection, plan):
+        key = (source['source_id'], inspection.fingerprint, digest(source['recipe']))
         records = len(plan['planned_records'])
         measurements = plan['summary']['planned_measurement_count']
         if records <= MAX_REVIEW_CACHE_RECORDS and measurements <= MAX_REVIEW_CACHE_MEASUREMENTS:
@@ -552,7 +567,6 @@ class ImportWorkspaceStore:
             ):
                 self._review_plan_cache.popitem(last=False)
             self._review_plan_cache[key] = (dict(plan), records, measurements)
-        return plan
 
     def _review(self, source, *, use_cache=True):
         plan, issues, units, ignores = empty_plan(), [], [], []
@@ -628,7 +642,7 @@ class ImportWorkspaceStore:
         reviewed = (state.get('duplicate_review') or {}).get('fingerprint') == fingerprint
         return {'groups': groups, 'fingerprint': fingerprint, 'reviewed': reviewed}
 
-    def _project(self, state, *, readiness_only=False):
+    def _project(self, state, *, readiness_only=False, known_active_plan=None):
         """Build the same readiness gates without UI-only work during commit."""
         sources, issues, plans, reviews, scopes = [], [], [], {}, []
         for source in state['sources']:
@@ -709,7 +723,16 @@ class ImportWorkspaceStore:
                                       'blocking_reason_codes': reasons}})
         if readiness_only:
             return session['readiness']
-        active_review = deepcopy(reviews[active['source_id']])
+        review = reviews[active['source_id']]
+        current_plan = next(item for item in plans if item['source_id'] == active['source_id'])
+        reference = {'source_id': active['source_id'], 'plan_fingerprint': current_plan['plan_fingerprint']}
+        # Navigation never changes scientific decisions. Reuse a client plan
+        # only after recomputing authoritative readiness and matching its hash.
+        if known_active_plan == reference and current_plan['status'] == 'ready':
+            active_review = deepcopy({key: value for key, value in review.items() if key != 'plan'})
+            active_review['plan_reference'] = reference
+        else:
+            active_review = deepcopy(review)
         active_review['semantic_actions'] = SEMANTIC_ACTIONS
         active_review['canonical_analytes'] = CANONICAL
         if state['database_path']:
@@ -722,5 +745,5 @@ class ImportWorkspaceStore:
             )
         if active['recipe']['global_decisions'].get('mineral_verification_enabled'):
             from .mineral_verification import acceptance_scopes
-            active_review['mineral_acceptance_scopes'] = acceptance_scopes(active_review['plan'], active['recipe'])
+            active_review['mineral_acceptance_scopes'] = acceptance_scopes(review['plan'], active['recipe'])
         return {'session': session, 'active': active_review, 'duplicate_comparison': comparison}

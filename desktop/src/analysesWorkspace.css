@@ -169,3 +169,15 @@
 .analysis-composition-grid small { margin-top: 2px; color: #78847c; font-size: 8px; }
 .analysis-composition-summary > p { margin: 8px 0 0; color: #758078; font-size: 9px; line-height: 1.4; }
 .analysis-composition-summary > p b { color: #40584a; }
+
+.analyses-data-table th .analysis-column-resizer { position:absolute; top:0; bottom:0; right:0; width:7px; cursor:col-resize; touch-action:none; z-index:1; }
+.analyses-data-table th .analysis-column-resizer:hover,.analyses-data-table th .analysis-column-resizer:focus-visible { background:#56816666; outline:1px solid #568166; }
+
+/* Fixed body geometry keeps the virtual scroll range exact and column widths stable. */
+.analyses-data-table.virtual-rows { table-layout: fixed; }
+.analyses-data-table.virtual-rows tbody tr:not(.analysis-row-spacer) { height: 42px; }
+.analyses-data-table.virtual-rows tbody tr:not(.analysis-row-spacer) td { box-sizing: border-box; height:42px; line-height:12px; padding:5px 9px; overflow:hidden; }
+.analyses-data-table.virtual-rows tbody td small { line-height:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.analyses-data-table.virtual-rows thead th { box-sizing:border-box; overflow:hidden; }
+.analyses-data-table.virtual-rows th button { overflow:hidden; text-overflow:ellipsis; }
+.analyses-data-table.virtual-rows .analysis-row-spacer td { padding:0; border:0; line-height:0; min-width:0; max-width:none; }

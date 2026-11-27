@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSelectionHistory } from "./selectionHistory";
+import { SelectionSummary } from "./SelectionSummary";
 import {
   CheckCircle,
   Columns,
@@ -32,7 +34,7 @@ import {
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
   getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication, capturePublicationPlot,
   capturePublicationTable, capturePublicationMedia,
-  getPlotCatalog, getPlotData, recordPlotVisibility, undoPlotVisibility,
+  getPlotCatalog, getPlotData, recordPlotVisibility, undoPlotVisibility, getProjectPlotColors, saveProjectPlotColors, getSelectionSummary, getProjectPlotPresets, saveProjectPlotPresets,
   listPlotSpecifications, openPlotSpecification, savePlotSpecification, pickPlotExportPath, exportPlot,
   isPetrolabDesktop,
   listProjectAnalyses,
@@ -110,8 +112,45 @@ export function App() {
   const desktopRuntimeAvailable = isPetrolabDesktop();
   const [screen, setScreen] = useState("Обзор");
   const [databasePath, setDatabasePath] = useState("");
+  // View state only, scoped to this project and this application session.
+  const viewMemory = useMemo(() => ({ table: {}, plot: { views: new Map() }, samples: {} }), [databasePath]);
   const [project, setProject] = useState({ total: 0, returned: 0, offset: 0, has_more: false, source_count: 0, import_batch_count: 0, latest_import: null, analyses: [] });
-  const [selectedAnalysisIds, setSelectedAnalysisIds] = useState([]);
+  const [selectedAnalysisIds, setSelectedAnalysisIds, undoSelection, redoSelection] = useSelectionHistory();
+  const [shortcutHelp, setShortcutHelp] = useState(false);
+  const [summaryRequest,setSummaryRequest] = useState(null);
+  const openSummary = () => setSummaryRequest([...selectedAnalysisIds]);
+  const [commandPalette, setCommandPalette] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
+  useEffect(() => {
+    const handle = event => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setShortcutHelp(false);
+        setCommandQuery("");
+        setCommandPalette(current => !current);
+      } else if (event.key === "F1") {
+        event.preventDefault();
+        setCommandPalette(false);
+        setShortcutHelp(current => !current);
+      } else if (commandPalette && event.key === "Escape") {
+        event.preventDefault();
+        setCommandPalette(false);
+      } else if (shortcutHelp && event.key === "Escape") {
+        event.preventDefault();
+        setShortcutHelp(false);
+      } else if (!shortcutHelp && !commandPalette && !event.defaultPrevented && !event.isComposing
+          && (event.ctrlKey || event.metaKey) && !event.altKey
+          && ["Анализы", "Построение"].includes(screen)
+          && !event.target.closest?.("input, textarea, select, [contenteditable], [role=dialog], form")) {
+        if (event.key.toLowerCase() === "z") {
+          event.preventDefault();
+          if (event.shiftKey) redoSelection(); else undoSelection();
+        }
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, [screen, shortcutHelp, commandPalette, undoSelection, redoSelection]);
   const [navigationAnalysis, setNavigationAnalysis] = useState(null);
   const [navigationDraftId, setNavigationDraftId] = useState("");
   const [navigationSampleId, setNavigationSampleId] = useState("");
@@ -273,7 +312,7 @@ export function App() {
   const chooseFile = async () => {
     if (busy || blockDraftDirty || mappingDraftDirty) return;
     setBusy(true);
-    setActivity("Выберите файл…");
+    setActivity("1/4 · Выберите файл…");
     setError("");
     setSuccess("");
     let newlyStaged = "";
@@ -281,15 +320,16 @@ export function App() {
     try {
       const selectedPath = await pickImportFile();
       if (!selectedPath) return;
-      setActivity("Копирую файл в рабочую область PetroLab…");
+      setActivity("2/4 · Копирую файл в рабочую область PetroLab…");
       const selected = await stageImportFile(selectedPath);
       newlyStaged = selected.local_path;
-      setActivity("Проверяю, соответствует ли файл PetroLab Clean Table…");
+      setActivity("3/4 · Распознаю таблицу и проверяю план импорта…");
       const sources = [{ staged_path: newlyStaged, original_display_path: selected.original_path || selectedPath }];
       const result = unwrap(await (workspace
         ? addWorkspaceSources(workspace.workspace_id, workspace.draft_revision, sources)
         : createImportWorkspace(sources, databasePath)));
       accepted = true;
+      setActivity("4/4 · Открываю предпросмотр исходной таблицы…");
       await receiveWorkspace(result);
       setScreen("Импорт");
     } catch (caught) {
@@ -304,11 +344,15 @@ export function App() {
   const decide = async (decision, sourceId = workspace?.active_source_id, bulk = false) => {
     if (busy || !workspace) return;
     setBusy(true);
-    setActivity(decision.kind === "activate" ? "Открываю исходную таблицу…" : "Проверяю и сохраняю решение…");
+    setActivity(decision.kind === "activate" ? "1/2 · Проверяю выбранный лист…" : "1/2 · Проверяю и сохраняю решение…");
     setError("");
     setSuccess("");
     try {
-      const result = unwrap(await applyWorkspaceDecision(workspace.workspace_id, workspace.draft_revision, sourceId, decision, bulk));
+      const activeFingerprint = workspace.plans?.find(item => item.source_id === sourceId)?.plan_fingerprint;
+      const knownPlan = decision.kind === "activate" && sourceId === workspace.active_source_id && plan && activeFingerprint
+        ? { reference: { source_id: sourceId, plan_fingerprint: activeFingerprint }, plan } : null;
+      const result = unwrap(await applyWorkspaceDecision(workspace.workspace_id, workspace.draft_revision, sourceId, decision, bulk, knownPlan));
+      setActivity("2/2 · Загружаю предпросмотр таблицы…");
       await receiveWorkspace(result, true);
       if (decision.kind !== "activate") setSuccess("Решение сохранено в этой очереди. Исходный файл не изменён.");
     } catch (caught) {
@@ -340,13 +384,15 @@ export function App() {
     if (busy || !canSaveImport || !databasePath || !workspace) return;
     setBusy(true);
     setError("");
-    setActivity("Проверяю очередь перед сохранением…");
+    setActivity("1/3 · Проверяю очередь и сохраняю импорт в проект…");
     try {
       const result = unwrap(await commitImportWorkspace(workspace.workspace_id, workspace.draft_revision));
       // Commit has succeeded. Never offer a second apply if refresh/cleanup fails.
       resetImportState();
       setSuccess(`Импорт сохранён: ${result.analysis_count} Analysis, ${result.measurement_count} Measurement.`);
+      setActivity("2/3 · Убираю временные копии…");
       await Promise.all(result.staged_paths.map((path) => clearImportStaging(path).catch(() => {})));
+      setActivity("3/3 · Обновляю список анализов…");
       await refreshAnalyses(databasePath);
       setScreen("Анализы");
     } catch (caught) {
@@ -406,7 +452,8 @@ export function App() {
     if (!enabled || busy || blockDraftDirty || mappingDraftDirty) return;
     setError("");
     if (label === "Построение") {
-      openPlots();
+      if (viewMemory.plot.opened) setScreen("Построение");
+      else openPlots();
       return;
     }
     if (label === "Поиск") setSearchSeed(null);
@@ -415,7 +462,13 @@ export function App() {
   };
   const openPlots = (ids = selectedAnalysisIds) => {
     if (busy || !databasePath) return;
-    setPlotInputIds(ids.length ? [...ids] : null);
+    const next = ids.length ? [...ids] : null;
+    if (JSON.stringify(next) !== JSON.stringify(plotInputIds)) {
+      // A deliberately new input does not inherit layers or zoom from the old input.
+      Object.assign(viewMemory.plot, { panels: [], layers: [], views: new Map(), scrollTop: 0, scrollLeft: 0 });
+      setPlotInputIds(next);
+    }
+    viewMemory.plot.opened = true;
     setScreen("Построение");
   };
   const togglePlotSource = (id) => {
@@ -423,7 +476,21 @@ export function App() {
       ? current.filter((value) => value !== id)
       : [...current, id]);
   };
-  const loadPlotCatalog = useCallback(async () => unwrap(await getPlotCatalog(databasePath, plotInputIds)), [databasePath, plotInputIds]);
+  const isolatePlotSource = (id, sourceIds) => {
+    const scope = new Set(sourceIds);
+    setHiddenSourceIds(current => {
+      const hidden = new Set(current);
+      const alreadyIsolated = !hidden.has(id) && sourceIds.every(value => value === id || hidden.has(value));
+      return [...current.filter(value => !scope.has(value)),
+        ...(alreadyIsolated ? [] : sourceIds.filter(value => value !== id))];
+    });
+  };
+  const loadPresets = useCallback(async () => unwrap(await getProjectPlotPresets(databasePath)), [databasePath]);
+  const savePresets = useCallback(async (preferences,revision) => unwrap(await saveProjectPlotPresets(databasePath,preferences,revision)), [databasePath]);
+  const loadColorScheme = useCallback(async () => unwrap(await getProjectPlotColors(databasePath)),[databasePath]);
+  const saveColorScheme = useCallback(async (scheme,revision) => unwrap(await saveProjectPlotColors(databasePath,scheme,revision)),[databasePath]);
+  const loadPlotCatalog = useCallback(async (includeCategories = false) => unwrap(await getPlotCatalog(databasePath, plotInputIds, includeCategories)), [databasePath, plotInputIds]);
+  const loadPlotAnalysis = useCallback(async id => unwrap(await getProjectAnalysis(databasePath, id)), [databasePath]);
   const loadPlotSelection = useCallback(async (analysisIds, offset, limit) =>
     unwrap(await queryProjectAnalyses(databasePath, { analysis_ids: analysisIds, offset, limit })), [databasePath]);
   const loadPlotLayouts = useCallback(async () => unwrap(await listPlotSpecifications(databasePath)), [databasePath]);
@@ -617,6 +684,19 @@ export function App() {
     }
   };
 
+  const blockedNavigation = busy || blockDraftDirty || mappingDraftDirty;
+  const paletteCommands = [
+    ...navigation.filter(([, , enabled]) => enabled).map(([, label]) => ({ label: "Открыть: " + label, disabled: blockedNavigation, run: () => goTo(label, true) })),
+    { label: "Добавить данные / импорт Excel", disabled: blockedNavigation || !desktopRuntimeAvailable, run: startNewImport },
+    { label: "Построить диаграммы из отбора", disabled: blockedNavigation || !databasePath || !selectedAnalysisIds.length, run: () => openPlots() },
+    { label: "Снять отбор", disabled: blockedNavigation || !selectedAnalysisIds.length, run: () => setSelectedAnalysisIds([]) },
+    { label: "Горячие клавиши / справка", run: () => setShortcutHelp(true) },
+  ].filter(command => command.label.toLowerCase().includes(commandQuery.trim().toLowerCase()));
+  const runCommand = command => {
+    if (!command || command.disabled) return;
+    setCommandPalette(false);
+    command.run();
+  };
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -652,7 +732,7 @@ export function App() {
           </div>
         </header>
 
-        {activity && <div className="global-message activity"><SpinnerGap className="spin" size={20} /><span>{activity}</span></div>}
+        {activity && <div className="global-message activity" role="status" aria-live="polite" aria-atomic="true"><SpinnerGap className="spin" size={20} /><span>{activity}</span></div>}
         {!desktopRuntimeAvailable && <div className="global-message activity"><Info size={20} /><span>Предпросмотр проверяет компоновку. Выбор и импорт файлов доступны в установленном PetroLab Desktop.</span></div>}
         {error && <div className="global-message error"><Warning size={20} weight="fill" /><span>{error}</span></div>}
         {success && <div className="global-message success"><CheckCircle size={20} weight="fill" /><span>{success}</span></div>}
@@ -673,7 +753,7 @@ export function App() {
           onBeginPointLink={beginSearchPointLink}
           onPlot={openPlots}
           onAddSelection={(ids) => setSelectedAnalysisIds((current) => [...new Set([...current, ...ids])])} />}
-        {["Образцы", "Связи", "Изображения"].includes(screen) && <SampleWorkspace key={screen} loadSamples={loadSamples} loadSample={loadSample}
+        {["Образцы", "Связи", "Изображения"].includes(screen) && <SampleWorkspace key={screen} viewMemory={viewMemory.samples} loadSamples={loadSamples} loadSample={loadSample}
           initialTab={screen === "Связи" ? "Точки" : screen === "Изображения" ? "Изображения" : "Обзор"}
           initialSampleId={screen === "Образцы" ? navigationSampleId : pointLinkScope?.sampleId}
           pointLinkScope={pointLinkScope} onClearPointLinkScope={() => setPointLinkScope(null)}
@@ -754,8 +834,8 @@ export function App() {
             const destination = await pickPublicationExportPath();
             return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination, settings)) : null;
           }} />}
-        {screen === "Построение" && <PlotWorkspace loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
-          loadSelection={loadPlotSelection}
+        {screen === "Построение" && <PlotWorkspace viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
+          loadSelection={loadPlotSelection} loadAnalysis={loadPlotAnalysis} loadColorScheme={loadColorScheme} saveColorScheme={saveColorScheme} loadPresets={loadPresets} savePresets={savePresets} onSummary={openSummary}
           loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}
           openLayout={restorePlotLayout} onExport={async (svg, options) => {
             const destination = await pickPlotExportPath(options.name);
@@ -768,7 +848,8 @@ export function App() {
           hiddenAnalysisIds={hiddenAnalysisIds} hiddenSourceIds={hiddenSourceIds} busy={busy}
           onSetVisibility={setPlotVisibility}
           onUndoVisibility={visibilityOperation ? undoVisibility : null}
-          onToggleSource={togglePlotSource} />}
+          onToggleSource={togglePlotSource} onIsolateSource={isolatePlotSource}
+          onOpenAnalysis={id => openSearchAnalysis(id)} />}
         {screen === "Импорт" && (
           <section className={`live-page${sourcePath ? " import-live-page" : ""}`}>
             {!sourcePath && (
@@ -838,6 +919,7 @@ export function App() {
 
         {screen === "Анализы" && (
           <AnalysesWorkspace
+            viewMemory={viewMemory.table}
             project={navigationAnalysis && !project.analyses.some((item) => item.analysis_id === navigationAnalysis.analysis_id)
               ? { ...project, analyses: [...project.analyses, navigationAnalysis] } : project}
             initialFocusedId={navigationAnalysis?.analysis_id}
@@ -849,7 +931,8 @@ export function App() {
             generationActions={generationActions}
             onExportSelection={exportSelection}
             onPublishSelection={publishSelection}
-            onOpenPlots={() => openPlots()}
+            onSummary={openSummary}
+            onOpenPlots={(ids) => openPlots(Array.isArray(ids) ? ids : selectedAnalysisIds)}
             hiddenPlotAnalysisIds={hiddenAnalysisIds}
             onSetPlotVisibility={setPlotVisibility}
             onUndoPlotVisibility={visibilityOperation ? undoVisibility : null}
@@ -869,6 +952,51 @@ export function App() {
           />
         )}
       </section>
+      {summaryRequest && <SelectionSummary ids={summaryRequest} load={ids=>getSelectionSummary(databasePath,ids).then(unwrap)} close={()=>setSummaryRequest(null)} />}
+      {commandPalette && <div className="import-result-overlay" role="presentation" onMouseDown={event => {
+        if (event.target === event.currentTarget) setCommandPalette(false);
+      }}>
+        <section className="import-result-dialog" role="dialog" aria-modal="true" aria-label="Быстрые команды PetroLab">
+          <header><div><h2>Быстрые команды</h2><p>Найти действие · Ctrl+K</p></div>
+            <button type="button" onClick={() => setCommandPalette(false)} aria-label="Закрыть команды">×</button></header>
+          <div className="import-result-tools"><input autoFocus aria-label="Найти команду" value={commandQuery}
+            onChange={event => setCommandQuery(event.target.value)}
+            onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); runCommand(paletteCommands.find(command => !command.disabled)); } }} /></div>
+          <div className="command-palette-results">
+            {paletteCommands.map(command => <button type="button" className="outline-button" key={command.label} disabled={command.disabled}
+              onClick={() => runCommand(command)}>{command.label}</button>)}
+            {!paletteCommands.length && <p>Команды не найдены.</p>}
+          </div>
+        </section>
+      </div>}
+      {shortcutHelp && <div className="import-result-overlay" role="presentation" onMouseDown={event => {
+        if (event.target === event.currentTarget) setShortcutHelp(false);
+      }}>
+        <section className="import-result-dialog" role="dialog" aria-modal="true" aria-label="Горячие клавиши PetroLab">
+          <header><div><h2>Горячие клавиши PetroLab</h2><p>Отбор и навигация не изменяют исходные данные.</p></div>
+            <button type="button" autoFocus onClick={() => setShortcutHelp(false)} aria-label="Закрыть памятку">×</button></header>
+          <div className="import-result-tools"><b>Таблица</b></div>
+          <div className="import-result-table-wrap"><table className="import-result-table"><tbody>
+            <tr><td>Ctrl+F</td><td>Поиск анализов</td></tr>
+            <tr><td>Ctrl+A / Ctrl+C</td><td>Выбрать показанные / копировать выбранные показанные строки</td></tr>
+            <tr><td>Стрелки / Shift+стрелки</td><td>Фокус / отбор диапазона</td></tr>
+            <tr><td>F2</td><td>Открыть черновик правки текущего анализа</td></tr>
+            <tr><td>Esc</td><td>Очистить поиск или снять отбор</td></tr>
+          </tbody></table></div>
+          <div className="import-result-tools"><b>Диаграммы</b></div>
+          <div className="import-result-table-wrap"><table className="import-result-table"><tbody>
+            <tr><td>Клик по пустому полю</td><td>Снять отбор</td></tr>
+            <tr><td>Shift / Ctrl / Alt + отбор</td><td>Добавить / переключить / исключить</td></tr>
+            <tr><td>Двойной клик по точке</td><td>Открыть анализ</td></tr>
+            <tr><td>Ctrl+клик по источнику</td><td>Изолировать источник; повторить — показать все</td></tr>
+            <tr><td>Ctrl+колесо / пробел+мышь / Home</td><td>Масштаб / панорама / автомасштаб</td></tr>
+            <tr><td>Ctrl+Z / Ctrl+Shift+Z</td><td>Отменить / вернуть отбор (таблица и графики)</td></tr>
+            <tr><td>F1 / Esc</td><td>Открыть / закрыть памятку</td></tr>
+            <tr><td>Ctrl+K</td><td>Быстрые команды</td></tr>
+            <tr><td>Правый клик</td><td>Действия с анализом или точкой</td></tr>
+          </tbody></table></div>
+        </section>
+      </div>}
     </main>
   );
 }

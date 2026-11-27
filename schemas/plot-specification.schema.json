@@ -5,172 +5,620 @@
   "description": "Saved plot layout, scientific mappings, stable legend and reversible visibility mask.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "project_id", "name", "input", "panels", "legend", "filters", "hidden_analysis_ids", "created_at", "updated_at"],
+  "required": [
+    "id",
+    "project_id",
+    "name",
+    "input",
+    "panels",
+    "legend",
+    "filters",
+    "hidden_analysis_ids",
+    "created_at",
+    "updated_at"
+  ],
   "$defs": {
     "measured_operand": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["field", "unit", "measurement_set", "method"],
+      "required": [
+        "field",
+        "unit",
+        "measurement_set",
+        "method"
+      ],
       "properties": {
-        "field": {"type": "string", "minLength": 1},
-        "unit": {"enum": ["wt.%", "ppm", "ppb"]},
-        "measurement_set": {"type": ["string", "null"]},
-        "method": {"type": ["string", "null"]}
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unit": {
+          "enum": [
+            "wt.%",
+            "ppm",
+            "ppb"
+          ]
+        },
+        "measurement_set": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "axis": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["field", "scale"],
+      "required": [
+        "field",
+        "scale"
+      ],
       "properties": {
-        "field": {"type": "string", "minLength": 1},
-        "unit": {"type": ["string", "null"]},
-        "method": {"type": ["string", "null"]},
-        "measurement_set": {"type": ["string", "null"]},
-        "scale": {"type": "string", "enum": ["linear", "log"]},
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "measurement_set": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scale": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "log"
+          ]
+        },
         "formula": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["version", "method_id", "method_version", "method_definition_fingerprint", "run_ids"],
+          "required": [
+            "version",
+            "method_id",
+            "method_version",
+            "method_definition_fingerprint",
+            "run_ids"
+          ],
           "properties": {
-            "version": {"const": 1},
-            "method_id": {"type": "string", "pattern": "^formula\\."},
-            "method_version": {"type": "string", "minLength": 1},
-            "method_definition_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-            "run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "minItems": 1, "uniqueItems": true}
+            "version": {
+              "const": 1
+            },
+            "method_id": {
+              "type": "string",
+              "pattern": "^formula\\."
+            },
+            "method_version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "method_definition_fingerprint": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "run_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
           }
         },
         "calculation": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["operation", "version", "operands"],
+          "required": [
+            "operation",
+            "version",
+            "operands"
+          ],
           "properties": {
-            "operation": {"enum": ["sum", "ratio"]},
-            "version": {"const": 1},
-            "operands": {"type": "array", "items": {"$ref": "#/$defs/measured_operand"}, "minItems": 2, "maxItems": 16, "uniqueItems": true}
+            "operation": {
+              "enum": [
+                "sum",
+                "ratio"
+              ]
+            },
+            "version": {
+              "const": 1
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/measured_operand"
+              },
+              "minItems": 2,
+              "maxItems": 16,
+              "uniqueItems": true
+            }
           },
-          "if": {"properties": {"operation": {"const": "ratio"}}},
-          "then": {"properties": {"operands": {"maxItems": 2}}}
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "ratio"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "operands": {
+                "maxItems": 2
+              }
+            }
+          }
         },
         "manual_range": {
           "oneOf": [
-            {"type": "null"},
-            {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "items": false}
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "items": false
+            }
           ]
         }
       },
-      "if": {"required": ["formula"]},
+      "if": {
+        "required": [
+          "formula"
+        ]
+      },
       "then": {
-        "required": ["unit", "method", "measurement_set"],
-        "not": {"required": ["calculation"]},
-        "properties": {"field": {"pattern": "^apfu\\..+$"}, "unit": {"const": "APFU"}, "method": {"const": null}, "measurement_set": {"const": null}}
+        "required": [
+          "unit",
+          "method",
+          "measurement_set"
+        ],
+        "not": {
+          "required": [
+            "calculation"
+          ]
+        },
+        "properties": {
+          "field": {
+            "pattern": "^apfu\\..+$"
+          },
+          "unit": {
+            "const": "APFU"
+          },
+          "method": {
+            "const": null
+          },
+          "measurement_set": {
+            "const": null
+          }
+        }
       }
     },
     "panel": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "title", "axes", "normalization"],
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "axes",
+        "normalization"
+      ],
       "properties": {
-        "id": {"type": "string", "format": "uuid"},
-        "kind": {"type": "string", "enum": ["binary", "ternary", "spider", "ree_pattern", "histogram"]},
-        "title": {"type": "string", "minLength": 1},
-        "axes": {"type": "array", "items": {"$ref": "#/$defs/axis"}, "minItems": 1},
-        "normalization": {"type": ["string", "null"]}
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "binary",
+            "ternary",
+            "spider",
+            "ree_pattern",
+            "histogram"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "axes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/axis"
+          },
+          "minItems": 1
+        },
+        "normalization": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "point_style": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "opacity",
+            "size_scale"
+          ],
+          "properties": {
+            "opacity": {
+              "type": "number",
+              "minimum": 0.05,
+              "maximum": 1
+            },
+            "size_scale": {
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 2
+            }
+          }
+        }
       },
-      "if": {"properties": {"kind": {"enum": ["ree_pattern", "spider"]}}},
-      "then": {"properties": {
-        "axes": {"minItems": 2, "maxItems": 36},
-        "normalization": {"enum": ["sun_mcdonough_1989_c1_v1", "sun_mcdonough_1989_mantle_diagram_v1"]}
-      }},
-      "else": {"properties": {"axes": {"maxItems": 3}}}
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "ree_pattern",
+              "spider"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "axes": {
+            "minItems": 2,
+            "maxItems": 36
+          },
+          "normalization": {
+            "enum": [
+              "sun_mcdonough_1989_c1_v1",
+              "sun_mcdonough_1989_mantle_diagram_v1"
+            ]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "axes": {
+            "maxItems": 3
+          }
+        }
+      }
     }
   },
   "properties": {
-    "id": {"type": "string", "format": "uuid"},
-    "project_id": {"type": "string", "format": "uuid"},
-    "name": {"type": "string", "minLength": 1, "maxLength": 120},
-    "schema_version": {"type": "integer", "minimum": 1},
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "project_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
     "input": {
       "oneOf": [
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "work_group_id"],
+          "required": [
+            "kind",
+            "work_group_id"
+          ],
           "properties": {
-            "kind": {"const": "work_group"},
-            "work_group_id": {"type": "string", "format": "uuid"}
+            "kind": {
+              "const": "work_group"
+            },
+            "work_group_id": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "analysis_ids"],
+          "required": [
+            "kind",
+            "analysis_ids"
+          ],
           "properties": {
-            "kind": {"const": "analysis_snapshot"},
-            "analysis_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "minItems": 1, "uniqueItems": true}
+            "kind": {
+              "const": "analysis_snapshot"
+            },
+            "analysis_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
           }
         }
       ]
     },
-    "panels": {"type": "array", "items": {"$ref": "#/$defs/panel"}, "minItems": 1, "maxItems": 32},
+    "panels": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/panel"
+      },
+      "minItems": 1,
+      "maxItems": 32
+    },
     "legend": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["group_by", "entries"],
+      "required": [
+        "group_by",
+        "entries"
+      ],
       "properties": {
-        "group_by": {"type": "string", "minLength": 1},
+        "group_by": {
+          "type": "string",
+          "minLength": 1
+        },
         "entries": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["value", "label", "color", "symbol"],
+            "required": [
+              "value",
+              "label",
+              "color",
+              "symbol"
+            ],
             "properties": {
-              "value": {"type": "string"},
-              "label": {"type": "string"},
-              "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
-              "symbol": {"type": "string", "minLength": 1}
+              "value": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "color": {
+                "type": "string",
+                "pattern": "^#[0-9A-Fa-f]{6}$"
+              },
+              "symbol": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         }
       }
     },
-    "filters": {"type": "array", "items": {"$ref": "analysis-filter.schema.json"}},
-    "hidden_analysis_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
-    "hidden_source_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
-    "layers": {
-      "type": "array", "maxItems": 32,
+    "filters": {
+      "type": "array",
       "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["id", "name", "analysis_ids", "show_points", "opacity", "field"],
+        "$ref": "analysis-filter.schema.json"
+      }
+    },
+    "hidden_analysis_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "uniqueItems": true
+    },
+    "hidden_source_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "uniqueItems": true
+    },
+    "layers": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "analysis_ids",
+          "show_points",
+          "opacity",
+          "field"
+        ],
         "properties": {
-          "id": {"type": "string", "format": "uuid"},
-          "name": {"type": "string", "minLength": 1, "maxLength": 120},
-          "analysis_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
-          "show_points": {"type": "boolean"},
-          "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "analysis_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          },
+          "show_points": {
+            "type": "boolean"
+          },
+          "opacity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
           "field": {
             "oneOf": [
-              {"type": "null"},
               {
-                "type": "object", "additionalProperties": false,
-                "required": ["method", "visible", "probability"],
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "method",
+                  "visible",
+                  "probability"
+                ],
                 "properties": {
-                  "method": {"enum": ["convex_hull", "normal_probability_ellipse"]},
-                  "visible": {"type": "boolean"},
-                  "probability": {"type": ["null", "number"], "exclusiveMinimum": 0, "exclusiveMaximum": 1}
+                  "method": {
+                    "enum": [
+                      "convex_hull",
+                      "normal_probability_ellipse"
+                    ]
+                  },
+                  "visible": {
+                    "type": "boolean"
+                  },
+                  "probability": {
+                    "type": [
+                      "null",
+                      "number"
+                    ],
+                    "exclusiveMinimum": 0,
+                    "exclusiveMaximum": 1
+                  }
                 },
-                "if": {"properties": {"method": {"const": "convex_hull"}}},
-                "then": {"properties": {"probability": {"type": "null"}}},
-                "else": {"properties": {"probability": {"type": "number"}}}
+                "if": {
+                  "properties": {
+                    "method": {
+                      "const": "convex_hull"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "probability": {
+                      "type": "null"
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "probability": {
+                      "type": "number"
+                    }
+                  }
+                }
               }
             ]
           }
         }
       }
     },
-    "created_at": {"type": "string", "format": "date-time"},
-    "updated_at": {"type": "string", "format": "date-time"}
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "category_style": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "entries",
+        "assignments"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "sample",
+            "generation",
+            "mineral"
+          ]
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 4001,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "label",
+              "count",
+              "color"
+            ],
+            "properties": {
+              "key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "color": {
+                "type": "string",
+                "pattern": "^#[0-9A-Fa-f]{6}$"
+              }
+            }
+          }
+        },
+        "assignments": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
   }
 }
-

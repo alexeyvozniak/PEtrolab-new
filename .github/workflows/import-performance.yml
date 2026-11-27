@@ -2,14 +2,14 @@ name: Import performance comparison
 
 on:
   pull_request:
-    branches: [codex/petrolab-2-release]
+    branches: [codex/petrolab-2-release, main]
 
 permissions:
   contents: read
 
 jobs:
   compare:
-    if: github.head_ref == 'codex/import-performance'
+    if: github.head_ref == 'codex/import-performance' || github.head_ref == 'codex/import-polish'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -18,7 +18,7 @@ jobs:
           path: candidate
       - uses: actions/checkout@v4
         with:
-          ref: 006f6fc8b5a73a6b820c8fb4c85a3f65676e6df3
+          ref: ${{ github.head_ref == 'codex/import-polish' && '1638393dba1182748580104e24bb24e12a1f124b' || '006f6fc8b5a73a6b820c8fb4c85a3f65676e6df3' }}
           path: baseline
       - uses: actions/setup-python@v5
         with:
@@ -42,8 +42,9 @@ jobs:
           for a, b in zip(old, new):
               for k in ("rows", "format", "source_sha256", "measurement_sha256", "provenance_sha256", "measurements"):
                   assert a[k] == b[k], (k, a, b)
-              ratios = {k: round(a[k] / b[k], 2) for k in ("create_s", "get_s", "preview_median_s", "commit_s") if b[k] > 0}
+              ratios = {k: round(a[k] / b[k], 2) for k in ("create_s", "get_s", "preview_median_s", "activate_s", "commit_s") if b[k] > 0}
               print(a["format"], a["rows"], "speedup (baseline/candidate):", ratios)
+              print("Activation payload bytes:", a["activate_payload_bytes"], "->", b["activate_payload_bytes"])
           PY
       - uses: actions/upload-artifact@v4
         if: always()

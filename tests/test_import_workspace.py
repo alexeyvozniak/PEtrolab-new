@@ -150,6 +150,40 @@ class ImportWorkspaceTests(unittest.TestCase):
         with closing(sqlite3.connect(database)) as connection:
             self.assertEqual(connection.execute('SELECT COUNT(*) FROM analysis').fetchone()[0], 3)
 
+    def test_activate_references_only_identical_ready_plan_and_revalidates_source(self):
+        self.source.write_text('Analysis,SiO2 [wt.%]\nA1,40\nA2,41\n', encoding='utf-8')
+        self.current = self.store.command('create', {'sources': [{'staged_path': str(self.source)}]})
+        session = self.current['session']
+        plan = self.current['active']['plan']
+        reference = {'source_id': session['active_source_id'], 'plan_fingerprint': session['plans'][0]['plan_fingerprint']}
+        self.call('apply_decision', decision={'kind': 'activate'}, known_active_plan=reference)
+        self.assertEqual(self.current['active']['plan_reference'], reference)
+        self.assertNotIn('plan', self.current['active'])
+        full = self.store.command('get', {'workspace_id': session['workspace_id']})
+        self.assertEqual(full['active']['plan'], plan)
+        self.assertEqual(full['session'], self.current['session'])
+        self.current = full
+        self.source.write_text('Analysis,SiO2 [wt.%]\nA1,99\nA2,41\n', encoding='utf-8')
+        self.call('apply_decision', decision={'kind': 'activate'}, known_active_plan=reference)
+        self.assertNotIn('plan_reference', self.current['active'])
+        self.assertFalse(self.current['session']['readiness']['ready_to_commit'])
+        self.assertIn('SOURCE_FINGERPRINT_MISMATCH', self.current['session']['readiness']['blocking_reason_codes'])
+
+    def test_clean_add_reuses_classified_plan_and_inspection(self):
+        from petrolab import clean_table, import_workspace
+        self.source.write_text('Analysis,SiO2 [wt.%]\nA1,40\nA2,41\n', encoding='utf-8')
+        store = ImportWorkspaceStore()
+        with patch.object(clean_table, 'create_import_plan', wraps=clean_table.create_import_plan) as classify, \
+                patch.object(import_workspace, 'create_import_plan', wraps=import_workspace.create_import_plan) as review, \
+                patch.object(import_workspace, 'inspect_source', wraps=import_workspace.inspect_source) as inspect:
+            result = store.command('create', {'sources': [{'staged_path': str(self.source)}]})
+            self.assertEqual(result['active']['classification']['mode'], 'clean_table_fast')
+            self.assertEqual(classify.call_count, 1)
+            self.assertEqual(review.call_count, 0)
+            self.assertEqual(inspect.call_count, 1)
+            self.assertEqual(result['active']['plan']['summary']['planned_analysis_count'], 2)
+            self.assertTrue(result['session']['readiness']['ready_to_commit'])
+
     def test_review_plan_cache_reuses_only_unchanged_recipe(self):
         from petrolab import import_workspace
         self.source.write_text('Analysis,SiO2 [wt.%]\nA1,40\nA2,41\n', encoding='utf-8')
