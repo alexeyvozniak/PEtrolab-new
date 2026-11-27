@@ -753,6 +753,7 @@ assert.equal(serviceRequest("import.workspace.restore", importProject).workspace
 
 // Build axes in the installed UI as well as reopening a prebuilt layout.
 const editedAxisEvidence = await withWindow(async (evaluate, screenshot) => {
+  await expectCompletedTask(evaluate);
   await click(evaluate, "Построение");
   await until("the saved layouts for the axis editor", () => evaluate(() => {
     const list = document.querySelector(".plot-saved-layouts");
