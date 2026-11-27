@@ -304,7 +304,8 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const [columnFilters, setColumnFilters] = useState(() => viewMemory?.columnFilters ?? {});
   const [visibleColumnIds, setVisibleColumnIds] = useState(() => viewMemory?.visibleColumnIds ?? []);
   const [columnWidths, setColumnWidths] = useState(() => viewMemory?.columnWidths ?? {});
-  const [pinnedColumnId, setPinnedColumnId] = useState(() => viewMemory?.pinnedColumnId || "");
+  const [pinnedColumnIds, setPinnedColumnIds] = useState(() => viewMemory?.pinnedColumnIds ?? (viewMemory?.pinnedColumnId ? [viewMemory.pinnedColumnId] : []));
+  const [pinOffsets,setPinOffsets]=useState({});
   const columnResize = useRef(null);
   const [dragIds, setDragIds] = useState([]);
   const [contextMenu, setContextMenu] = useState(null);
@@ -346,9 +347,9 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   useLayoutEffect(() => {
     if (!viewMemory) return;
     Object.assign(viewMemory, { query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery,
-      sampleLinkFilter, columnFilters, visibleColumnIds, columnWidths, pinnedColumnId, focusedId, sort });
+      sampleLinkFilter, columnFilters, visibleColumnIds, columnWidths, pinnedColumnIds, pinnedColumnId:pinnedColumnIds[0]||"", focusedId, sort });
   }, [viewMemory, query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery, sampleLinkFilter,
-    columnFilters, visibleColumnIds, columnWidths, pinnedColumnId, focusedId, sort]);
+    columnFilters, visibleColumnIds, columnWidths, pinnedColumnIds, focusedId, sort]);
   useLayoutEffect(() => {
     const element = tableScroll.current;
     if (!element || !viewMemory) return;
@@ -407,12 +408,42 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const sheets = useMemo(() => [...new Set(analyses.filter((analysis) => sourceFilter === "all" || analysis.source_id === sourceFilter).map((analysis) => analysis.sheet_name))].sort((a, b) => a.localeCompare(b, "ru")), [analyses, sourceFilter]);
   const visibleColumns = useMemo(() => {
     const columns = availableColumns.filter(column => visibleColumnIds.includes(column.id));
-    const index = columns.findIndex(column => column.id === pinnedColumnId);
-    if (index > 0) columns.unshift(...columns.splice(index, 1));
-    return columns;
-  }, [availableColumns, visibleColumnIds, pinnedColumnId]);
-  const pinned = visibleColumns.some(column => column.id === pinnedColumnId) ? pinnedColumnId : "";
-  const pinClass = id => id === pinned ? "analysis-pinned-column" : undefined;
+    const byId=new Map(columns.map(column=>[column.id,column]));
+    return [...pinnedColumnIds.filter(id=>byId.has(id)).map(id=>byId.get(id)),...columns.filter(column=>!pinnedColumnIds.includes(column.id))];
+  }, [availableColumns, visibleColumnIds, pinnedColumnIds]);
+  const pinned = pinnedColumnIds.filter(id=>visibleColumns.some(column=>column.id===id));
+  const pinClass = id => pinned.includes(id) ? "analysis-pinned-column" : undefined;
+  const setPin=(index,id)=>{
+    setPinnedColumnIds(current=>{
+      const next=[...current];
+      if(!id)next.splice(index,1);
+      else if(index===next.length)next.push(id);
+      else next[index]=id;
+      return [...new Set(next)].slice(0,3);
+    });
+  };
+  // Actual rendered widths rather than configured widths: the table can grow
+  // to fill the viewport and filters may impose a larger minimum width.
+  useLayoutEffect(()=>{
+    const table=tableScroll.current?.querySelector("table"), headers=table?.querySelectorAll("thead tr:first-child th");
+    if(!headers?.length)return;
+    const measure=()=>{
+      let offset=headers[0].getBoundingClientRect().width||42;
+      const next={};
+      for(const [index,column] of visibleColumns.entries()){
+        if(!pinnedColumnIds.includes(column.id))break;
+        next[column.id]=offset;
+        offset+=headers[index+1]?.getBoundingClientRect().width||columnWidths[column.id]||150;
+      }
+      setPinOffsets(old=>JSON.stringify(old)===JSON.stringify(next)?old:next);
+    };
+    measure();
+    if(typeof ResizeObserver==="undefined")return;
+    const observer=new ResizeObserver(measure);
+    observer.observe(table);
+    headers.forEach(cell=>observer.observe(cell));
+    return()=>observer.disconnect();
+  },[visibleColumns,pinnedColumnIds,columnWidths,analyses.length>0]);
   const mineralStatuses = useMemo(() => [...new Set(analyses.map(mineralStatus))].sort(), [analyses]);
   const toggleMineralStatus = (status) => setMineralStatusFilter((current) =>
     current.includes(status) ? current.filter((item) => item !== status) : [...current, status]);
@@ -744,7 +775,8 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const resizeColumn = (id, width) => setColumnWidths(current => ({ ...current, [id]: Math.max(104, Math.min(600, Math.round(width))) }));
   const columnStyle = id => {
     const width = columnWidths[id] || (virtual ? 150 : undefined);
-    return width ? { width, minWidth: width, maxWidth: width } : undefined;
+    const dimensions=width?{width,minWidth:width,maxWidth:width}:{};
+    return pinned.includes(id)?{...dimensions,left:pinOffsets[id]??42}:width?dimensions:undefined;
   };
   const autoWidth = column => {
     // Measure displayed text (including raw tokens and units), not a numerical conversion.
@@ -861,12 +893,19 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
           <details className="analysis-columns-menu">
             <summary><SquaresFour size={17} /> Колонки <span>{visibleColumns.length}</span></summary>
             <div>
-              <label className="analysis-pin-control">Закрепить слева
-                <select aria-label="Закреплённая колонка" value={pinned} onChange={event=>setPinnedColumnId(event.target.value)}>
-                  <option value="">Не закреплять</option>
-                  {visibleColumns.map(column=><option key={column.id} value={column.id}>{column.label}</option>)}
-                </select>
-              </label>
+              <div className="analysis-pin-control">
+                <span>Закрепить слева (до трёх)</span>
+                {Array.from({length:Math.min(3,pinnedColumnIds.length+1)},(_,index)=><label key={index}>
+                  {index===0?"Первая":index===1?"Вторая":"Третья"}
+                  <select aria-label={index===0?"Закреплённая колонка":`Закреплённая колонка ${index+1}`}
+                    value={pinnedColumnIds[index]||""} onChange={event=>setPin(index,event.target.value)}>
+                    <option value="">Не закреплять</option>
+                    {availableColumns.filter(column=>(visibleColumnIds.includes(column.id)||pinnedColumnIds[index]===column.id)&&
+                      (!pinnedColumnIds.includes(column.id)||pinnedColumnIds[index]===column.id)).map(column=><option key={column.id} value={column.id}>{column.label}</option>)}
+                  </select>
+                </label>)}
+                {pinnedColumnIds.length>0&&<button type="button" className="outline-button" onClick={()=>setPinnedColumnIds([])}>Снять все закрепления</button>}
+              </div>
               <p>Показывать в таблице</p>
               {availableColumns.map((column) => <label key={column.id}><input type="checkbox" checked={visibleColumnIds.includes(column.id)} onChange={() => toggleColumn(column.id)} /> {column.label}</label>)}
             </div>

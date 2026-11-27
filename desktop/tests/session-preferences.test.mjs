@@ -24,3 +24,10 @@ test("invalid or outdated preferences never become scientific state",()=>{
   const inaccessible={getItem:()=>{throw Error("blocked");}};
   assert.equal(readSession(inaccessible,key),null);assert.equal(writeSession(inaccessible,key,safe),false);
 });
+
+test("multiple pins preserve order, reject duplicates, migrate the legacy preference",()=>{
+ const saved=sanitizeSession({table:{pinnedColumnIds:["identity:Analysis","source","source","measurement:MgO","sheet"]}});
+ assert.deepEqual(saved.table.pinnedColumnIds,["identity:Analysis","source","measurement:MgO"]);
+ assert.equal(saved.table.pinnedColumnId,"identity:Analysis");
+ assert.deepEqual(sanitizeSession({table:{pinnedColumnId:"source"}}).table.pinnedColumnIds,["source"]);
+});
