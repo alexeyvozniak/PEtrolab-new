@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .analyte_dictionary import REPORTED_INDICES, REPORTED_INDEX_UNITS
 from .import_preview import ImportCommandError, create_import_plan, inspect_source, semantic_fingerprint, validate_recipe
 from .import_recognition import (
     IRON_FIELDS,
@@ -127,6 +128,12 @@ def _apply_mapping_decision(revised: dict[str, Any], decision: dict[str, Any]) -
             raise ImportCommandError("RECIPE_SCHEMA_INCOMPATIBLE", "Measurement field name is required.")
         if unit not in VALID_UNITS:
             raise ImportCommandError("UNKNOWN_UNIT", "Choose an explicit unit for every measurement.", {"block_id": block_id, "header": source_header, "unit": unit})
+        index = next((item for item in REPORTED_INDICES if item.casefold() == field.casefold()), None)
+        if index is not None:
+            if unit not in REPORTED_INDEX_UNITS:
+                raise ImportCommandError("UNKNOWN_UNIT", "Укажите шкалу индекса ratio или mol%.",
+                                         {"block_id": block_id, "header": source_header, "unit": unit})
+            field, semantics = index, "source_derived"
         selected_unit = unit
     elif target == "Metadata":
         field, selected_unit = str(decision.get('canonical_field') or '').strip(), None

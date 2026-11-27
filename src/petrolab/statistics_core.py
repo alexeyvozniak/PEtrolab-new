@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from .analyte_dictionary import COMPONENTS, ELEMENTS
+from .analyte_dictionary import COMPONENTS, ELEMENTS, REPORTED_INDICES, REPORTED_INDEX_UNITS
 from .clean_table import VALID_MEASUREMENT_UNITS
 from .import_preview import ImportCommandError
 
@@ -19,7 +19,7 @@ def feature_domain(feature):
         return "trace_concentration"
     if unit == "apfu" and field in _ELEMENTS:
         return "apfu"
-    if unit == "ratio":
+    if unit == "ratio" or (field in REPORTED_INDICES and unit in REPORTED_INDEX_UNITS):
         return "ratio_or_index"
     return "other"
 
