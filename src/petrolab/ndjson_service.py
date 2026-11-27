@@ -21,6 +21,7 @@ from .sample_workspace import add_sample_note, change_point_link, get_point_anal
 from .manual_analysis import create_manual_analysis
 from .media_links import change_media_link, create_media_region, import_linked_photo, list_media_links
 from .plot_data import list_plot_specifications, open_plot_specification, plot_catalog, query_plot_data, record_plot_visibility, save_plot_specification, undo_plot_visibility
+from .plot_gradient import plot_gradient_values
 from .plot_export import export_plot
 from .plot_colors import (get_project_plot_colors, save_project_plot_colors,
                           get_project_plot_presets, save_project_plot_presets)
@@ -415,6 +416,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "project.plot_colors.get": lambda params: {"result": get_project_plot_colors(_project_database_path(params))},
     "project.plot_colors.save": lambda params: {"result": save_project_plot_colors(
         _project_database_path(params), params.get("scheme"), params.get("expected_revision"))},
+    "plot_data.gradient": lambda params: {"result": plot_gradient_values(_project_database_path(params), params.get("axis"), params.get("analysis_ids"))},
     "plot_data.catalog": lambda params: {"result": plot_catalog(_project_database_path(params), params.get("analysis_ids"),
                                                                include_formula=params.get("include_formula", False),
                                                                include_categories=params.get("include_categories", False))},

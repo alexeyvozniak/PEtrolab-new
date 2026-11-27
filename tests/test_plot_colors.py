@@ -10,12 +10,20 @@ class PlotColorTests(unittest.TestCase):
         with TemporaryDirectory() as folder:
             a,b=Path(folder)/"a.sqlite",Path(folder)/"b.sqlite"
             self.assertEqual(get_project_plot_colors(a)["revision"],0)
-            scheme={"mode":"mineral","colors":[{"mode":"mineral","key":"phlogopite","color":"#AABBCC"},
+            scheme={"mode":"mineral","colors":[{"mode":"mineral","key":"phlogopite","color":"#AABBCC","symbol":"diamond"},
                 {"mode":"sample","key":str(uuid4()),"color":"#112233"}]}
             saved=save_project_plot_colors(a,scheme,0)
             self.assertEqual(saved["revision"],1)
             self.assertEqual(saved["scheme"]["colors"][0]["color"],"#aabbcc")
             self.assertEqual(get_project_plot_colors(a),saved)
+            self.assertEqual(saved["scheme"]["colors"][0]["symbol"],"diamond")
+            from petrolab.plot_symbols import PLOT_SYMBOLS, marker_legend_signature
+            self.assertEqual(len(PLOT_SYMBOLS),20)
+            self.assertEqual(marker_legend_signature("star_open","#112233"),("polygon","none","#112233"))
+            for symbol in sorted(PLOT_SYMBOLS):
+                self.assertEqual(marker_legend_signature(symbol,"#112233")[1],"none" if symbol.endswith("_open") else "#112233")
+            with self.assertRaises(ValueError):
+                save_project_plot_colors(a,{"mode":"mineral","colors":[{"mode":"mineral","key":"mica","color":"#112233","symbol":"unknown"}]},1)
             self.assertEqual(get_project_plot_colors(b)["revision"],0)
             with self.assertRaises(ImportCommandError):
                 save_project_plot_colors(a,scheme,0)

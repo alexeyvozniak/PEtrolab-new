@@ -181,3 +181,15 @@
 .analyses-data-table.virtual-rows thead th { box-sizing:border-box; overflow:hidden; }
 .analyses-data-table.virtual-rows th button { overflow:hidden; text-overflow:ellipsis; }
 .analyses-data-table.virtual-rows .analysis-row-spacer td { padding:0; border:0; line-height:0; min-width:0; max-width:none; }
+
+/* The checkbox column remains the first frozen 42px. One chosen data
+   column follows it and the original order is restored when unpinned. */
+.analyses-data-table .analysis-select-cell { box-sizing:border-box; padding-left:0; padding-right:0; }
+.analyses-data-table td.analysis-pinned-column { position:sticky; left:42px; z-index:1; background:inherit; box-shadow:2px 0 2px #23372c20; }
+.analyses-data-table thead th.analysis-pinned-column { left:42px; z-index:5; box-shadow:2px 0 2px #23372c20; }
+.analyses-data-table thead tr.analysis-filter-row th.analysis-pinned-column { z-index:5; }
+.analyses-data-table thead tr.analysis-filter-row th.analysis-select-cell { z-index:6; }
+.analysis-columns-menu .analysis-pin-control { display:flex;flex-direction:column;align-items:stretch;gap:4px; }
+.analysis-pin-control select { width:100%;min-width:0; }
+
+.analysis-measurement.provenance-focused { outline:2px solid #397450;outline-offset:-2px;background:#eaf4ec; }

@@ -193,7 +193,15 @@ function AnalysisMineralReview({ analysis }) {
   </section>;
 }
 
-function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlotAnalysisIds, onSetPlotVisibility, onUndoPlotVisibility, busy }) {
+function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlotAnalysisIds, onSetPlotVisibility, onUndoPlotVisibility, busy, provenanceFocus }) {
+  const detailRef = useRef(null);
+  useEffect(() => {
+    if (!provenanceFocus || provenanceFocus.analysisId !== analysis?.analysis_id) return;
+    const node = [...(detailRef.current?.querySelectorAll("[data-source-cell]") || [])].find(item =>
+      item.dataset.sourceCell === provenanceFocus.cell && item.dataset.measurementField === provenanceFocus.field);
+    node?.scrollIntoView?.({block:"nearest"});
+    node?.focus();
+  }, [analysis?.analysis_id, provenanceFocus]);
   if (!analysis) {
     return <aside className="analysis-detail empty"><SquaresFour size={24} /><span>Выбери строку, чтобы увидеть все поля и происхождение значений.</span></aside>;
   }
@@ -204,7 +212,7 @@ function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlot
     : Object.entries(analysis.source_metadata || {}).map(([field, value]) => [field, value, ""]);
   const measurements = analysis.measurement_list || Object.entries(analysis.measurements || {}).map(([field, item]) => ({ field, ...item }));
   return (
-    <aside className="analysis-detail" aria-label="Подробности анализа">
+    <aside ref={detailRef} className="analysis-detail" aria-label="Подробности анализа">
       <div className="analysis-detail-head">
         <span>Выбранный анализ</span>
         <h2>{mainIdentity(analysis)}</h2>
@@ -247,7 +255,9 @@ function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlot
         <div className="analysis-detail-section-head"><h3>Все измерения</h3><span>{measurements.length}</span></div>
         <div className="analysis-measurement-list">
           {measurements.map((measurement, index) => (
-            <div className="analysis-measurement" key={`${measurement.field}-${measurement.source_cell}-${index}`}>
+            <div className={`analysis-measurement${provenanceFocus?.analysisId === analysis.analysis_id && provenanceFocus.cell === measurement.source_cell && provenanceFocus.field === measurement.field ? " provenance-focused" : ""}`}
+              key={`${measurement.field}-${measurement.source_cell}-${index}`} tabIndex={-1}
+              data-source-cell={measurement.source_cell || undefined} data-measurement-field={measurement.field}>
               <div><b>{measurement.field}</b><small>{measurement.source_header || "Без исходного заголовка"}{measurement.source_cell ? ` · ${measurement.source_cell}` : ""}</small></div>
               <div><b>{measurement.raw_token ?? "∅"}</b><small>{measurement.unit}{measurementContext(measurement) ? ` · ${measurementContext(measurement)}` : ""}</small></div>
             </div>
@@ -300,9 +310,11 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const [columnFilters, setColumnFilters] = useState(() => viewMemory?.columnFilters ?? {});
   const [visibleColumnIds, setVisibleColumnIds] = useState(() => viewMemory?.visibleColumnIds ?? []);
   const [columnWidths, setColumnWidths] = useState(() => viewMemory?.columnWidths ?? {});
+  const [pinnedColumnId, setPinnedColumnId] = useState(() => viewMemory?.pinnedColumnId || "");
   const columnResize = useRef(null);
   const [dragIds, setDragIds] = useState([]);
   const [contextMenu, setContextMenu] = useState(null);
+  const [provenanceFocus, setProvenanceFocus] = useState(null);
   const [workGroups, setWorkGroups] = useState(null);
   const [groupForm, setGroupForm] = useState(false);
   const [groupBusy, setGroupBusy] = useState(false);
@@ -335,9 +347,9 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   useLayoutEffect(() => {
     if (!viewMemory) return;
     Object.assign(viewMemory, { query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery,
-      sampleLinkFilter, columnFilters, visibleColumnIds, columnWidths, focusedId, sort });
+      sampleLinkFilter, columnFilters, visibleColumnIds, columnWidths, pinnedColumnId, focusedId, sort });
   }, [viewMemory, query, sourceFilter, sheetFilter, mineralStatusFilter, statusQuery, sampleLinkFilter,
-    columnFilters, visibleColumnIds, columnWidths, focusedId, sort]);
+    columnFilters, visibleColumnIds, columnWidths, pinnedColumnId, focusedId, sort]);
   useLayoutEffect(() => {
     const element = tableScroll.current;
     if (!element || !viewMemory) return;
@@ -394,7 +406,14 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
       .sort((left, right) => left.label.localeCompare(right.label, "ru"));
   }, [analyses]);
   const sheets = useMemo(() => [...new Set(analyses.filter((analysis) => sourceFilter === "all" || analysis.source_id === sourceFilter).map((analysis) => analysis.sheet_name))].sort((a, b) => a.localeCompare(b, "ru")), [analyses, sourceFilter]);
-  const visibleColumns = availableColumns.filter((column) => visibleColumnIds.includes(column.id));
+  const visibleColumns = useMemo(() => {
+    const columns = availableColumns.filter(column => visibleColumnIds.includes(column.id));
+    const index = columns.findIndex(column => column.id === pinnedColumnId);
+    if (index > 0) columns.unshift(...columns.splice(index, 1));
+    return columns;
+  }, [availableColumns, visibleColumnIds, pinnedColumnId]);
+  const pinned = visibleColumns.some(column => column.id === pinnedColumnId) ? pinnedColumnId : "";
+  const pinClass = id => id === pinned ? "analysis-pinned-column" : undefined;
   const mineralStatuses = useMemo(() => [...new Set(analyses.map(mineralStatus))].sort(), [analyses]);
   const toggleMineralStatus = (status) => setMineralStatusFilter((current) =>
     current.includes(status) ? current.filter((item) => item !== status) : [...current, status]);
@@ -843,6 +862,12 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
           <details className="analysis-columns-menu">
             <summary><SquaresFour size={17} /> Колонки <span>{visibleColumns.length}</span></summary>
             <div>
+              <label className="analysis-pin-control">Закрепить слева
+                <select aria-label="Закреплённая колонка" value={pinned} onChange={event=>setPinnedColumnId(event.target.value)}>
+                  <option value="">Не закреплять</option>
+                  {visibleColumns.map(column=><option key={column.id} value={column.id}>{column.label}</option>)}
+                </select>
+              </label>
               <p>Показывать в таблице</p>
               {availableColumns.map((column) => <label key={column.id}><input type="checkbox" checked={visibleColumnIds.includes(column.id)} onChange={() => toggleColumn(column.id)} /> {column.label}</label>)}
             </div>
@@ -881,7 +906,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
               <tr>
                 <th className="analysis-select-cell"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} aria-label="Выбрать показанные анализы" /></th>
                 {visibleColumns.map((column) => (
-                  <th key={column.id} style={columnStyle(column.id)}><button type="button" onClick={() => changeSort(column.id)}
+                  <th key={column.id} className={pinClass(column.id)} style={columnStyle(column.id)}><button type="button" onClick={() => changeSort(column.id)}
                     onDoubleClick={event => { event.preventDefault(); autoWidth(column); }}>{column.label}{sort.id === column.id ? (sort.direction === "asc" ? <CaretUp size={12} /> : <CaretDown size={12} />) : null}</button>
                     <span className="analysis-column-resizer" role="separator" aria-orientation="vertical" tabIndex={0}
                       aria-label={`Ширина колонки ${column.label}`} aria-valuemin={104} aria-valuemax={600} aria-valuenow={columnWidths[column.id] || 104}
@@ -907,13 +932,13 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                 ))}
               </tr>
               <tr className="analysis-filter-row">
-                <th />
+                <th className="analysis-select-cell" />
                 {visibleColumns.map((column) => {
                   const units = measurementUnits.get(column.field) || [];
                   const hint = column.kind === "measurement"
                     ? `Число, >10, 5..20, пусто, ниже предела${units.length > 1 ? `. Укажите единицу: ${units.join(", ")}` : ""}`
                     : "Поиск по фрагменту";
-                  return <th key={column.id} style={columnStyle(column.id)}><input value={columnFilters[column.id] || ""} onChange={(event) => setColumnFilters((current) => ({ ...current, [column.id]: event.target.value }))} placeholder={column.kind === "measurement" ? ">10, 5..20" : "Фильтр"} title={hint} aria-invalid={invalidFilters.has(column.id)} aria-label={`Фильтр ${column.label}`} /></th>;
+                  return <th key={column.id} className={pinClass(column.id)} style={columnStyle(column.id)}><input value={columnFilters[column.id] || ""} onChange={(event) => setColumnFilters((current) => ({ ...current, [column.id]: event.target.value }))} placeholder={column.kind === "measurement" ? ">10, 5..20" : "Фильтр"} title={hint} aria-invalid={invalidFilters.has(column.id)} aria-label={`Фильтр ${column.label}`} /></th>;
                 })}
               </tr>
             </thead>
@@ -929,7 +954,9 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                       if (event.target.closest?.("input, textarea, select")) return;
                       event.preventDefault();
                       setFocusedId(analysis.analysis_id);
-                      setContextMenu({ id: analysis.analysis_id, label: mainIdentity(analysis), x: event.clientX, y: event.clientY });
+                      const cell=event.target.closest?.("td[data-source-cell]");
+                      setContextMenu({ id: analysis.analysis_id, label: mainIdentity(analysis), x: event.clientX, y: event.clientY,
+                        ...(cell ? {cell:cell.dataset.sourceCell,field:cell.dataset.measurementField} : {}) });
                     }}
                     onClick={(event) => {
                       if (event.shiftKey || event.ctrlKey || event.metaKey) {
@@ -943,7 +970,9 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
                     {visibleColumns.map((column) => {
                       const measurement = column.kind === "measurement" ? analysis.measurements?.[column.field] : null;
                       return (
-                        <td key={column.id} style={columnStyle(column.id)} title={String(valueFor(analysis, column))}>
+                        <td key={column.id} className={pinClass(column.id)} style={columnStyle(column.id)}
+                          data-source-cell={measurement?.source_cell || undefined} data-measurement-field={measurement?.source_cell ? column.field : undefined}
+                          title={measurement?.source_cell ? `${valueFor(analysis,column)} · ${analysis.sheet_name || ""}!${measurement.source_cell}` : String(valueFor(analysis, column))}>
                           <span>{valueFor(analysis, column)}</span>
                           {measurement ? <small>{measurement.unit}{measurementContext(measurement) ? ` · ${measurementContext(measurement)}` : ""}</small> : null}
                         </td>
@@ -962,6 +991,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
       </main>
 
       <ContextActions menu={contextMenu} onClose={() => setContextMenu(null)} actions={contextMenu ? [
+        ...(contextMenu.cell ? [{label:`Показать исходную ячейку ${contextMenu.cell}`, run:()=>setProvenanceFocus({analysisId:contextMenu.id,cell:contextMenu.cell,field:contextMenu.field})}] : []),
         { label: selected.has(contextMenu.id) ? "Снять выделение анализа" : "Добавить анализ в отбор", run: () => toggleSelection(contextMenu.id) },
         { label: "Построить диаграммы для анализа", disabled: busy || !onOpenPlots, run: () => onOpenPlots([contextMenu.id]) },
         { label: "Фильтровать по источнику", run: () => { const analysis = byId.get(contextMenu.id); if (analysis) { setSourceFilter(analysis.source_id); setSheetFilter("all"); } } },
@@ -970,7 +1000,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
           if (details) { details.open = true; details.scrollIntoView?.({ block: "nearest" }); details.querySelector("input[name=new_value]")?.focus(); }
         } },
       ] : []} />
-      <AnalysisDetail analysis={focused} editDraftActions={editDraftActions} initialDraftId={initialDraftId} hiddenPlotAnalysisIds={hiddenPlotAnalysisIds}
+      <AnalysisDetail analysis={focused} provenanceFocus={provenanceFocus} editDraftActions={editDraftActions} initialDraftId={initialDraftId} hiddenPlotAnalysisIds={hiddenPlotAnalysisIds}
         onSetPlotVisibility={onSetPlotVisibility} onUndoPlotVisibility={onUndoPlotVisibility} busy={busy} />
 
       {selectedIds.length > 0 && (

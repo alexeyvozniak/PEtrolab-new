@@ -281,6 +281,30 @@
               "type": "number",
               "minimum": 0.5,
               "maximum": 2
+            },
+            "symbol": {
+              "enum": [
+                "circle",
+                "square",
+                "triangle",
+                "diamond",
+                "triangle_down",
+                "pentagon",
+                "hexagon",
+                "star",
+                "plus",
+                "cross",
+                "circle_open",
+                "square_open",
+                "triangle_open",
+                "diamond_open",
+                "triangle_down_open",
+                "pentagon_open",
+                "hexagon_open",
+                "star_open",
+                "plus_open",
+                "cross_open"
+              ]
             }
           }
         }
@@ -523,6 +547,39 @@
                     ],
                     "exclusiveMinimum": 0,
                     "exclusiveMaximum": 1
+                  },
+                  "style": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "mode",
+                      "color",
+                      "fill_opacity",
+                      "stroke_width"
+                    ],
+                    "properties": {
+                      "mode": {
+                        "enum": [
+                          "outline",
+                          "fill",
+                          "both"
+                        ]
+                      },
+                      "color": {
+                        "type": "string",
+                        "pattern": "^#[0-9A-Fa-f]{6}$"
+                      },
+                      "fill_opacity": {
+                        "type": "number",
+                        "minimum": 0.05,
+                        "maximum": 1
+                      },
+                      "stroke_width": {
+                        "type": "number",
+                        "minimum": 0.5,
+                        "maximum": 4
+                      }
+                    }
                   }
                 },
                 "if": {
@@ -605,6 +662,30 @@
               "color": {
                 "type": "string",
                 "pattern": "^#[0-9A-Fa-f]{6}$"
+              },
+              "symbol": {
+                "enum": [
+                  "circle",
+                  "square",
+                  "triangle",
+                  "diamond",
+                  "triangle_down",
+                  "pentagon",
+                  "hexagon",
+                  "star",
+                  "plus",
+                  "cross",
+                  "circle_open",
+                  "square_open",
+                  "triangle_open",
+                  "diamond_open",
+                  "triangle_down_open",
+                  "pentagon_open",
+                  "hexagon_open",
+                  "star_open",
+                  "plus_open",
+                  "cross_open"
+                ]
               }
             }
           }

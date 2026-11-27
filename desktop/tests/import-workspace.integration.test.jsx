@@ -571,6 +571,24 @@ test("categorical mineral colors use reported labels and preserve selection and 
   expect(svg).toContain(first.getAttribute("fill"));
   expect(svg).toContain('opacity="0.35"');
   expect(svg).toContain('r="5.25"');
+  await user.selectOptions(within(legend).getByLabelText("Символ: olivine"),"diamond");
+  const diamond=screen.getAllByRole("button",{name:/^Выбрать точку C1/})[0];
+  expect(diamond.localName).toBe("polygon");
+  expect(diamond.getAttribute("fill")).toBe("#112233");
+  const shapedSvg=new DOMParser().parseFromString(await readFile(await savePlot(user),"utf8"),"image/svg+xml");
+  expect([...shapedSvg.querySelectorAll("polygon")].some(node=>node.getAttribute("fill")==="#112233")).toBe(true);
+  await user.click(await enabledButton("Сохранить цветовую схему проекта"));
+  await screen.findByText("Цветовая схема сохранена в проекте.");
+  const shaped=(await invokePetrolab("project.plot_colors.get",{project_database_path:join(folder,"project.sqlite")})).result;
+  expect(shaped.scheme.colors).toContainEqual({mode:"mineral",key:"olivine",color:"#112233",symbol:"diamond"});
+  await user.selectOptions(within(legend).getByLabelText("Символ: olivine"),"star_open");
+  const star=screen.getAllByRole("button",{name:/^Выбрать точку C1/})[0];
+  expect(star.localName).toBe("polygon");
+  expect(star.getAttribute("fill")).toBe("none");
+  expect(star.getAttribute("stroke")).toBe("#112233");
+  const openSvg=new DOMParser().parseFromString(await readFile(await savePlot(user),"utf8"),"image/svg+xml");
+  expect([...openSvg.querySelectorAll("polygon")].some(node=>node.getAttribute("fill")==="none"&&node.getAttribute("stroke")==="#112233")).toBe(true);
+  await user.selectOptions(within(legend).getByLabelText("Символ: olivine"),"diamond");
   await user.selectOptions(mode,"generation");
   expect(within(await screen.findByLabelText("Легенда категорий")).getByText("Не указано")).toBeTruthy();
   await user.selectOptions(mode,"source");
@@ -580,7 +598,8 @@ test("categorical mineral colors use reported labels and preserve selection and 
   await user.click(await enabledButton("Загрузить сохранённую схему"));
   await screen.findByText("Загружена сохранённая цветовая схема.");
   expect(mode.value).toBe("mineral");
-  expect(first.getAttribute("fill")).toBe("#112233");
+  expect(screen.getAllByRole("button",{name:/^Выбрать точку C1/})[0].localName).toBe("polygon");
+  expect(screen.getAllByRole("button",{name:/^Выбрать точку C1/})[0].getAttribute("fill")).toBe("#112233");
 }, 20000);
 
 test("axis catalog drops an exact catalog key and rejects an unknown key", async () => {
@@ -879,15 +898,22 @@ test("visible plot fields survive marker hiding and SVG includes their geometry"
   }
   await user.click(screen.getByText("Слои и поля", { exact: true }));
   await user.type(screen.getByLabelText("Название слоя"), "Серия");
-  await user.click(await enabledButton("Добавить слой из отбора"));
+  await user.click(await enabledButton("Только облако выделения · 3"));
   const layer = within(screen.getByRole("group", { name: "Серия · 3" }));
-  await user.selectOptions(layer.getByLabelText("Метод поля"), "convex_hull");
-  await user.click(layer.getByRole("checkbox", { name: "Точки" }));
+  expect(layer.getByLabelText("Метод поля").value).toBe("convex_hull");
+  expect(layer.getByRole("checkbox", { name: "Точки" }).checked).toBe(false);
   await waitFor(() => expect(container.querySelectorAll(".plot-field")).toHaveLength(2));
   expect(screen.queryByRole("button", { name: "Выбрать точку P1" })).toBeNull();
   expect(screen.getByText("Выбранные анализы · 3")).toBeTruthy();
+  await user.selectOptions(layer.getByLabelText("Оформление облака"),"outline");
+  fireEvent.change(layer.getByLabelText("Цвет облака"),{target:{value:"#123456"}});
+  fireEvent.change(layer.getByLabelText("Толщина контура"),{target:{value:"2"}});
   const svg = new DOMParser().parseFromString(await readFile(await savePlot(user), "utf8"), "image/svg+xml");
   expect(svg.querySelectorAll("polygon")).toHaveLength(2);
+  expect([...svg.querySelectorAll("polygon")].every(p=>p.getAttribute("fill")==="none" && p.getAttribute("stroke")==="#123456" && p.getAttribute("stroke-width")==="2")).toBe(true);
+  await user.selectOptions(layer.getByLabelText("Оформление облака"),"fill");
+  expect([...container.querySelectorAll(".plot-field")].every(p=>p.getAttribute("stroke")==="none")).toBe(true);
+  await user.selectOptions(layer.getByLabelText("Оформление облака"),"both");
   expect(svg.querySelector("circle, clipPath, mask")).toBeNull();
   const pdf = await readFile(await savePlot(user, 1, "PDF · векторный"));
   expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");

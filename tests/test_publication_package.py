@@ -361,10 +361,28 @@ class PublicationPackageTests(unittest.TestCase):
             self.assertEqual(open_plot_specification(database,styled["id"])["panels"][0]["point_style"],styled_panel["point_style"])
             with self.assertRaises(ValueError):
                 save_plot_specification(database,"Недопустимый стиль",None,[{**panel,"point_style":{"opacity":0,"size_scale":1}}],{},[],[])
+            layer={"id":str(uuid4()),"name":"Облако","analysis_ids":list(assignments),"show_points":False,"opacity":1,
+                   "field":{"method":"convex_hull","visible":True,"probability":None,
+                            "style":{"mode":"outline","color":"#112233","fill_opacity":0.3,"stroke_width":2}}}
+            cloud=save_plot_specification(database,"Облако",None,[panel],{},[],[],[layer])
+            self.assertEqual(cloud["schema_version"],4)
+            self.assertEqual(open_plot_specification(database,cloud["id"])["layers"],[layer])
+            with self.assertRaises(ValueError):
+                save_plot_specification(database,"Ошибка облака",None,[panel],{},[],[],[{**layer,"field":{**layer["field"],"style":{**layer["field"]["style"],"stroke_width":0}}}])
             svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g id="panel-a"><text x="1" y="2">a</text></g><g id="category-legend"><rect x="1" y="10" width="10" height="10" fill="#112233"/><rect x="1" y="25" width="10" height="10" fill="#445566"/></g></svg>'
             capture = {"name":"Categories","format":"svg","width_mm":90,"dpi":600,"include_csv":True,"svg":svg,
                        "analysis_ids":None,"hidden_analysis_ids":[],"hidden_source_ids":[],"layers":[],"colors":{},
                        "category_style":style,"panels":[{**panel,"projection_sha256":projection["projection_sha256"]}]}
+            cloud_projection = query_plot_data(database,"binary",axes,layers=[layer])
+            cloud_capture = {**capture,"layers":[layer],"panels":[{**capture["panels"][0],"projection_sha256":cloud_projection["projection_sha256"]}]}
+            cloud_item = capture_publication_plot(database,cloud_capture,"Облако")
+            cloud_ready = prepare_publication(database,"Облако",[cloud_item])
+            cloud_path = root / "cloud.zip"
+            export_publication(database,"Облако",[cloud_item],cloud_ready["fingerprint"],str(cloud_path))
+            with ZipFile(cloud_path) as archive:
+                material=json.loads(archive.read("materials/01-plot_capture.json"))
+                self.assertEqual(material["schema_version"],4)
+                self.assertEqual(material["layers"],[layer])
             styled_capture = {**capture,"panels":[{**capture["panels"][0],"point_style":styled_panel["point_style"]}]}
             styled_item = capture_publication_plot(database,styled_capture,"Прозрачные точки")
             self.assertEqual(styled_item["capture"]["panels"][0]["point_style"],styled_panel["point_style"])
