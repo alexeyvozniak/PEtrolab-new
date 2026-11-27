@@ -1,0 +1,203 @@
+{
+  "steps": {
+    "pinnedAscending": {
+      "rows": [
+        {
+          "label": "A-ZERO",
+          "selected": true
+        },
+        {
+          "label": "A-HIGHEST",
+          "selected": true
+        },
+        {
+          "label": "A-HIGH-OTHER",
+          "selected": false
+        },
+        {
+          "label": "A-BDL",
+          "selected": false
+        },
+        {
+          "label": "A-BLANK",
+          "selected": false
+        },
+        {
+          "label": "A-MODERATE",
+          "selected": false
+        },
+        {
+          "label": "A-HIGH",
+          "selected": false
+        }
+      ],
+      "chips": [],
+      "selection": "2 выбраноВыбранные строки закреплены сверху."
+    },
+    "pinnedDescending": {
+      "rows": [
+        {
+          "label": "A-ZERO",
+          "selected": true
+        },
+        {
+          "label": "A-HIGHEST",
+          "selected": true
+        },
+        {
+          "label": "A-BDL",
+          "selected": false
+        },
+        {
+          "label": "A-BLANK",
+          "selected": false
+        },
+        {
+          "label": "A-MODERATE",
+          "selected": false
+        },
+        {
+          "label": "A-HIGH",
+          "selected": false
+        },
+        {
+          "label": "A-HIGH-OTHER",
+          "selected": false
+        }
+      ],
+      "chips": [],
+      "selection": "2 выбраноВыбранные строки закреплены сверху."
+    },
+    "detectionLimits": [
+      {
+        "rows": [
+          {
+            "label": "A-ZERO",
+            "selected": true
+          }
+        ],
+        "chips": [
+          "F: =0",
+          "Сбросить фильтры"
+        ],
+        "selection": "2 выбраноСкрыто фильтром: 1"
+      },
+      {
+        "rows": [
+          {
+            "label": "A-BDL",
+            "selected": false
+          }
+        ],
+        "chips": [
+          "F: ниже предела",
+          "Сбросить фильтры"
+        ],
+        "selection": "2 выбраноСкрыто фильтром: 2"
+      },
+      {
+        "rows": [
+          {
+            "label": "A-BLANK",
+            "selected": false
+          }
+        ],
+        "chips": [
+          "F: пусто",
+          "Сбросить фильтры"
+        ],
+        "selection": "2 выбраноСкрыто фильтром: 2"
+      },
+      {
+        "rows": [
+          {
+            "label": "A-HIGH",
+            "selected": false
+          }
+        ],
+        "chips": [
+          "F: 9,5..10",
+          "Сбросить фильтры"
+        ],
+        "selection": "2 выбраноСкрыто фильтром: 2"
+      }
+    ],
+    "linked": {
+      "rows": [],
+      "chips": [
+        "at16-primary.csv",
+        "Связь назначена",
+        "Analysis: HIGH",
+        "F: >=10",
+        "Сбросить фильтры"
+      ],
+      "selection": "2 выбраноСкрыто фильтром: 2"
+    },
+    "combined": {
+      "rows": [
+        {
+          "label": "A-HIGHEST",
+          "selected": true
+        },
+        {
+          "label": "A-HIGH",
+          "selected": false
+        }
+      ],
+      "chips": [
+        "at16-primary.csv",
+        "Без связи",
+        "Analysis: HIGH",
+        "F: >=10",
+        "Сбросить фильтры"
+      ],
+      "selection": "2 выбраноСкрыто фильтром: 1"
+    },
+    "reset": {
+      "rows": [
+        {
+          "label": "A-ZERO",
+          "selected": true
+        },
+        {
+          "label": "A-HIGHEST",
+          "selected": true
+        },
+        {
+          "label": "A-BDL",
+          "selected": false
+        },
+        {
+          "label": "A-BLANK",
+          "selected": false
+        },
+        {
+          "label": "A-MODERATE",
+          "selected": false
+        },
+        {
+          "label": "A-HIGH",
+          "selected": false
+        },
+        {
+          "label": "A-HIGH-OTHER",
+          "selected": false
+        }
+      ],
+      "chips": [],
+      "selection": "2 выбраноВыбранные строки закреплены сверху."
+    }
+  },
+  "selection": [
+    "3ed8bd5c-cb34-4c7c-959f-9fa8a895b758",
+    "51fce366-828f-4181-8960-87f8748b5aa5"
+  ],
+  "workGroup": [
+    "51fce366-828f-4181-8960-87f8748b5aa5",
+    "3ed8bd5c-cb34-4c7c-959f-9fa8a895b758"
+  ],
+  "originalSha256": [
+    "626c16a85d6d7c2704bdeb0915d4bef13dc9d984fd1c43552d38e7e878509812",
+    "a91e5dcf8d1b4b74e0c9ccbb3c9473fbb1b7e21ad27be305f46068bd2a781eff"
+  ]
+}
