@@ -391,7 +391,7 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "plot_spec.save": lambda params: {"result": save_plot_specification(
         _project_database_path(params), params.get("name"), params.get("analysis_ids"), params.get("panels"),
         params.get("colors"), params.get("hidden_analysis_ids", []), params.get("hidden_source_ids", []),
-        params.get("layers"), category_style=params.get("category_style"),
+        params.get("layers"), category_style=params.get("category_style"), photo_view=params.get("photo_view"),
     )},
     "plot_spec.list": lambda params: {"result": list_plot_specifications(_project_database_path(params))},
     "plot_spec.open": lambda params: {"result": open_plot_specification(_project_database_path(params), params.get("id"))},
@@ -683,3 +683,4 @@ def serve(input_stream: TextIO = sys.stdin, output_stream: TextIO = sys.stdout) 
 
 if __name__ == "__main__":
     serve()
+

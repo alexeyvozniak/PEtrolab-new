@@ -10,6 +10,7 @@ function PointMarker({symbol,x,y,r,children,fill,...props}) {
 }
 import { makePreset, presetKey, rememberPreset, resolvePreset, templateGroups, MINERAL_TEMPLATES } from "./plotPresets";
 import "./plotWorkspace.css";
+import {PhotoPlot} from "./PhotoPlot";
 
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
 const EMPTY_BINS = [];
@@ -692,9 +693,12 @@ function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
   </>;
 }
 
-export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
+export function PlotWorkspace({ loadPhotos, previewPhoto, viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
   hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onOpenPhotos, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
   onExport, onAddPublication, loadColorScheme, saveColorScheme, onSummary, loadPresets, savePresets }) {
+  const [photoView,setPhotoView]=useState(()=>viewMemory?.photoView||null);
+  const [focusedIds,setFocusedIds]=useState([]);
+  useLayoutEffect(()=>{if(viewMemory)viewMemory.photoView=photoView;},[viewMemory,photoView]);
   const [axes, setAxes] = useState([]);
   const [axisQuery, setAxisQuery] = useState("");
   const [axisCatalogOpen, setAxisCatalogOpen] = useState(false);
@@ -907,6 +911,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
       if (!colorReady) throw new Error("Дождитесь загрузки категорий окрашивания.");
       const saved = await saveLayout({
         name: layoutName, analysis_ids: inputIds, panels,
+        ...(photoView?{photo_view:photoView}:{}),
         colors: Object.fromEntries(sources.map(({ source_id }) => [source_id, colorFor(source_id)])),
         hidden_analysis_ids: hiddenAnalysisIds, hidden_source_ids: hiddenSourceIds,
         layers, ...(category ? {category_style:category.snapshot} : {}),
@@ -925,6 +930,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     setLayoutStatus(null);
     try {
       const saved = await openLayout(id);
+      setPhotoView(saved.photo_view||null);setFocusedIds([]);
       setColorMode(saved.category_style?.mode || "source");
       setPanels(saved.panels.map(({ id: panelId, kind, axes: savedAxes, normalization, point_style }) => ({
         id: panelId, kind, axes: savedAxes.map(({ scale, manual_range, ...axis }) => axis),
@@ -1075,6 +1081,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     <aside>
       <button className="outline-button" type="button" onClick={onBack}>Назад к анализам</button>
       <h3>Раскладка</h3>
+      {loadPhotos&&<button type="button" disabled={!panels.length} className="outline-button" onClick={()=>setPhotoView(current=>current?null:{media_asset_id:null,panel_ids:panels.slice(0,3).map(p=>p.id)})}>{photoView?"Закрыть фото":"Фото + диаграммы"}</button>}
       {panels.map((panel, index) => <div className="plot-panel-order" key={panel.id}
         onDragOver={event => { if (event.dataTransfer.types.includes("application/x-petrolab-panel")) event.preventDefault(); }}
         onDrop={event => { const id = event.dataTransfer.getData("application/x-petrolab-panel"); if (id) { event.preventDefault(); movePanel(id, panel.id); } }}>
@@ -1277,8 +1284,12 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
       <div ref={content} className={exportOptions ? "plot-content plot-content-export" : "plot-content"} onScroll={event => {
         if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
       }}>
+        <div className={photoView?"photo-plot-body":undefined}>
+        {photoView&&<PhotoPlot inputIds={inputIds} loadCatalog={loadCatalog} loadPhotos={loadPhotos} preview={previewPhoto} view={photoView} setView={setPhotoView}
+          panels={panels} focusedIds={focusedIds} setFocusedIds={setFocusedIds}
+          addToSelection={ids=>setSelectedIds(current=>[...new Set([...current,...ids])])}/>}
         <div className="plot-grid" ref={grid}>
-          {!loading && !error && panels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} loadCatalog={loadCatalog} selected={selected} onSelect={select} onOpenAnalysis={onOpenAnalysis} onOpenPhotos={onOpenPhotos} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} categorySymbol={category?.symbolFor} layers={layers} viewMemory={viewMemory}
+          {!loading && !error && panels.filter(panel=>!photoView||photoView.panel_ids.includes(panel.id)).map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} loadCatalog={loadCatalog} selected={photoView?new Set(focusedIds):selected} onSelect={photoView?setFocusedIds:select} onOpenAnalysis={onOpenAnalysis} onOpenPhotos={onOpenPhotos} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} categorySymbol={category?.symbolFor} layers={layers} viewMemory={viewMemory}
             openExport={onExport && !exportBusy && colorReady ? () => openExport(panel.id) : undefined}
             favorite={Boolean(makePreset(panel) && favoritePresets.some(item => presetKey(item) === presetKey(makePreset(panel))))}
             onFavorite={!presetBusy && (!loadPresets || presetRevision!==null) ? () => toggleFavorite(panel) : undefined}
@@ -1289,7 +1300,12 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
               if ((next.kind!==panel.kind || next.axes!==panel.axes || next.normalization!==panel.normalization) && preset && resolvePreset(preset,axes,patterns) && !presetBusy && (!loadPresets || presetRevision!==null))
                 setRecentPresets(current => rememberPreset(current,preset));
             }}
-            canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}
+            canRemove={panels.length > 1} remove={() => {
+              setPanels(current=>current.filter(item=>item.id!==panel.id));
+              if(photoView){const remaining=photoView.panel_ids.filter(id=>id!==panel.id);
+                setPhotoView({...photoView,panel_ids:remaining.length?remaining:[panels.find(item=>item.id!==panel.id).id]});}
+            }} />)}
+        </div>
         </div>
         {exportOptions && <PlotExport options={exportOptions} panels={panels} pending={exportBusy} submit={submitExport}
           canAddPublication={Boolean(onAddPublication) && colorReady}
@@ -1313,3 +1329,4 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
     </main>
   </section>;
 }
+

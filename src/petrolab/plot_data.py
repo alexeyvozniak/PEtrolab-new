@@ -737,7 +737,7 @@ def validate_point_style(panel):
         raise ValueError("plot_point_style")
 
 
-def save_plot_specification(database_path, name, analysis_ids, panels, colors, hidden_analyses, hidden_sources, layers=None, *, transaction=None, category_style=None):
+def save_plot_specification(database_path, name, analysis_ids, panels, colors, hidden_analyses, hidden_sources, layers=None, *, transaction=None, category_style=None, photo_view=None):
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
         raise ImportCommandError("PLOT_LAYOUT_NAME_INVALID", "Введите название раскладки до 120 символов.")
     if not isinstance(panels, list) or not 1 <= len(panels) <= 32:
@@ -779,10 +779,10 @@ def save_plot_specification(database_path, name, analysis_ids, panels, colors, h
             if transaction is None:
                 connection.execute("BEGIN IMMEDIATE")
             return _insert_plot_specification(connection, name, analysis_ids, saved_panels, panel_keys, colors,
-                                              hidden_analyses, hidden_sources, layers, category_style)
+                                              hidden_analyses, hidden_sources, layers, category_style, photo_view)
 
 
-def _insert_plot_specification(connection, name, analysis_ids, saved_panels, panel_keys, colors, hidden_analyses, hidden_sources, layers, category_style=None):
+def _insert_plot_specification(connection, name, analysis_ids, saved_panels, panel_keys, colors, hidden_analyses, hidden_sources, layers, category_style=None, photo_view=None):
     rows, available = _layout_input(connection, analysis_ids)
     if not panel_keys <= available:
         raise ImportCommandError("PLOT_LAYOUT_AXES_UNAVAILABLE", "Часть полей раскладки недоступна для выбранного набора.")
@@ -824,6 +824,9 @@ def _insert_plot_specification(connection, name, analysis_ids, saved_panels, pan
         spec["schema_version"] = 4
     if any("symbol" in panel.get("point_style", {}) for panel in saved_panels) or any("symbol" in entry for entry in (category_style or {}).get("entries", [])):
         spec["schema_version"] = 5
+    if photo_view is not None:
+        spec["photo_view"] = _validate_photo_view(connection, photo_view, saved_panels)
+        spec["schema_version"] = 6
     connection.execute("INSERT INTO plot_specification (id, name, definition_json) VALUES (?, ?, ?)",
                        (spec["id"], name, json.dumps(spec, ensure_ascii=False)))
     return spec
@@ -844,7 +847,7 @@ def open_plot_specification(database_path, spec_id):
         spec = json.loads(row[0])
         _validated_layers(spec.get("layers"))
         has_symbols = any("symbol" in panel.get("point_style", {}) for panel in spec["panels"]) or any("symbol" in entry for entry in spec.get("category_style", {}).get("entries", []))
-        expected_version = (5 if has_symbols else 4 if any("style" in (layer["field"] or {}) for layer in spec.get("layers", []))
+        expected_version = (6 if "photo_view" in spec else 5 if has_symbols else 4 if any("style" in (layer["field"] or {}) for layer in spec.get("layers", []))
                             else 3 if any("point_style" in panel for panel in spec["panels"])
                             else 2 if "category_style" in spec else 1)
         if spec.get("schema_version") != expected_version:
@@ -862,4 +865,22 @@ def open_plot_specification(database_path, spec_id):
             raise ImportCommandError("PLOT_LAYOUT_AXES_UNAVAILABLE", "Часть сохранённых полей недоступна. Раскладка не изменилась.")
         if "category_style" in spec:
             validate_category_style(connection, spec["input"]["analysis_ids"], spec["category_style"])
+        if "photo_view" in spec:
+            _validate_photo_view(connection, spec["photo_view"], spec["panels"])
         return spec
+
+def _validate_photo_view(connection, view, panels):
+    if not isinstance(view, dict) or set(view) != {"media_asset_id", "panel_ids"}:
+        raise ValueError("photo_view")
+    ids = view["panel_ids"]
+    if not isinstance(ids, list) or not 1 <= len(ids) <= 3 or len(set(ids)) != len(ids):
+        raise ValueError("photo_view.panel_ids")
+    if not set(ids) <= {panel["id"] for panel in panels}:
+        raise ValueError("photo_view.panel_ids")
+    media_id = view["media_asset_id"]
+    if media_id is not None:
+        _selection([media_id])
+        if not connection.execute("SELECT 1 FROM media_asset WHERE media_asset_id = ?", (media_id,)).fetchone():
+            raise ImportCommandError("PHOTO_VIEW_UNAVAILABLE", "Сохранённое фото недоступно; замена не выбрана.")
+    return {"media_asset_id": media_id, "panel_ids": list(ids)}
+

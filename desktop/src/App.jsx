@@ -627,6 +627,8 @@ export function App() {
     : { groups: [], layouts: [], runs: [] }, [databasePath]);
   const loadSamples = useCallback(async () => databasePath ? unwrap(await listProjectSamples(databasePath)) : [], [databasePath]);
   const loadSample = useCallback(async (id) => unwrap(await getProjectSample(databasePath, id)), [databasePath]);
+  const loadPhotoPlotLinks=useCallback(async id=>unwrap(await listAnalysisPhotos(databasePath,id)),[databasePath]);
+  const previewPhotoPlot=useCallback(async (id,region)=>unwrap(await previewProjectMedia(databasePath,id,region)),[databasePath]);
   const loadPointAnalyses = useCallback(async (id) => unwrap(await listPointAnalyses(databasePath, id)), [databasePath]);
   const loadMediaLinks = useCallback(async (id) => unwrap(await listMediaLinks(databasePath, id)), [databasePath]);
   const loadMediaDraft = useCallback(async () => unwrap(await loadMediaImportDraft(databasePath)), [databasePath]);
@@ -917,7 +919,7 @@ export function App() {
             const destination = await pickPublicationExportPath();
             return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination, settings)) : null;
           }} />}
-        {screen === "Построение" && <PlotWorkspace key={checkpointEpoch} viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
+        {screen === "Построение" && <PlotWorkspace loadPhotos={loadPhotoPlotLinks} previewPhoto={previewPhotoPlot} key={checkpointEpoch} viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
           loadSelection={loadPlotSelection} loadAnalysis={loadPlotAnalysis} loadColorScheme={loadColorScheme} saveColorScheme={saveColorScheme} loadPresets={loadPresets} savePresets={savePresets} onSummary={openSummary}
           loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}
           openLayout={restorePlotLayout} onExport={async (svg, options) => {
@@ -1089,3 +1091,4 @@ export function App() {
     </main>
   );
 }
+
