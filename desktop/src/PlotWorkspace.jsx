@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import { ContextActions } from "./ContextActions";
+import {duplicatePanel,selectionView} from "./plotQuickActions";
 import { SYMBOL_LABELS,symbolGeometry,symbolPaint } from "./plotSymbols";
 function PointMarker({symbol,x,y,r,children,fill,...props}) {
   const {tag:Tag,attrs}=symbolGeometry(symbol,x,y,r);
@@ -335,7 +336,10 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
       .flatMap((point) => point.analysis_ids || [point.analysis_id]))], modifier);
   };
   const clear = () => { drag.current = null; setRubber(null); };
+  const zoomTarget=useMemo(()=>["binary","ternary"].includes(data.kind)?selectionView(
+    markers.filter(point=>selected.has(point.analysis_id)).map(point=>({x:px(point.u),y:py(point.v)})),FULL_VIEW):null,[data.kind,markers,selected]);
   return <>
+  {zoomTarget&&<button type="button" className="outline-button" onClick={()=>{clear();setHover(null);setView(zoomTarget);}}>Приблизить выделенные точки</button>}
   {zoomed && <button type="button" className="outline-button plot-reset-zoom" onClick={() => setView(FULL_VIEW)}>Автомасштаб</button>}
   <svg ref={canvas} className="plot-canvas" viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`} aria-label="Диаграмма"
     tabIndex={0} onPointerEnter={() => { hovered.current = true; }} onPointerLeave={() => { hovered.current = false; setHover(null); }}
@@ -442,7 +446,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, loadAnalysis, sh
   ] : []} /></>;
 }
 
-function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor, categorySymbol, onApplyStyle }) {
+function PlotPanel({ panel, axes, patterns, load, update, remove, duplicate, selected, onSelect, onOpenAnalysis, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor, categorySymbol, onApplyStyle }) {
   const [projection, setProjection] = useState(null);
   const projectionPanel = useMemo(() => ({kind:panel.kind, axes:panel.axes, normalization:panel.normalization}), [panel.kind, panel.axes, panel.normalization]);
   const current = projection?.load === load && projection.panel === projectionPanel ? projection : null;
@@ -503,6 +507,7 @@ function PlotPanel({ panel, axes, patterns, load, update, remove, selected, onSe
         {onFavorite && <button type="button" className="outline-button" aria-label={favorite ? "Убрать диаграмму из избранного" : "Добавить диаграмму в избранное"}
           aria-pressed={favorite} disabled={!makePreset(panel)} title="Избранное сохраняет комбинацию осей, а не исходные данные" onClick={onFavorite}>{favorite ? "★" : "☆"}</button>}
         {openExport && <button type="button" className="outline-button" disabled={!data} onClick={openExport}>Выгрузить панель</button>}
+        {duplicate&&<button type="button" className="outline-button" onClick={duplicate} title="Копирует оси и оформление, но не текущий масштаб">Дублировать диаграмму</button>}
         {canRemove && <button type="button" className="outline-button" onClick={remove}>Убрать панель</button>}
       </div>
     </header>
@@ -1286,6 +1291,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
               if ((next.kind!==panel.kind || next.axes!==panel.axes || next.normalization!==panel.normalization) && preset && resolvePreset(preset,axes,patterns) && !presetBusy && (!loadPresets || presetRevision!==null))
                 setRecentPresets(current => rememberPreset(current,preset));
             }}
+            duplicate={panels.length<32?()=>{const id=crypto.randomUUID();setPanels(current=>duplicatePanel(current,panel.id,id));}:undefined}
             canRemove={panels.length > 1} remove={() => setPanels((current) => current.filter((item) => item.id !== panel.id))} />)}
         </div>
         {exportOptions && <PlotExport options={exportOptions} panels={panels} pending={exportBusy} submit={submitExport}
