@@ -5,7 +5,7 @@ from collections import defaultdict
 from contextlib import closing, nullcontext
 from hashlib import sha256
 import json
-from math import fsum, isfinite
+from math import fsum, hypot, isfinite
 import re
 from uuid import UUID
 
@@ -442,9 +442,10 @@ def _pattern_vertices(record, keys, concentrations):
 
 
 def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysis_ids=None, hidden_source_ids=None,
-                    layers=None, *, normalization=None):
-    keys = _plot_keys(kind, axes)
-    calculated = any('calculation' in axis or 'formula' in axis for axis in axes)
+                    layers=None, *, normalization=None, profile_connection=None):
+    profile = profile_connection is not None
+    keys = [_coordinate_axis(axes[0])[0]] if profile else _plot_keys(kind, axes)
+    calculated = profile or any('calculation' in axis or 'formula' in axis for axis in axes)
     definitions = [_coordinate_axis(axis) for axis in axes] if calculated else []
     formula_bindings = [binding for _, operation, binding in definitions if operation == 'apfu']
     reference = pattern_reference(kind, [key[0] for key in keys], normalization) if kind in PATTERN_ORDERS else None
@@ -460,8 +461,9 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
     if reference is not None:
         key_set.update(map(_alternate_concentration_key, keys))
     fields = json.dumps(sorted({key[0] for key in key_set}))
-    with closing(open_project(database_path)) as connection:
-        connection.execute("BEGIN")
+    with (nullcontext(profile_connection) if profile else closing(open_project(database_path))) as connection:
+        if not profile:
+            connection.execute("BEGIN")
         active_analyses = connection.execute(
             f"SELECT a.analysis_id, a.source_id, a.identity_json, s.display_name AS source_name {_ACTIVE_ANALYSES}", (parameter, selection),
         ).fetchall()
@@ -591,6 +593,63 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
     result["projection_sha256"] = sha256(json.dumps(result, ensure_ascii=False, sort_keys=True,
                                                      allow_nan=False).encode()).hexdigest()
     return result
+
+
+def query_zoning_profile(database_path, media_id, points, axis, reference_px, reference_um):
+    _selection([media_id])
+    if not isinstance(points, list) or not 2 <= len(points) <= 100:
+        raise ValueError("profile_points")
+    if any(not isinstance(point, dict) or set(point) != {"spatial_annotation_id", "analysis_id"}
+           for point in points):
+        raise ValueError("profile_point")
+    _selection([point["spatial_annotation_id"] for point in points])
+    analysis_ids = [point["analysis_id"] for point in points]
+    _selection(analysis_ids)
+    if any(type(value) not in (int, float) or not 0 < value <= 1e12
+           for value in (reference_px, reference_um)):
+        raise ImportCommandError("PROFILE_CALIBRATION", "Введите положительную длину в пикселях и микрометрах.")
+    scale = reference_um / reference_px
+    if not isfinite(scale) or scale <= 0:
+        raise ValueError("profile_calibration")
+    ordered = []
+    with closing(open_project(database_path)) as connection:
+        connection.execute("BEGIN")
+        for point in points:
+            location = connection.execute("""
+                SELECT a.x_px, a.y_px
+                FROM spatial_annotation a
+                JOIN media_asset m USING (media_asset_id)
+                JOIN analytical_point_annotation pa USING (spatial_annotation_id)
+                JOIN analytical_point p USING (analytical_point_id)
+                JOIN analytical_point_analysis l USING (analytical_point_id)
+                WHERE a.media_asset_id = ? AND a.spatial_annotation_id = ?
+                  AND l.analysis_id = ? AND l.link_type = 'same_point'
+                  AND a.geometry_kind = 'point' AND pa.cross_sample_exception = 0
+                  AND p.sample_id = m.sample_id
+            """, (media_id, point["spatial_annotation_id"], point["analysis_id"])).fetchone()
+            if location is None:
+                raise ImportCommandError("PROFILE_POINT_UNAVAILABLE", "Сохранённая точная связь точки с анализом недоступна.")
+            ordered.append({**point, **dict(location)})
+        projection = query_plot_data(database_path, "profile", [axis], analysis_ids, profile_connection=connection)
+    if set(projection["input_analysis_ids"]) != set(analysis_ids):
+        raise ImportCommandError("PROFILE_POINT_UNAVAILABLE", "Один из анализов больше недоступен.")
+    values = {row["analysis_id"]: row for row in projection["points"]}
+    exclusions = {row["analysis_id"]: row for row in projection["exclusions"]}
+    distance = 0.0
+    previous = ordered[0]
+    for point in ordered:
+        distance += hypot(point["x_px"] - previous["x_px"], point["y_px"] - previous["y_px"]) * scale
+        if not isfinite(distance):
+            raise ValueError("profile_calibration")
+        previous = point
+        analysis_id = point["analysis_id"]
+        value = values.get(analysis_id)
+        excluded = exclusions.get(analysis_id)
+        point.update(distance_um=distance, value=value["values"][0] if value else None,
+                     reason=excluded["reason"] if excluded else "unusable_measurement" if not value else None,
+                     evidence=value["axis_inputs"] if value else excluded["axes"] if excluded else [])
+    return {"method": "ordered_euclidean_v1", "media_asset_id": media_id, "axis": axis,
+            "reference_px": reference_px, "reference_um": reference_um, "points": ordered}
 
 
 def _write_visibility_entry(connection, analysis_ids, hidden, session_id, *, reverses_operation_id=None,

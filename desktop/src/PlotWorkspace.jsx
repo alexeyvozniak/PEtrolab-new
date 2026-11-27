@@ -693,7 +693,7 @@ function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
   </>;
 }
 
-export function PlotWorkspace({ loadPhotos, previewPhoto, viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
+export function PlotWorkspace({ loadPhotos, previewPhoto, loadProfile, viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
   hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onOpenPhotos, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
   onExport, onAddPublication, loadColorScheme, saveColorScheme, onSummary, loadPresets, savePresets }) {
   const [photoView,setPhotoView]=useState(()=>viewMemory?.photoView||null);
@@ -1017,12 +1017,13 @@ export function PlotWorkspace({ loadPhotos, previewPhoto, viewMemory, loadCatalo
     return ordered;
   });
   const hasVisibleFields = layers.some((layer) => layer.field?.visible);
+  const displayedPanels = photoView ? panels.filter(panel => photoView.panel_ids.includes(panel.id)) : panels;
   const openExport = (panelId) => {
     if (!colorReady) return;
     const visibleIds = Array.from(grid.current.children).flatMap((node, index) => {
       const area = node.getBoundingClientRect();
       return area.right > 0 && area.left < window.innerWidth && area.bottom > 0 && area.top < window.innerHeight
-        ? [panels[index].id] : [];
+        ? [displayedPanels[index].id] : [];
     });
     setExportStatus(null);
     setExportOptions({ panelId, visibleIds, scope: panelId ? "panel" : "layout", format: "svg",
@@ -1034,7 +1035,7 @@ export function PlotWorkspace({ loadPhotos, previewPhoto, viewMemory, loadCatalo
     const addToPackage = event.nativeEvent.submitter?.value === "package";
     const { scope, panelId, visibleIds, name, format, labels, caption, includeCsv, ...options } = exportOptions;
     const requested = Array.from(grid.current.children, (node, panelIndex) => ({
-      id: panels[panelIndex].id, svg: node.querySelector(".plot-canvas"), panelIndex,
+      id: displayedPanels[panelIndex].id, svg: node.querySelector(".plot-canvas"), panelIndex,
     })).filter(({ id }) => scope === "layout" || (scope === "panel" ? id === panelId : visibleIds.includes(id)));
     if (!requested.length || requested.some(({ svg }) => !svg)) {
       setExportStatus({ error: "Дождитесь загрузки выбранных панелей и проверьте настройки их осей." });
@@ -1044,9 +1045,9 @@ export function PlotWorkspace({ loadPhotos, previewPhoto, viewMemory, loadCatalo
     setExportStatus(null);
     try {
       if (!colorReady) throw new Error("Дождитесь загрузки категорий окрашивания.");
-       const hasCategoryPanels = requested.some(({panelIndex}) => panels[panelIndex].kind !== "histogram");
+      const hasCategoryPanels = requested.some(({panelIndex}) => displayedPanels[panelIndex].kind !== "histogram");
       const legend = category && hasCategoryPanels ? { title: COLOR_MODES[colorMode] + " · категории входного набора",
-        entries: category.entries, histogramNote: requested.some(({panelIndex}) => panels[panelIndex].kind === "histogram") } : null;
+        entries: category.entries, histogramNote: requested.some(({panelIndex}) => displayedPanels[panelIndex].kind === "histogram") } : null;
       if (legend && legend.entries.length > 60) throw new Error("Слишком много категорий для читаемой легенды. Сузьте входной набор или выберите окрашивание по источнику.");
       const svg = buildPlotSvg(requested, { ...options, showLabel: requested.length > 1 || options.showLabel,
         alphabet: labels.split("-")[0], uppercase: labels.endsWith("-upper"), legend });
@@ -1058,7 +1059,7 @@ export function PlotWorkspace({ loadPhotos, previewPhoto, viewMemory, loadCatalo
           colors: Object.fromEntries(sources.map(({ source_id }) => [source_id, colorFor(source_id)])),
           ...(legend ? {category_style:category.snapshot} : {}),
           panels: requested.map(({ panelIndex, svg: canvas }) => ({
-            ...panels[panelIndex], projection_sha256: canvas.dataset.plotProjection,
+            ...displayedPanels[panelIndex], projection_sha256: canvas.dataset.plotProjection,
           })),
         }, caption);
         setExportStatus({ notice: "Фигура добавлена в пакет." });
@@ -1285,11 +1286,11 @@ export function PlotWorkspace({ loadPhotos, previewPhoto, viewMemory, loadCatalo
         if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
       }}>
         <div className={photoView?"photo-plot-body":undefined}>
-        {photoView&&<PhotoPlot inputIds={inputIds} loadCatalog={loadCatalog} loadPhotos={loadPhotos} preview={previewPhoto} view={photoView} setView={setPhotoView}
+        {photoView&&<PhotoPlot inputIds={inputIds} loadCatalog={loadCatalog} loadPhotos={loadPhotos} preview={previewPhoto} loadProfile={loadProfile} view={photoView} setView={setPhotoView}
           panels={panels} focusedIds={focusedIds} setFocusedIds={setFocusedIds}
           addToSelection={ids=>setSelectedIds(current=>[...new Set([...current,...ids])])}/>}
         <div className="plot-grid" ref={grid}>
-          {!loading && !error && panels.filter(panel=>!photoView||photoView.panel_ids.includes(panel.id)).map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} loadCatalog={loadCatalog} selected={photoView?new Set(focusedIds):selected} onSelect={photoView?setFocusedIds:select} onOpenAnalysis={onOpenAnalysis} onOpenPhotos={onOpenPhotos} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} categorySymbol={category?.symbolFor} layers={layers} viewMemory={viewMemory}
+          {!loading && !error && displayedPanels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} loadCatalog={loadCatalog} selected={photoView?new Set(focusedIds):selected} onSelect={photoView?setFocusedIds:select} onOpenAnalysis={onOpenAnalysis} onOpenPhotos={onOpenPhotos} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} categorySymbol={category?.symbolFor} layers={layers} viewMemory={viewMemory}
             openExport={onExport && !exportBusy && colorReady ? () => openExport(panel.id) : undefined}
             favorite={Boolean(makePreset(panel) && favoritePresets.some(item => presetKey(item) === presetKey(makePreset(panel))))}
             onFavorite={!presetBusy && (!loadPresets || presetRevision!==null) ? () => toggleFavorite(panel) : undefined}
@@ -1307,7 +1308,7 @@ export function PlotWorkspace({ loadPhotos, previewPhoto, viewMemory, loadCatalo
             }} />)}
         </div>
         </div>
-        {exportOptions && <PlotExport options={exportOptions} panels={panels} pending={exportBusy} submit={submitExport}
+        {exportOptions && <PlotExport options={exportOptions} panels={displayedPanels} pending={exportBusy} submit={submitExport}
           canAddPublication={Boolean(onAddPublication) && colorReady}
           close={() => setExportOptions(null)} onChange={(values) => setExportOptions((current) => ({ ...current, ...values }))} />}
       </div>

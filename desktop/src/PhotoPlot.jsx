@@ -1,18 +1,19 @@
 import {useEffect,useState} from "react";
 import {MediaViewer} from "./MediaWorkspace";
 import {photoLinks,focusLinks} from "./photoPlotLinks";
+import {ZoningProfile} from "./ZoningProfile";
 import "./photoPlot.css";
 
-export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,view,setView,panels,focusedIds,setFocusedIds,addToSelection}) {
+export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,loadProfile,view,setView,panels,focusedIds,setFocusedIds,addToSelection}) {
   const [links,setLinks]=useState(null),[image,setImage]=useState(null),[error,setError]=useState("");
   const key=JSON.stringify(inputIds);
   useEffect(()=>{
-    let active=true;setLinks(null);setError("");setImage(null);
+    let active=true;setLinks(null);setError("");
     // Bounded concurrency; every lookup uses the exact input Analysis ID.
     (async()=>{const rows=[];let next=0;
       const ids=inputIds??(await loadCatalog(true)).categories.map(row=>row.analysis_id);
       await Promise.all(Array.from({length:Math.min(4,ids.length)},async()=>{
-        while(next<ids.length){const id=ids[next++];rows.push(...(await loadPhotos(id)).map(row=>({...row,analysis_id:id})));}
+        while(active&&next<ids.length){const id=ids[next++];rows.push(...(await loadPhotos(id)).map(row=>({...row,analysis_id:id})));}
       }));
       if(active)setLinks(rows);
     })().catch(e=>{if(active)setError(e.message||String(e));});
@@ -60,6 +61,9 @@ export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,view,setView,
       {row.cross_sample_exception===1&&<p>Другой образец: {row.exception_reason}</p>}
     </article>)}
     <button type="button" className="primary-button" disabled={!ids.length} onClick={()=>addToSelection(ids)}>Добавить в отбор · {ids.length}</button>
+    {loadProfile&&image&&links&&<ZoningProfile key={view.media_asset_id+":"+key} mediaId={view.media_asset_id}
+      rows={rows} focusedIds={focusedIds} panels={panels.filter(panel=>view.panel_ids.includes(panel.id))}
+      load={loadProfile} onFocus={setFocusedIds}/>}
   </section>;
 }
 
