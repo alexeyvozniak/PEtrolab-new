@@ -1,0 +1,435 @@
+{
+  "first": {
+    "id": "972b8068-8730-4b8d-aa3e-24c0b5ce0d71",
+    "project_id": "9773a665-8fb8-43b1-8096-7851e9ac7d2d",
+    "method_id": "statistics.cluster.kmeans_lloyd",
+    "method_version": "1.0.0",
+    "method_definition_fingerprint": "afc97929b5e1c72b1726d5e6a143a388df40e75a33ff67f3dfa1fdacea31fee6",
+    "input": {
+      "kind": "work_group_snapshot",
+      "work_group_id": "69a28153-7127-4e1e-b71e-6be07272a2c3",
+      "analysis_ids": [
+        "301e756a-5aca-436e-b2fb-a35f2080d2bb",
+        "bc0bda1f-1053-4ff7-a6d0-0297c2b08ea2",
+        "fa199a19-466d-4ac8-9b6d-524231307884",
+        "d5e8767c-1991-45c6-add3-b934af9f50ef",
+        "7a23cb29-1319-4946-b0ab-42791aa9a048",
+        "d7caf59f-b12d-4eaa-a990-b651f3cd6e01",
+        "2cdac655-c09c-450d-9f4b-0edc4a6ef488"
+      ]
+    },
+    "input_measurement_ids": [
+      "9d884b15-6c20-4421-ad54-2e8db81ac59c",
+      "d70361e7-a6ba-49ef-abfb-311b29965084",
+      "c3aa073b-e904-4600-9196-030c5869c390",
+      "ce521c02-7e98-4838-9c3d-ae0e808bd6a8",
+      "0702ed4f-56ea-4c85-9879-7d1626555336",
+      "459851d3-ffe2-49e0-a670-fbcd6d5d41a1",
+      "10ad38a5-b3ab-4c99-94d1-e0553f916d7c",
+      "f3ece951-7563-4406-b794-db2723f28b89",
+      "4615a139-a72e-4ced-8f1b-418c5a252620",
+      "c983b6a3-5695-487a-a3dc-ef34e4fdbff5",
+      "04ce0f5d-c064-46ea-b2d5-71bde5a59b99",
+      "fbee7b8b-732a-4185-8714-6c3ff304d70d",
+      "20347eea-4cc7-4fd1-97b1-2bf033141467",
+      "4d30a5e6-6c16-41f8-bbdb-bc0ec69b4f18"
+    ],
+    "input_fingerprint": "73d606107408989845ad57d086c632afaf2627e0b2722c0e544ca6cbcabcdf40",
+    "parameters": {
+      "clusters": 2,
+      "scaling": "standard",
+      "seed": 42,
+      "transform": "euclidean",
+      "features": [
+        {
+          "field": "SiO2",
+          "measurement_set": null,
+          "method": null,
+          "unit": "wt.%"
+        },
+        {
+          "field": "Al2O3",
+          "measurement_set": null,
+          "method": null,
+          "unit": "wt.%"
+        }
+      ],
+      "feature_domains": [
+        "oxide_wt_percent",
+        "oxide_wt_percent"
+      ],
+      "missing_and_censored": "exclude",
+      "nonpositive": "keep",
+      "scaling_parameters": {
+        "center": [
+          28.285714285714285,
+          27.142857142857142
+        ],
+        "scale": [
+          9.54260050980842,
+          10.411924090450627
+        ]
+      }
+    },
+    "status": "current",
+    "stale_reasons": [],
+    "seed": 42,
+    "excluded": [],
+    "result_manifest": {
+      "members": [
+        {
+          "analysis_id": "301e756a-5aca-436e-b2fb-a35f2080d2bb",
+          "label": "P1",
+          "cluster": 0,
+          "scores": [
+            -0.9316038430941539,
+            -1.6301393162298534
+          ],
+          "u": 0.1473269923467971,
+          "v": 0
+        },
+        {
+          "analysis_id": "bc0bda1f-1053-4ff7-a6d0-0297c2b08ea2",
+          "label": "P2",
+          "cluster": 0,
+          "scores": [
+            -1.332753987191607,
+            0.5494110376462502
+          ],
+          "u": 0,
+          "v": 0.7130825873897975
+        },
+        {
+          "analysis_id": "fa199a19-466d-4ac8-9b6d-524231307884",
+          "label": "P3",
+          "cluster": 0,
+          "scores": [
+            -0.7770749437142281,
+            0.29013202913197933
+          ],
+          "u": 0.20407950337362749,
+          "v": 0.628254381462637
+        },
+        {
+          "analysis_id": "d5e8767c-1991-45c6-add3-b934af9f50ef",
+          "label": "P4",
+          "cluster": 0,
+          "scores": [
+            -0.48067490875112007,
+            0.5865320640950877
+          ],
+          "u": 0.3129358164651961,
+          "v": 0.7252274582525547
+        },
+        {
+          "analysis_id": "7a23cb29-1319-4946-b0ab-42791aa9a048",
+          "label": "P5",
+          "cluster": 1,
+          "scores": [
+            1.2295280417144288,
+            -0.8272708514073538
+          ],
+          "u": 0.9410274691843791,
+          "v": 0.26267414341272294
+        },
+        {
+          "analysis_id": "d7caf59f-b12d-4eaa-a990-b651f3cd6e01",
+          "label": "P6",
+          "cluster": 1,
+          "scores": [
+            0.9024779063577522,
+            1.426379511209527
+          ],
+          "u": 0.8209145551104741,
+          "v": 1
+        },
+        {
+          "analysis_id": "2cdac655-c09c-450d-9f4b-0edc4a6ef488",
+          "label": "P7",
+          "cluster": 1,
+          "scores": [
+            1.3901017346789284,
+            -0.39504447444563706
+          ],
+          "u": 1,
+          "v": 0.40408546831001374
+        }
+      ],
+      "fit": {
+        "centers": [
+          [
+            -0.6587003489513655,
+            0.5865527643199078
+          ],
+          [
+            0.8782671319351542,
+            -0.7820703524265437
+          ]
+        ],
+        "inertia": 6.739317246293556,
+        "iterations": 3
+      },
+      "pca": {
+        "mean": [
+          6.344131569286608e-17,
+          0
+        ],
+        "loadings": [
+          [
+            0.7071067811865476,
+            -0.7071067811865474
+          ],
+          [
+            0.7071067811865474,
+            0.7071067811865476
+          ]
+        ],
+        "explained_variance_ratio": [
+          0.5526857968912605,
+          0.44731420310873954
+        ]
+      }
+    },
+    "software_versions": {
+      "numpy": "2.5.5",
+      "python": "3.12.10"
+    },
+    "created_at": "2026-11-27T13:49:16Z"
+  },
+  "second": {
+    "id": "21130393-48fb-416d-9720-24d16f382005",
+    "project_id": "9773a665-8fb8-43b1-8096-7851e9ac7d2d",
+    "method_id": "statistics.cluster.kmeans_lloyd",
+    "method_version": "1.0.0",
+    "method_definition_fingerprint": "afc97929b5e1c72b1726d5e6a143a388df40e75a33ff67f3dfa1fdacea31fee6",
+    "input": {
+      "kind": "work_group_snapshot",
+      "work_group_id": "69a28153-7127-4e1e-b71e-6be07272a2c3",
+      "analysis_ids": [
+        "301e756a-5aca-436e-b2fb-a35f2080d2bb",
+        "bc0bda1f-1053-4ff7-a6d0-0297c2b08ea2",
+        "fa199a19-466d-4ac8-9b6d-524231307884",
+        "d5e8767c-1991-45c6-add3-b934af9f50ef",
+        "7a23cb29-1319-4946-b0ab-42791aa9a048",
+        "d7caf59f-b12d-4eaa-a990-b651f3cd6e01",
+        "2cdac655-c09c-450d-9f4b-0edc4a6ef488"
+      ]
+    },
+    "input_measurement_ids": [
+      "9d884b15-6c20-4421-ad54-2e8db81ac59c",
+      "d70361e7-a6ba-49ef-abfb-311b29965084",
+      "c3aa073b-e904-4600-9196-030c5869c390",
+      "ce521c02-7e98-4838-9c3d-ae0e808bd6a8",
+      "0702ed4f-56ea-4c85-9879-7d1626555336",
+      "459851d3-ffe2-49e0-a670-fbcd6d5d41a1",
+      "10ad38a5-b3ab-4c99-94d1-e0553f916d7c",
+      "f3ece951-7563-4406-b794-db2723f28b89",
+      "4615a139-a72e-4ced-8f1b-418c5a252620",
+      "c983b6a3-5695-487a-a3dc-ef34e4fdbff5",
+      "04ce0f5d-c064-46ea-b2d5-71bde5a59b99",
+      "fbee7b8b-732a-4185-8714-6c3ff304d70d",
+      "20347eea-4cc7-4fd1-97b1-2bf033141467",
+      "4d30a5e6-6c16-41f8-bbdb-bc0ec69b4f18"
+    ],
+    "input_fingerprint": "73d606107408989845ad57d086c632afaf2627e0b2722c0e544ca6cbcabcdf40",
+    "parameters": {
+      "clusters": 2,
+      "scaling": "robust",
+      "seed": 42,
+      "transform": "euclidean",
+      "features": [
+        {
+          "field": "SiO2",
+          "measurement_set": null,
+          "method": null,
+          "unit": "wt.%"
+        },
+        {
+          "field": "Al2O3",
+          "measurement_set": null,
+          "method": null,
+          "unit": "wt.%"
+        }
+      ],
+      "feature_domains": [
+        "oxide_wt_percent",
+        "oxide_wt_percent"
+      ],
+      "missing_and_censored": "exclude",
+      "nonpositive": "keep",
+      "scaling_parameters": {
+        "center": [
+          29,
+          31
+        ],
+        "scale": [
+          9,
+          17
+        ]
+      }
+    },
+    "status": "current",
+    "stale_reasons": [],
+    "seed": 42,
+    "excluded": [],
+    "result_manifest": {
+      "members": [
+        {
+          "analysis_id": "301e756a-5aca-436e-b2fb-a35f2080d2bb",
+          "label": "P1",
+          "cluster": 0,
+          "scores": [
+            -1.8855054767918307,
+            -0.4745803998014517
+          ],
+          "u": 0,
+          "v": 0.23804657024381717
+        },
+        {
+          "analysis_id": "bc0bda1f-1053-4ff7-a6d0-0297c2b08ea2",
+          "label": "P2",
+          "cluster": 0,
+          "scores": [
+            -0.6584525671587173,
+            0.7588108126026156
+          ],
+          "u": 0.34047503576987764,
+          "v": 1
+        },
+        {
+          "analysis_id": "fa199a19-466d-4ac8-9b6d-524231307884",
+          "label": "P3",
+          "cluster": 0,
+          "scores": [
+            -0.4052918841150723,
+            0.42735967192166857
+          ],
+          "u": 0.4107204929446492,
+          "v": 0.7952390685951234
+        },
+        {
+          "analysis_id": "d5e8767c-1991-45c6-add3-b934af9f50ef",
+          "label": "P4",
+          "cluster": 0,
+          "scores": [
+            0.03733976808957982,
+            0.4674606028848109
+          ],
+          "u": 0.5335391802515556,
+          "v": 0.8200122642985579
+        },
+        {
+          "analysis_id": "7a23cb29-1319-4946-b0ab-42791aa9a048",
+          "label": "P5",
+          "cluster": 1,
+          "scores": [
+            0.3807275458002947,
+            -0.8599117552566035
+          ],
+          "u": 0.6288202924033957,
+          "v": 0
+        },
+        {
+          "analysis_id": "d7caf59f-b12d-4eaa-a990-b651f3cd6e01",
+          "label": "P6",
+          "cluster": 1,
+          "scores": [
+            1.7184383684845714,
+            0.3835046898882491
+          ],
+          "u": 1,
+          "v": 0.7681467286820411
+        },
+        {
+          "analysis_id": "2cdac655-c09c-450d-9f4b-0edc4a6ef488",
+          "label": "P7",
+          "cluster": 1,
+          "scores": [
+            0.812744245691174,
+            -0.7026436222392886
+          ],
+          "u": 0.7486936085365293,
+          "v": 0.0971557054556322
+        }
+      ],
+      "fit": {
+        "centers": [
+          [
+            -0.7777777777777777,
+            0.1323529411764706
+          ],
+          [
+            0.8518518518518517,
+            -0.7058823529411765
+          ]
+        ],
+        "inertia": 4.7381527048001475,
+        "iterations": 3
+      },
+      "pca": {
+        "mean": [
+          -0.07936507936507929,
+          -0.22689075630252103
+        ],
+        "loadings": [
+          [
+            0.9959212174604675,
+            -0.09022709466707005
+          ],
+          [
+            0.09022709466707005,
+            0.9959212174604675
+          ]
+        ],
+        "explained_variance_ratio": [
+          0.7539460271284166,
+          0.24605397287158337
+        ]
+      }
+    },
+    "software_versions": {
+      "numpy": "2.5.5",
+      "python": "3.12.10"
+    },
+    "created_at": "2026-11-27T13:49:28Z"
+  },
+  "groups": [
+    {
+      "id": "aca403ba-79a9-4e11-a757-7e3276c7507e",
+      "project_id": "9773a665-8fb8-43b1-8096-7851e9ac7d2d",
+      "name": "AT-29 второй кластер",
+      "description": "",
+      "created_by": "Локальный пользователь",
+      "created_at": "2026-11-27T13:49:25Z",
+      "calculation_origin": {
+        "calculation_run_id": "972b8068-8730-4b8d-aa3e-24c0b5ce0d71",
+        "cluster": 1
+      },
+      "analysis_ids": [
+        "7a23cb29-1319-4946-b0ab-42791aa9a048",
+        "d7caf59f-b12d-4eaa-a990-b651f3cd6e01",
+        "2cdac655-c09c-450d-9f4b-0edc4a6ef488"
+      ],
+      "revision": 1
+    },
+    {
+      "id": "851d4861-8291-44ed-bcb6-b8dc9f65f1e1",
+      "project_id": "9773a665-8fb8-43b1-8096-7851e9ac7d2d",
+      "name": "AT-29 первый кластер",
+      "description": "",
+      "created_by": "Локальный пользователь",
+      "created_at": "2026-11-27T13:49:23Z",
+      "calculation_origin": {
+        "calculation_run_id": "972b8068-8730-4b8d-aa3e-24c0b5ce0d71",
+        "cluster": 0
+      },
+      "analysis_ids": [
+        "301e756a-5aca-436e-b2fb-a35f2080d2bb",
+        "bc0bda1f-1053-4ff7-a6d0-0297c2b08ea2",
+        "fa199a19-466d-4ac8-9b6d-524231307884",
+        "d5e8767c-1991-45c6-add3-b934af9f50ef"
+      ],
+      "revision": 1
+    }
+  ]
+}
