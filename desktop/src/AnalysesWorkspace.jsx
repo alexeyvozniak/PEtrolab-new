@@ -15,6 +15,7 @@ import { EditDraftPanel } from "./EditDraftPanel";
 import { GenerationAssignment } from "./GenerationAssignment";
 import { selectionRange } from "./selectionRange";
 import { ContextActions } from "./ContextActions";
+import { tsv, compositionTsv, provenanceTsv, copyText } from "./analysisClipboard";
 import { virtualRowRange, ROW_HEIGHT, TABLE_HEADER_HEIGHT } from "./virtualRows";
 
 function originLabel(analysis) {
@@ -84,14 +85,6 @@ function valueFor(analysis, column) {
   if (column.kind === "metadata") return analysis.source_metadata?.[column.field] || "";
   if (column.kind === "measurement") return analysis.measurements?.[column.field]?.raw_token ?? "";
   return "";
-}
-
-// Quoted TSV is suitable for spreadsheet paste. Treat formula-like text as
-// literal; signed numeric tokens remain numbers. Never write back to the source.
-function clipboardCell(value) {
-  let text = String(value ?? "");
-  if (/^[\s]*[=+\-@]/.test(text) && !/^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][+-]?\d+)?$/.test(text.trim())) text = "'" + text;
-  return /[\t\r\n"]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
 }
 
 function mainIdentity(analysis) {
@@ -193,7 +186,7 @@ function AnalysisMineralReview({ analysis }) {
   </section>;
 }
 
-function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlotAnalysisIds, onSetPlotVisibility, onUndoPlotVisibility, busy, provenanceFocus }) {
+function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlotAnalysisIds, onSetPlotVisibility, onUndoPlotVisibility, busy, provenanceFocus, onCopyComposition }) {
   const detailRef = useRef(null);
   useEffect(() => {
     if (!provenanceFocus || provenanceFocus.analysisId !== analysis?.analysis_id) return;
@@ -217,6 +210,7 @@ function AnalysisDetail({ analysis, editDraftActions, initialDraftId, hiddenPlot
         <span>Выбранный анализ</span>
         <h2>{mainIdentity(analysis)}</h2>
         <p>{analysis.source_name} · {analysis.sheet_name} · {originLabel(analysis)}</p>
+        <button className="outline-button" type="button" disabled={!measurements.length} onClick={()=>onCopyComposition(analysis)}>Копировать состав в Excel</button>
         {onSetPlotVisibility && <button className="outline-button" type="button" disabled={busy}
           onClick={() => onSetPlotVisibility([analysis.analysis_id], !hiddenOnPlots)}>
           {hiddenOnPlots ? "Вернуть этот анализ на графики" : "Скрыть этот анализ на графиках"}
@@ -314,6 +308,11 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
   const columnResize = useRef(null);
   const [dragIds, setDragIds] = useState([]);
   const [contextMenu, setContextMenu] = useState(null);
+  const [copyStatus,setCopyStatus]=useState(null);
+  const copy=async makeText=>{
+    try{await copyText(makeText());setCopyStatus({text:"Скопировано в буфер обмена."});}
+    catch(error){setCopyStatus({error:true,text:error.message||"Не удалось скопировать."});}
+  };
   const [provenanceFocus, setProvenanceFocus] = useState(null);
   const [workGroups, setWorkGroups] = useState(null);
   const [groupForm, setGroupForm] = useState(false);
@@ -775,7 +774,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
     const lines = [header, ...rows.map(analysis => visibleColumns.flatMap(column => column.kind === "measurement"
       ? [valueFor(analysis, column), analysis.measurements?.[column.field]?.unit ?? ""]
       : [valueFor(analysis, column)]))];
-    event.clipboardData.setData("text/plain", lines.map(line => line.map(clipboardCell).join("\t")).join("\r\n"));
+    event.clipboardData.setData("text/plain", tsv(lines));
     event.preventDefault();
   };
 
@@ -990,8 +989,11 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
         {project.has_more && <button className="analyses-load-more" type="button" onClick={onLoadMore} disabled={busy}>Загрузить ещё анализы</button>}
       </main>
 
+      {copyStatus&&<div className="analysis-copy-status" role={copyStatus.error?"alert":"status"}>{copyStatus.text}<button type="button" className="outline-button" onClick={()=>setCopyStatus(null)} aria-label="Закрыть сообщение копирования">×</button></div>}
       <ContextActions menu={contextMenu} onClose={() => setContextMenu(null)} actions={contextMenu ? [
         ...(contextMenu.cell ? [{label:`Показать исходную ячейку ${contextMenu.cell}`, run:()=>setProvenanceFocus({analysisId:contextMenu.id,cell:contextMenu.cell,field:contextMenu.field})}] : []),
+        {label:"Копировать состав в Excel",run:()=>copy(()=>compositionTsv(byId.get(contextMenu.id)))},
+        ...(contextMenu.cell?[{label:"Копировать файл, лист и ячейку",run:()=>copy(()=>provenanceTsv(byId.get(contextMenu.id),contextMenu.cell))}]:[]),
         { label: selected.has(contextMenu.id) ? "Снять выделение анализа" : "Добавить анализ в отбор", run: () => toggleSelection(contextMenu.id) },
         { label: "Построить диаграммы для анализа", disabled: busy || !onOpenPlots, run: () => onOpenPlots([contextMenu.id]) },
         { label: "Фильтровать по источнику", run: () => { const analysis = byId.get(contextMenu.id); if (analysis) { setSourceFilter(analysis.source_id); setSheetFilter("all"); } } },
@@ -1000,7 +1002,7 @@ export function AnalysesWorkspace({ project, viewMemory, initialFocusedId, initi
           if (details) { details.open = true; details.scrollIntoView?.({ block: "nearest" }); details.querySelector("input[name=new_value]")?.focus(); }
         } },
       ] : []} />
-      <AnalysisDetail analysis={focused} provenanceFocus={provenanceFocus} editDraftActions={editDraftActions} initialDraftId={initialDraftId} hiddenPlotAnalysisIds={hiddenPlotAnalysisIds}
+      <AnalysisDetail analysis={focused} onCopyComposition={analysis=>copy(()=>compositionTsv(analysis))} provenanceFocus={provenanceFocus} editDraftActions={editDraftActions} initialDraftId={initialDraftId} hiddenPlotAnalysisIds={hiddenPlotAnalysisIds}
         onSetPlotVisibility={onSetPlotVisibility} onUndoPlotVisibility={onUndoPlotVisibility} busy={busy} />
 
       {selectedIds.length > 0 && (
