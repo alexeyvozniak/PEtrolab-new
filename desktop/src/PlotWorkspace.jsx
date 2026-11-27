@@ -2,8 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { PLOT_SIZE, buildPlotSvg, plotPanelLabel } from "./plotSvg";
 import { ContextActions } from "./ContextActions";
 import {duplicatePanel,selectionView} from "./plotQuickActions";
-import {applyBatchStyle} from "./plotBatchStyle";
-import {PlotBatchStyle} from "./PlotBatchStyle";
+import {applyBatchStyle} from "./plotBatchStyle.js";
+import {PlotBatchStyle} from "./PlotBatchStyle.jsx";
 import { SYMBOL_LABELS,symbolGeometry,symbolPaint } from "./plotSymbols";
 function PointMarker({symbol,x,y,r,children,fill,...props}) {
   const {tag:Tag,attrs}=symbolGeometry(symbol,x,y,r);
