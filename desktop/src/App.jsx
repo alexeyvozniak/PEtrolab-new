@@ -569,8 +569,11 @@ export function App() {
       table=tableMemoryFromView(view,tableProject);
     }
     if(state.plot_specification_ids.length){
-      layout=unwrap(await openPlotSpecification(databasePath,state.plot_specification_ids[0]));
-      plot=plotMemoryFromLayout(layout);
+      const [saved, projectScheme] = await Promise.all([
+        openPlotSpecification(databasePath, state.plot_specification_ids[0]), loadColorScheme(),
+      ]);
+      layout = unwrap(saved);
+      plot = plotMemoryFromLayout(layout, projectScheme);
     }
     // No view mutation before every referenced component was successfully read.
     if(table)Object.assign(viewMemory.table,table);

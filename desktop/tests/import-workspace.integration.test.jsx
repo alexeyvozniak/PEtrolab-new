@@ -600,7 +600,31 @@ test("categorical mineral colors use reported labels and preserve selection and 
   expect(mode.value).toBe("mineral");
   expect(screen.getAllByRole("button",{name:/^Выбрать точку C1/})[0].localName).toBe("polygon");
   expect(screen.getAllByRole("button",{name:/^Выбрать точку C1/})[0].getAttribute("fill")).toBe("#112233");
-}, 20000);
+  await user.click(screen.getByText("Сохранённые раскладки", {exact:true}));
+  await user.type(screen.getByLabelText("Название раскладки"), "Оливин и пироксен");
+  await user.click(await enabledButton("Сохранить раскладку"));
+  await screen.findByText("Сохранена раскладка «Оливин и пироксен».");
+  const database = {project_database_path:join(folder,"project.sqlite")};
+  const other = {mode:"mineral", key:"garnet", color:"#ab1245", symbol:"square"};
+  const updated = (await invokePetrolab("project.plot_colors.save", {...database,
+    scheme:{mode:"mineral",colors:[...shaped.scheme.colors, other]}, expected_revision:shaped.revision})).result;
+  expect(updated.scheme.colors).toContainEqual(other);
+
+  await user.click(await enabledButton("Рабочие состояния"));
+  const dialog = within(await screen.findByRole("dialog", {name:"Рабочие состояния проекта"}));
+  await user.selectOptions(await dialog.findByLabelText("Раскладка диаграмм"), dialog.getByRole("option", {name:"Оливин и пироксен"}));
+  await user.selectOptions(dialog.getByLabelText("Открывать раздел"), "plotting");
+  await user.type(dialog.getByLabelText("Название состояния"), "Сравнение минералов");
+  await user.click(dialog.getByRole("button", {name:"Сохранить рабочее состояние"}));
+  await user.click(await enabledButton("Открыть «Сравнение минералов»"));
+  await screen.findByText("Рабочее состояние «Сравнение минералов» восстановлено.");
+  expect((await invokePetrolab("project.plot_colors.get", database)).result).toEqual(updated);
+  await user.click(await enabledButton("Сохранить цветовую схему проекта"));
+  await screen.findByText("Цветовая схема сохранена в проекте.");
+  const persisted = (await invokePetrolab("project.plot_colors.get", database)).result;
+  expect(persisted.revision).toBe(updated.revision + 1);
+  expect(persisted.scheme.colors).toContainEqual(other);
+}, 35000);
 
 test("axis catalog drops an exact catalog key and rejects an unknown key", async () => {
   await writeFile(second, "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\nP1,20,30,50\nP2,10,80,10\n");

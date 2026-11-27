@@ -26,14 +26,25 @@ export function tableMemoryFromView(view,project) {
     columnFilters:Object.fromEntries(view.filters.filter(rule=>rule.field.startsWith("column:")).map(rule=>[rule.field.slice(7),rule.value])),
     focusedId:"",scrollTop:0,scrollLeft:0};
 }
-export function plotMemoryFromLayout(layout) {
-  const colors=layout.legend.entries.map(({value,color})=>({mode:"source",key:value,color}));
+export function mergeLayoutColors(current, layout) {
+  const entries = new Map(current.map(entry => [JSON.stringify([entry.mode, entry.key]), entry]));
+  for (const {value, color} of layout.legend.entries) {
+    entries.set(JSON.stringify(["source", value]), {mode:"source", key:value, color});
+  }
   const category=layout.category_style;
-  if(category)for(const entry of category.entries)if(entry.key!==null)colors.push({mode:category.mode,key:entry.key,color:entry.color,...(entry.symbol?{symbol:entry.symbol}:{})});
+  for (const {key, color, symbol} of category?.entries ?? []) {
+    if (key !== null) entries.set(JSON.stringify([category.mode, key]), {mode:category.mode, key, color, ...(symbol ? {symbol} : {})});
+  }
+  return [...entries.values()];
+}
+
+export function plotMemoryFromLayout(layout, projectScheme) {
+  const category=layout.category_style;
   return {opened:true,panels:layout.panels.map(({id,kind,axes,normalization,point_style})=>({
     id,kind,axes:axes.map(({scale,manual_range,...axis})=>axis),
     ...(["ree_pattern","spider"].includes(kind)?{normalization}:{}),...(point_style?{point_style}:{})
   })),layers:layout.layers||[],views:new Map(),scrollTop:0,scrollLeft:0,
     savedColors:Object.fromEntries(layout.legend.entries.map(({value,color})=>[value,color])),
-    colorMode:category?.mode||"source",schemeColors:colors,schemeLoaded:true,schemeRevision:null};
+    colorMode:category?.mode||"source",schemeColors:mergeLayoutColors(projectScheme.scheme.colors, layout),
+    schemeLoaded:true,schemeRevision:projectScheme.revision};
 }

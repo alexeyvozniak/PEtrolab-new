@@ -8,6 +8,7 @@ function PointMarker({symbol,x,y,r,children,fill,...props}) {
   return <Tag {...attrs} {...props} fill={paint.fill} stroke={paint.stroke} strokeWidth={paint["stroke-width"]}>{children}</Tag>;
 }
 import { makePreset, presetKey, rememberPreset, resolvePreset, templateGroups, MINERAL_TEMPLATES } from "./plotPresets";
+import { mergeLayoutColors } from "./workspaceCheckpoint";
 import "./plotWorkspace.css";
 
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
@@ -771,7 +772,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
   const [colorMode, setColorMode] = useState(() => viewMemory?.colorMode || "source");
   const [categoryResult, setCategoryResult] = useState(null);
   const [schemeColors, setSchemeColors] = useState(() => viewMemory?.schemeColors || []);
-  const [schemeRevision, setSchemeRevision] = useState(null);
+  const [schemeRevision, setSchemeRevision] = useState(() => viewMemory?.schemeRevision ?? null);
   const [schemeStatus, setSchemeStatus] = useState("");
   const [schemeBusy,setSchemeBusy] = useState(false);
   const overrides = useMemo(() => new Map(schemeColors.map(entry=>[JSON.stringify([entry.mode,entry.key]),entry.color])),[schemeColors]);
@@ -929,13 +930,7 @@ export function PlotWorkspace({ viewMemory, loadCatalog, loadData, loadSelection
         ...(point_style ? {point_style} : {}),
       })));
       setSavedColors(Object.fromEntries(saved.legend.entries.map(({ value, color }) => [value, color])));
-      const savedIds=new Set(saved.legend.entries.map(entry=>entry.value));
-      const categoryEntries = saved.category_style?.entries.filter(entry=>entry.key!==null) || [];
-      const categoryIds = new Set(categoryEntries.map(entry=>entry.key));
-      setSchemeColors(current=>[...current.filter(entry=>!(entry.mode==="source"&&savedIds.has(entry.key)) &&
-        !(entry.mode===saved.category_style?.mode&&categoryIds.has(entry.key))),
-        ...saved.legend.entries.map(({value,color})=>({mode:"source",key:value,color})),
-        ...categoryEntries.map(({key,color,symbol})=>({mode:saved.category_style.mode,key,color,...(symbol?{symbol}:{})}))]);
+      setSchemeColors(current => mergeLayoutColors(current, saved));
       setLayers(saved.layers || []);
       setLayoutStatus({ notice: `Открыта раскладка «${saved.name}».` });
     } catch (caught) {
