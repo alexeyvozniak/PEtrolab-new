@@ -1,0 +1,164 @@
+{
+  "measurements": [
+    {
+      "screen": "overview",
+      "viewport": [
+        390,
+        844
+      ],
+      "pageWidth": 980,
+      "workAreaWidth": 775,
+      "addDataRight": 720
+    },
+    {
+      "screen": "analyses",
+      "viewport": [
+        390,
+        844
+      ],
+      "pageWidth": 980,
+      "workAreaWidth": 775,
+      "addDataRight": 720
+    },
+    {
+      "screen": "search",
+      "viewport": [
+        390,
+        844
+      ],
+      "pageWidth": 980,
+      "workAreaWidth": 775,
+      "addDataRight": 720
+    },
+    {
+      "screen": "plots",
+      "viewport": [
+        390,
+        844
+      ],
+      "pageWidth": 980,
+      "workAreaWidth": 775,
+      "addDataRight": 720
+    },
+    {
+      "screen": "overview",
+      "viewport": [
+        1280,
+        800
+      ],
+      "pageWidth": 1280,
+      "workAreaWidth": 1075,
+      "addDataRight": 1020
+    },
+    {
+      "screen": "analyses",
+      "viewport": [
+        1280,
+        800
+      ],
+      "pageWidth": 1265,
+      "workAreaWidth": 1060,
+      "addDataRight": 1005
+    },
+    {
+      "screen": "search",
+      "viewport": [
+        1280,
+        800
+      ],
+      "pageWidth": 1280,
+      "workAreaWidth": 1075,
+      "addDataRight": 1020
+    },
+    {
+      "screen": "plots",
+      "viewport": [
+        1280,
+        800
+      ],
+      "pageWidth": 1265,
+      "workAreaWidth": 1060,
+      "addDataRight": 1005
+    },
+    {
+      "screen": "overview",
+      "viewport": [
+        1440,
+        900
+      ],
+      "pageWidth": 1440,
+      "workAreaWidth": 1202,
+      "addDataRight": 1180
+    },
+    {
+      "screen": "analyses",
+      "viewport": [
+        1440,
+        900
+      ],
+      "pageWidth": 1425,
+      "workAreaWidth": 1187,
+      "addDataRight": 1165
+    },
+    {
+      "screen": "search",
+      "viewport": [
+        1440,
+        900
+      ],
+      "pageWidth": 1440,
+      "workAreaWidth": 1202,
+      "addDataRight": 1180
+    },
+    {
+      "screen": "plots",
+      "viewport": [
+        1440,
+        900
+      ],
+      "pageWidth": 1425,
+      "workAreaWidth": 1187,
+      "addDataRight": 1165
+    },
+    {
+      "screen": "overview",
+      "viewport": [
+        1920,
+        1080
+      ],
+      "pageWidth": 1920,
+      "workAreaWidth": 1682,
+      "addDataRight": 1660
+    },
+    {
+      "screen": "analyses",
+      "viewport": [
+        1920,
+        1080
+      ],
+      "pageWidth": 1905,
+      "workAreaWidth": 1667,
+      "addDataRight": 1645
+    },
+    {
+      "screen": "search",
+      "viewport": [
+        1920,
+        1080
+      ],
+      "pageWidth": 1920,
+      "workAreaWidth": 1682,
+      "addDataRight": 1660
+    },
+    {
+      "screen": "plots",
+      "viewport": [
+        1920,
+        1080
+      ],
+      "pageWidth": 1905,
+      "workAreaWidth": 1667,
+      "addDataRight": 1645
+    }
+  ]
+}

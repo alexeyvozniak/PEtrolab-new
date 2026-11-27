@@ -47,7 +47,7 @@ python -m unittest discover -s tests
 
 ## Установка на Windows x64
 
-1. Откройте успешный прогон [Windows test build](https://github.com/alexeyvozniak/PEtrolab-new/actions/workflows/windows-test-build.yml?query=branch%3Acodex%2Fpetrolab-2-release+is%3Asuccess) для нужного коммита. В разделе **Artifacts** скачайте `PetroLab-Windows-verified-MSI-<коммит>`. Для скачивания войдите в GitHub.
+1. Войдите в GitHub и откройте нужный прогон в списке [успешных сборок Windows из `main`](https://github.com/alexeyvozniak/PEtrolab-new/actions/workflows/windows-test-build.yml?query=branch%3Amain+is%3Asuccess). В разделе **Artifacts** скачайте `PetroLab-Windows-verified-MSI-<коммит>`.
 2. Распакуйте архив. Сверьте SHA-256 установщика с `build-info.json` по командам ниже и запустите указанный там `PetroLab_…_x64_en-US.msi`.
 3. Откройте PetroLab из меню «Пуск». При переезде на другой компьютер восстановите проект отдельно по инструкции ниже.
 
