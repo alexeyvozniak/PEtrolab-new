@@ -535,7 +535,8 @@
                   "method": {
                     "enum": [
                       "convex_hull",
-                      "normal_probability_ellipse"
+                      "normal_probability_ellipse",
+                      "gaussian_kde_v1"
                     ]
                   },
                   "visible": {
@@ -549,6 +550,9 @@
                     "exclusiveMinimum": 0,
                     "exclusiveMaximum": 1
                   },
+                  "bandwidth_x": { "type": "number", "minimum": 0.02, "maximum": 0.5 },
+                  "bandwidth_y": { "type": "number", "minimum": 0.02, "maximum": 0.5 },
+                  "level": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
                   "style": {
                     "type": "object",
                     "additionalProperties": false,
@@ -586,11 +590,12 @@
                 "if": {
                   "properties": {
                     "method": {
-                      "const": "convex_hull"
+                      "const": "gaussian_kde_v1"
                     }
                   }
                 },
                 "then": {
+                  "required": ["bandwidth_x", "bandwidth_y", "level"],
                   "properties": {
                     "probability": {
                       "type": "null"
@@ -598,9 +603,22 @@
                   }
                 },
                 "else": {
-                  "properties": {
-                    "probability": {
-                      "type": "number"
+                  "not": {
+                    "anyOf": [
+                      { "required": ["bandwidth_x"] },
+                      { "required": ["bandwidth_y"] },
+                      { "required": ["level"] }
+                    ]
+                  },
+                  "if": {
+                    "properties": { "method": { "const": "convex_hull" } }
+                  },
+                  "then": {
+                    "properties": { "probability": { "type": "null" } }
+                  },
+                  "else": {
+                    "properties": {
+                      "probability": { "type": "number" }
                     }
                   }
                 }

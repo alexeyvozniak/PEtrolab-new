@@ -1,5 +1,15 @@
 .plot-workspace { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 10px; min-height: calc(100vh - 90px); background: #f5f7f4; color: #24392d; }
-.plot-workspace > aside { padding: 14px 10px; background: #fff; border-right: 1px solid #d9e3da; }
+.plot-workspace > aside {
+  position: sticky;
+  top: 76px;
+  align-self: start;
+  max-height: calc(100dvh - 76px);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 14px 10px;
+  background: #fff;
+  border-right: 1px solid #d9e3da;
+}
 .plot-workspace aside a { display: block; padding: 6px; color: #235641; overflow-wrap: anywhere; }
 .plot-workspace > main { min-width: 0; padding: 10px 10px 0 0; }
 .plot-toolbar, .plot-selection-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 9px; background: #fff; border: 1px solid #d9e3da; border-radius: 7px; }

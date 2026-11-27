@@ -17,7 +17,7 @@ _SVG = "{http://www.w3.org/2000/svg}"
 _SVG_TAGS = {_SVG + tag for tag in ("svg", "g", "path", "line", "polygon", "rect", "circle", "text")}
 _SVG_ATTRIBUTES = {
     "id", "width", "height", "viewBox", "transform", "x", "y", "x1", "x2", "y1", "y2", "cx", "cy", "r",
-    "d", "text-anchor", "points", "fill", "fill-opacity", "stroke", "stroke-width", "opacity", "font-size", "font-family",
+    "d", "text-anchor", "points", "fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "opacity", "font-size", "font-family",
 }
 _EXTENSIONS = {"svg": {".svg"}, "pdf": {".pdf"}, "png": {".png"}, "tiff": {".tif", ".tiff"}}
 _FONT = "PetroLabSans"
@@ -35,6 +35,7 @@ def checked_svg(data):
             raise ElementTree.ParseError("namespace")
         for node in root.iter():
             if (node.tag not in _SVG_TAGS or set(node.attrib) - _SVG_ATTRIBUTES
+                    or node.get("fill-rule") not in (None, "evenodd", "nonzero")
                     or any("url(" in "".join(value.casefold().split()) for value in node.attrib.values())):
                 raise ElementTree.ParseError("element or attribute")
         if any(child.tag not in {_SVG + "g", _SVG + "text"} for child in root) or any(

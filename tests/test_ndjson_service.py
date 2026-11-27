@@ -323,6 +323,24 @@ class NdjsonServiceTests(unittest.TestCase):
             self.assertTrue(all(-1e-12 <= value <= 1 + 1e-12 for vertex in ellipse["vertices"] for value in vertex))
             layered = call("plot_spec.save", name="С полем", panels=panels, colors={}, layers=[layer])["result"]
             self.assertEqual(call("plot_spec.open", id=layered["id"])["result"]["layers"], [layer])
+            layer["field"] = {"method": "gaussian_kde_v1", "visible": True, "probability": None,
+                              "bandwidth_x": 0.1, "bandwidth_y": 0.12, "level": 0.5}
+            kde = call("plot_data.query", kind="binary", axes=field_axes, layers=[layer])["result"]["fields"][0]
+            self.assertEqual(kde["analysis_ids"], layer["analysis_ids"])
+            self.assertGreaterEqual(len(kde["rings"]), 1)
+            self.assertIn("Малая выборка", kde["message"])
+            for ring in kde["rings"]:
+                self.assertEqual(ring[0], ring[-1])
+                self.assertTrue(all(0 <= value <= 1 for point in ring for value in point))
+            masked = call("plot_data.query", kind="binary", axes=field_axes, layers=[layer],
+                          hidden_analysis_ids=[p2["analysis_id"]])["result"]["fields"][0]
+            self.assertEqual(masked["rings"], [])
+            self.assertNotIn(p2["analysis_id"], masked["analysis_ids"])
+            kde_layout = call("plot_spec.save", name="KDE", panels=panels, colors={}, layers=[layer])["result"]
+            self.assertEqual(kde_layout["schema_version"], 6)
+            self.assertEqual(call("plot_spec.open", id=kde_layout["id"])["result"]["layers"], [layer])
+            invalid_layer = {**layer, "field": {**layer["field"], "bandwidth_y": 0}}
+            self.assertIn("error", call("plot_data.query", kind="binary", axes=field_axes, layers=[invalid_layer]))
             self.assertEqual(source.read_bytes(), source_bytes)
 
     def test_project_search_keeps_source_identity_and_opens_exact_analysis(self) -> None:
