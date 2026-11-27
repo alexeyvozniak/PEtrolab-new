@@ -39,7 +39,9 @@
 .plot-selection-table :is(th, td) { padding: 6px 8px; border-bottom: 1px solid #d9e3da; white-space: nowrap; }
 .plot-selection-table thead { position: sticky; top: 0; background: #eef4ef; }
 .plot-selection-pages { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.plot-source-legend { display: grid; gap: 6px; min-width: 0; }
+.plot-source-legend { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
+.plot-source-legend > select { width: 100%; min-width: 0; }
+.plot-source-legend > .outline-button { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .plot-source-legend label { display: flex; align-items: center; gap: 5px; overflow-wrap: anywhere; }
 .plot-source-legend input { flex: 0 0 auto; margin: 0; }
 .plot-source-legend i { flex: 0 0 8px; height: 8px; border-radius: 50%; }
