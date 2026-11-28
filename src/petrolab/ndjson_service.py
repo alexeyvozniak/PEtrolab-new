@@ -23,6 +23,7 @@ from .media_links import change_media_link, create_media_region, import_linked_p
 from .plot_data import list_plot_specifications, open_plot_specification, plot_catalog, query_plot_data, query_zoning_profile, record_plot_visibility, save_plot_specification, undo_plot_visibility
 from .plot_gradient import plot_gradient_values
 from .plot_export import export_plot
+from .profile_export import export_profile
 from .plot_colors import (get_project_plot_colors, save_project_plot_colors,
                           get_project_plot_presets, save_project_plot_presets)
 from .selection_summary import selection_summary
@@ -428,6 +429,10 @@ COMMANDS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "photo.profile.query": lambda params: {"result": query_zoning_profile(
         _project_database_path(params), params.get("media_asset_id"), params.get("points"),
         params.get("axis"), params.get("reference_px"), params.get("reference_um"),
+    )},
+    "photo.profile.export": lambda params: {"result": export_profile(
+        _project_database_path(params), params.get("media_asset_id"), params.get("points"),
+        params.get("axis"), params.get("reference_px"), params.get("reference_um"), params.get("output_path"),
     )},
     "project.overview": lambda params: {"result": project_overview(_project_database_path(params))},
     "project.work_plan.save": lambda params: {"result": save_work_plan_task(

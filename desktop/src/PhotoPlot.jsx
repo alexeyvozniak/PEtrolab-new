@@ -4,9 +4,17 @@ import {photoLinks,focusLinks} from "./photoPlotLinks";
 import {ZoningProfile} from "./ZoningProfile";
 import "./photoPlot.css";
 
-export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,loadProfile,view,setView,panels,focusedIds,setFocusedIds,addToSelection}) {
+export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,loadProfile,exportProfile,view,setView,panels,focusedIds,setFocusedIds,addToSelection}) {
   const [links,setLinks]=useState(null),[image,setImage]=useState(null),[error,setError]=useState("");
   const key=JSON.stringify(inputIds);
+  const [scale,setScale]=useState(null);
+  const scaleKey=JSON.stringify([key,view.media_asset_id]);
+  const calibration=scale?.key===scaleKey ? scale : null;
+  const picking=calibration?.points.length<2;
+  const pickScalePoint=({x_px,y_px})=>setScale(current=>{
+    if (current?.key!==scaleKey || current.points.length>=2) return current;
+    return {...current, points:[...current.points,{x_px,y_px}]};
+  });
   useEffect(()=>{
     let active=true;setLinks(null);setError("");
     // Bounded concurrency; every lookup uses the exact input Analysis ID.
@@ -35,7 +43,7 @@ export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,loadProfile,v
     {error&&<p role="alert">{error}</p>}
     {!links&&!error&&<p role="status">Загружаю связи…</p>}
     {links?.length===0&&<p>У входного набора нет связанных фотографий.</p>}
-    <label>Фото <select value={view.media_asset_id||""} onChange={e=>{setError("");setFocusedIds([]);setView({...view,media_asset_id:e.target.value||null});}}>
+    <label>Фото <select value={view.media_asset_id||""} onChange={e=>{setError("");setScale(null);setFocusedIds([]);setView({panel_ids:view.panel_ids,media_asset_id:e.target.value||null});}}>
       <option value="">Выберите фото</option>
       {photos.map(row=><option key={row.media_asset_id} value={row.media_asset_id}>{row.display_name} · {row.sample_name}</option>)}
       {view.media_asset_id&&!photos.some(row=>row.media_asset_id===view.media_asset_id)&&<option value={view.media_asset_id}>Сохранённое фото: {view.media_asset_id}</option>}
@@ -46,10 +54,14 @@ export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,loadProfile,v
       {index+1}. {panel.axes.map(axis=>axis.field).join(" / ")}
     </label>)}</fieldset>
     {view.media_asset_id&&!image&&!error&&<p role="status">Загружаю фото…</p>}
+    {picking&&<p role="status">{calibration.points.length ? "Щёлкните по второму концу масштабной линейки." : "Щёлкните по первому концу масштабной линейки."}
+      <button type="button" className="outline-button" onClick={()=>setScale(null)}>Отменить калибровку</button></p>}
     {image&&<MediaViewer key={view.media_asset_id} image={image} loadRegion={region=>preview(view.media_asset_id,region)}
-      annotations={image.annotations.map(a=>({...a,id:a.spatial_annotation_id,kind:a.geometry_kind,label:a.point_name||a.label,
-        highlighted:focused.some(row=>row.spatial_annotation_id===a.spatial_annotation_id)}))}
-      onFocusAnnotation={a=>setFocusedIds([...new Set(rows.filter(row=>row.spatial_annotation_id===a.id).map(row=>row.analysis_id))])}/>}
+      onPlace={picking?pickScalePoint:undefined}
+      annotations={[...image.annotations.map(a=>({...a,id:a.spatial_annotation_id,kind:a.geometry_kind,label:a.point_name||a.label,
+        highlighted:focused.some(row=>row.spatial_annotation_id===a.spatial_annotation_id)})),
+        ...(calibration?.points.map((point,index)=>({...point,id:`scale-${index}`,kind:"point",label:`Масштаб ${index+1}`,provisional:true}))||[])]}
+      onFocusAnnotation={a=>{if(!a.provisional)setFocusedIds([...new Set(rows.filter(row=>row.spatial_annotation_id===a.id).map(row=>row.analysis_id))]);}}/>}
     <h3>Связи фокуса · {ids.length}</h3>
     {focusedIds.length>0&&!focused.length&&<p>Для этих Analysis ID на выбранном фото нет связи во входном наборе.</p>}
     {focused.map((row,index)=><article key={index}>
@@ -63,8 +75,8 @@ export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,loadProfile,v
     <button type="button" className="primary-button" disabled={!ids.length} onClick={()=>addToSelection(ids)}>Добавить в отбор · {ids.length}</button>
     {loadProfile&&image&&links&&<ZoningProfile key={view.media_asset_id+":"+key} mediaId={view.media_asset_id}
       rows={rows} focusedIds={focusedIds} panels={panels.filter(panel=>view.panel_ids.includes(panel.id))}
-      load={loadProfile} onFocus={setFocusedIds}/>}
+      load={loadProfile} onFocus={setFocusedIds} loadPhotos={loadPhotos} previewPhoto={preview}
+      savedProfile={view.profile} onKeepProfile={profile=>setView({...view,profile})} exportProfile={exportProfile}
+      calibration={calibration} onPickScale={()=>setScale({key:scaleKey,points:[]})} onClearScale={()=>setScale(null)}/>}
   </section>;
 }
-
-

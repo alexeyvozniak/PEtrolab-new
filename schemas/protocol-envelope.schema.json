@@ -70,6 +70,7 @@
         "plot_spec.open",
         "plot_data.query",
         "photo.profile.query",
+        "photo.profile.export",
         "plot_data.catalog",
         "plot_visibility.hide",
         "plot_visibility.restore",

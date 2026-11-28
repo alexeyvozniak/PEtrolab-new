@@ -13,6 +13,7 @@ import { makePreset, presetKey, rememberPreset, resolvePreset, templateGroups, M
 import { mergeLayoutColors } from "./workspaceCheckpoint";
 import "./plotWorkspace.css";
 import {PhotoPlot} from "./PhotoPlot";
+import {GrainPreview} from "./GrainPreview";
 
 const VIEW = { ...PLOT_SIZE, left: 55, right: 425, top: 22, bottom: 235 };
 const EMPTY_BINS = [];
@@ -50,17 +51,18 @@ const AXIS_DRAG_TYPE = "application/x-petrolab-axis";
 const KDE_METHOD = "gaussian_kde_v1";
 const KDE_DEFAULTS = { bandwidth_x: 0.10, bandwidth_y: 0.10, level: 0.50 };
 const hasFieldGeometry = (field) => field.vertices.length >= 3 || Boolean(field.rings?.length);
-function PointTooltip({ hover, detail, shift, loadAnalysis }) {
+function PointTooltip({ hover, detail, shift, loadAnalysis, grain }) {
   if (!hover) return null;
   const { point, x, y } = hover;
   const analysis = detail?.analysis;
   const rows = analysis?.measurement_list || Object.entries(analysis?.measurements || {}).map(([field, value]) => ({ field, ...value }));
   return <div className="plot-point-tooltip" role="tooltip" style={{
     left: Math.max(8, Math.min(x + 12, window.innerWidth - 328)),
-    top: Math.max(8, Math.min(y + 12, window.innerHeight - (shift ? 370 : 130))),
+    top: Math.max(8, Math.min(y + 12, window.innerHeight - (shift ? 370 : grain?.loadPhotos ? 240 : 130))),
   }}>
     <b>{point.label}</b><small>{point.source_name || ""}</small>
     {point.axisValues?.map((item, index) => <div key={index}>{item}</div>)}
+    {grain?.loadPhotos && <GrainPreview key={point.analysis_id + ":" + grain.mediaId} id={point.analysis_id} {...grain}/>}
     {shift && loadAnalysis ? <>
       {detail?.error ? <small>Состав недоступен: {detail.error}</small> : !analysis ? <small>Загружаю состав…</small> : <>
         {analysis.identity?.Sample && <small>Образец: {analysis.identity.Sample}</small>}
@@ -155,7 +157,7 @@ function initialPanels(axes) {
     : make("binary", [axes[1], axes[0]])];
 }
 
-function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, onOpenPhotos, loadAnalysis, shape, colorFor, categoryColor, categorySymbol, points, fieldStyles, pointStyle = DEFAULT_POINT_STYLE, rememberedView, rememberView }) {
+function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, onOpenPhotos, loadAnalysis, grain, shape, colorFor, categoryColor, categorySymbol, points, fieldStyles, pointStyle = DEFAULT_POINT_STYLE, rememberedView, rememberView }) {
   const drag = useRef(null);
   const canvas = useRef(null);
   const hovered = useRef(false);
@@ -450,7 +452,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, onOpenPhotos, lo
       <circle key={`${point.analysis_id}:${point.element || ""}`} className="plot-halo" cx={px(point.u)} cy={py(point.v)} r={(isPattern ? 2.5 : 3.5) * pointStyle.size_scale + 2.5} />)}
     {rubber && (rubber.path ? <polygon className="plot-rubber" points={rubber.path} /> : <rect className="plot-rubber" {...rubber} />)}
   </svg>
-  <PointTooltip hover={hover} shift={shift} detail={detail?.id === hoveredId ? detail : null} loadAnalysis={loadAnalysis} />
+  <PointTooltip hover={hover} shift={shift} detail={detail?.id === hoveredId ? detail : null} loadAnalysis={loadAnalysis} grain={grain}/>
   <ContextActions menu={contextMenu} onClose={() => setContextMenu(null)} actions={contextMenu ? [
     { label: "Открыть анализ", disabled: !onOpenAnalysis, run: () => onOpenAnalysis(contextMenu.id) },
     ...(onOpenPhotos?[{label:"Показать фотографии анализа",run:()=>onOpenPhotos(contextMenu.id)}]:[]),
@@ -459,7 +461,7 @@ function PlotCanvas({ data, selected, onSelect, onOpenAnalysis, onOpenPhotos, lo
   ] : []} /></>;
 }
 
-function PlotPanel({ panel, axes, patterns, load, loadCatalog, update, remove, duplicate, selected, onSelect, onOpenAnalysis, onOpenPhotos, loadAnalysis, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor, categorySymbol, onApplyStyle }) {
+function PlotPanel({ panel, axes, patterns, load, loadCatalog, update, remove, duplicate, selected, onSelect, onOpenAnalysis, onOpenPhotos, loadAnalysis, grain, canRemove, shape, colorFor, openExport, layers, viewMemory, favorite, onFavorite, categoryColor, categorySymbol, onApplyStyle }) {
   const [projection, setProjection] = useState(null);
   const projectionPanel = useMemo(() => ({kind:panel.kind, axes:panel.axes, normalization:panel.normalization}), [panel.kind, panel.axes, panel.normalization]);
   const current = projection?.load === load && projection.panel === projectionPanel ? projection : null;
@@ -583,7 +585,7 @@ function PlotPanel({ panel, axes, patterns, load, loadCatalog, update, remove, d
     </details>}
     {status && <p role="status">{status}</p>}
     {data && <>
-      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} onOpenPhotos={onOpenPhotos} loadAnalysis={loadAnalysis} shape={shape} colorFor={colorFor} categoryColor={categoryColor} categorySymbol={categorySymbol} points={points} fieldStyles={fieldStyles} pointStyle={pointStyle}
+      <PlotCanvas key={data.projection_sha256} data={data} selected={selected} onSelect={onSelect} onOpenAnalysis={onOpenAnalysis} onOpenPhotos={onOpenPhotos} loadAnalysis={loadAnalysis} grain={grain} shape={shape} colorFor={colorFor} categoryColor={categoryColor} categorySymbol={categorySymbol} points={points} fieldStyles={fieldStyles} pointStyle={pointStyle}
         rememberedView={viewMemory?.views.get(panel.id)?.fingerprint === data.projection_sha256 ? viewMemory.views.get(panel.id).view : undefined}
         rememberView={view => viewMemory?.views.set(panel.id, { fingerprint: data.projection_sha256, view })} />
       <small>{pattern ? "Спектров" : panel.kind === "histogram" ? "Анализов" : "Точек"}: {points.length} из {data.input_count}{data.excluded_count ? ` · пропущено: ${data.excluded_count}` : ""}
@@ -708,10 +710,11 @@ function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
   </>;
 }
 
-export function PlotWorkspace({ loadPhotos, previewPhoto, loadProfile, viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
+export function PlotWorkspace({ loadPhotos, previewPhoto, loadProfile, exportProfile, viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
   hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onOpenPhotos, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
   onExport, onAddPublication, loadColorScheme, saveColorScheme, onSummary, loadPresets, savePresets }) {
   const [photoView,setPhotoView]=useState(()=>viewMemory?.photoView||null);
+  const [photoEpoch,setPhotoEpoch]=useState(0);
   const [focusedIds,setFocusedIds]=useState([]);
   useLayoutEffect(()=>{if(viewMemory)viewMemory.photoView=photoView;},[viewMemory,photoView]);
   const [axes, setAxes] = useState([]);
@@ -949,7 +952,7 @@ export function PlotWorkspace({ loadPhotos, previewPhoto, loadProfile, viewMemor
     setLayoutStatus(null);
     try {
       const saved = await openLayout(id);
-      setPhotoView(saved.photo_view||null);setFocusedIds([]);
+      setPhotoView(saved.photo_view||null);setFocusedIds([]);setPhotoEpoch(value=>value+1);
       setColorMode(saved.category_style?.mode || "source");
       setPanels(saved.panels.map(({ id: panelId, kind, axes: savedAxes, normalization, point_style }) => ({
         id: panelId, kind, axes: savedAxes.map(({ scale, manual_range, ...axis }) => axis),
@@ -1317,11 +1320,12 @@ export function PlotWorkspace({ loadPhotos, previewPhoto, loadProfile, viewMemor
         if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
       }}>
         <div className={photoView?"photo-plot-body":undefined}>
-        {photoView&&<PhotoPlot inputIds={inputIds} loadCatalog={loadCatalog} loadPhotos={loadPhotos} preview={previewPhoto} loadProfile={loadProfile} view={photoView} setView={setPhotoView}
+        {photoView&&<PhotoPlot key={photoEpoch} inputIds={inputIds} loadCatalog={loadCatalog} loadPhotos={loadPhotos} preview={previewPhoto} loadProfile={loadProfile} exportProfile={exportProfile} view={photoView} setView={setPhotoView}
           panels={panels} focusedIds={focusedIds} setFocusedIds={setFocusedIds}
           addToSelection={ids=>setSelectedIds(current=>[...new Set([...current,...ids])])}/>}
         <div className="plot-grid" ref={grid}>
           {!loading && !error && displayedPanels.map((panel) => <PlotPanel key={panel.id} panel={panel} axes={axes} patterns={patterns} load={loadWithLayers} loadCatalog={loadCatalog} selected={photoView?new Set(focusedIds):selected} onSelect={photoView?setFocusedIds:select} onOpenAnalysis={onOpenAnalysis} onOpenPhotos={onOpenPhotos} loadAnalysis={cachedAnalysis} shape={shape} colorFor={colorFor} categoryColor={category?.colorFor} categorySymbol={category?.symbolFor} layers={layers} viewMemory={viewMemory}
+            grain={{loadPhotos,previewPhoto,mediaId:photoView?.media_asset_id}}
             openExport={onExport && !exportBusy && colorReady ? () => openExport(panel.id) : undefined}
             favorite={Boolean(makePreset(panel) && favoritePresets.some(item => presetKey(item) === presetKey(makePreset(panel))))}
             onFavorite={!presetBusy && (!loadPresets || presetRevision!==null) ? () => toggleFavorite(panel) : undefined}
