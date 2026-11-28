@@ -234,6 +234,8 @@ jobs:
           path: ${{ runner.temp }}/petrolab-candidate
       - name: Record installer checksum and build identity
         shell: pwsh
+        env:
+          UPGRADE_BASELINES: ${{ inputs.historical_upgrade && 'rehearsal,historical' || 'rehearsal' }}
         run: |
           $candidate = Join-Path $env:RUNNER_TEMP "petrolab-candidate"
           $msi = @(Get-ChildItem -LiteralPath $candidate -Recurse -File -Filter "PetroLab_*_x64_en-US.msi")
@@ -252,6 +254,7 @@ jobs:
             attempt = $env:GITHUB_RUN_ATTEMPT
             installer = $msi[0].Name
             sha256 = $checksum
+            upgrade_baselines = @($env:UPGRADE_BASELINES -split ',')
           } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $package.FullName "build-info.json") -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:

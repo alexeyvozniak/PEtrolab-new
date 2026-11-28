@@ -19,7 +19,8 @@ class WindowsReleasePackageTests(unittest.TestCase):
             contents = b"bytes of the clean-tested installer"
             installer.write_bytes(contents)
             checksum = sha256(contents).hexdigest()
-            metadata = {"commit": commit, "run_id": "123", "attempt": "2", "installer": installer.name, "sha256": checksum}
+            metadata = {"commit": commit, "run_id": "123", "attempt": "2", "installer": installer.name,
+                        "sha256": checksum, "upgrade_baselines": ["rehearsal", "historical"]}
             info = package / "build-info.json"
             info.write_text(json.dumps(metadata), encoding="utf-8-sig")
             sums = package / "SHA256SUMS.txt"
@@ -35,6 +36,13 @@ class WindowsReleasePackageTests(unittest.TestCase):
             self.assertNotEqual(verify(run="124").returncode, 0)
             self.assertNotEqual(verify(attempt="1").returncode, 0)
             self.assertNotEqual(verify(tag_version="0.1.8").returncode, 0)
+            for baselines in (None, ["rehearsal"], ["historical"]):
+                incomplete = {**metadata, "upgrade_baselines": baselines}
+                info.write_text(json.dumps(incomplete), encoding="utf-8-sig")
+                missing_upgrade = verify()
+                self.assertNotEqual(missing_upgrade.returncode, 0)
+                self.assertIn("both the rehearsal and historical MSI upgrades", missing_upgrade.stderr)
+            info.write_text(json.dumps(metadata), encoding="utf-8-sig")
             installer.write_bytes(contents + b"!")
             wrong_bytes = verify()
             self.assertNotEqual(wrong_bytes.returncode, 0)
