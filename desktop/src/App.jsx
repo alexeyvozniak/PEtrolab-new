@@ -38,7 +38,7 @@ import {
   reviewStatistics, runClustering, listCalculationRuns, openCalculationRun, saveCalculatedCluster,
   getPublicationCatalog, pickPublicationFigure, pickPublicationExportPath, preparePublication, exportPublication, capturePublicationPlot,
   capturePublicationTable, capturePublicationMedia,
-  getPlotCatalog, getPlotData, getZoningProfile, recordPlotVisibility, undoPlotVisibility, getProjectPlotColors, saveProjectPlotColors, getSelectionSummary, getProjectPlotPresets, saveProjectPlotPresets,
+  getPlotCatalog, getPlotData, getZoningProfile, exportZoningProfile, recordPlotVisibility, undoPlotVisibility, getProjectPlotColors, saveProjectPlotColors, getSelectionSummary, getProjectPlotPresets, saveProjectPlotPresets,
   listPlotSpecifications, openPlotSpecification, savePlotSpecification, pickPlotExportPath, exportPlot,
   isPetrolabDesktop,
   listProjectAnalyses,
@@ -652,6 +652,10 @@ export function App() {
   const loadSample = useCallback(async (id) => unwrap(await getProjectSample(databasePath, id)), [databasePath]);
   const loadPhotoPlotLinks=useCallback(async id=>unwrap(await listAnalysisPhotos(databasePath,id)),[databasePath]);
   const loadZoningProfile=useCallback(async request=>unwrap(await getZoningProfile(databasePath,request)),[databasePath]);
+  const saveZoningFigure=useCallback(async request=>{
+    const path=await pickPlotExportPath("PetroLab-zoning-profile.pdf");
+    return path ? unwrap(await exportZoningProfile(databasePath,request,path)).output_path : null;
+  },[databasePath]);
   const previewPhotoPlot=useCallback(async (id,region)=>unwrap(await previewProjectMedia(databasePath,id,region)),[databasePath]);
   const loadPointAnalyses = useCallback(async (id) => unwrap(await listPointAnalyses(databasePath, id)), [databasePath]);
   const loadMediaLinks = useCallback(async (id) => unwrap(await listMediaLinks(databasePath, id)), [databasePath]);
@@ -943,7 +947,7 @@ export function App() {
             const destination = await pickPublicationExportPath();
             return destination ? unwrap(await exportPublication(databasePath, name, items, fingerprint, destination, settings)) : null;
           }} />}
-        {screen === "Построение" && <PlotWorkspace loadPhotos={loadPhotoPlotLinks} previewPhoto={previewPhotoPlot} loadProfile={loadZoningProfile} key={checkpointEpoch} viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
+        {screen === "Построение" && <PlotWorkspace loadPhotos={loadPhotoPlotLinks} previewPhoto={previewPhotoPlot} loadProfile={loadZoningProfile} exportProfile={saveZoningFigure} key={checkpointEpoch} viewMemory={viewMemory.plot} loadCatalog={loadPlotCatalog} loadData={loadPlotData} inputIds={plotInputIds}
           loadSelection={loadPlotSelection} loadAnalysis={loadPlotAnalysis} loadColorScheme={loadColorScheme} saveColorScheme={saveColorScheme} loadPresets={loadPresets} savePresets={savePresets} onSummary={openSummary}
           loadLayouts={loadPlotLayouts} saveLayout={async (layout) => unwrap(await savePlotSpecification(databasePath, layout))}
           openLayout={restorePlotLayout} onExport={async (svg, options) => {

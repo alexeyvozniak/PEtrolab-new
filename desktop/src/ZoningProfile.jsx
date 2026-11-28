@@ -1,4 +1,5 @@
-import {useState} from "react";
+import {useEffect, useState} from "react";
+import {GrainPreview} from "./GrainPreview";
 
 const format = new Intl.NumberFormat("ru", {maximumSignificantDigits: 7});
 const pointKey = point => JSON.stringify([point.spatial_annotation_id, point.analysis_id]);
@@ -12,7 +13,8 @@ const reasons = {
   incompatible_iron_form: "другая форма железа",
 };
 
-function ProfileChart({result, onFocus}) {
+function ProfileChart({result, onFocus, loadPhotos, previewPhoto}) {
+  const [hover, setHover] = useState(null);
   const {points, axis} = result;
   const shown = points.filter(point => point.value !== null);
   const minimum = Math.min(...shown.map(point => point.value));
@@ -35,10 +37,18 @@ function ProfileChart({result, onFocus}) {
         const previous = points[index - 1];
         return <g key={pointKey(point)}>
           {previous?.value != null && <line x1={x(previous)} y1={y(previous)} x2={x(point)} y2={y(point)} stroke="#34704e"/>}
-          <circle cx={x(point)} cy={y(point)} r="4" fill="#34704e"><title>{point.analysis_id}</title></circle>
+          <circle cx={x(point)} cy={y(point)} r="4" fill="#34704e" tabIndex={0}
+            aria-label={`${format.format(point.distance_um)} мкм · ${format.format(point.value)}`}
+            onMouseEnter={() => setHover(point.analysis_id)} onMouseLeave={() => setHover(null)}
+            onFocus={() => setHover(point.analysis_id)} onBlur={() => setHover(null)}>
+            <title>{point.analysis_id}</title>
+          </circle>
         </g>;
       })}
       </svg>
+      {hover && loadPhotos && <div className="profile-grain-tooltip" role="tooltip">
+        <GrainPreview key={hover} id={hover} mediaId={result.media_asset_id} loadPhotos={loadPhotos} previewPhoto={previewPhoto}/>
+      </div>}
     </figure> : <p>Для выбранной оси нет пригодных значений.</p>}
     <ol>{points.map(point => <li key={pointKey(point)}>
       <button type="button" className="outline-button" onClick={() => onFocus([point.analysis_id])}>
@@ -49,25 +59,43 @@ function ProfileChart({result, onFocus}) {
   </>;
 }
 
-export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus}) {
-  const [route, setRoute] = useState([]);
+export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus, loadPhotos, previewPhoto,
+  calibration, onPickScale, onClearScale, savedProfile, onKeepProfile, exportProfile}) {
+  const [route, setRoute] = useState(()=>savedProfile?.points.map(point=>
+    rows.find(row=>pointKey(row)===pointKey(point)) || point) || []);
   const [choice, setChoice] = useState("");
-  const [axisKey, setAxisKey] = useState("");
-  const [pixels, setPixels] = useState("");
-  const [length, setLength] = useState("");
+  const [originalProfile] = useState(savedProfile);
+  const [axisKey, setAxisKey] = useState(()=>savedProfile ? JSON.stringify(savedProfile.axis) : "");
+  const [pixels, setPixels] = useState(()=>savedProfile?.reference_px.toString() || "");
+  const [length, setLength] = useState(()=>savedProfile?.reference_um.toString() || "");
   const [pending, setPending] = useState(false);
   const [response, setResponse] = useState(null);
+  const [exportStatus, setExportStatus] = useState(null);
   const axes = new Map(panels.flatMap(panel => panel.axes).map(axis => [JSON.stringify(axis), axis]));
+  if(originalProfile) axes.set(JSON.stringify(originalProfile.axis),originalProfile.axis);
   const allowed = rows.filter(row => row.geometry_kind === "point" && row.link_type === "same_point"
     && row.cross_sample_exception === 0);
   const candidates = allowed.filter(row => !route.some(point =>
     point.analysis_id === row.analysis_id || point.spatial_annotation_id === row.spatial_annotation_id));
   const selected = candidates.find(row => pointKey(row) === choice);
   const axis = axes.get(axisKey);
+  const [first, second] = calibration?.points || [];
+  const measuredPixels = second ? Math.hypot(second.x_px-first.x_px, second.y_px-first.y_px) : null;
+  const referencePixels = calibration ? measuredPixels : Number(pixels);
   const request = {media_asset_id: mediaId, points: route.map(({spatial_annotation_id, analysis_id}) =>
-    ({spatial_annotation_id, analysis_id})), axis, reference_px: Number(pixels), reference_um: Number(length)};
+    ({spatial_annotation_id, analysis_id})), axis, reference_px: referencePixels, reference_um: Number(length)};
   const signature = JSON.stringify(request);
   const current = response?.signature === signature ? response : null;
+  useEffect(()=>{
+    if(!originalProfile) return;
+    let active=true;
+    const saved={media_asset_id:mediaId,...originalProfile};
+    setPending(true);
+    load(saved).then(result=>{if(active)setResponse({signature:JSON.stringify(saved),result});},
+      error=>{if(active)setResponse({signature:JSON.stringify(saved),error:error.message||String(error)});})
+      .finally(()=>{if(active)setPending(false);});
+    return ()=>{active=false;};
+  },[originalProfile,mediaId,load]);
   const move = (index, delta) => {
     setResponse(null);
     setRoute(items => {
@@ -84,7 +112,14 @@ export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus}
     catch (error) { setResponse({signature, error: error.message || String(error)}); }
     finally { setPending(false); }
   };
-  return <details>
+  const saveFigure = async () => {
+    setExportStatus({pending:true});
+    try {
+      const path=await exportProfile(request);
+      setExportStatus(path?{notice:`Сохранено: ${path}`}:null);
+    } catch(error){setExportStatus({error:error.message||String(error)});}
+  };
+  return <details open={savedProfile ? true : undefined}>
     <summary>Профиль зональности</summary>
     <form onSubmit={submit}>
       <fieldset disabled={pending}>
@@ -101,7 +136,8 @@ export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus}
         }}>Добавить точку в маршрут</button>
         {!allowed.length && <p>Для профиля нужны точечные связи same_point на этом фото.</p>}
         <ol>{route.map((point, index) => <li key={pointKey(point)}>
-          {point.point_name} · {point.analysis_id} · {point.x_px}, {point.y_px} px
+          {point.point_name || "Привязка недоступна"} · {point.analysis_id}
+          {point.x_px!=null&&` · ${point.x_px}, ${point.y_px} px`}
           <button type="button" disabled={index === 0} onClick={() => move(index, -1)}>Выше</button>
           <button type="button" disabled={index === route.length - 1} onClick={() => move(index, 1)}>Ниже</button>
           <button type="button" onClick={() => {
@@ -112,15 +148,28 @@ export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus}
           <option value="">Выберите ось</option>
           {[...axes].map(([key, value]) => <option key={key} value={key}>{axisLabel(value)}</option>)}
         </select></label>
-        <label>Длина на оригинале, px <input type="number" min="0" step="any" required value={pixels} onChange={e => {setPixels(e.target.value); setResponse(null);}}/></label>
+        {onPickScale&&<button type="button" className="outline-button" onClick={()=>{setResponse(null);onPickScale();}}>Указать концы линейки на фото</button>}
+        {calibration ? <p>
+          {measuredPixels === null ? "Выберите две точки на фото." : measuredPixels === 0
+            ? "Концы линейки совпадают. Выберите их заново." : `Длина на оригинале: ${format.format(measuredPixels)} px`}
+          <button type="button" className="outline-button" onClick={()=>{setResponse(null);onClearScale();}}>Ввести пиксели вручную</button>
+        </p> : <label>Длина на оригинале, px <input type="number" min="0" step="any" required value={pixels} onChange={e => {setPixels(e.target.value); setResponse(null);}}/></label>}
         <label>Длина в микрометрах <input type="number" min="0" step="any" required value={length} onChange={e => {setLength(e.target.value); setResponse(null);}}/></label>
-        <button type="submit" className="primary-button" disabled={route.length < 2 || !axis || !(Number(pixels) > 0 && Number(length) > 0)}>
+        <button type="submit" className="primary-button" disabled={route.length < 2 || !axis || !(referencePixels > 0 && Number(length) > 0)}>
           Построить профиль
         </button>
       </fieldset>
     </form>
     {pending && <p role="status">Строю профиль…</p>}
     {current?.error && <p role="alert">{current.error}</p>}
-    {current?.result && <ProfileChart result={current.result} onFocus={onFocus}/>}
+    {savedProfile&&<button type="button" className="outline-button" onClick={()=>onKeepProfile?.(undefined)}>Убрать профиль из раскладки</button>}
+    {current?.result&&onKeepProfile&&<button type="button" className="outline-button" onClick={()=>{
+      const {media_asset_id, ...definition}=request;
+      onKeepProfile(definition);
+    }}>Включить профиль в раскладку</button>}
+    {savedProfile&&<p>Профиль записывается в проект при сохранении раскладки.</p>}
+    {current?.result&&exportProfile&&<button type="button" className="outline-button" disabled={exportStatus?.pending} onClick={saveFigure}>Экспорт фото и профиля · PDF</button>}
+    {(exportStatus?.error||exportStatus?.notice)&&<p role={exportStatus.error?"alert":"status"}>{exportStatus.error||exportStatus.notice}</p>}
+    {current?.result && <ProfileChart result={current.result} onFocus={onFocus} loadPhotos={loadPhotos} previewPhoto={previewPhoto}/>}
   </details>;
 }

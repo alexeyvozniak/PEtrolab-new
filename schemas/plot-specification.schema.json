@@ -731,6 +731,27 @@
         "panel_ids"
       ],
       "properties": {
+        "profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["points", "axis", "reference_px", "reference_um"],
+          "properties": {
+            "points": {
+              "type": "array", "minItems": 2, "maxItems": 100, "uniqueItems": true,
+              "items": {
+                "type": "object", "additionalProperties": false,
+                "required": ["spatial_annotation_id", "analysis_id"],
+                "properties": {
+                  "spatial_annotation_id": {"type": "string", "format": "uuid"},
+                  "analysis_id": {"type": "string", "format": "uuid"}
+                }
+              }
+            },
+            "axis": {"type": "object", "required": ["field"]},
+            "reference_px": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000000000},
+            "reference_um": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000000000}
+          }
+        },
         "media_asset_id": {
           "type": [
             "string",

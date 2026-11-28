@@ -4,7 +4,52 @@ import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
 import {useState} from "react";
 import {PhotoPlot} from "../src/PhotoPlot";
 import {ZoningProfile} from "../src/ZoningProfile";
+import {GrainPreview} from "../src/GrainPreview";
 afterEach(cleanup);
+test("reopens a saved route by exact IDs and exports the refreshed definition",async()=>{
+  const axis={field:"SiO2",unit:"wt.%"};
+  const points=[{spatial_annotation_id:"s1",analysis_id:"a1"},{spatial_annotation_id:"s2",analysis_id:"a2"}];
+  const profile={points,axis,reference_px:5,reference_um:10};
+  const load=vi.fn(async request=>({...request,points:points.map((point,i)=>({...point,distance_um:i*10,value:i+1}))}));
+  const exportProfile=vi.fn(async()=>"/figure.pdf");
+  render(<ZoningProfile mediaId="m" rows={[]} focusedIds={[]} panels={[]} savedProfile={profile}
+    load={load} onFocus={()=>{}} exportProfile={exportProfile}/>);
+  fireEvent.click(await screen.findByRole("button",{name:"Экспорт фото и профиля · PDF"}));
+  expect(load).toHaveBeenCalledWith({media_asset_id:"m",...profile});
+  expect(exportProfile).toHaveBeenCalledWith({media_asset_id:"m",...profile});
+  expect(await screen.findByText("Сохранено: /figure.pdf")).toBeTruthy();
+});
+test("grain preview crops original pixels at the edge and prefers the explicitly selected photo",async()=>{
+  const links=["other","chosen"].map(media_asset_id=>({
+    media_asset_id, display_name:media_asset_id, point_name:"P7", link_type:"same_point",
+    geometry_kind:"point", cross_sample_exception:0, image_width_px:1000, image_height_px:200, x_px:997, y_px:12,
+  }));
+  const loadPhotos=vi.fn(async()=>links);
+  const previewPhoto=vi.fn(async()=>({preview_url:"/fragment.png"}));
+  const {rerender}=render(<GrainPreview id="a" loadPhotos={loadPhotos} previewPhoto={previewPhoto}/>);
+  await screen.findByText(/Точных привязок: 2/);
+  expect(previewPhoto).not.toHaveBeenCalled();
+  rerender(<GrainPreview id="a" mediaId="chosen" loadPhotos={loadPhotos} previewPhoto={previewPhoto}/>);
+  expect((await screen.findByRole("img",{name:"Фрагмент вокруг точки P7"})).getAttribute("src")).toBe("/fragment.png");
+  expect(previewPhoto).toHaveBeenCalledWith("chosen",{left:680,top:0,width:320,height:200});
+});
+
+test("a late response does not display a previous analysis or use a context link",async()=>{
+  let resolveOld;
+  const location={media_asset_id:"m",point_name:"old",geometry_kind:"point",cross_sample_exception:0,
+    image_width_px:500,image_height_px:500,x_px:240,y_px:240};
+  const loadPhotos=vi.fn(id=>id==="old"
+    ? new Promise(resolve=>{resolveOld=resolve;})
+    : Promise.resolve([{...location,link_type:"same_zone"}]));
+  const previewPhoto=vi.fn();
+  const {rerender}=render(<GrainPreview id="old" loadPhotos={loadPhotos} previewPhoto={previewPhoto}/>);
+  await waitFor(()=>expect(loadPhotos).toHaveBeenCalledWith("old"));
+  rerender(<GrainPreview id="new" loadPhotos={loadPhotos} previewPhoto={previewPhoto}/>);
+  await waitFor(()=>expect(loadPhotos).toHaveBeenCalledWith("new"));
+  resolveOld([{...location,link_type:"same_point"}]);
+  await waitFor(()=>expect(screen.queryByText("Загружаю фото…")).toBeNull());
+  expect(previewPhoto).not.toHaveBeenCalled();
+});
 test("profile submits ordered exact IDs and displays a gap without joining across it",async()=>{
   const axis={field:"MgO",unit:"wt.%"};
   const rows=["a","b","c","context"].map((id,index)=>({
@@ -14,7 +59,8 @@ test("profile submits ordered exact IDs and displays a gap without joining acros
   const load=vi.fn(async request=>({axis,points:request.points.map((point,index)=>({
     ...point,distance_um:10*index,value:index===1?null:index+1,reason:"missing",
   }))}));
-  const {container}=render(<ZoningProfile mediaId="m" rows={rows} focusedIds={[]} panels={[{axes:[axis]}]} load={load} onFocus={()=>{}}/>);
+  const {container}=render(<ZoningProfile mediaId="m" rows={rows} focusedIds={[]} panels={[{axes:[axis]}]} load={load} onFocus={()=>{}}
+    calibration={{points:[{x_px:1,y_px:1},{x_px:4,y_px:5}]}}/>);
   fireEvent.click(screen.getByText("Профиль зональности"));
   const point=screen.getByLabelText("Точка и Analysis ID");
   expect([...point.options].map(option=>option.textContent)).not.toContain("context · id-context");
@@ -23,11 +69,12 @@ test("profile submits ordered exact IDs and displays a gap without joining acros
     fireEvent.click(screen.getByRole("button",{name:"Добавить точку в маршрут"}));
   }
   fireEvent.change(screen.getByLabelText("Ось профиля"),{target:{value:JSON.stringify(axis)}});
-  fireEvent.change(screen.getByLabelText("Длина на оригинале, px"),{target:{value:"5"}});
+  expect(screen.getByText("Длина на оригинале: 5 px")).toBeTruthy();
   fireEvent.change(screen.getByLabelText("Длина в микрометрах"),{target:{value:"10"}});
   fireEvent.click(screen.getByRole("button",{name:"Построить профиль"}));
   await screen.findByText("10 мкм · нет значения");
   expect(load.mock.calls[0][0].points.map(point=>point.analysis_id)).toEqual(["id-a","id-b","id-c"]);
+  expect(load.mock.calls[0][0].reference_px).toBe(5);
   expect(container.querySelectorAll("svg circle")).toHaveLength(2);
   expect(container.querySelectorAll("svg line")).toHaveLength(0);
 });

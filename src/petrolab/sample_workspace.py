@@ -164,6 +164,7 @@ def get_analysis_photo_locations(database_path, analysis_id):
             SELECT m.media_asset_id, m.display_name, m.sample_id, s.sample_name,
                    p.analytical_point_id, p.point_name, l.link_type,
                    a.spatial_annotation_id, a.geometry_kind, a.x_px, a.y_px, a.width_px, a.height_px,
+                   a.image_width_px, a.image_height_px,
                    pa.cross_sample_exception, pa.exception_reason
             FROM analytical_point_analysis l
             JOIN analysis n USING (analysis_id)
@@ -289,3 +290,4 @@ def undo_point_link(database_path, operation_id, actor):
                            (json.dumps(entry, ensure_ascii=False), operation_id))
         return write_point_journal(connection, point_id, ids, actor.strip(), action, link_type,
                                    reverses_operation_id=operation_id)
+
