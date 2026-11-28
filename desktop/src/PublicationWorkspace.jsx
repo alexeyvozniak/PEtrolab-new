@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { plotSvgPreview } from "./plotSvg";
 import "./publicationWorkspace.css";
 
 const KINDS = { work_group: "Рабочие группы", calculation_run: "Кластеризация", formula_run: "Формулы минералов", plot_specification: "Раскладки" };
@@ -11,6 +12,12 @@ export function PublicationWorkspace({ load, pickFigure, check, exportZip, items
   const [status, setStatus] = useState(null);
   const [linkLayoutId, setLinkLayoutId] = useState("");
   const [figureFormat, setFigureFormat] = useState("pdf");
+  const [previewTarget, setPreviewTarget] = useState({ id: "", panel: -1 });
+  const capturedFigures = items.filter((item) => item.kind === "plot_capture");
+  const previewFigure = capturedFigures.find((item) => item.draft_id === previewTarget.id) || capturedFigures[0];
+  const previewPanel = previewFigure?.draft_id === previewTarget.id ? previewTarget.panel : -1;
+  const previewSvg = previewFigure?.capture?.svg;
+  const preview = useMemo(() => previewSvg ? plotSvgPreview(previewSvg, previewPanel) : null, [previewSvg, previewPanel]);
   const lithos = settings.profile === "lithos";
   const selectedFormat = lithos ? figureFormat : "svg";
   useEffect(() => {
@@ -126,6 +133,20 @@ export function PublicationWorkspace({ load, pickFigure, check, exportZip, items
       </main>
       <aside className="publication-card">
         <h3>Проверка и экспорт</h3>
+        {preview && <section aria-label="Предпросмотр фигуры">
+          <h4>Предпросмотр фигуры</h4>
+          {capturedFigures.length > 1 && <label>Фигура<select value={previewFigure.draft_id}
+            onChange={(event) => setPreviewTarget({ id: event.target.value, panel: -1 })}>
+            {capturedFigures.map((figure) => <option key={figure.draft_id} value={figure.draft_id}>{figure.label}</option>)}
+          </select></label>}
+          {preview.labels.length > 1 && <label>Панель<select value={previewPanel}
+            onChange={(event) => setPreviewTarget({ id: previewFigure.draft_id, panel: Number(event.target.value) })}>
+            <option value={-1}>Вся фигура</option>
+            {preview.labels.map((label, index) => <option key={label} value={index}>Панель {label}</option>)}
+          </select></label>}
+          <img className="publication-figure-preview" src={preview.url}
+            alt={previewPanel < 0 ? previewFigure.label : `${previewFigure.label}, панель ${preview.labels[previewPanel]}`} />
+        </section>}
         {lithos && <p>PDF со встроенными шрифтами или TIFF. SVG для редактирования, PNG для просмотра.</p>}
         {prepared ? <>
           <p>Материалов · {prepared.manifest.items.length}</p>

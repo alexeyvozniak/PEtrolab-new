@@ -1,0 +1,18 @@
+{
+  "wholePanels": [
+    "panel-a",
+    "panel-b"
+  ],
+  "singlePanel": "panel-b",
+  "previewPixels": [
+    460,
+    280
+  ],
+  "fullSvgSha256": "5fcf2d476be26039951ec04296aa96ea49252b468205fc56eddd3e3fcec6f754",
+  "exportedPanels": [
+    "panel-a",
+    "panel-b"
+  ],
+  "zipFigureSha256": "5fcf2d476be26039951ec04296aa96ea49252b468205fc56eddd3e3fcec6f754",
+  "analysisCount": 7
+}

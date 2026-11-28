@@ -9,3 +9,4 @@
 .publication-card label { display: grid; margin: 6px 0; gap: 3px; }
 .publication-card input, .publication-card select, .publication-card textarea { padding: 5px; border: 1px solid #adc0b4; border-radius: 4px; color: inherit; }
 .publication-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.publication-figure-preview { display: block; width: 100%; height: auto; border: 1px solid #dce5df; border-radius: 4px; }

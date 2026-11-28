@@ -10,6 +10,25 @@ export function plotPanelLabel(index, alphabet = "latin", uppercase = false) {
   return uppercase ? label.toUpperCase() : label;
 }
 
+export function plotSvgPreview(svg, panelIndex) {
+  const root = new DOMParser().parseFromString(svg, "image/svg+xml").documentElement;
+  if (root.localName !== "svg" || root.namespaceURI !== SVG) return null;
+  const panels = [...root.children].filter((element) => element.localName === "g" && element.id.startsWith("panel-"));
+  if (!panels.length) return null;
+  const labels = panels.map((panel) => panel.id.slice("panel-".length));
+  const panel = panels[panelIndex];
+  if (panel) {
+    const { width, height } = PLOT_SIZE;
+    panel.removeAttribute("transform");
+    root.replaceChildren(panel);
+    root.setAttribute("width", width);
+    root.setAttribute("height", height);
+    root.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  }
+  const markup = panel ? new XMLSerializer().serializeToString(root) : svg;
+  return { labels, url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}` };
+}
+
 export function buildPlotSvg(canvases, { showLabel = true, alphabet, uppercase, labelPosition, legend } = {}) {
   const { width, height } = PLOT_SIZE;
   const columns = Math.min(canvases.length, 2);

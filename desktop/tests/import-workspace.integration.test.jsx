@@ -912,13 +912,23 @@ test("mineral patterns share selection and keep censored gaps through SVG export
   expect(screen.getAllByRole("combobox", { name: "Эталон нормировки" })[0].selectedOptions[0].textContent).toBe("Примитивная мантия");
   const restored = screen.getAllByRole("combobox", { name: "Тип диаграммы" })[0].closest("article");
   await waitFor(() => expect(within(restored).getByRole("button", { name: "Выгрузить панель" }).disabled).toBe(false));
-  await user.click(within(restored).getByRole("button", { name: "Выгрузить панель" }));
+  await user.click(await enabledButton("Выгрузить раскладку"));
   await user.click(screen.getByRole("checkbox", { name: "Добавить данные CSV" }));
   await user.click(await enabledButton("Добавить в пакет"));
   await screen.findByRole("heading", { name: "Состав пакета" });
   const request = requests.findLast(({ command }) => command === "publication.capture_plot");
+  expect(request.payload.capture.panels).toHaveLength(2);
   expect(request.payload.capture.panels[0].normalization).toBe("sun_mcdonough_1989_mantle_diagram_v1");
   expect(request.payload.capture.include_csv).toBe(true);
+  const preview = within(screen.getByRole("region", { name: "Предпросмотр фигуры" }));
+  const previewMarkup = () => decodeURIComponent(preview.getByRole("img").getAttribute("src").split(",")[1]);
+  expect(previewMarkup()).toBe(request.payload.capture.svg);
+  await user.selectOptions(preview.getByLabelText("Панель"), "1");
+  const panelSvg = new DOMParser().parseFromString(previewMarkup(), "image/svg+xml");
+  expect([...panelSvg.querySelectorAll("g[id]")].map((group) => group.id)).toEqual(["panel-b"]);
+  expect(panelSvg.getElementById("panel-b").hasAttribute("transform")).toBe(false);
+  await user.selectOptions(preview.getByLabelText("Панель"), "-1");
+  expect(previewMarkup()).toBe(request.payload.capture.svg);
   expect(await readFile(second, "utf8")).toBe(content);
 }, 35000);
 
