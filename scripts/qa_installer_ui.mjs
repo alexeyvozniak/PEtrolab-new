@@ -9,8 +9,8 @@ import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-const [executableArg, evidenceArg] = process.argv.slice(2);
-assert(executableArg && evidenceArg, "Usage: node qa_installer_ui.mjs <petrolab-desktop.exe> <new evidence directory>");
+const [executableArg, evidenceArg, upgradeStatePath] = process.argv.slice(2);
+assert(executableArg && evidenceArg, "Usage: node qa_installer_ui.mjs <petrolab-desktop.exe> <new evidence directory> [upgrade state JSON]");
 const executable = resolve(executableArg);
 const service = join(dirname(executable), "binaries", "petrolab-service.exe");
 const evidence = resolve(evidenceArg);
@@ -103,7 +103,7 @@ async function withWindow(check, { projectPath = database, editConfirmations = n
   const profile = await mkdtemp(join(workspace, "webview-"));
   const child = spawn(executable, [], {
     cwd: dirname(executable), stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, PETROLAB_PROJECT_DATABASE: projectPath, WEBVIEW2_USER_DATA_FOLDER: profile,
+    env: { ...process.env, PETROLAB_PROJECT_DATABASE: projectPath ?? undefined, WEBVIEW2_USER_DATA_FOLDER: profile,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1` },
   });
   let appOutput = "";
@@ -165,7 +165,7 @@ async function withWindow(check, { projectPath = database, editConfirmations = n
     return result;
   } catch (error) {
     if (screenshot) await screenshot("failure").catch(() => {});
-    if (!socket) {
+    if (!socket || upgradeStatePath) {
       const inspect = `
         $port = ${port}
         $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
@@ -187,7 +187,7 @@ async function withWindow(check, { projectPath = database, editConfirmations = n
           encoding: "utf8", windowsHide: true, timeout: 8000,
         }));
       } catch { hostState = null; }
-      const diagnostic = { port, pid: child.pid, discovery, hostState, appOutput };
+      const diagnostic = { error: error.message, port, pid: child.pid, discovery, hostState, appOutput };
       await writeFile(join(evidence, "webview-startup-failure.json"), JSON.stringify(diagnostic, null, 2));
       console.error("AT-14 WebView startup:", diagnostic);
     }
@@ -266,6 +266,45 @@ async function checkPlotZoom(evaluate, screenshot, command) {
   await screenshot("AT-17-reset-panels");
   return { full, zoomed, panned, selected };
 }
+if (upgradeStatePath) {
+  const { data } = JSON.parse(await readFile(upgradeStatePath, "utf8"));
+  const group = data[1].groups.find((item) => item.group.name === "Upgrade QA").group;
+  const expectedIds = [...group.analysis_ids].sort();
+  const expectedLabels = data[0].analyses.filter((row) => expectedIds.includes(row.analysis_id))
+    .map((row) => row.identity.Analysis).sort();
+  const opened = await withWindow(async (evaluate, screenshot) => {
+    await click(evaluate, "Анализы");
+    await click(evaluate, "Рабочие группы");
+    await click(evaluate, `Upgrade QA · ${expectedIds.length}`);
+    await until("the default upgraded project restores the original work group", async () =>
+      JSON.stringify(await evaluate(selection)) === JSON.stringify(expectedLabels));
+    await screenshot("AT-14-upgrade-work-group");
+
+    await click(evaluate, "Построение");
+    await until("plot layouts are available", () => evaluate(() => {
+      const layouts = document.querySelector(".plot-saved-layouts");
+      if (!layouts) return false;
+      layouts.open = true;
+      return true;
+    }));
+    await click(evaluate, "Открыть «Upgrade QA»");
+    const panels = await until("the upgraded saved plots contain the original selected analysis IDs", () =>
+      evaluate((expectedIds) => {
+        const panels = [...document.querySelectorAll(".plot-grid .plot-panel")].map((panel) => ({
+          kind: panel.querySelector('select[aria-label="Тип диаграммы"]').value,
+          ids: [...panel.querySelectorAll('.plot-point[aria-pressed="true"]')].map((point) => point.dataset.analysisId).sort(),
+        }));
+        return panels.length === 2 && panels[0].kind === "binary" && panels[1].kind === "ternary"
+          && panels.every(({ids}) => JSON.stringify(ids) === JSON.stringify(expectedIds)) ? panels : null;
+      }, expectedIds));
+    await screenshot("AT-14-upgrade-saved-plots");
+    return { expectedIds, expectedLabels, panels };
+  }, { projectPath: null });
+  await writeFile(join(evidence, "acceptance.json"), JSON.stringify(opened, null, 2));
+  console.log("The installed upgrade opened the original Windows project and restored the saved group and plots.");
+  process.exit(0);
+}
+
 const original = "Analysis,SiO2 [wt.%],Al2O3 [wt.%],MgO [wt.%]\n"
   + "P1,11,22,67\nP2,23,41,36\nP3,25,35,40\nP4,29,35,36\nP5,31,12,57\nP6,44,31,25\nP7,35,14,51\n";
 await writeFile(source, original);

@@ -258,6 +258,7 @@ test("frontend sends the versioned envelope through the one Tauri command", asyn
 test("Windows release gate installs and launches the packaged application", async () => {
   const workflow = await read("../.github/workflows/windows-test-build.yml");
   const smoke = await read("../scripts/smoke_windows_installer.ps1");
+  const nativeSmoke = await read("../scripts/qa_installer_ui.mjs");
   const uiSmoke = await read("tests/import-ui.e2e.test.jsx");
   assert.match(workflow, /Install and launch packaged Windows app/);
   assert.match(workflow, /smoke_windows_installer\.ps1 -UiEvidence/);
@@ -273,7 +274,10 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(workflow, /-HistoricalSource historical-source/);
   assert.match(smoke, /qa_installer_project\.py"\) historical/);
   assert.match(workflow, /-LaunchEvidence .*petrolab-upgrade-launch/);
-  assert.match(workflow, /Upload upgrade launch diagnostics\r?\n\s+if: failure\(\)/);
+  assert.match(workflow, /Upload upgrade launch evidence\r?\n\s+if: always\(\)/);
+  assert.match(smoke, /qa_installer_ui\.mjs"\) \$appExecutable\.FullName \$LaunchEvidence \$upgradeState/);
+  assert.match(nativeSmoke, /\{ projectPath: null \}/);
+  assert.match(nativeSmoke, /AT-14-upgrade-saved-plots/);
   assert.match(smoke, /RedirectStandardError.*app-stderr\.txt/);
   assert.match(smoke, /Uninstall removed persistent project data/);
   assert.match(workflow, /npm run test:ui/);

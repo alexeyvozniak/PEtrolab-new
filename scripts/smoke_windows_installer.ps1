@@ -116,10 +116,6 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Installed service failed the isolated import and restart check."
     }
-    if ($baselinePath) {
-        & python (Join-Path $PSScriptRoot "qa_installer_project.py") verify $installedService $database $upgradeState
-        if ($LASTEXITCODE -ne 0) { throw "The upgrade changed or lost the baseline project." }
-    }
 
     if ($HistoricalSource) {
         & python (Join-Path $PSScriptRoot "qa_installer_project.py") historical $installedService $HistoricalSource
@@ -131,67 +127,75 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Installed PetroLab failed the native acceptance workflow." }
     }
 
-    Write-Host "Launching $($appExecutable.FullName)"
-    $launchOptions = @{ FilePath = $appExecutable.FullName; PassThru = $true }
-    if ($LaunchEvidence) {
-        New-Item -ItemType Directory -Path $LaunchEvidence -Force | Out-Null
-        $launchOptions.RedirectStandardOutput = Join-Path $LaunchEvidence "app-stdout.txt"
-        $launchOptions.RedirectStandardError = Join-Path $LaunchEvidence "app-stderr.txt"
-    }
-    $appProcess = Start-Process @launchOptions
-    $windowReady = $false
-    $serviceReady = $false
-    $databaseReady = $false
-
-    for ($attempt = 0; $attempt -lt 40; $attempt += 1) {
-        Start-Sleep -Milliseconds 500
-        $appProcess.Refresh()
-        if ($appProcess.HasExited) {
-            throw "Installed PetroLab exited during startup with code $($appProcess.ExitCode)."
+    if ($baselinePath) {
+        if (-not $LaunchEvidence) { $LaunchEvidence = Join-Path $env:RUNNER_TEMP "petrolab-upgrade-$runId" }
+        & node (Join-Path $PSScriptRoot "qa_installer_ui.mjs") $appExecutable.FullName $LaunchEvidence $upgradeState
+        if ($LASTEXITCODE -ne 0) { throw "Installed PetroLab did not reopen the upgraded project in its window." }
+        & python (Join-Path $PSScriptRoot "qa_installer_project.py") verify $installedService $database $upgradeState
+        if ($LASTEXITCODE -ne 0) { throw "The upgrade changed or lost the baseline project." }
+    } else {
+        Write-Host "Launching $($appExecutable.FullName)"
+        $launchOptions = @{ FilePath = $appExecutable.FullName; PassThru = $true }
+        if ($LaunchEvidence) {
+            New-Item -ItemType Directory -Path $LaunchEvidence -Force | Out-Null
+            $launchOptions.RedirectStandardOutput = Join-Path $LaunchEvidence "app-stdout.txt"
+            $launchOptions.RedirectStandardError = Join-Path $LaunchEvidence "app-stderr.txt"
         }
+        $appProcess = Start-Process @launchOptions
+        $windowReady = $false
+        $serviceReady = $false
+        $databaseReady = $false
 
-        if ($appProcess.MainWindowHandle -ne 0) {
-            $windowReady = $true
-        }
+        for ($attempt = 0; $attempt -lt 40; $attempt += 1) {
+            Start-Sleep -Milliseconds 500
+            $appProcess.Refresh()
+            if ($appProcess.HasExited) {
+                throw "Installed PetroLab exited during startup with code $($appProcess.ExitCode)."
+            }
 
-        # Only count the service belonging to this app, never another open project.
-        $serviceProcesses = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($appProcess.Id)" |
-            Where-Object { $_.Name -eq "petrolab-service.exe" } |
-            ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue })
-        if ($serviceProcesses.Count -gt 0) {
-            $serviceReady = $true
-        }
+            if ($appProcess.MainWindowHandle -ne 0) {
+                $windowReady = $true
+            }
 
-        foreach ($candidate in $databaseCandidates) {
-            if (Test-Path -LiteralPath $candidate) {
-                $database = $candidate
-                $databaseReady = $true
+            # Only count the service belonging to this app, never another open project.
+            $serviceProcesses = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($appProcess.Id)" |
+                Where-Object { $_.Name -eq "petrolab-service.exe" } |
+                ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue })
+            if ($serviceProcesses.Count -gt 0) {
+                $serviceReady = $true
+            }
+
+            foreach ($candidate in $databaseCandidates) {
+                if (Test-Path -LiteralPath $candidate) {
+                    $database = $candidate
+                    $databaseReady = $true
+                    break
+                }
+            }
+
+            if ($windowReady -and $serviceReady -and $databaseReady) {
                 break
             }
         }
 
-        if ($windowReady -and $serviceReady -and $databaseReady) {
-            break
+        if (-not $windowReady) {
+            throw "PetroLab process stayed alive but no main window appeared."
         }
-    }
+        if (-not $serviceReady) {
+            $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($appProcess.Id)" |
+                Select-Object Name, ProcessId, SessionId)
+            Write-Host "Installed window: $($appProcess.MainWindowTitle); session: $($appProcess.SessionId)"
+            Write-Host "Observed child processes: $(ConvertTo-Json -InputObject $children -Compress)"
+            throw "PetroLab window opened but the packaged scientific service did not start."
+        }
+        if (-not $databaseReady) {
+            throw "PetroLab opened but did not create its fresh project SQLite database."
+        }
 
-    if (-not $windowReady) {
-        throw "PetroLab process stayed alive but no main window appeared."
-    }
-    if (-not $serviceReady) {
-        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($appProcess.Id)" |
-            Select-Object Name, ProcessId, SessionId)
-        Write-Host "Installed window: $($appProcess.MainWindowTitle); session: $($appProcess.SessionId)"
-        Write-Host "Observed child processes: $(ConvertTo-Json -InputObject $children -Compress)"
-        throw "PetroLab window opened but the packaged scientific service did not start."
-    }
-    if (-not $databaseReady) {
-        throw "PetroLab opened but did not create its fresh project SQLite database."
-    }
-
-    Write-Host "PetroLab window, scientific service and project database are ready."
-    if (-not $appProcess.CloseMainWindow() -or -not $appProcess.WaitForExit(15000)) {
-        throw "Installed PetroLab did not exit after closing its main window."
+        Write-Host "PetroLab window, scientific service and project database are ready."
+        if (-not $appProcess.CloseMainWindow() -or -not $appProcess.WaitForExit(15000)) {
+            throw "Installed PetroLab did not exit after closing its main window."
+        }
     }
 
     # The bundled PyInstaller loader and its worker are separate processes.
