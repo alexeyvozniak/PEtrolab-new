@@ -267,7 +267,26 @@ async function checkPlotZoom(evaluate, screenshot, command) {
   return { full, zoomed, panned, selected };
 }
 if (upgradeStatePath) {
-  const { data } = JSON.parse(await readFile(upgradeStatePath, "utf8"));
+  const { data, historical_project: historical } = JSON.parse(await readFile(upgradeStatePath, "utf8"));
+  if (historical) {
+    const expectedLabels = [...new Set(historical.rows.map((row) => JSON.parse(row[1])[0]))].sort();
+    const opened = await withWindow(async (evaluate, screenshot) => {
+      await click(evaluate, "Анализы");
+      const labels = await until("the migrated historical analyses are visible", async () => {
+        const displayed = await evaluate(() => [...document.querySelectorAll('tbody input[aria-label^="Выбрать "]')]
+          .map((item) => item.getAttribute("aria-label").slice("Выбрать ".length)).sort());
+        return JSON.stringify(displayed) === JSON.stringify(expectedLabels) ? displayed : null;
+      });
+      await evaluate(() => document.querySelector('tbody input[aria-label="Выбрать A3"]').closest("tr").click());
+      await until("the migrated analysis shows its original cells and values", () => evaluate(() =>
+        [...document.querySelectorAll("aside")].some((aside) => ["A3", "B4", "C4", "42", "23"]
+          .every((token) => aside.innerText.includes(token)))));
+      await screenshot("AT-13-installed-historical-upgrade");
+      return { labels, originalSchema: historical.version };
+    }, { projectPath: null });
+    await writeFile(join(evidence, "acceptance.json"), JSON.stringify(opened, null, 2));
+    process.exit(0);
+  }
   const group = data[1].groups.find((item) => item.group.name === "Upgrade QA").group;
   const expectedIds = [...group.analysis_ids].sort();
   const expectedLabels = data[0].analyses.filter((row) => expectedIds.includes(row.analysis_id))

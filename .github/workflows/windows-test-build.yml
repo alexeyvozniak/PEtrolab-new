@@ -5,6 +5,12 @@ on:
     branches: [main, codex/petrolab-2-release]
   pull_request:
   workflow_dispatch:
+    inputs:
+      historical_upgrade:
+        description: Also test migration from the rebuilt historical 0.1.6 MSI
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
@@ -120,6 +126,10 @@ jobs:
     name: Verify upgrade with the clean-tested MSI
     needs: build
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        baseline: ${{ fromJSON(inputs.historical_upgrade && '["rehearsal","historical"]' || '["rehearsal"]') }}
     env:
       PYTHONUTF8: "1"
       PYTHONPATH: ${{ github.workspace }}\\src
@@ -152,6 +162,7 @@ jobs:
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath $msi[0].FullName).Hash -ne $expectedHash) {
             throw "The downloaded MSI differs from the clean-tested installer."
           }
+          if ('${{ matrix.baseline }}' -eq 'historical') { return }
           $imagePath = Join-Path $env:RUNNER_TEMP "petrolab-baseline-image"
           $arguments = @("/a", ('"{0}"' -f $msi[0].FullName), ('TARGETDIR="{0}"' -f $imagePath), "/qn", "/norestart")
           $image = Start-Process -FilePath "msiexec.exe" -WindowStyle Hidden -ArgumentList $arguments -Wait -PassThru
@@ -168,6 +179,7 @@ jobs:
           python -m pip install --disable-pip-version-check .
           npm --prefix desktop ci
       - name: Build baseline MSI for upgrade rehearsal
+        if: matrix.baseline == 'rehearsal'
         working-directory: desktop
         shell: pwsh
         run: |
@@ -180,14 +192,31 @@ jobs:
           npm run tauri -- build --bundles msi --config $override
           $baseline = "src-tauri/target/release/bundle/msi/PetroLab_${baselineVersion}_x64_en-US.msi"
           Move-Item -LiteralPath $baseline -Destination (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi")
+      - name: Rebuild historical 0.1.6 MSI from its source
+        if: matrix.baseline == 'historical'
+        working-directory: historical-source
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:PYTHONPATH = (Resolve-Path src).Path
+          $version = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($version -ne '0.1.6') { throw "Unexpected historical installer version: $version." }
+          python -m pip install --disable-pip-version-check . pyinstaller
+          python scripts/build_windows_service.py
+          npm --prefix desktop ci
+          Push-Location desktop
+          try { npm run tauri -- build --bundles msi } finally { Pop-Location }
+          $baseline = 'desktop/src-tauri/target/release/bundle/msi/PetroLab_0.1.6_x64_en-US.msi'
+          Get-FileHash -LiteralPath $baseline -Algorithm SHA256 | Format-List
+          Move-Item -LiteralPath $baseline -Destination (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi")
       - name: Verify upgrade preserves the project and uninstall retains it
         shell: pwsh
-        run: ./scripts/smoke_windows_installer.ps1 -BundleRoot (Join-Path $env:RUNNER_TEMP "petrolab-candidate") -BaselineMsi (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi") -HistoricalSource historical-source -LaunchEvidence (Join-Path $env:RUNNER_TEMP "petrolab-upgrade-launch")
+        run: ./scripts/smoke_windows_installer.ps1 -BundleRoot (Join-Path $env:RUNNER_TEMP "petrolab-candidate") -BaselineMsi (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi") -HistoricalSource historical-source -LaunchEvidence (Join-Path $env:RUNNER_TEMP "petrolab-upgrade-launch") -HistoricalBaseline:('${{ matrix.baseline }}' -eq 'historical')
       - name: Upload upgrade launch evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PetroLab-Windows-upgrade-launch-${{ github.sha }}
+          name: PetroLab-Windows-upgrade-launch-${{ github.sha }}-${{ matrix.baseline }}
           path: |
             ${{ runner.temp }}/petrolab-upgrade-launch/*.json
             ${{ runner.temp }}/petrolab-upgrade-launch/*.png

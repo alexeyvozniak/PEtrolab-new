@@ -3,7 +3,8 @@ param(
     [string]$BaselineMsi,
     [string]$HistoricalSource,
     [string]$UiEvidence,
-    [string]$LaunchEvidence
+    [string]$LaunchEvidence,
+    [switch]$HistoricalBaseline
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,7 +78,8 @@ try {
         $database = $databaseCandidates[0]
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $database) | Out-Null
         $baselineService = Join-Path $installRoot "binaries\petrolab-service.exe"
-        & python (Join-Path $PSScriptRoot "qa_installer_project.py") seed $baselineService $database $upgradeState
+        $seedAction = if ($HistoricalBaseline) { "seed-historical" } else { "seed" }
+        & python (Join-Path $PSScriptRoot "qa_installer_project.py") $seedAction $baselineService $database $upgradeState
         if ($LASTEXITCODE -ne 0) { throw "Failed to seed the baseline project." }
         $previousProduct = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
             'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |

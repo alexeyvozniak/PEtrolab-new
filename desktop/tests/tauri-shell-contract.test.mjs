@@ -278,6 +278,10 @@ test("Windows release gate installs and launches the packaged application", asyn
   assert.match(smoke, /qa_installer_ui\.mjs"\) \$appExecutable\.FullName \$LaunchEvidence \$upgradeState/);
   assert.match(nativeSmoke, /\{ projectPath: null \}/);
   assert.match(nativeSmoke, /AT-14-upgrade-saved-plots/);
+  assert.match(workflow, /historical_upgrade:/);
+  assert.match(workflow, /Rebuild historical 0\.1\.6 MSI from its source/);
+  assert.match(smoke, /\$HistoricalBaseline\) \{ "seed-historical" \}/);
+  assert.match(nativeSmoke, /AT-13-installed-historical-upgrade/);
   assert.match(smoke, /RedirectStandardError.*app-stderr\.txt/);
   assert.match(smoke, /Uninstall removed persistent project data/);
   assert.match(workflow, /npm run test:ui/);
