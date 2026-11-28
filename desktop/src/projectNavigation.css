@@ -51,6 +51,7 @@
 .project-search-table table { border-collapse: collapse; width: 100%; font-size: 12px; }
 .project-search-table td, .project-search-table th { padding: 8px; text-align: left; border-bottom: 1px solid #dde5df; white-space: nowrap; }
 .project-search-table th { background: #eef4f0; }
+.project-search-table .search-marked-heading td { background: #f3f7f4; color: #315d45; font-weight: 700; }
 .project-search-table tr.marked { background: #e5f0e9; }
 .project-search-table tr.marked td:first-child { box-shadow: inset 3px 0 #497d5f; }
 .project-search-table tbody td:first-child { user-select: none; }

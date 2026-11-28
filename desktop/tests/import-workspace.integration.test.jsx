@@ -254,8 +254,11 @@ test("AT-26 marks search ranges, distinguishes a page from all results and journ
   await screen.findByText(/Отмечено: 12\. В отборе: 0/);
   fireEvent.click(check(16), { ctrlKey: true });
   await screen.findByText(/Отмечено: 13\. В отборе: 0/);
-  const markedRows = within(screen.getByRole("table")).getAllByRole("row").slice(1, 14);
-  expect(markedRows.every((row) => row.classList.contains("marked"))).toBe(true);
+  const searchTable = within(screen.getByRole("table"));
+  const resultRows = searchTable.getAllByRole("row").slice(1);
+  expect(resultRows[0].textContent).toBe("Отмеченные (13)");
+  expect(resultRows.slice(1, 14).every((row) => row.classList.contains("marked"))).toBe(true);
+  expect(resultRows[14].textContent).toBe("Остальные результаты (21)");
   await view.click(await enabledButton("Скрыть отмеченные на графиках"));
   await screen.findByText(/Отмечено: 13\. В отборе: 0\. Скрыто на графиках из отмеченных: 13/);
   const hide = requests.find(({ command }) => command === "plot_visibility.hide");
@@ -282,6 +285,8 @@ test("AT-26 marks search ranges, distinguishes a page from all results and journ
   await screen.findByText(/Отмечено: 34\. В отборе: 13/);
   await view.click(await enabledButton("Далее"));
   await waitFor(() => expect(check(11).checked).toBe(true));
+  expect(searchTable.getByText("Отмеченные (10)")).toBeTruthy();
+  expect(searchTable.queryByText(/Остальные результаты/)).toBeNull();
   await view.click(screen.getByLabelText("Другие действия с отмеченными"));
   await view.click(await enabledButton("Сохранить как рабочую группу"));
   const groupForm = within(screen.getByRole("form", { name: "Новая рабочая группа" }));

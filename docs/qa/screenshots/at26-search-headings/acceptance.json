@@ -1,0 +1,117 @@
+{
+  "linked": [
+    "0bba2074-38aa-4eb9-a3ae-d5a35f0dfd2d",
+    "11b8a3a5-e081-4613-8c06-d3fb4787e89e",
+    "8bbd6667-eb7f-4585-bb1a-bee02c1dc63c",
+    "a2b9157c-10f5-4926-9e5f-9045b1483580"
+  ],
+  "entry": {
+    "id": "82ee05be-be4b-4f2c-951d-cb0396fc3de2",
+    "project_id": "68b7c92d-a12e-4b67-86df-e5395f7712d3",
+    "action": "link_analytical_point",
+    "category": "domain",
+    "scope": [
+      {
+        "entity_type": "analytical_point",
+        "entity_id": "435841ff-c449-4733-8a4d-6e1d29b5394e",
+        "expected_revision": null,
+        "result_revision": null
+      },
+      {
+        "entity_type": "analysis",
+        "entity_id": "8bbd6667-eb7f-4585-bb1a-bee02c1dc63c",
+        "expected_revision": null,
+        "result_revision": null
+      },
+      {
+        "entity_type": "analysis",
+        "entity_id": "a2b9157c-10f5-4926-9e5f-9045b1483580",
+        "expected_revision": null,
+        "result_revision": null
+      }
+    ],
+    "parameters": {
+      "analytical_point_id": "435841ff-c449-4733-8a4d-6e1d29b5394e",
+      "analysis_ids": [
+        "8bbd6667-eb7f-4585-bb1a-bee02c1dc63c",
+        "a2b9157c-10f5-4926-9e5f-9045b1483580"
+      ],
+      "link_type": "same_point"
+    },
+    "reversible": true,
+    "inverse_action": {
+      "action": "unlink_analytical_point",
+      "parameters": {
+        "analytical_point_id": "435841ff-c449-4733-8a4d-6e1d29b5394e",
+        "analysis_ids": [
+          "8bbd6667-eb7f-4585-bb1a-bee02c1dc63c",
+          "a2b9157c-10f5-4926-9e5f-9045b1483580"
+        ],
+        "link_type": "same_point"
+      }
+    },
+    "state": "applied",
+    "actor": "Локальный пользователь",
+    "created_at": "2026-11-28T11:14:51Z"
+  },
+  "restored": [
+    "0bba2074-38aa-4eb9-a3ae-d5a35f0dfd2d",
+    "11b8a3a5-e081-4613-8c06-d3fb4787e89e"
+  ],
+  "afterUndo": [
+    {
+      "id": "47a6cf7a-b8ee-4375-ba70-d15bc08146fb",
+      "action": "unlink_analytical_point",
+      "category": "domain",
+      "state": "applied",
+      "actor": "Локальный пользователь",
+      "created_at": "2026-11-28T11:15:14Z",
+      "scope_count": 3,
+      "reversible": false
+    },
+    {
+      "id": "82ee05be-be4b-4f2c-951d-cb0396fc3de2",
+      "action": "link_analytical_point",
+      "category": "domain",
+      "state": "undone",
+      "actor": "Локальный пользователь",
+      "created_at": "2026-11-28T11:14:51Z",
+      "scope_count": 3,
+      "reversible": true
+    },
+    {
+      "id": "9de8961e-db17-4a3a-aac9-78438c35681e",
+      "action": "link_analytical_point",
+      "category": "domain",
+      "state": "applied",
+      "actor": "QA",
+      "created_at": "2026-11-28T11:14:10Z",
+      "scope_count": 3,
+      "reversible": true
+    }
+  ],
+  "selection": [
+    "Prior"
+  ],
+  "groups": [
+    "Отмеченные (3)",
+    "Остальные результаты (2)"
+  ],
+  "pointId": "435841ff-c449-4733-8a4d-6e1d29b5394e",
+  "baselineIds": [
+    "11b8a3a5-e081-4613-8c06-d3fb4787e89e",
+    "0bba2074-38aa-4eb9-a3ae-d5a35f0dfd2d"
+  ],
+  "markedIds": [
+    "8bbd6667-eb7f-4585-bb1a-bee02c1dc63c",
+    "a2b9157c-10f5-4926-9e5f-9045b1483580"
+  ],
+  "ids": {
+    "Epma": "8bbd6667-eb7f-4585-bb1a-bee02c1dc63c",
+    "Trace": "a2b9157c-10f5-4926-9e5f-9045b1483580",
+    "Prior": "11b8a3a5-e081-4613-8c06-d3fb4787e89e",
+    "Other": "0bba2074-38aa-4eb9-a3ae-d5a35f0dfd2d",
+    "Foreign": "7d89fd4f-1543-4d63-b4a8-ab25d0384129"
+  },
+  "originalSha256": "f05f6483b0a3ddc77f3004f47e5df8d4791e053ec00230f31eeb06d366a2bde1"
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Database, FileArrowUp, MagnifyingGlass, PencilSimple, Plus, SquaresFour, X } from "@phosphor-icons/react";
 import { GenerationAssignment } from "./GenerationAssignment";
 import { isPetrolabDesktop, openExternalUrl } from "./desktopApi";
@@ -211,6 +211,7 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
   const hiddenSet = new Set(hiddenAnalysisIds);
   const dragSet = new Set(dragIds);
   const rows = [...(result?.analyses || [])].sort((a, b) => Number(markedSet.has(b.analysis_id)) - Number(markedSet.has(a.analysis_id)));
+  const visibleMarkedCount = rows.filter((row) => markedSet.has(row.analysis_id)).length;
   const visibleIds = rows.map(({ analysis_id }) => analysis_id);
   const locked = pending || busy || markingAll || savingGroup;
   const markedHidden = marked.filter((id) => hiddenSet.has(id)).length;
@@ -355,36 +356,43 @@ export function ProjectSearch({ seed, queryProject, queryAnalysisIds, onOpenAnal
         </details>
         <div className="project-search-table"><table>
           <thead><tr><th>Отметка</th><th>Анализ</th><th>Образец</th><th>Минерал</th><th>Метод</th><th>Источник</th><th /></tr></thead>
-          <tbody>{rows.map((row) => <tr key={row.analysis_id} className={markedSet.has(row.analysis_id) || dragSet.has(row.analysis_id) ? "marked" : ""}
-            onPointerEnter={(event) => extendDrag(event, row.analysis_id)}
-            onFocus={() => setFocused(row)} onClick={(event) => {
-              setFocused(row);
-              if (!locked && (event.ctrlKey || event.metaKey || event.shiftKey) && !event.target.closest("input,button,summary")) {
-                toggle(row.analysis_id, event.shiftKey);
-              }
-            }}>
-            <td><input type="checkbox" aria-label={`Отметить ${row.identity}`} checked={markedSet.has(row.analysis_id)}
-              disabled={locked} onPointerDown={(event) => startDrag(event, row.analysis_id)}
-              onClick={(event) => event.stopPropagation()}
-              onChange={(event) => toggle(row.analysis_id, event.nativeEvent.shiftKey)} /></td>
-            <td>{row.identity || "Анализ"}</td><td>{row.sample_name || "—"}</td><td>{row.mineral || "—"}</td>
-            <td>{row.method || "—"}</td><td>{row.source_name}</td>
-            <td><div className="search-row-actions">
-              <button className="outline-button" type="button" disabled={locked}
-                onClick={() => onOpenAnalysis(row.analysis_id)} aria-label={`Открыть анализ ${row.identity}`}>Открыть</button>
-              <details className="search-marking">
-                <summary aria-label={`Действия для анализа ${row.identity}`}>…</summary>
-                <button className="outline-button" type="button" disabled={locked}
-                  onClick={() => onEditAnalysis(row.analysis_id)}>Исправить</button>
-                {row.sample_id && <>
+          <tbody>
+            {visibleMarkedCount > 0 && <tr className="search-marked-heading"><td colSpan={7}>Отмеченные ({visibleMarkedCount})</td></tr>}
+            {rows.map((row, index) => <Fragment key={row.analysis_id}>
+              {visibleMarkedCount > 0 && index === visibleMarkedCount &&
+                <tr className="search-marked-heading"><td colSpan={7}>Остальные результаты ({rows.length - visibleMarkedCount})</td></tr>}
+              <tr className={markedSet.has(row.analysis_id) || dragSet.has(row.analysis_id) ? "marked" : ""}
+                onPointerEnter={(event) => extendDrag(event, row.analysis_id)}
+                onFocus={() => setFocused(row)} onClick={(event) => {
+                  setFocused(row);
+                  if (!locked && (event.ctrlKey || event.metaKey || event.shiftKey) && !event.target.closest("input,button,summary")) {
+                    toggle(row.analysis_id, event.shiftKey);
+                  }
+                }}>
+                <td><input type="checkbox" aria-label={`Отметить ${row.identity}`} checked={markedSet.has(row.analysis_id)}
+                  disabled={locked} onPointerDown={(event) => startDrag(event, row.analysis_id)}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => toggle(row.analysis_id, event.nativeEvent.shiftKey)} /></td>
+                <td>{row.identity || "Анализ"}</td><td>{row.sample_name || "—"}</td><td>{row.mineral || "—"}</td>
+                <td>{row.method || "—"}</td><td>{row.source_name}</td>
+                <td><div className="search-row-actions">
                   <button className="outline-button" type="button" disabled={locked}
-                    onClick={() => onOpenSample(row.sample_id)}>Открыть образец</button>
-                  <button className="outline-button" type="button" disabled={locked}
-                    onClick={() => onBeginPointLink([row.analysis_id])}>Привязать к аналитической точке</button>
-                </>}
-              </details>
-            </div></td>
-          </tr>)}</tbody>
+                    onClick={() => onOpenAnalysis(row.analysis_id)} aria-label={`Открыть анализ ${row.identity}`}>Открыть</button>
+                  <details className="search-marking">
+                    <summary aria-label={`Действия для анализа ${row.identity}`}>…</summary>
+                    <button className="outline-button" type="button" disabled={locked}
+                      onClick={() => onEditAnalysis(row.analysis_id)}>Исправить</button>
+                    {row.sample_id && <>
+                      <button className="outline-button" type="button" disabled={locked}
+                        onClick={() => onOpenSample(row.sample_id)}>Открыть образец</button>
+                      <button className="outline-button" type="button" disabled={locked}
+                        onClick={() => onBeginPointLink([row.analysis_id])}>Привязать к аналитической точке</button>
+                    </>}
+                  </details>
+                </div></td>
+              </tr>
+            </Fragment>)}
+          </tbody>
         </table></div>
       </>}
       {result?.total > 0 && <div className="project-search-page">
