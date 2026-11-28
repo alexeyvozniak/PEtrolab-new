@@ -1,4 +1,4 @@
-import {useState} from "react";
+import {useEffect, useState} from "react";
 import {GrainPreview} from "./GrainPreview";
 
 const format = new Intl.NumberFormat("ru", {maximumSignificantDigits: 7});
@@ -60,15 +60,19 @@ function ProfileChart({result, onFocus, loadPhotos, previewPhoto}) {
 }
 
 export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus, loadPhotos, previewPhoto,
-  calibration, onPickScale, onClearScale}) {
-  const [route, setRoute] = useState([]);
+  calibration, onPickScale, onClearScale, savedProfile, onKeepProfile, exportProfile}) {
+  const [route, setRoute] = useState(()=>savedProfile?.points.map(point=>
+    rows.find(row=>pointKey(row)===pointKey(point)) || point) || []);
   const [choice, setChoice] = useState("");
-  const [axisKey, setAxisKey] = useState("");
-  const [pixels, setPixels] = useState("");
-  const [length, setLength] = useState("");
+  const [originalProfile] = useState(savedProfile);
+  const [axisKey, setAxisKey] = useState(()=>savedProfile ? JSON.stringify(savedProfile.axis) : "");
+  const [pixels, setPixels] = useState(()=>savedProfile?.reference_px.toString() || "");
+  const [length, setLength] = useState(()=>savedProfile?.reference_um.toString() || "");
   const [pending, setPending] = useState(false);
   const [response, setResponse] = useState(null);
+  const [exportStatus, setExportStatus] = useState(null);
   const axes = new Map(panels.flatMap(panel => panel.axes).map(axis => [JSON.stringify(axis), axis]));
+  if(originalProfile) axes.set(JSON.stringify(originalProfile.axis),originalProfile.axis);
   const allowed = rows.filter(row => row.geometry_kind === "point" && row.link_type === "same_point"
     && row.cross_sample_exception === 0);
   const candidates = allowed.filter(row => !route.some(point =>
@@ -82,6 +86,16 @@ export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus,
     ({spatial_annotation_id, analysis_id})), axis, reference_px: referencePixels, reference_um: Number(length)};
   const signature = JSON.stringify(request);
   const current = response?.signature === signature ? response : null;
+  useEffect(()=>{
+    if(!originalProfile) return;
+    let active=true;
+    const saved={media_asset_id:mediaId,...originalProfile};
+    setPending(true);
+    load(saved).then(result=>{if(active)setResponse({signature:JSON.stringify(saved),result});},
+      error=>{if(active)setResponse({signature:JSON.stringify(saved),error:error.message||String(error)});})
+      .finally(()=>{if(active)setPending(false);});
+    return ()=>{active=false;};
+  },[originalProfile,mediaId,load]);
   const move = (index, delta) => {
     setResponse(null);
     setRoute(items => {
@@ -98,7 +112,14 @@ export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus,
     catch (error) { setResponse({signature, error: error.message || String(error)}); }
     finally { setPending(false); }
   };
-  return <details>
+  const saveFigure = async () => {
+    setExportStatus({pending:true});
+    try {
+      const path=await exportProfile(request);
+      setExportStatus(path?{notice:`Сохранено: ${path}`}:null);
+    } catch(error){setExportStatus({error:error.message||String(error)});}
+  };
+  return <details open={savedProfile ? true : undefined}>
     <summary>Профиль зональности</summary>
     <form onSubmit={submit}>
       <fieldset disabled={pending}>
@@ -115,7 +136,8 @@ export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus,
         }}>Добавить точку в маршрут</button>
         {!allowed.length && <p>Для профиля нужны точечные связи same_point на этом фото.</p>}
         <ol>{route.map((point, index) => <li key={pointKey(point)}>
-          {point.point_name} · {point.analysis_id} · {point.x_px}, {point.y_px} px
+          {point.point_name || "Привязка недоступна"} · {point.analysis_id}
+          {point.x_px!=null&&` · ${point.x_px}, ${point.y_px} px`}
           <button type="button" disabled={index === 0} onClick={() => move(index, -1)}>Выше</button>
           <button type="button" disabled={index === route.length - 1} onClick={() => move(index, 1)}>Ниже</button>
           <button type="button" onClick={() => {
@@ -140,6 +162,14 @@ export function ZoningProfile({mediaId, rows, focusedIds, panels, load, onFocus,
     </form>
     {pending && <p role="status">Строю профиль…</p>}
     {current?.error && <p role="alert">{current.error}</p>}
+    {savedProfile&&<button type="button" className="outline-button" onClick={()=>onKeepProfile?.(undefined)}>Убрать профиль из раскладки</button>}
+    {current?.result&&onKeepProfile&&<button type="button" className="outline-button" onClick={()=>{
+      const {media_asset_id, ...definition}=request;
+      onKeepProfile(definition);
+    }}>Включить профиль в раскладку</button>}
+    {savedProfile&&<p>Профиль записывается в проект при сохранении раскладки.</p>}
+    {current?.result&&exportProfile&&<button type="button" className="outline-button" disabled={exportStatus?.pending} onClick={saveFigure}>Экспорт фото и профиля · PDF</button>}
+    {(exportStatus?.error||exportStatus?.notice)&&<p role={exportStatus.error?"alert":"status"}>{exportStatus.error||exportStatus.notice}</p>}
     {current?.result && <ProfileChart result={current.result} onFocus={onFocus} loadPhotos={loadPhotos} previewPhoto={previewPhoto}/>}
   </details>;
 }

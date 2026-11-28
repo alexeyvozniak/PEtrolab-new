@@ -6,6 +6,19 @@ import {PhotoPlot} from "../src/PhotoPlot";
 import {ZoningProfile} from "../src/ZoningProfile";
 import {GrainPreview} from "../src/GrainPreview";
 afterEach(cleanup);
+test("reopens a saved route by exact IDs and exports the refreshed definition",async()=>{
+  const axis={field:"SiO2",unit:"wt.%"};
+  const points=[{spatial_annotation_id:"s1",analysis_id:"a1"},{spatial_annotation_id:"s2",analysis_id:"a2"}];
+  const profile={points,axis,reference_px:5,reference_um:10};
+  const load=vi.fn(async request=>({...request,points:points.map((point,i)=>({...point,distance_um:i*10,value:i+1}))}));
+  const exportProfile=vi.fn(async()=>"/figure.pdf");
+  render(<ZoningProfile mediaId="m" rows={[]} focusedIds={[]} panels={[]} savedProfile={profile}
+    load={load} onFocus={()=>{}} exportProfile={exportProfile}/>);
+  fireEvent.click(await screen.findByRole("button",{name:"Экспорт фото и профиля · PDF"}));
+  expect(load).toHaveBeenCalledWith({media_asset_id:"m",...profile});
+  expect(exportProfile).toHaveBeenCalledWith({media_asset_id:"m",...profile});
+  expect(await screen.findByText("Сохранено: /figure.pdf")).toBeTruthy();
+});
 test("grain preview crops original pixels at the edge and prefers the explicitly selected photo",async()=>{
   const links=["other","chosen"].map(media_asset_id=>({
     media_asset_id, display_name:media_asset_id, point_name:"P7", link_type:"same_point",

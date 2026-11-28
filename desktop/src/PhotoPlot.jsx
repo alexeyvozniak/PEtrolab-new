@@ -4,7 +4,7 @@ import {photoLinks,focusLinks} from "./photoPlotLinks";
 import {ZoningProfile} from "./ZoningProfile";
 import "./photoPlot.css";
 
-export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,loadProfile,view,setView,panels,focusedIds,setFocusedIds,addToSelection}) {
+export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,loadProfile,exportProfile,view,setView,panels,focusedIds,setFocusedIds,addToSelection}) {
   const [links,setLinks]=useState(null),[image,setImage]=useState(null),[error,setError]=useState("");
   const key=JSON.stringify(inputIds);
   const [scale,setScale]=useState(null);
@@ -43,7 +43,7 @@ export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,loadProfile,v
     {error&&<p role="alert">{error}</p>}
     {!links&&!error&&<p role="status">Загружаю связи…</p>}
     {links?.length===0&&<p>У входного набора нет связанных фотографий.</p>}
-    <label>Фото <select value={view.media_asset_id||""} onChange={e=>{setError("");setScale(null);setFocusedIds([]);setView({...view,media_asset_id:e.target.value||null});}}>
+    <label>Фото <select value={view.media_asset_id||""} onChange={e=>{setError("");setScale(null);setFocusedIds([]);setView({panel_ids:view.panel_ids,media_asset_id:e.target.value||null});}}>
       <option value="">Выберите фото</option>
       {photos.map(row=><option key={row.media_asset_id} value={row.media_asset_id}>{row.display_name} · {row.sample_name}</option>)}
       {view.media_asset_id&&!photos.some(row=>row.media_asset_id===view.media_asset_id)&&<option value={view.media_asset_id}>Сохранённое фото: {view.media_asset_id}</option>}
@@ -76,6 +76,7 @@ export function PhotoPlot({inputIds,loadCatalog,loadPhotos,preview,loadProfile,v
     {loadProfile&&image&&links&&<ZoningProfile key={view.media_asset_id+":"+key} mediaId={view.media_asset_id}
       rows={rows} focusedIds={focusedIds} panels={panels.filter(panel=>view.panel_ids.includes(panel.id))}
       load={loadProfile} onFocus={setFocusedIds} loadPhotos={loadPhotos} previewPhoto={preview}
+      savedProfile={view.profile} onKeepProfile={profile=>setView({...view,profile})} exportProfile={exportProfile}
       calibration={calibration} onPickScale={()=>setScale({key:scaleKey,points:[]})} onClearScale={()=>setScale(null)}/>}
   </section>;
 }

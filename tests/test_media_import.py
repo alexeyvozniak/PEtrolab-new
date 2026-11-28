@@ -184,7 +184,8 @@ class MediaImportTests(unittest.TestCase):
         from uuid import uuid4
         from petrolab.desktop_workflow import suggest_import_recipe
         from petrolab.ndjson_service import PROTOCOL_VERSION, handle_request
-        from petrolab.plot_data import plot_catalog
+        from petrolab.plot_data import open_plot_specification, plot_catalog, save_plot_specification
+        from pypdf import PdfReader
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -222,9 +223,28 @@ class MediaImportTests(unittest.TestCase):
             self.assertEqual([item["distance_um"] for item in points], [0, 10, 16])
             self.assertEqual([item["value"] for item in points], [20, None, 30])
             self.assertEqual(points[1]["reason"], "below_detection_limit")
+            definition = {key: request["payload"][key] for key in ("points", "axis", "reference_px", "reference_um")}
+            axes = plot_catalog(database)["axes"]
+            panel = {"id": str(uuid4()), "kind": "binary", "axes": axes[:2]}
+            view = {"media_asset_id": plan["items"][0]["media_asset_id"], "panel_ids": [panel["id"]], "profile": definition}
+            saved = save_plot_specification(database, "Профиль", ids, [panel], {}, [], [], photo_view=view)
+            self.assertEqual(saved["schema_version"], 8)
+            self.assertEqual(open_plot_specification(database, saved["id"])["photo_view"], view)
+            output = root / "figure.pdf"
+            export = {**request, "command": "photo.profile.export", "payload": {**request["payload"], "output_path": str(output)}}
+            self.assertIn("result", handle_request(export))
+            page = PdfReader(output).pages[0]
+            self.assertEqual(len(page.images), 1)
+            self.assertIn(ids[1], page.extract_text())
+            self.assertIn("below_detection_limit", page.extract_text())
+            self.assertEqual(handle_request(export)["error"]["code"], "EXPORT_FILE_EXISTS")
             with closing(open_project(database)) as connection, connection:
                 connection.execute("UPDATE analytical_point_analysis SET link_type = 'same_zone' WHERE analysis_id = ?", (ids[1],))
             self.assertEqual(handle_request(request)["error"]["code"], "PROFILE_POINT_UNAVAILABLE")
+            self.assertEqual(open_plot_specification(database, saved["id"])["photo_view"], view)
+            stale = {**export, "payload": {**export["payload"], "output_path": str(root / "stale.pdf")}}
+            self.assertEqual(handle_request(stale)["error"]["code"], "PROFILE_POINT_UNAVAILABLE")
+            self.assertFalse((root / "stale.pdf").exists())
 
     def test_png_and_tiff_metadata_are_inspected_without_writes(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

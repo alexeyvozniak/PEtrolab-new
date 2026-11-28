@@ -611,7 +611,7 @@ def query_plot_data(database_path, kind, axes, analysis_ids=None, hidden_analysi
     return result
 
 
-def query_zoning_profile(database_path, media_id, points, axis, reference_px, reference_um):
+def _validate_profile_request(media_id, points, axis, reference_px, reference_um):
     _selection([media_id])
     if not isinstance(points, list) or not 2 <= len(points) <= 100:
         raise ValueError("profile_points")
@@ -621,15 +621,22 @@ def query_zoning_profile(database_path, media_id, points, axis, reference_px, re
     _selection([point["spatial_annotation_id"] for point in points])
     analysis_ids = [point["analysis_id"] for point in points]
     _selection(analysis_ids)
+    _coordinate_axis(axis)
     if any(type(value) not in (int, float) or not 0 < value <= 1e12
            for value in (reference_px, reference_um)):
         raise ImportCommandError("PROFILE_CALIBRATION", "Введите положительную длину в пикселях и микрометрах.")
     scale = reference_um / reference_px
     if not isfinite(scale) or scale <= 0:
         raise ValueError("profile_calibration")
+    return analysis_ids, scale
+
+
+def query_zoning_profile(database_path, media_id, points, axis, reference_px, reference_um, *, transaction=None):
+    analysis_ids, scale = _validate_profile_request(media_id, points, axis, reference_px, reference_um)
     ordered = []
-    with closing(open_project(database_path)) as connection:
-        connection.execute("BEGIN")
+    with (closing(open_project(database_path)) if transaction is None else nullcontext(transaction)) as connection:
+        if transaction is None:
+            connection.execute("BEGIN")
         for point in points:
             location = connection.execute("""
                 SELECT a.x_px, a.y_px
@@ -920,8 +927,10 @@ def _insert_plot_specification(connection, name, analysis_ids, saved_panels, pan
         spec["category_style"] = validate_category_style(connection, spec["input"]["analysis_ids"], category_style)
     spec["schema_version"] = plot_schema_version(saved_panels, layers, spec.get("category_style"))
     if photo_view is not None:
-        spec["photo_view"] = _validate_photo_view(connection, photo_view, saved_panels)
-        spec["schema_version"] = 7
+        spec["photo_view"] = _validate_photo_view(connection, photo_view, saved_panels, check_profile_links=True)
+        if "profile" in photo_view and not {point["analysis_id"] for point in photo_view["profile"]["points"]} <= scope:
+            raise ImportCommandError("PROFILE_POINT_UNAVAILABLE", "Часть точек профиля находится вне входного набора раскладки.")
+        spec["schema_version"] = 8 if "profile" in photo_view else 7
     connection.execute("INSERT INTO plot_specification (id, name, definition_json) VALUES (?, ?, ?)",
                        (spec["id"], name, json.dumps(spec, ensure_ascii=False)))
     return spec
@@ -943,7 +952,8 @@ def open_plot_specification(database_path, spec_id):
         _validated_layers(spec.get("layers"))
         expected_version = plot_schema_version(spec["panels"], spec.get("layers", []), spec.get("category_style"))
         # Photo layouts made by the PR26 preview used version 6 before KDE shipped.
-        supported_versions = {6, 7} if "photo_view" in spec else {expected_version}
+        view = spec.get("photo_view")
+        supported_versions = ({8} if "profile" in view else {6, 7}) if isinstance(view, dict) else {expected_version}
         if spec.get("schema_version") not in supported_versions:
             raise ImportCommandError("PLOT_LAYOUT_VERSION_UNSUPPORTED", "Версия раскладки несовместима с этой версией PetroLab.")
         if any(panel["kind"] == "histogram" and panel.get("binning") != _HISTOGRAM_BINNING for panel in spec["panels"]):
@@ -963,8 +973,8 @@ def open_plot_specification(database_path, spec_id):
             _validate_photo_view(connection, spec["photo_view"], spec["panels"])
         return spec
 
-def _validate_photo_view(connection, view, panels):
-    if not isinstance(view, dict) or set(view) != {"media_asset_id", "panel_ids"}:
+def _validate_photo_view(connection, view, panels, *, check_profile_links=False):
+    if not isinstance(view, dict) or set(view) - {"profile"} != {"media_asset_id", "panel_ids"}:
         raise ValueError("photo_view")
     ids = view["panel_ids"]
     if not isinstance(ids, list) or not 1 <= len(ids) <= 3 or len(set(ids)) != len(ids):
@@ -976,4 +986,15 @@ def _validate_photo_view(connection, view, panels):
         _selection([media_id])
         if not connection.execute("SELECT 1 FROM media_asset WHERE media_asset_id = ?", (media_id,)).fetchone():
             raise ImportCommandError("PHOTO_VIEW_UNAVAILABLE", "Сохранённое фото недоступно; замена не выбрана.")
-    return {"media_asset_id": media_id, "panel_ids": list(ids)}
+    result = {"media_asset_id": media_id, "panel_ids": list(ids)}
+    if "profile" in view:
+        profile = view["profile"]
+        if not isinstance(profile, dict) or set(profile) != {"points", "axis", "reference_px", "reference_um"} or not media_id:
+            raise ValueError("photo_view.profile")
+        args = (media_id, profile["points"], profile["axis"], profile["reference_px"], profile["reference_um"])
+        if check_profile_links:
+            query_zoning_profile(None, *args, transaction=connection)
+        else:
+            _validate_profile_request(*args)
+        result["profile"] = profile
+    return result

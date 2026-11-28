@@ -262,6 +262,8 @@ export const getPlotData = (projectDatabasePath, analysisIds, kind, axes, hidden
     hidden_analysis_ids: hiddenAnalysisIds, hidden_source_ids: hiddenSourceIds, layers, normalization });
 export const getZoningProfile = (projectDatabasePath, request) =>
   invokePetrolab("photo.profile.query", { project_database_path: projectDatabasePath, ...request });
+export const exportZoningProfile = (projectDatabasePath, request, outputPath) =>
+  invokePetrolab("photo.profile.export", { project_database_path: projectDatabasePath, ...request, output_path: outputPath });
 export const recordPlotVisibility = (projectDatabasePath, analysisIds, hidden, sessionId) =>
   invokePetrolab(hidden ? "plot_visibility.hide" : "plot_visibility.restore", {
     project_database_path: projectDatabasePath, analysis_ids: analysisIds, session_id: sessionId,
@@ -402,4 +404,3 @@ export const createAnalyticalPoint = (projectDatabasePath, sampleName, pointName
     analysis_ids: analysisIds,
     link_type: linkType,
   });
-

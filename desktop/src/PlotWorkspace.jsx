@@ -710,10 +710,11 @@ function PlotSelectionTable({ ids, load, hiddenAnalysisIds, hiddenSourceIds }) {
   </>;
 }
 
-export function PlotWorkspace({ loadPhotos, previewPhoto, loadProfile, viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
+export function PlotWorkspace({ loadPhotos, previewPhoto, loadProfile, exportProfile, viewMemory, loadCatalog, loadData, loadSelection, loadAnalysis, selectedIds, setSelectedIds, inputIds, onBack,
   hiddenSourceIds = [], hiddenAnalysisIds = [], onToggleSource, onIsolateSource, onOpenAnalysis, onOpenPhotos, onSetVisibility, onUndoVisibility, busy, loadLayouts, saveLayout, openLayout,
   onExport, onAddPublication, loadColorScheme, saveColorScheme, onSummary, loadPresets, savePresets }) {
   const [photoView,setPhotoView]=useState(()=>viewMemory?.photoView||null);
+  const [photoEpoch,setPhotoEpoch]=useState(0);
   const [focusedIds,setFocusedIds]=useState([]);
   useLayoutEffect(()=>{if(viewMemory)viewMemory.photoView=photoView;},[viewMemory,photoView]);
   const [axes, setAxes] = useState([]);
@@ -951,7 +952,7 @@ export function PlotWorkspace({ loadPhotos, previewPhoto, loadProfile, viewMemor
     setLayoutStatus(null);
     try {
       const saved = await openLayout(id);
-      setPhotoView(saved.photo_view||null);setFocusedIds([]);
+      setPhotoView(saved.photo_view||null);setFocusedIds([]);setPhotoEpoch(value=>value+1);
       setColorMode(saved.category_style?.mode || "source");
       setPanels(saved.panels.map(({ id: panelId, kind, axes: savedAxes, normalization, point_style }) => ({
         id: panelId, kind, axes: savedAxes.map(({ scale, manual_range, ...axis }) => axis),
@@ -1319,7 +1320,7 @@ export function PlotWorkspace({ loadPhotos, previewPhoto, loadProfile, viewMemor
         if (viewMemory) Object.assign(viewMemory, { scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft });
       }}>
         <div className={photoView?"photo-plot-body":undefined}>
-        {photoView&&<PhotoPlot inputIds={inputIds} loadCatalog={loadCatalog} loadPhotos={loadPhotos} preview={previewPhoto} loadProfile={loadProfile} view={photoView} setView={setPhotoView}
+        {photoView&&<PhotoPlot key={photoEpoch} inputIds={inputIds} loadCatalog={loadCatalog} loadPhotos={loadPhotos} preview={previewPhoto} loadProfile={loadProfile} exportProfile={exportProfile} view={photoView} setView={setPhotoView}
           panels={panels} focusedIds={focusedIds} setFocusedIds={setFocusedIds}
           addToSelection={ids=>setSelectedIds(current=>[...new Set([...current,...ids])])}/>}
         <div className="plot-grid" ref={grid}>
