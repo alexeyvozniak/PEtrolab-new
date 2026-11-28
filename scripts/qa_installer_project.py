@@ -16,6 +16,8 @@ from zipfile import ZipFile
 from qa_packaged_import import request, run
 from petrolab.desktop_workflow import suggest_import_recipe
 
+HISTORICAL_CSV = b"Analysis,SiO2 (wt.%),Al2O3 (wt.%)\nA1,40,21\nA2,41,22\nA3,42,23\nA4,43,24\n"
+
 
 def project_state(executable, database):
     state = [item["result"] for item in run(executable, [
@@ -61,6 +63,9 @@ def seed(executable, database, state_file):
 
 def verify(executable, database, state_file):
     expected = json.loads(state_file.read_text(encoding="utf-8"))
+    if "historical_project" in expected:
+        check_historical(executable, database, state_file.with_suffix(".csv"), expected["historical_project"])
+        return
     if project_state(executable, database) != expected["data"]:
         raise AssertionError("Upgrade changed persisted analysis, group or plot records")
     if sha256(state_file.with_suffix(".csv").read_bytes()).hexdigest() != expected["source_sha256"]:
@@ -71,14 +76,56 @@ def verify(executable, database, state_file):
             raise AssertionError(f"Upgrade changed a managed source: {managed.name}")
 
 
+def read_historical_project(path):
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+        if connection.execute("PRAGMA integrity_check").fetchone() != ("ok",):
+            raise AssertionError(f"SQLite integrity check failed: {path.name}")
+        version = connection.execute("SELECT MAX(version) FROM schema_migration").fetchone()[0]
+        rows = connection.execute("""
+            SELECT a.analysis_id, a.identity_json, a.source_id, a.sheet_name, a.source_row_number,
+                   m.measurement_id, m.canonical_field, m.raw_token, m.unit, m.source_cell
+            FROM analysis a JOIN measurement m USING (analysis_id)
+            ORDER BY a.analysis_id, m.measurement_id
+        """).fetchall()
+        return {"version": version, "rows": [list(row) for row in rows]}
+
+
+def check_historical(executable, database, source, original):
+    if original["version"] != 8 or len(original["rows"]) != 8:
+        raise AssertionError("The historical 0.1.6 source did not produce the expected schema and measurements")
+    result = run(executable, [request("project.analyses.list", {"project_database_path": str(database)})])[0]["result"]
+    current = read_historical_project(database)
+    if result["total"] != 4 or current["version"] <= original["version"] or current["rows"] != original["rows"]:
+        raise AssertionError("The installed candidate changed or lost historical analyses")
+    backups = list(database.parent.glob(f"{database.name}.before-v9-*.bak"))
+    if len(backups) != 1 or read_historical_project(backups[0]) != original or source.read_bytes() != HISTORICAL_CSV:
+        raise AssertionError("The historical database backup or original source was not preserved")
+    print(f"Historical project migrated from schema {original['version']} to {current['version']}: "
+          f"{result['total']} analyses and {len(current['rows'])} measurements preserved, backup and source verified.")
+
+
+def seed_historical(executable, database, state_file):
+    source = state_file.with_suffix(".csv")
+    with source.open("xb") as handle:
+        handle.write(HISTORICAL_CSV)
+    recipe = run(executable, [request("import.recipe.suggest", {"source_path": str(source)})])[0]["result"]["recipe"]
+    run(executable, [request("import.plan.apply", {
+        "project_database_path": str(database), "source_path": str(source), "recipe": recipe,
+    })])
+    project = read_historical_project(database)
+    if project["version"] != 8 or len(project["rows"]) != 8:
+        raise AssertionError("The installed baseline did not create the historical schema and measurements")
+    with state_file.open("x", encoding="utf-8") as handle:
+        json.dump({"historical_project": project}, handle, ensure_ascii=False)
+
+
 def verify_historical(executable, historical_source):
     historical_source = historical_source.resolve(strict=True)
     with TemporaryDirectory(prefix="petrolab-historical-") as directory:
         root = Path(directory)
         database = root / "project.sqlite"
         source = root / "source.csv"
-        original_source = b"Analysis,SiO2 (wt.%),Al2O3 (wt.%)\nA1,40,21\nA2,41,22\nA3,42,23\nA4,43,24\n"
-        source.write_bytes(original_source)
+        source.write_bytes(HISTORICAL_CSV)
         subprocess.run([sys.executable, "-c", """
 import sys
 from petrolab.desktop_workflow import suggest_import_recipe
@@ -88,35 +135,12 @@ apply_import_plan(database, source, suggest_import_recipe(source)["recipe"])
 """, str(database), str(source)], cwd=historical_source,
             env={**os.environ, "PYTHONPATH": str(historical_source / "src")}, check=True, timeout=60)
 
-        def read_project(path):
-            with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
-                if connection.execute("PRAGMA integrity_check").fetchone() != ("ok",):
-                    raise AssertionError(f"SQLite integrity check failed: {path.name}")
-                version = connection.execute("SELECT MAX(version) FROM schema_migration").fetchone()[0]
-                rows = connection.execute("""
-                    SELECT a.analysis_id, a.identity_json, a.source_id, a.sheet_name, a.source_row_number,
-                           m.measurement_id, m.canonical_field, m.raw_token, m.unit, m.source_cell
-                    FROM analysis a JOIN measurement m USING (analysis_id)
-                    ORDER BY a.analysis_id, m.measurement_id
-                """).fetchall()
-                return version, rows
-
-        old_version, old_rows = read_project(database)
-        if old_version != 8 or len(old_rows) != 8:
-            raise AssertionError("The historical 0.1.6 source did not produce the expected schema and measurements")
-        result = run(executable, [request("project.analyses.list", {"project_database_path": str(database)})])[0]["result"]
-        new_version, new_rows = read_project(database)
-        if result["total"] != 4 or new_version <= old_version or new_rows != old_rows:
-            raise AssertionError("The installed candidate changed or lost historical analyses")
-        backups = list(root.glob("project.sqlite.before-v9-*.bak"))
-        if len(backups) != 1 or read_project(backups[0]) != (old_version, old_rows) or source.read_bytes() != original_source:
-            raise AssertionError("The historical database backup or original source was not preserved")
-    print("The candidate migrated a historical 0.1.6 project and preserved its measurements and backup.")
+        check_historical(executable, database, source, read_historical_project(database))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("seed", "verify", "historical"))
+    parser.add_argument("action", choices=("seed", "seed-historical", "verify", "historical"))
     parser.add_argument("executable", type=Path)
     parser.add_argument("database", type=Path)
     parser.add_argument("state", type=Path, nargs="?")
@@ -125,8 +149,8 @@ def main():
         verify_historical(args.executable, args.database)
     else:
         if args.state is None:
-            parser.error("seed and verify require the state file")
-        action = seed if args.action == "seed" else verify
+            parser.error(f"{args.action} requires the state file")
+        action = {"seed": seed, "seed-historical": seed_historical, "verify": verify}[args.action]
         action(args.executable, args.database, args.state)
 
 
