@@ -183,12 +183,15 @@ jobs:
       - name: Verify upgrade preserves the project and uninstall retains it
         shell: pwsh
         run: ./scripts/smoke_windows_installer.ps1 -BundleRoot (Join-Path $env:RUNNER_TEMP "petrolab-candidate") -BaselineMsi (Join-Path $env:RUNNER_TEMP "PetroLab-baseline.msi") -HistoricalSource historical-source -LaunchEvidence (Join-Path $env:RUNNER_TEMP "petrolab-upgrade-launch")
-      - name: Upload upgrade launch diagnostics
-        if: failure()
+      - name: Upload upgrade launch evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: PetroLab-Windows-upgrade-launch-${{ github.sha }}
-          path: ${{ runner.temp }}/petrolab-upgrade-launch/
+          path: |
+            ${{ runner.temp }}/petrolab-upgrade-launch/*.json
+            ${{ runner.temp }}/petrolab-upgrade-launch/*.png
+            ${{ runner.temp }}/petrolab-upgrade-launch/*.txt
           if-no-files-found: ignore
 
   verified-msi:
