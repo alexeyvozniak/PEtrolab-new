@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       windows_run_id:
-        description: Successful Windows test build run ID from main
+        description: Successful Windows test build from main with historical_upgrade enabled
         required: true
         type: string
       release_tag:

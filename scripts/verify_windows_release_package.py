@@ -19,6 +19,8 @@ def verify_package(directory, commit, run_id, attempt, version):
     identity = {"commit": commit, "run_id": run_id, "attempt": attempt, "installer": installer}
     if not isinstance(metadata, dict) or any(metadata.get(key) != value for key, value in identity.items()):
         raise ValueError("Package identity does not match the selected Windows run and version.")
+    if metadata.get("upgrade_baselines") != ["rehearsal", "historical"]:
+        raise ValueError("A release package must pass both the rehearsal and historical MSI upgrades.")
 
     checksum = metadata.get("sha256")
     if not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum):
