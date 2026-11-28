@@ -1,0 +1,79 @@
+{
+  "package_sha256": "061b96c2aceb3b3cb0389847ae08f5f6e6f668dd78b0a93a79fbc817b2afc851",
+  "analysis_count": 7,
+  "measurement_count": 21,
+  "source_sha256": "2c55fd1324c5b927772e7c6074b2a8c10a1a7224fdd0ee46f6af5c32fb3d1e0c",
+  "run_matches_saved_result": true,
+  "run_id": "364d6c4a-2067-4d99-8f5e-9ce6ee5c17e6",
+  "work_group_id": "90525941-e0df-4f44-88ee-ad35f79cccd6",
+  "selected_analysis_ids": [
+    "0e5f2e1b-7f2b-47f8-9184-c8187c95968e",
+    "99fee9c1-8900-47c4-9b99-652c023909f3",
+    "15f829f9-27c5-4834-a42c-19705963bf54",
+    "7dad00db-7526-4da2-9384-94e9484a27eb",
+    "491c16e0-a58e-40a4-a0d1-ce51d4da54f2",
+    "e2955fb9-46a6-4640-bd59-1f0622868b07",
+    "ce3dec51-d451-4aeb-bb83-881e26b70447"
+  ],
+  "method_id": "statistics.cluster.kmeans_lloyd",
+  "method_version": "1.0.0",
+  "parameters": {
+    "clusters": 2,
+    "feature_domains": [
+      "oxide_wt_percent",
+      "oxide_wt_percent"
+    ],
+    "features": [
+      {
+        "field": "SiO2",
+        "measurement_set": null,
+        "method": null,
+        "unit": "wt.%"
+      },
+      {
+        "field": "Al2O3",
+        "measurement_set": null,
+        "method": null,
+        "unit": "wt.%"
+      }
+    ],
+    "missing_and_censored": "exclude",
+    "nonpositive": "keep",
+    "scaling": "standard",
+    "scaling_parameters": {
+      "center": [
+        28.285714285714285,
+        27.142857142857142
+      ],
+      "scale": [
+        9.54260050980842,
+        10.411924090450627
+      ]
+    },
+    "seed": 42,
+    "transform": "euclidean"
+  },
+  "seed": 42,
+  "verified_manifest_members": [
+    {
+      "path": "materials/01-calculation_run.json",
+      "sha256": "ab7e71942f9ab3d8aa7b599ebdd4d0bf4a85755218af8f93aa2969eb261272fe",
+      "size": 5016
+    },
+    {
+      "path": "data/analyses.jsonl",
+      "sha256": "416c9c90c8cfa43c7f199bd852ec8edc0d59068670854c754d5e9b44053344a5",
+      "size": 3654
+    },
+    {
+      "path": "data/measurements.jsonl",
+      "sha256": "17cc91a5a3c7164d227aa4df865d0c81a4007925b671d7199571f53adb777094",
+      "size": 7266
+    },
+    {
+      "path": "README.md",
+      "sha256": "f6c00dabca8c611ad7bba020345d22416f69f1092d305f7b97149cae248af12d",
+      "size": 160
+    }
+  ]
+}
